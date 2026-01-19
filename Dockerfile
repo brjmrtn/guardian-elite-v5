@@ -1,20 +1,31 @@
-# 1. Usamos una imagen base con Maven y Java 17 para construir
-FROM maven:3.8.5-openjdk-17 AS build
+# --- ETAPA 1: CONSTRUCCIÓN (BUILD) ---
+# Usamos Maven con Java 17 (versión Eclipse Temurin, muy estable)
+FROM maven:3.9.6-eclipse-temurin-17 AS build
 WORKDIR /app
+
+# Copiamos primero el pom.xml para aprovechar la caché de Docker
 COPY pom.xml .
+# Descargamos las dependencias (esto hace que las siguientes builds sean rápidas)
+RUN mvn dependency:go-offline
+
+# Copiamos el código fuente
 COPY src ./src
-# Compilamos y creamos el JAR
+
+# Compilamos y creamos el JAR final
 RUN mvn clean package -DskipTests
 
-# 2. Usamos una imagen ligera solo con Java para ejecutar
-FROM openjdk:17-jdk-slim
+# --- ETAPA 2: EJECUCIÓN (RUN) ---
+# Usamos una imagen ligera de Java 17 para ejecutar
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-# Copiamos el JAR que acabamos de cocinar
+
+# Copiamos el JAR que hemos creado en la etapa 1
+# NOTA: Asegúrate de que este nombre coincide con el de tu pom.xml
 COPY --from=build /app/target/guardian-elite-1.0-SNAPSHOT.jar app.jar
 
-# Avisamos a Render de que usaremos un puerto dinámico
+# Configuración de puertos para la nube
 ENV PORT=8080
 EXPOSE 8080
 
-# Arrancamos la app
+# Arrancamos la aplicación
 CMD ["java", "-jar", "app.jar"]
