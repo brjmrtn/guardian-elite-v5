@@ -1,0 +1,11 @@
+ ### PRUEBA
+ POST http://localhost:8081/api/match/new
+ Content-Type: application/json
+
+ {
+   "rival": "Test Manual",
+   "gf": 1,
+   "gc": 0,
+   "clima": "Sol",
+   "categoria": "Test"
+ }

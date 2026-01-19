@@ -1,0 +1,287 @@
+import cask._
+import upickle.default._
+import scalatags.Text.all._
+import scalatags.Text.tags2
+import java.net.URLEncoder
+
+object GuardianServer extends cask.MainRoutes {
+  // En la nube, escuchamos en 0.0.0.0
+  override def host: String = "0.0.0.0"
+  override def port: Int = sys.env.getOrElse("PORT", "8081").toInt
+
+  // ==============================================================================
+  // 1. DASHBOARD (HOME)
+  // ==============================================================================
+  @cask.get("/")
+  def dashboard() = {
+    val card = DatabaseManager.getLatestCardData()
+    val matches = DatabaseManager.getMatchesList()
+    val chartData = DatabaseManager.getChartData()
+    val logros = DatabaseManager.getAchievements()
+    val aiMessage = DatabaseManager.getAdvancedAiAnalysis()
+    val tac = DatabaseManager.getTacticalStats()
+    val objs = DatabaseManager.getSeasonObjectives()
+
+    // TENDENCIA (Sin emojis)
+    val last5 = matches.take(5)
+    val avgLast5 = if (last5.nonEmpty) last5.map(_.nota).sum / last5.length else 0.0
+    val avgSeason = if (matches.nonEmpty) matches.map(_.nota).sum / matches.length else 0.0
+    val trendDiff = avgLast5 - avgSeason
+    val trendText = if (trendDiff > 0.5) "MEJORA" else if (trendDiff < -0.5) "BAJA" else "IGUAL"
+    val trendColor = if (trendDiff > 0) "text-success" else if (trendDiff < 0) "text-danger" else "text-muted"
+
+    val radarData = s"""[${card.div}, ${card.han}, ${card.kic}, ${card.ref}, ${card.spd}, ${card.pos}]"""
+
+    def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
+    val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
+    val (ga, gm, gr) = (pct(tac("g_alt"),totG), pct(tac("g_med"),totG), pct(tac("g_ras"),totG))
+    val (gl, gc, gd) = (pct(tac("g_izq"),totG), pct(tac("g_cen"),totG), pct(tac("g_der"),totG))
+    val totP = if(tac("p_tot") > 0) tac("p_tot").toDouble else 1.0
+    val (pa, pm, pr) = (pct(tac("p_alt"),totP), pct(tac("p_med"),totP), pct(tac("p_ras"),totP))
+    val (pl, pc, pd) = (pct(tac("p_izq"),totP), pct(tac("p_cen"),totP), pct(tac("p_der"),totP))
+
+    def tactCell(label: String, valPct: Int, colorBg: String) = div(
+      cls:=s"flex-fill text-center p-1 border border-secondary $colorBg",
+      style:="font-size: 10px; color: black; font-weight: bold;",
+      div(label), div(s"$valPct%")
+    )
+
+    val columnaIzquierda = div(cls := "col-md-5 mb-4",
+      div(cls := "d-flex justify-content-center mobile-scale",
+        div(cls := "fut-card",
+          div(cls := "left-info", div(cls := "rating", card.media), div(cls := "position", card.posicion), img(src := card.flagUrl, cls := "nation")),
+          img(src := card.clubUrl, cls := "club-badge"),
+          div(cls := "player-circle-container", img(src := card.fotoUrl, cls := "player-img")),
+          div(cls := "name-container", div(cls := "player-name", card.nombre)),
+          div(cls := "stats-container", div(cls := "stats-grid",
+            div(cls := "stat-item", span(cls:="stat-val", card.div), span(cls:="stat-label", "DIV")), div(cls := "stat-item", span(cls:="stat-val", card.kic), span(cls:="stat-label", "KIC")),
+            div(cls := "stat-item", span(cls:="stat-val", card.spd), span(cls:="stat-label", "SPD")), div(cls := "stat-item", span(cls:="stat-val", card.han), span(cls:="stat-label", "HAN")),
+            div(cls := "stat-item", span(cls:="stat-val", card.ref), span(cls:="stat-label", "REF")), div(cls := "stat-item", span(cls:="stat-val", card.pos), span(cls:="stat-label", "POS"))
+          ))
+        )
+      ),
+      div(cls:="d-grid mb-3 mt-3", a(href:="/scouting", cls:="btn btn-outline-info shadow fw-bold", "SCOUTING RIVALES")),
+
+      div(cls:="card bg-dark border-secondary shadow p-3 mb-3",
+        div(cls:="d-flex justify-content-between align-items-center",
+          div(h6(cls:="text-muted mb-0", "Racha (Ultimos 5)"), h3(cls:=s"mb-0 $trendColor fw-bold", f"$avgLast5%2.2f $trendText")),
+          div(cls:="text-end", span(cls:="small text-muted", "Media Temp"), div(cls:="fw-bold text-white", f"$avgSeason%2.2f"))
+        )
+      ),
+
+      if(objs.nonEmpty) div(cls:="card bg-dark border-info shadow p-2 mt-3", h6(cls:="text-center text-info mb-2 small fw-bold", "OBJETIVOS"), for(o <- objs) yield {
+        val p = Math.min(100, (o.actual / o.meta.toDouble * 100).toInt)
+        val valStr = if(o.tipo=="MediaNota") f"${o.actual}%.1f" else o.actual.toInt.toString
+        div(cls:="mb-2", div(cls:="d-flex justify-content-between xx-small text-white mb-1", span(o.descripcion), span(s"$valStr / ${o.meta}")), div(cls:="progress", style:="height: 6px;", div(cls:="progress-bar bg-info", style:=s"width:$p%")))
+      }) else div()
+    )
+
+    val columnaDerecha = div(cls := "col-md-5",
+      div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header border-secondary text-warning fw-bold py-1 text-uppercase text-center small", "Scouting Profile"), div(cls := "card-body p-1 d-flex justify-content-center", div(style:="width: 250px; height: 250px;", canvas(id := "radarChart")))),
+      div(cls := "alert alert-dark border-info shadow p-3", role:="alert", div(cls:="d-flex align-items-center mb-2", span(style:="font-size: 24px; margin-right: 10px;", "IA"), strong(cls:="text-info", "COACH")), div(cls:="text-light small fst-italic lh-sm", aiMessage)),
+      div(cls := "card bg-dark text-white border-secondary shadow mb-4", div(cls := "card-header border-secondary text-info fw-bold py-2 small", "Rendimiento"), div(cls := "card-body p-2", canvas(id := "growthChart", style := "max-height: 150px;"))),
+
+      div(cls:="row mt-3",
+        div(cls:="col-6 pe-1", div(cls:="card bg-dark border-danger shadow p-1",
+          h6(cls:="text-center text-danger mb-2 small fw-bold", "DONDE TE MARCAN"),
+          div(cls:="d-flex mb-1", tactCell("ALTA", ga, "bg-danger bg-opacity-75"), tactCell("MEDIA", gm, "bg-warning bg-opacity-75"), tactCell("BAJA", gr, "bg-light bg-opacity-75")),
+          div(cls:="d-flex", tactCell("IZQ", gl, "bg-danger bg-opacity-75"), tactCell("CEN", gc, "bg-warning bg-opacity-75"), tactCell("DER", gd, "bg-danger bg-opacity-75"))
+        )),
+        div(cls:="col-6 ps-1", div(cls:="card bg-dark border-success shadow p-1",
+          h6(cls:="text-center text-success mb-2 small fw-bold", "DONDE PARAS"),
+          div(cls:="d-flex mb-1", tactCell("ALTA", pa, "bg-success bg-opacity-75"), tactCell("MEDIA", pm, "bg-info bg-opacity-75"), tactCell("BAJA", pr, "bg-light bg-opacity-75")),
+          div(cls:="d-flex", tactCell("IZQ", pl, "bg-success bg-opacity-75"), tactCell("CEN", pc, "bg-info bg-opacity-75"), tactCell("DER", pd, "bg-success bg-opacity-75"))
+        ))
+      ),
+
+      if (logros.nonEmpty) div(cls := "card bg-dark border-warning shadow mt-3 mx-auto achievement-box", div(cls := "card-header bg-warning text-dark fw-bold text-center py-1", "PALMARES"), div(cls := "card-body text-center p-2", for (l <- logros) yield div(cls := "d-inline-block m-1 p-1 rounded achievement-item", div(style := "font-size: 24px;", l.icono + (if(l.cantidad > 1) s" x${l.cantidad}" else "")), div(cls := "small text-warning fw-bold", style:="font-size: 10px;", l.nombre)))) else div()
+    )
+
+    val content = basePage("home",
+      div(cls := "row justify-content-center", columnaIzquierda, columnaDerecha),
+      script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+      script(raw(s"""
+        const ctxLine=document.getElementById('growthChart');const dbData=$chartData;
+        if(ctxLine){new Chart(ctxLine,{type:'line',data:{labels:dbData.labels,datasets:[{label:'Media',data:dbData.data,borderColor:'#36A2EB',backgroundColor:'rgba(54,162,235,0.2)',borderWidth:2,tension:0.3,pointBackgroundColor:'#d4af37',fill:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#aaa'},grid:{color:'#333'}},x:{display:false}}}});}
+        const ctxRadar=document.getElementById('radarChart');
+        if(ctxRadar){new Chart(ctxRadar,{type:'radar',data:{labels:['DIV','HAN','KIC','REF','SPD','POS'],datasets:[{label:'Stats',data:$radarData,backgroundColor:'rgba(212,175,55,0.4)',borderColor:'#d4af37',pointBackgroundColor:'#fff',pointBorderColor:'#d4af37',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{r:{angleLines:{color:'#444'},grid:{color:'#444'},pointLabels:{color:'#fff',font:{size:12,family:'Oswald'}},ticks:{display:false,backdropColor:'transparent'},suggestedMin:40,suggestedMax:90}}}});}
+      """))
+    )
+
+    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // 2. MATCH CENTER
+  @cask.get("/match-center")
+  def matchCenterPage() = {
+    val content = basePage("match-center", div(cls := "row justify-content-center", div(cls := "col-md-6 col-12", div(cls := "card bg-dark text-white border-warning shadow",
+      div(cls := "card-header bg-warning text-dark fw-bold text-center", "MATCH TRACKER PRO"),
+      div(cls := "card-body p-3", form(action := "/match-center/save", method := "post",
+        div(cls := "mb-3", label(cls := "form-label text-warning small", "RIVAL"), input(tpe := "text", name := "rival", cls := "form-control form-control-lg", placeholder := "Ej: Rayo", required := true)),
+        div(cls := "row mb-3 bg-secondary bg-opacity-25 p-2 rounded mx-0", div(cls := "col-4 text-center", label(cls := "small fw-bold", "GOLES (GC)"), input(tpe := "number", name := "gc", id:="gcInput", cls := "form-control text-center bg-danger text-white border-0 fw-bold fs-4", value := "0", readonly:=true)), div(cls := "col-4 text-center", label(cls := "small fw-bold", "PARADAS"), input(tpe := "number", name := "paradas", id:="parInput", cls := "form-control text-center bg-success text-white border-0 fw-bold fs-4", value := "0", readonly:=true)), div(cls := "col-4 text-center", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))),
+
+        div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))), div(cls:="goal-grid-3x3", for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }, input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas")), div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"), label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "CASUISTICAS DE PORTERO"), div(cls:="row g-2", div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-info btn-sm", onclick:="incCounter('p1v1')", "1vs1"), input(tpe:="number", name:="p1v1", id:="p1v1", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))), div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-warning btn-sm", onclick:="incCounter('pAir')", "Aereo"), input(tpe:="number", name:="pAir", id:="pAir", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))), div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-light btn-sm", onclick:="incCounter('pPie')", "Pie"), input(tpe:="number", name:="pPie", id:="pPie", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true)))), label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"), div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))),
+
+        div(cls:="mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="form-label text-white small fw-bold w-100 text-center", "ENTORNO Y NOTAS"), div(cls:="row mb-2", div(cls:="col-6", label(cls:="small text-muted", "Clima"), select(name:="clima", cls:="form-select form-select-sm bg-dark text-white", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Viento", "Viento"))), div(cls:="col-6", label(cls:="small text-muted", "Temp (C)"), input(tpe:="number", name:="temp", cls:="form-control form-control-sm bg-dark text-white", value:="20"))), div(cls:="mb-2", textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white", rows:="2", placeholder:="Notas: arbitro, campo, sensaciones...")), div(cls:="mb-0", input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white", placeholder:="Link Video (Youtube/Drive)"))),
+        div(cls := "mb-3", label(cls := "form-label small", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control", value := "40", attr("inputmode") := "numeric")),
+        div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
+        div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3", "GUARDAR PARTIDO"))
+      ), script(raw("""var currentMode='save';var goals=[];var saves=[];var origins=[];function setMode(mode){currentMode=mode;}function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">●</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">●</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}function incCounter(id){var el=document.getElementById(id);el.value=parseInt(el.value||0)+1;}function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}"""))
+      )))))
+      cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  @cask.postForm("/match-center/save")
+  def saveMatch(rival: String, gf: Int, gc: Int, minutos: Int, nota: Double, paradas: Int, zonaGoles: String, zonaTiros: String, zonaParadas: String, p1v1: Int, pAir: Int, pPie: Int, clima: String, temp: Int, notas: String, video: String, mode: String) = {
+    val c = DatabaseManager.getLatestCardData()
+    val n = StatsCalculator.calculateGrowth(c, minutos, gc, nota, paradas)
+    val m = (n.divRaw * 0.2 + n.hanRaw * 0.2 + n.refRaw * 0.2 + n.posRaw * 0.2 + n.spdRaw * 0.05 + n.kicRaw * 0.15)
+    DatabaseManager.updateStats(n)
+    DatabaseManager.logMatch(rival, gf, gc, minutos, nota, m, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, temp, notas, video)
+    val d = n.media - c.media
+    val msg = if(d > 0) s"SUBIDA DE NIVEL! +$d" else "Experiencia acumulada..."
+    val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Guardado"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(style := "color: #d4af37;", "ANALISIS GUARDADO"), div(style := "margin: 30px auto; width: 300px; background: #333; padding: 20px; border-radius: 10px;", h3("Media Global"), div(style := "font-size: 50px; font-weight: bold;", c.media, span(style:="color: #28a745; margin-left: 10px;", "-> " + n.media)), p(style := "color: #ffc107;", msg)), div(style := "margin-top: 40px;", a(href := "/", cls := "btn btn-outline-light btn-lg", "Volver a Inicio"))))).render
+    cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // 3. SCOUTING, GEAR, BIO
+  @cask.get("/scouting")
+  def scoutingPage(query: String = "") = {
+    val (matches, stats) = if(query.nonEmpty) DatabaseManager.getRivalScouting(query) else (List[MatchLog](), Map[String,Int]())
+    val content = basePage("scouting", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12",
+      h2(cls := "text-info mb-4 text-center", "SCOUTING"),
+      form(action:="/scouting", method:="get", cls:="mb-4", div(cls:="input-group", input(tpe:="text", name:="query", cls:="form-control form-control-lg bg-dark text-white border-secondary", placeholder:="Nombre equipo", value:=query), button(tpe:="submit", cls:="btn btn-info", "Buscar"))),
+      if(query.nonEmpty && matches.isEmpty) div(cls:="alert alert-warning text-center", s"Sin datos vs '$query'")
+      else if(matches.nonEmpty) div(
+        div(cls:="card bg-secondary bg-opacity-25 border-info mb-4 p-3",
+          h5(cls:="text-center text-white mb-3", s"Vs ${matches.head.rival}"),
+          div(cls:="d-flex justify-content-around text-center text-white", div(h3(stats("pj")), span(cls:="small text-muted", "PJ")), div(h3(cls:="text-success", stats("ganados")), span(cls:="small text-muted", "G")), div(h3(cls:="text-danger", stats("gc")), span(cls:="small text-muted", "GC")))
+        ),
+        h6(cls:="text-white border-bottom border-secondary pb-2 mb-3", "Partidos"),
+        for(m <- matches) yield div(cls:="card bg-dark border-secondary shadow mb-3", div(cls:="card-body", div(cls:="d-flex justify-content-between align-items-center mb-2", div(strong(cls:="text-warning", m.fecha), span(cls:="ms-2 badge bg-secondary", m.clima)), div(cls:="fs-5 fw-bold text-white", m.resultado)), if(m.notas.nonEmpty) div(cls:="alert alert-dark border-secondary p-2 small text-light fst-italic mb-2", s"Nota: ${m.notas}"), if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-outline-danger w-100", "Video")))
+      ) else div(cls:="text-center text-muted mt-5", "Busca un rival...")
+    )))
+    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  @cask.get("/gear")
+  def gearPage() = {
+    val items = DatabaseManager.getActiveGear()
+    val content = basePage("gear", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", h2(cls := "text-warning mb-4 text-center", "MATERIAL"), if(items.isEmpty) div(cls:="alert alert-secondary text-center", "Sin material registrado.") else div(cls:="row", for(i <- items) yield { val pct = if(i.maxUsos>0) (i.usos.toDouble/i.maxUsos.toDouble*100).toInt else 0; val color = if(pct > 90) "bg-danger" else if(pct > 75) "bg-warning" else "bg-success"; div(cls:="col-12 mb-3", div(cls:="card bg-dark border-secondary shadow", div(cls:="card-body d-flex align-items-center", div(cls:="me-3", style:="font-size: 30px;", if(i.tipo=="Guantes") "G" else "B"), div(cls:="flex-grow-1", h5(cls:="text-white mb-0", i.nombre), div(cls:="small text-muted mb-1", i.tipo + " | " + i.estado), div(cls:="progress", style:="height: 10px;", div(cls:=s"progress-bar $color", style:=s"width: $pct%"))), div(cls:="ms-3 text-end", div(cls:="fw-bold text-white", s"${i.usos}/${i.maxUsos}"), div(style:="font-size:10px", "USOS"))))) }), div(cls:="card bg-secondary bg-opacity-10 border-secondary mt-4", div(cls:="card-body", h5(cls:="text-white mb-3", "Nuevo"), form(action:="/gear/add", method:="post", div(cls:="row", div(cls:="col-6 mb-2", input(tpe:="text", name:="nombre", cls:="form-control", placeholder:="Nombre", required:=true)), div(cls:="col-6 mb-2", select(name:="tipo", cls:="form-select", option(value:="Guantes", "Guantes"), option(value:="Botas", "Botas"))), div(cls:="col-12 mb-2", input(tpe:="number", name:="vida", cls:="form-control", value:="30", placeholder:="Vida util")), div(cls:="col-12", button(tpe:="submit", cls:="btn btn-warning w-100", "Anadir")))))))))
+      cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  @cask.postForm("/gear/add")
+  def addGear(nombre: String, tipo: String, vida: Int) = { DatabaseManager.addNewGear(nombre, tipo, vida); gearPage() }
+
+  @cask.get("/bio")
+  def bioPage() = {
+    val content = basePage("bio", div(cls := "row justify-content-center", div(cls := "col-md-6 mb-4", div(cls := "card bg-dark text-white border-info shadow", div(cls := "card-header bg-info text-dark fw-bold text-center", "WELLNESS"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="row mb-3", div(cls:="col-6 text-center", label(cls:="small", "Sueno"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6 text-center", label(cls:="small", "Energia"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia"))), div(cls:="mb-3", label(cls:="small", "Dolor?"), select(name:="dolor", cls:="form-select", option(value:="1", "Nada"), option(value:="2", "Molestia"), option(value:="3", "Dolor"), option(value:="5", "Lesion"))), div(cls:="mb-3", input(tpe:="text", name:="zona", cls:="form-control", placeholder:="Zona dolor (opcional)")), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info", "Guardar Bio"))))), div(cls := "col-md-6", div(cls := "card bg-dark text-white border-success shadow", div(cls := "card-header bg-success text-dark fw-bold text-center", "ENTRENO"), div(cls := "card-body p-3", form(action := "/bio/save_training", method := "post", div(cls:="mb-3", select(name:="tipo", cls:="form-select", option(value:="Club", "Club"), option(value:="Academia", "Academia"), option(value:="Papa", "Papa"))), div(cls:="mb-3", input(tpe:="text", name:="foco", cls:="form-control", placeholder:="Foco (ej: Blocaje)")), div(cls:="row mb-3", div(cls:="col-6 text-center", label(cls:="small", "Esfuerzo"), input(tpe:="number", cls:="form-control text-center", name:="rpe", value:="7")), div(cls:="col-6 text-center", label(cls:="small", "Calidad"), input(tpe:="number", cls:="form-control text-center", name:="calidad", value:="8"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success", "Guardar")))))))))
+      cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  @cask.postForm("/bio/save_wellness") def saveWellness(sueno: Int, energia: Int, dolor: Int, zona: String) = { DatabaseManager.logWellness(sueno, energia, dolor, zona); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("OK"), h3("Guardado"), div(style:="margin-top:20px;", a(href:="/bio", cls:="btn btn-info", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.postForm("/bio/save_training") def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int) = { DatabaseManager.logTraining(tipo, foco, rpe, calidad); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("OK"), h3("Guardado"), div(style:="margin-top:20px;", a(href:="/bio", cls:="btn btn-success", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+
+  // 4. HISTORY
+  @cask.get("/history")
+  def historyPage() = {
+    val matches = DatabaseManager.getMatchesList()
+    val content = basePage("history", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12",
+      h2(cls := "text-warning mb-3 text-center", "Historial"),
+      div(cls := "card shadow-sm border-0", div(cls := "card-body p-0", table(cls := "table table-hover tm-table mb-0",
+        thead(tr(th("Rival"), th(cls:="text-center", "Res"), th(cls:="text-center", "Nota"), th(cls:="text-end", "Accion"))),
+        tbody(if (matches.isEmpty) tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")) else for (m <- matches) yield {
+          val p = m.resultado.split("-").map(_.trim.toInt); val c = if(p.length>=2){ if (p(0)>p(1)) "text-success" else if (p(0)==p(1)) "text-warning" else "text-danger" } else "text-muted"
+          val extra = if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-danger py-0 ms-1", style:="font-size:10px", "V") else span("")
+
+          val waText = s"""MATCH REPORT: HECTOR
+Rival: ${m.rival}
+Resultado: ${m.resultado}
+Nota: ${m.nota}
+Clima: ${m.clima}
+Notas: "${m.notas}"
+Link: ${if(m.video.nonEmpty) m.video else "-"}"""
+          val encodedWa = URLEncoder.encode(waText, "UTF-8").replace("+", "%20")
+
+          tr(
+            td(cls:="fw-bold small", m.rival, extra, br, span(cls:="text-muted xx-small", s"${m.fecha} ${m.clima}")),
+            td(cls:=s"text-center fw-bold $c", m.resultado),
+            td(cls:="text-center", span(cls:="badge bg-dark text-warning", m.nota)),
+            td(cls:="text-end",
+              a(href:=s"https://wa.me/?text=$encodedWa", target:="_blank", cls:="btn btn-sm btn-success me-1", style:="padding:2px 6px;", "W"),
+              a(href:=s"/match/edit/${m.id}", cls:="btn btn-sm btn-outline-primary me-1", style:="padding:2px 6px;", "E"),
+              a(href:=s"/match/delete/${m.id}", onclick:="return confirm('Borrar?');", cls:="btn btn-sm btn-outline-danger", style:="padding:2px 6px;", "X")
+            )
+          )
+        })
+      )))
+    )))
+    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  @cask.get("/match/delete/:id") def deleteMatchAction(id: Int) = { DatabaseManager.deleteMatch(id); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) }
+
+  @cask.get("/match/edit/:id")
+  def editMatchPage(id: Int) = {
+    val m = DatabaseManager.getMatchById(id)
+    if (m.isEmpty) { cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) } else {
+      val matchData = m.get; val (gf, gc) = if(matchData.resultado.contains("-")) (matchData.resultado.split("-")(0), matchData.resultado.split("-")(1)) else ("0", "0")
+      val content = basePage("history", div(cls := "row justify-content-center", div(cls := "col-md-6 col-12", div(cls := "card bg-dark text-white border-primary shadow",
+        div(cls := "card-header bg-primary text-white fw-bold text-center", "EDITAR PARTIDO"),
+        div(cls := "card-body p-3", form(action := "/match/update", method := "post",
+          input(tpe:="hidden", name:="id", value:=id.toString),
+          div(cls:="mb-3", label("Rival"), input(tpe:="text", name:="rival", value:=matchData.rival, cls:="form-control")),
+          div(cls:="row mb-3", div(cls:="col-6", label("GF"), input(tpe:="number", name:="gf", value:=gf, cls:="form-control")), div(cls:="col-6", label("GC"), input(tpe:="number", name:="gc", value:=gc, cls:="form-control"))),
+          div(cls:="mb-3", label("Nota"), input(tpe:="number", step:="0.1", name:="nota", value:=matchData.nota.toString, cls:="form-control")),
+          div(cls:="mb-3", label("Notas Texto"), textarea(name:="notas", cls:="form-control", rows:="3", matchData.notas)),
+          div(cls:="mb-3", label("Video URL"), input(tpe:="text", name:="video", value:=matchData.video, cls:="form-control")),
+          div(cls:="d-grid gap-2", button(tpe:="submit", cls:="btn btn-success", "Guardar Cambios"), a(href:="/history", cls:="btn btn-outline-secondary", "Cancelar"))
+        ))
+      )))).render
+      cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+    }
+  }
+  @cask.postForm("/match/update") def updateMatchAction(id: Int, rival: String, gf: Int, gc: Int, nota: Double, notas: String, video: String) = { DatabaseManager.updateMatch(id, rival, gf, gc, 60, nota, "Sol", 20, notas, video); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) }
+
+  // 5. ADMIN
+  @cask.get("/career") def careerPage() = { val c = DatabaseManager.getCareerSummary(); val content=basePage("career", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12", div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center", h2(cls := "text-warning m-0 mb-2", "Trayectoria"), div(cls:="card bg-secondary p-2 w-100", form(action := "/career/new-season", method := "post", cls:="d-flex flex-column gap-2", div(label(cls:="form-label text-white small m-0", "Nueva Categoria:"), input(tpe := "text", name := "categoria", cls := "form-control form-control-sm", placeholder := "Ej: Benjamin A", required := true)), button(tpe := "submit", cls := "btn btn-danger btn-sm", onclick := "return confirm('Seguro?');", "Cerrar & Empezar")))), div(cls := "card shadow-sm border-0", div(cls := "card-body p-0 table-responsive", table(cls := "table table-hover tm-table mb-0", thead(tr(th("Cat"), th("Ficha"), th("PJ"), th("GC"), th("Media"))), tbody(for (s <- c) yield tr(td(cls:="fw-bold text-primary small", s.categoria), td(img(src := s.fotoUrl, style := "height: 35px; width: 35px; border-radius: 50%; object-fit: cover; border: 2px solid #ddd;")), td(cls:="text-center fw-bold small", s.partidosJugados), td(cls:="text-center text-danger small", s.golesContra), td(cls:="text-center", span(cls:="badge bg-dark text-warning", s.mediaFinal)))))))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.postForm("/career/new-season") def newSeasonAction(categoria: String) = { val msg = DatabaseManager.startNewSeason(categoria); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Nueva Temp"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(msg), p(s"Etapa iniciada: $categoria"), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Ir a Inicio"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.get("/settings") def settingsPage() = { val content = basePage("settings", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Fotos"), form(action := "/settings/save_base64", method := "post", div(cls := "mb-4", label(cls := "form-label text-info", "Foto Jugador"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_foto')"), input(tpe := "hidden", name := "fotoBase64", id := "hidden_foto")), div(cls := "mb-4", label(cls := "form-label text-warning", "Escudo Club"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_club')"), input(tpe := "hidden", name := "clubBase64", id := "hidden_club")), div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg", "Guardar"))), script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-grid", a(href:="/admin", cls:="btn btn-outline-danger", "ZONA ADMIN"))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.postForm("/settings/save_base64") def saveSettingsBase64(fotoBase64: String, clubBase64: String) = { val res = DatabaseManager.updateSeasonPhotos(if(fotoBase64!=null) fotoBase64 else "", if(clubBase64!=null) clubBase64 else ""); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Exito"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(res), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.get("/admin") def adminPage() = { val objs = DatabaseManager.getSeasonObjectives(); val content = basePage("settings", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", h2(cls:="text-danger text-center mb-4", "ADMINISTRACION"), div(cls:="card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", h5(cls:="text-white", "Copia de Seguridad"), p(cls:="small text-muted", "Descarga todos los partidos en formato Excel/CSV."), a(href:="/admin/download_csv", cls:="btn btn-primary w-100", "Descargar CSV")), div(cls:="card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", h5(cls:="text-white", "Informe PDF"), p(cls:="small text-muted", "Genera un informe limpio para imprimir o guardar como PDF."), a(href:="/admin/print_report", target:="_blank", cls:="btn btn-info w-100", "Generar Informe")), div(cls:="card bg-dark border-info shadow p-3", h5(cls:="text-info", "Gestionar Objetivos"), if(objs.isEmpty) div("Sin objetivos.") else div(for(o <- objs) yield form(action:="/admin/update_obj", method:="post", cls:="row align-items-center mb-2", div(cls:="col-7 small text-white", o.descripcion), div(cls:="col-3", input(tpe:="number", name:="meta", value:=o.meta.toString, cls:="form-control form-control-sm text-center")), input(tpe:="hidden", name:="id", value:=o.id.toString), div(cls:="col-2", button(tpe:="submit", cls:="btn btn-sm btn-outline-success", "S")))))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.postForm("/admin/update_obj") def updateObj(id: Int, meta: Int) = { DatabaseManager.updateObjective(id, meta); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/admin")) }
+  @cask.get("/admin/download_csv") def downloadCsv() = { cask.Response(DatabaseManager.getBackupCSV().getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/csv; charset=utf-8", "Content-Disposition" -> "attachment; filename=guardian_backup.csv")) }
+  @cask.get("/admin/print_report") def printReport() = { val card = DatabaseManager.getLatestCardData(); val matches = DatabaseManager.getMatchesList(); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.title("Informe Temporada"), tags2.style("""body{font-family:sans-serif;color:black;background:white;padding:20px;}h1,h2{text-align:center;color:#333;}table{width:100%;border-collapse:collapse;margin-top:20px;font-size:12px;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background-color:#f2f2f2;}.header{text-align:center;margin-bottom:30px;border-bottom:2px solid #333;padding-bottom:20px;}@media print{.no-print{display:none;}}""")), body(div(cls:="no-print", style:="text-align:center;margin-bottom:20px;", button(onclick:="window.print()", style:="padding:10px 20px;font-size:16px;cursor:pointer;", "IMPRIMIR / GUARDAR PDF")), div(cls:="header", h1(s"INFORME DE TEMPORADA - ${card.nombre}"), div(s"Media: ${card.media} | Posicion: ${card.posicion}"), div(s"Estirada: ${card.div} | Manos: ${card.han} | Saque: ${card.kic}"), div(s"Reflejos: ${card.ref} | Velocidad: ${card.spd} | Posicion: ${card.pos}")), h2("Historial de Partidos"), table(thead(tr(th("Fecha"), th("Rival"), th("Resultado"), th("Min"), th("Nota"), th("Clima"))), tbody(for(m <- matches) yield tr(td(m.fecha), td(m.rival), td(m.resultado), td(m.minutos), td(m.nota), td(m.clima))))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+
+  // 6. BASE PAGE (Devuelve STRING puro)
+  def basePage(activeLink: String, pageContents: Modifier*) = {
+    doctype("html")(html(head(meta(charset := "utf-8"), meta(name := "viewport", content := "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"), link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"), link(rel := "stylesheet", href := "https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap"), tags2.title("Guardian Elite"), tags2.style(raw(getCss()))),
+      body(div(cls := "app-header d-flex justify-content-between align-items-center", div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"), a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "S")), div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/gear", cls:=s"nav-item ${if(activeLink=="gear") "active" else ""}", div(cls:="nav-icon", "M"), span(cls:="nav-label", "Material")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial")))))).render
+  }
+
+  def getCss() = """
+    body { background-color: #121212; color: white; font-family: 'Oswald', sans-serif; padding-bottom: 80px; margin: 0; }
+    .app-header { background: #1a1a1a; color: white; text-align: center; padding: 15px; font-size: 20px; font-weight: bold; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 1000; letter-spacing: 2px; }
+    .main-content { padding-top: 20px; }
+    .bottom-nav { position: fixed; bottom: 0; width: 100%; background: #1a1a1a; border-top: 1px solid #333; display: flex; justify-content: space-around; padding: 8px 0; z-index: 1000; box-shadow: 0 -2px 10px rgba(0,0,0,0.5); overflow-x: auto; }
+    .nav-item { text-align: center; color: #888; text-decoration: none; flex: 1; transition: color 0.2s; min-width: 55px; } .nav-item.active { color: #d4af37; }
+    .nav-icon { font-size: 20px; margin-bottom: 2px; } .nav-label { font-size: 9px; display: block; text-transform: uppercase; letter-spacing: 0.5px; }
+    .fut-card { width: 300px; height: 500px; margin: 0 auto; position: relative; background: #d4af37; border-radius: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); color: #2f2f2f; overflow: hidden; text-transform: uppercase; transition: transform 0.3s ease; }
+    @media (max-width: 380px) { .mobile-scale { transform: scale(0.9); transform-origin: top center; margin-bottom: -40px; } }
+    .fut-card::before { content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to bottom, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 60%); z-index: 0; pointer-events: none; }
+    .left-info { position: absolute; top: 30px; left: 25px; text-align: center; z-index: 2; } .rating { font-size: 64px; font-weight: 700; line-height: 1; margin-bottom: 5px; } .position { font-size: 24px; font-weight: 400; margin-bottom: 10px; } .nation { width: 35px; border: 1px solid rgba(0,0,0,0.1); box-shadow: 1px 1px 2px rgba(0,0,0,0.2); } .club-badge { position: absolute; top: 40px; right: 25px; width: 50px; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.2)); z-index: 2; }
+    .player-circle-container { position: absolute; top: 100px; left: 50%; transform: translateX(-50%); width: 190px; height: 190px; background-color: #789fc2; border: 5px solid #c2a25e; border-radius: 50%; overflow: hidden; z-index: 1; box-shadow: 0 5px 15px rgba(0,0,0,0.3); } .player-img { width: 100%; height: 100%; object-fit: cover; }
+    .name-container { position: absolute; top: 300px; width: 100%; text-align: center; z-index: 2; } .player-name { font-size: 38px; font-weight: 700; letter-spacing: 2px; margin: 0; }
+    .stats-container { position: absolute; bottom: 25px; width: 100%; display: flex; justify-content: center; padding: 0 20px; z-index: 2; } .stats-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 40px; row-gap: 5px; width: 85%; } .stat-item { font-size: 18px; display: flex; align-items: center; justify-content: flex-start; } .stat-val { font-weight: 700; margin-right: 8px; font-size: 22px; min-width: 30px; text-align: right; } .stat-label { font-weight: 400; font-size: 16px; color: #4a4a4a; }
+    .tm-table { background-color: white; font-size: 14px; border-radius: 5px; overflow: hidden; } .tm-table thead { background-color: #f2f2f2; color: #666; font-size: 12px; } .tm-table th, .tm-table td { padding: 10px; vertical-align: middle; }
+    .achievement-box { max-width: 100% !important; } input.form-control-lg { height: 50px; font-size: 18px; } .btn-lg { height: 55px; font-size: 20px; text-transform: uppercase; letter-spacing: 2px; }
+    .goal-grid-3x3 { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 60px 60px 60px; gap: 2px; background: white; padding: 2px; border: 4px solid #aaa; margin: 10px auto; width: 220px; }
+    .goal-cell { background: #eee; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px; position: relative; }
+    .action-marker { font-size: 20px; display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; width: 100%; }
+    .shot-btn.active { background-color: #ffc107; color: black; border-color: #ffc107; font-weight: bold; }
+    .xx-small { font-size: 10px; display: block; }
+  """
+
+  initialize()
+}

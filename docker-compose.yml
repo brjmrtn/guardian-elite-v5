@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  # SERVICIO 1: LA BASE DE DATOS (El Almacén)
+  db:
+    image: postgres:15-alpine
+    container_name: guardian_db
+    restart: always
+    environment:
+      POSTGRES_USER: admin           # El "usuario maestro"
+      POSTGRES_PASSWORD: password123 # La llave del almacén (en local no pasa nada si es simple)
+      POSTGRES_DB: guardian_elite    # El nombre de nuestro libro de cuentas
+    ports:
+      - "5432:5432" # Abrimos la puerta 5432 para que el Camarero (Scala) pueda entrar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Esto es vital: guarda los datos en tu disco duro real
+
+volumes:
+  postgres_data:

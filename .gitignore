@@ -1,0 +1,18 @@
+# Archivos compilados y basura
+target/
+*.class
+*.log
+*.jar
+
+# Archivos de IDEs (IntelliJ, VS Code, etc.)
+.idea/
+*.iml
+.vscode/
+.bloop/
+.metals/
+.bsp/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
