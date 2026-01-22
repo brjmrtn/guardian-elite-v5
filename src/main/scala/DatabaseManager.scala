@@ -22,43 +22,36 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI: SISTEMA DE ROTACIÓN (TRY-HARD) ---
+  // --- IA GEMINI: MODO "CHIVATO" (DEBUG) ---
   def callGeminiAI(prompt: String): String = {
 
-    // ⬇️⬇️⬇️ PEGA TU CLAVE AQUÍ DENTRO ⬇️⬇️⬇️
+    // ⬇️⬇️ PON AQUI TU NUEVA CLAVE DE PROYECTO NUEVO ⬇️⬇️
     val apiKey = "GEMINI_API_KEY"
 
-    if (apiKey.isEmpty) return "⚠️ <b>Falta API Key:</b> Edita DatabaseManager.scala."
+    if (apiKey.contains("PEGAR_AQUI")) return "⚠️ Falta poner la API Key nueva en el código."
 
-    // LISTA DE DELANTEROS (Si falla uno, sale el otro)
-    val models = Seq("gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro", "gemini-2.0-flash-exp")
+    // Usamos el modelo más estándar y robusto
+    val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
 
-    for (model <- models) {
-      try {
-        // Probamos con la versión v1beta que es la más compatible hoy
-        val url = s"https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-
-        val payload = ujson.Obj(
-          "contents" -> ujson.Arr(
-            ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
-          )
+    try {
+      val payload = ujson.Obj(
+        "contents" -> ujson.Arr(
+          ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
         )
+      )
 
-        val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
+      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
 
-        if (r.statusCode == 200) {
-          val json = ujson.read(r.text())
-          // ¡GOL! Hemos conseguido respuesta
-          return json("candidates")(0)("content")("parts")(0)("text").str
-        } else {
-          println(s"⚠️ El modelo $model falló con error ${r.statusCode}. Probando siguiente...")
-        }
-      } catch {
-        case e: Exception => println(s"❌ Error técnico con $model: ${e.getMessage}")
+      if (r.statusCode == 200) {
+        val json = ujson.read(r.text())
+        json("candidates")(0)("content")("parts")(0)("text").str
+      } else {
+        // AQUI ESTÁ LA CLAVE: Mostramos el error real de Google
+        s"⚠️ <b>Error Google (${r.statusCode}):</b> ${r.text().take(100)}..."
       }
+    } catch {
+      case e: Exception => s"❌ Error Conexión: ${e.getMessage}"
     }
-
-    "⚠️ <b>IA Saturada:</b> Ningún modelo de Google ha respondido. Intenta en 5 minutos."
   }
 
   def getDeepAnalysis(): String = {
@@ -66,7 +59,7 @@ object DatabaseManager {
     try {
       conn = getConnection(); val stmt = conn.createStatement()
       val sb = new StringBuilder()
-      sb.append("Eres el entrenador de porteros y psicólogo de Héctor (niño con posible TDA). Analiza estos datos y dame un consejo breve (max 30 palabras) y motivador en HTML (usa <b>negritas</b>). Prioriza el refuerzo positivo.\n\n")
+      sb.append("Eres el entrenador de porteros y psicólogo de Héctor. Analiza estos datos y dame un consejo breve (max 30 palabras) y motivador con HTML (<b>negritas</b>).\n\n")
 
       sb.append("--- DATOS ---\n")
       val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
@@ -81,13 +74,13 @@ object DatabaseManager {
       callGeminiAI(sb.toString())
 
     } catch {
-      case e: Exception => "Analizando datos tácticos..."
+      case e: Exception => "Analizando datos..."
     } finally {
       if(conn!=null) conn.close()
     }
   }
 
-  // --- RESTO DEL CÓDIGO (IGUAL) ---
+  // --- RESTO DEL CÓDIGO (SIN CAMBIOS) ---
   def getLatestCardData(): PlayerCardData = {
     var conn: Connection = null; try { conn = getConnection(); val rs = conn.createStatement().executeQuery("SELECT club_escudo_url, foto_jugador_url, nombre_club, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos FROM seasons ORDER BY id DESC LIMIT 1"); if (rs.next()) {
       val (f, c, n) = (Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("nombre_club")).getOrElse("Club"))
