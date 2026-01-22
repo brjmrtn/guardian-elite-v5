@@ -2,6 +2,7 @@ import java.sql.{Connection, DriverManager, Date}
 import java.util.Properties
 import java.time.LocalDate
 
+
 case class PlayerCardData(
                            nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String,
                            div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int,
@@ -168,4 +169,5 @@ object DatabaseManager {
 
   def importMatchesCSV(csvData: String): String = { var count = 0; val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("rival"))) lines.tail else lines; val today = LocalDate.now().toString; dataLines.foreach { line => try { val p = line.split(",").map(_.trim); if (p.length >= 6) { val rival = p(0); val gf = p(1).toInt; val gc = p(2).toInt; val min = p(3).toInt; val nota = p(4).toDouble; val paradas = p(5).toInt; val clima = if(p.length > 6) p(6) else "Sol"; val notas = if(p.length > 7) p(7) else "Importado"; val reaccion = if(p.length > 8) p(8) else ""; val c = getLatestCardData(); val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas); updateStats(n); val m = (n.divRaw * 0.2 + n.hanRaw * 0.2 + n.refRaw * 0.2 + n.posRaw * 0.2 + n.spdRaw * 0.05 + n.kicRaw * 0.15); logMatch(rival, gf, gc, min, nota, m, paradas, "", "", "", 0, 0, 0, clima, 20, notas, "", reaccion, today); count += 1 } } catch { case e: Exception => println(s"Error import line: $line") } }; s"Importados $count partidos" }
   def importWellnessCSV(csvData: String): String = { var count = 0; val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("sueno"))) lines.tail else lines; dataLines.foreach { line => try { val p = line.split(",").map(_.trim); if (p.length >= 3) { val sueno = p(0).toInt; val energia = p(1).toInt; val dolor = p(2).toInt; val zona = if(p.length > 3) p(3) else ""; logWellness(sueno, energia, dolor, zona, 0, 0.0, 3, ""); count += 1 } } catch { case e: Exception => println(s"Error import wellness: $line") } }; s"Importados $count registros wellness" }
+
 }
