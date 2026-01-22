@@ -29,7 +29,7 @@ object DatabaseManager {
     if (apiKey.isEmpty) return "⚠️ <b>Falta API Key:</b> Configura GEMINI_API_KEY en Render para activar mi cerebro."
 
     try {
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
       val payload = ujson.Obj(
         "contents" -> ujson.Arr(
           ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
