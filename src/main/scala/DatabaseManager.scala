@@ -22,45 +22,41 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI INTEGRATION (V1BETA + 1.5 FLASH) ---
+  // --- IA GEMINI INTEGRATION (VERSIÓN ESTÁNDAR GEMINI-PRO) ---
   def callGeminiAI(prompt: String): String = {
 
-    // TU CLAVE REAL (Ojo, no compartir este archivo en público)
+    // ⚠️⚠️⚠️ ¡PEGA TU CLAVE REAL AQUÍ! ⚠️⚠️⚠️
     val apiKey = "AIzaSyCk11VUA0Fbop3GsWgruTbo1QLt38mZO6A"
 
+    if (apiKey.contains("TU_CLAVE")) return "⚠️ <b>Falta API Key:</b> Edita el archivo DatabaseManager.scala."
+
     try {
-      // INTENTO 1: Modelo Rápido y Gratuito (1.5 Flash en Beta)
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+      // USAMOS EL MODELO CLÁSICO QUE NUNCA FALLA
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey"
 
-      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+      val payload = ujson.Obj(
+        "contents" -> ujson.Arr(
+          ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
+        )
+      )
 
+      // Hacemos la llamada
       val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
 
       if (r.statusCode == 200) {
         val json = ujson.read(r.text())
-        json("candidates")(0)("content")("parts")(0)("text").str
+        // Extraemos el texto de la respuesta
+        try {
+          json("candidates")(0)("content")("parts")(0)("text").str
+        } catch {
+          case _: Exception => "🤖 La IA ha respondido pero no entiendo el formato. Intenta de nuevo."
+        }
       } else {
-        // SI FALLA, INTENTO 2: Modelo Clásico (Gemini Pro)
-        tryFallbackModel(prompt, apiKey, r.statusCode)
+        s"⚠️ Error de conexión con Google (Código: ${r.statusCode}). Revisa tu API Key."
       }
     } catch {
-      case e: Exception => s"Error IA: ${e.getMessage}"
+      case e: Exception => s"Error interno IA: ${e.getMessage}"
     }
-  }
-
-  // Plan B: Si el modelo Flash falla, usamos el Pro clásico
-  def tryFallbackModel(prompt: String, apiKey: String, originalStatus: Int): String = {
-    try {
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey"
-      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
-      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
-      if (r.statusCode == 200) {
-        val json = ujson.read(r.text())
-        json("candidates")(0)("content")("parts")(0)("text").str
-      } else {
-        s"⚠️ La IA está saturada (Error $originalStatus). Intenta en 1 min."
-      }
-    } catch { case _: Exception => s"⚠️ Error de conexión ($originalStatus)." }
   }
 
   def getDeepAnalysis(): String = {
@@ -68,26 +64,34 @@ object DatabaseManager {
     try {
       conn = getConnection(); val stmt = conn.createStatement()
       val sb = new StringBuilder()
-      sb.append("Eres el entrenador de porteros y psicólogo de Héctor (niño con posible TDA). Analiza estos datos y dame un consejo breve (max 40 palabras) y motivador en HTML, usando negritas <b> para resaltar. Cruza datos de sueño/foco con rendimiento.\n\n")
+      // CONTEXTO DE ENTRENADOR:
+      sb.append("Actúa como un entrenador de porteros experto y psicólogo deportivo. Analiza estos datos de Héctor (un niño portero con posible TDA) y dame un consejo MUY BREVE (máximo 2 frases) y motivador. Usa HTML (<b>negritas</b>) para resaltar lo importante.\n\n")
 
-      sb.append("ÚLTIMOS PARTIDOS:\n")
+      sb.append("--- DATOS RECIENTES ---\n")
+      // 1. Partidos
       val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
-      while(rsM.next()) { sb.append(s"- Vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
+      while(rsM.next()) { sb.append(s"Partido vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción tras gol: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
 
-      sb.append("\nESTADO FISICO/MENTAL (Últimos 3 días):\n")
+      // 2. Wellness
       val rsW = stmt.executeQuery("SELECT sueno, animo FROM (SELECT * FROM wellness ORDER BY id DESC LIMIT 3) as sub")
-      while(rsW.next()) { sb.append(s"- Sueño: ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5.\n") }
+      while(rsW.next()) { sb.append(s"Estado: Sueño ${rsW.getInt("sueno")}/5, Ánimo ${rsW.getInt("animo")}/5.\n") }
 
-      sb.append("\nENTRENAMIENTOS (Foco/Atención):\n")
+      // 3. Entrenos
       val rsT = stmt.executeQuery("SELECT foco, atencion FROM (SELECT * FROM trainings ORDER BY id DESC LIMIT 3) as sub")
-      while(rsT.next()) { sb.append(s"- Foco: ${rsT.getString("foco")}. Atención: ${rsT.getInt("atencion")}/5\n") }
+      while(rsT.next()) { sb.append(s"Entreno: Foco en ${rsT.getString("foco")}, Atención ${rsT.getInt("atencion")}/5.\n") }
+
+      sb.append("\nCONSEJO:")
 
       callGeminiAI(sb.toString())
 
-    } catch { case e: Exception => "Analizando datos tácticos..." } finally { if(conn!=null) conn.close() }
+    } catch {
+      case e: Exception => "Recopilando datos tácticos..."
+    } finally {
+      if(conn!=null) conn.close()
+    }
   }
 
-  // --- RESTO DEL CÓDIGO (IGUAL QUE SIEMPRE) ---
+  // --- RESTO DEL CÓDIGO (Sin cambios) ---
   def getLatestCardData(): PlayerCardData = {
     var conn: Connection = null; try { conn = getConnection(); val rs = conn.createStatement().executeQuery("SELECT club_escudo_url, foto_jugador_url, nombre_club, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos FROM seasons ORDER BY id DESC LIMIT 1"); if (rs.next()) {
       val (f, c, n) = (Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("nombre_club")).getOrElse("Club"))
