@@ -2,7 +2,6 @@ import java.sql.{Connection, DriverManager, Date}
 import java.util.Properties
 import java.time.LocalDate
 
-
 case class PlayerCardData(
                            nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String,
                            div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int,
@@ -15,6 +14,7 @@ case class GearItem(id: Int, nombre: String, tipo: String, usos: Int, maxUsos: I
 case class Objective(id: Int, tipo: String, actual: Double, meta: Int, descripcion: String)
 
 object DatabaseManager {
+  // FUERZA BRUTA UTF-8 EN LA CONEXIÓN
   val url = "jdbc:postgresql://ep-fancy-cherry-abkfneqp-pooler.eu-west-2.aws.neon.tech/neondb?user=neondb_owner&password=npg_5VxYysTm8vQa&sslmode=require&options=-c%20client_encoding=UTF8"
 
   def getConnection(): Connection = {
@@ -87,13 +87,13 @@ object DatabaseManager {
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches ORDER BY fecha ASC, id ASC LIMIT 15"); while(rs.next()) { l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally { conn.close() }; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
   def getAchievements(): List[Achievement] = { var l=List[Achievement](); val conn=getConnection(); try { val s=conn.createStatement(); val r1=s.executeQuery("SELECT COUNT(*) FROM matches WHERE goles_contra=0"); if(r1.next() && r1.getInt(1)>=5) l=l:+Achievement("(M)","El Muro",r1.getInt(1)/5,""); val r2=s.executeQuery("SELECT COUNT(*) FROM matches WHERE nota>=9"); if(r2.next() && r2.getInt(1)>0) l=l:+Achievement("(E)","MVP",r2.getInt(1),"") } finally { conn.close() }; l }
 
-  // --- IA COACH 3.1: CORRECCIÓN SQL SUBQUERIES ---
+  // --- IA COACH (ARREGLADA) ---
   def getDeepAnalysis(): String = {
     var conn: Connection = null; val sb = new StringBuilder()
     try {
       conn = getConnection(); val stmt = conn.createStatement()
 
-      // 1. RECOGER DATOS (Usando subconsultas para evitar el error de GROUP BY)
+      // SUBCONSULTAS PARA EVITAR ERROR GROUP BY
       val rsM = stmt.executeQuery("SELECT AVG(nota) as m FROM (SELECT nota FROM matches ORDER BY fecha DESC, id DESC LIMIT 5) as sub")
       var avgMatch=0.0; if(rsM.next()){ avgMatch=rsM.getDouble("m") }
 
@@ -103,43 +103,28 @@ object DatabaseManager {
       val rsT = stmt.executeQuery("SELECT AVG(atencion) as f FROM (SELECT atencion FROM trainings ORDER BY id DESC LIMIT 5) as sub")
       var avgFocus=0.0; if(rsT.next()){ avgFocus=rsT.getDouble("f") }
 
-      // 2. ANALISIS CRUZADO TDA (Foco vs Rendimiento)
       if (avgFocus > 0 && avgFocus < 3.0 && avgMatch < 7.0) {
-        sb.append("📉 <b>Alerta de Foco (TDA):</b> He detectado un patrón. Tu bajada de rendimiento reciente (Nota media <b>" + f"$avgMatch%1.1f" + "</b>) coincide con una semana de baja atención en los entrenos (Foco <b>" + f"$avgFocus%1.1f" + "</b>).<br><br>")
+        sb.append("📉 <b>Alerta de Foco:</b> Bajada de rendimiento (Nota <b>" + f"$avgMatch%1.1f" + "</b>) coincide con baja atencion en entrenos (Foco <b>" + f"$avgFocus%1.1f" + "</b>).<br><br>")
       } else if (avgFocus > 4.0 && avgMatch > 7.5) {
-        sb.append("🚀 <b>Estado de Flow:</b> ¡Esta es la clave! Tu 'Hiper-Foco' en los entrenos (<b>" + f"$avgFocus%1.1f" + "</b>) se está traduciendo en seguridad total bajo palos.<br><br>")
+        sb.append("🚀 <b>Estado de Flow:</b> Tu 'Hiper-Foco' en entrenos (<b>" + f"$avgFocus%1.1f" + "</b>) se traduce en seguridad bajo palos.<br><br>")
       }
 
-      // 3. ANALISIS BIO-EMOCIONAL (Sueño/Animo vs Regulación)
       if (avgSleep < 3.5 && avgMood < 3.0) {
-        sb.append("🧠 <b>Riesgo de Regulación:</b> Tus registros muestran poco sueño y ánimo bajo. En este estado es fácil frustrarse tras un error. Prioridad: Descanso.<br><br>")
+        sb.append("🧠 <b>Riesgo:</b> Poco sueño y animo bajo. Prioridad: Descanso.<br><br>")
       }
 
-      // 4. ANALISIS TÁCTICO (Patrones de Goles)
       val rsGoals = stmt.executeQuery("SELECT zona_goles FROM matches ORDER BY id DESC LIMIT 5")
-      var highGoals = 0; var lowGoals = 0; var totGoals = 0
-      while(rsGoals.next()){
-        val z=rsGoals.getString("zona_goles")
-        if(z!=null && z.nonEmpty) {
-          totGoals += 1
-          if(z.contains("T")) highGoals+=1
-          if(z.contains("B")) lowGoals+=1
-        }
-      }
+      var highGoals = 0; var totGoals = 0
+      while(rsGoals.next()){ val z=rsGoals.getString("zona_goles"); if(z!=null && z.nonEmpty) { totGoals+=1; if(z.contains("T")) highGoals+=1 } }
 
-      if (totGoals > 0) {
-        if (highGoals >= 3) sb.append("🧤 <b>Patrón Técnico:</b> Atención a los balones aéreos. En los últimos 5 partidos, muchos goles han entrado por arriba.<br>")
-        else if (lowGoals >= 3) sb.append("🦵 <b>Patrón Técnico:</b> Estamos sufriendo abajo. Varios goles rasos recientes.<br>")
-      }
+      if (totGoals > 0 && highGoals >= 3) sb.append("🧤 <b>Tecnica:</b> Atencion a balones aereos (Goles por arriba).<br>")
 
-      if (sb.isEmpty) sb.append("🤖 <b>Recopilando datos...</b> Sigue registrando entrenos, bio y partidos para que pueda encontrar tus patrones ocultos.")
+      if (sb.isEmpty) sb.append("🤖 <b>Recopilando datos...</b> Sigue registrando tu dia a dia.")
 
-    } catch { case e: Exception => println("Err AI Deep: " + e.getMessage); sb.append("Analizando datos...") } finally { if(conn!=null) conn.close() }
-
+    } catch { case e: Exception => println("Err AI Deep: " + e.getMessage); sb.append("Analizando...") } finally { if(conn!=null) conn.close() }
     sb.toString()
   }
 
-  // LOG WELLNESS (Mood y Notas)
   def logWellness(sueno: Int, energia: Int, dolor: Int, zona: String, altura: Int, peso: Double, animo: Int, notas: String): Unit = {
     val conn=getConnection(); try {
       val s=conn.prepareStatement("INSERT INTO wellness (sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta) VALUES (?,?,?,?,?,?,?,?)")
@@ -148,7 +133,6 @@ object DatabaseManager {
     } finally { conn.close() }
   }
 
-  // LOG TRAINING (Atención)
   def logTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int): Unit = {
     val conn=getConnection(); try {
       val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion) VALUES (?,?,?,?,?)")
@@ -169,5 +153,4 @@ object DatabaseManager {
 
   def importMatchesCSV(csvData: String): String = { var count = 0; val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("rival"))) lines.tail else lines; val today = LocalDate.now().toString; dataLines.foreach { line => try { val p = line.split(",").map(_.trim); if (p.length >= 6) { val rival = p(0); val gf = p(1).toInt; val gc = p(2).toInt; val min = p(3).toInt; val nota = p(4).toDouble; val paradas = p(5).toInt; val clima = if(p.length > 6) p(6) else "Sol"; val notas = if(p.length > 7) p(7) else "Importado"; val reaccion = if(p.length > 8) p(8) else ""; val c = getLatestCardData(); val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas); updateStats(n); val m = (n.divRaw * 0.2 + n.hanRaw * 0.2 + n.refRaw * 0.2 + n.posRaw * 0.2 + n.spdRaw * 0.05 + n.kicRaw * 0.15); logMatch(rival, gf, gc, min, nota, m, paradas, "", "", "", 0, 0, 0, clima, 20, notas, "", reaccion, today); count += 1 } } catch { case e: Exception => println(s"Error import line: $line") } }; s"Importados $count partidos" }
   def importWellnessCSV(csvData: String): String = { var count = 0; val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("sueno"))) lines.tail else lines; dataLines.foreach { line => try { val p = line.split(",").map(_.trim); if (p.length >= 3) { val sueno = p(0).toInt; val energia = p(1).toInt; val dolor = p(2).toInt; val zona = if(p.length > 3) p(3) else ""; logWellness(sueno, energia, dolor, zona, 0, 0.0, 3, ""); count += 1 } } catch { case e: Exception => println(s"Error import wellness: $line") } }; s"Importados $count registros wellness" }
-
 }
