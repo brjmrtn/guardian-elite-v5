@@ -22,41 +22,43 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI INTEGRATION (VERSIÓN ESTÁNDAR GEMINI-PRO) ---
+  // --- IA GEMINI: SISTEMA DE ROTACIÓN (TRY-HARD) ---
   def callGeminiAI(prompt: String): String = {
 
-    // ⚠️⚠️⚠️ ¡PEGA TU CLAVE REAL AQUÍ! ⚠️⚠️⚠️
-    val apiKey = "AIzaSyCk11VUA0Fbop3GsWgruTbo1QLt38mZO6A"
+    // ⬇️⬇️⬇️ PEGA TU CLAVE AQUÍ DENTRO ⬇️⬇️⬇️
+    val apiKey = "PEGAR_AQUI_TU_CLAVE_AIzaSy..."
 
-    if (apiKey.contains("TU_CLAVE")) return "⚠️ <b>Falta API Key:</b> Edita el archivo DatabaseManager.scala."
+    if (apiKey.contains("PEGAR_AQUI")) return "⚠️ <b>Falta API Key:</b> Edita DatabaseManager.scala."
 
-    try {
-      // USAMOS EL MODELO CLÁSICO QUE NUNCA FALLA
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey"
+    // LISTA DE DELANTEROS (Si falla uno, sale el otro)
+    val models = Seq("gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro", "gemini-2.0-flash-exp")
 
-      val payload = ujson.Obj(
-        "contents" -> ujson.Arr(
-          ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
+    for (model <- models) {
+      try {
+        // Probamos con la versión v1beta que es la más compatible hoy
+        val url = s"https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+
+        val payload = ujson.Obj(
+          "contents" -> ujson.Arr(
+            ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
+          )
         )
-      )
 
-      // Hacemos la llamada
-      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
+        val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
 
-      if (r.statusCode == 200) {
-        val json = ujson.read(r.text())
-        // Extraemos el texto de la respuesta
-        try {
-          json("candidates")(0)("content")("parts")(0)("text").str
-        } catch {
-          case _: Exception => "🤖 La IA ha respondido pero no entiendo el formato. Intenta de nuevo."
+        if (r.statusCode == 200) {
+          val json = ujson.read(r.text())
+          // ¡GOL! Hemos conseguido respuesta
+          return json("candidates")(0)("content")("parts")(0)("text").str
+        } else {
+          println(s"⚠️ El modelo $model falló con error ${r.statusCode}. Probando siguiente...")
         }
-      } else {
-        s"⚠️ Error de conexión con Google (Código: ${r.statusCode}). Revisa tu API Key."
+      } catch {
+        case e: Exception => println(s"❌ Error técnico con $model: ${e.getMessage}")
       }
-    } catch {
-      case e: Exception => s"Error interno IA: ${e.getMessage}"
     }
+
+    "⚠️ <b>IA Saturada:</b> Ningún modelo de Google ha respondido. Intenta en 5 minutos."
   }
 
   def getDeepAnalysis(): String = {
@@ -64,34 +66,28 @@ object DatabaseManager {
     try {
       conn = getConnection(); val stmt = conn.createStatement()
       val sb = new StringBuilder()
-      // CONTEXTO DE ENTRENADOR:
-      sb.append("Actúa como un entrenador de porteros experto y psicólogo deportivo. Analiza estos datos de Héctor (un niño portero con posible TDA) y dame un consejo MUY BREVE (máximo 2 frases) y motivador. Usa HTML (<b>negritas</b>) para resaltar lo importante.\n\n")
+      sb.append("Eres el entrenador de porteros y psicólogo de Héctor (niño con posible TDA). Analiza estos datos y dame un consejo breve (max 30 palabras) y motivador en HTML (usa <b>negritas</b>). Prioriza el refuerzo positivo.\n\n")
 
-      sb.append("--- DATOS RECIENTES ---\n")
-      // 1. Partidos
+      sb.append("--- DATOS ---\n")
       val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
-      while(rsM.next()) { sb.append(s"Partido vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción tras gol: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
+      while(rsM.next()) { sb.append(s"Partido vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
 
-      // 2. Wellness
       val rsW = stmt.executeQuery("SELECT sueno, animo FROM (SELECT * FROM wellness ORDER BY id DESC LIMIT 3) as sub")
-      while(rsW.next()) { sb.append(s"Estado: Sueño ${rsW.getInt("sueno")}/5, Ánimo ${rsW.getInt("animo")}/5.\n") }
+      while(rsW.next()) { sb.append(s"Bio: Sueño ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5.\n") }
 
-      // 3. Entrenos
       val rsT = stmt.executeQuery("SELECT foco, atencion FROM (SELECT * FROM trainings ORDER BY id DESC LIMIT 3) as sub")
-      while(rsT.next()) { sb.append(s"Entreno: Foco en ${rsT.getString("foco")}, Atención ${rsT.getInt("atencion")}/5.\n") }
-
-      sb.append("\nCONSEJO:")
+      while(rsT.next()) { sb.append(s"Entreno: Foco ${rsT.getString("foco")}. Atención: ${rsT.getInt("atencion")}/5\n") }
 
       callGeminiAI(sb.toString())
 
     } catch {
-      case e: Exception => "Recopilando datos tácticos..."
+      case e: Exception => "Analizando datos tácticos..."
     } finally {
       if(conn!=null) conn.close()
     }
   }
 
-  // --- RESTO DEL CÓDIGO (Sin cambios) ---
+  // --- RESTO DEL CÓDIGO (IGUAL) ---
   def getLatestCardData(): PlayerCardData = {
     var conn: Connection = null; try { conn = getConnection(); val rs = conn.createStatement().executeQuery("SELECT club_escudo_url, foto_jugador_url, nombre_club, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos FROM seasons ORDER BY id DESC LIMIT 1"); if (rs.next()) {
       val (f, c, n) = (Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("nombre_club")).getOrElse("Club"))
