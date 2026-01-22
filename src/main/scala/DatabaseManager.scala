@@ -4,7 +4,6 @@ import java.time.LocalDate
 import requests._
 import ujson._
 
-
 case class PlayerCardData(
                            nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String,
                            div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int,
@@ -23,13 +22,18 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI INTEGRATION ---
+  // --- IA GEMINI INTEGRATION (CORREGIDO A V1 STABLE) ---
   def callGeminiAI(prompt: String): String = {
-    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "")
-    if (apiKey.isEmpty) return "⚠️ <b>Falta API Key:</b> Configura GEMINI_API_KEY en Render para activar mi cerebro."
+
+    // ⚠️⚠️⚠️ ¡PEGA TU CLAVE AQUI! ⚠️⚠️⚠️
+    val apiKey = "AIzaSyCk11VUA0Fbop3GsWgruTbo1QLt38mZO6A"
+
+    if (apiKey.contains("TU_CLAVE")) return "⚠️ <b>Falta API Key:</b> Edita DatabaseManager.scala."
 
     try {
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+      // CAMBIO CLAVE: Usamos 'v1' (estable) en vez de 'v1beta' y el modelo 'gemini-1.5-flash'
+      val url = s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$apiKey"
+
       val payload = ujson.Obj(
         "contents" -> ujson.Arr(
           ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
@@ -37,45 +41,53 @@ object DatabaseManager {
       )
 
       val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
-      val json = ujson.read(r.text())
-      // Extraemos el texto de la respuesta de Google
-      json("candidates")(0)("content")("parts")(0)("text").str
+
+      if (r.statusCode == 200) {
+        val json = ujson.read(r.text())
+        json("candidates")(0)("content")("parts")(0)("text").str
+      } else {
+        // Si falla 1.5 Flash, intentamos con el clásico Gemini Pro que nunca falla
+        tryFallbackModel(prompt, apiKey, r.statusCode)
+      }
     } catch {
-      case e: Exception => s"Error IA: ${e.getMessage}"
+      case e: Exception => s"Error de conexión IA: ${e.getMessage}"
     }
+  }
+
+  // Plan B: Si Flash falla, usamos Gemini Pro
+  def tryFallbackModel(prompt: String, apiKey: String, originalStatus: Int): String = {
+    try {
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey"
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
+      if (r.statusCode == 200) {
+        val json = ujson.read(r.text())
+        json("candidates")(0)("content")("parts")(0)("text").str
+      } else {
+        s"⚠️ La IA está saturada (Error $originalStatus / ${r.statusCode})."
+      }
+    } catch { case _: Exception => s"⚠️ Error $originalStatus en IA." }
   }
 
   def getDeepAnalysis(): String = {
     var conn: Connection = null
     try {
       conn = getConnection(); val stmt = conn.createStatement()
-
-      // 1. RECOLECTAR DATOS (Contexto para la IA)
       val sb = new StringBuilder()
-      sb.append("Eres el entrenador de porteros y psicólogo deportivo de Héctor (niño con posible TDA). Analiza estos datos recientes y dame un consejo breve (max 40 palabras) y motivador, usando negritas HTML <b> para resaltar lo clave. Cruza datos de sueño/foco con rendimiento.\n\n")
+      sb.append("Eres el entrenador de porteros y psicólogo de Héctor (niño con posible TDA). Analiza estos datos y dame un consejo breve (max 40 palabras) y motivador en HTML, usando negritas <b> para resaltar. Cruza datos de sueño/foco con rendimiento.\n\n")
 
-      // Partidos recientes
       sb.append("ÚLTIMOS PARTIDOS:\n")
-      val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles, zona_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
-      while(rsM.next()) {
-        sb.append(s"- Vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}. Goles por: ${Option(rsM.getString("zona_goles")).getOrElse("-")}\n")
-      }
+      val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
+      while(rsM.next()) { sb.append(s"- Vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
 
-      // Wellness reciente
       sb.append("\nESTADO FISICO/MENTAL (Últimos 3 días):\n")
-      val rsW = stmt.executeQuery("SELECT sueno, animo, notas_conducta FROM (SELECT * FROM wellness ORDER BY id DESC LIMIT 3) as sub")
-      while(rsW.next()) {
-        sb.append(s"- Sueño: ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5. Notas: ${Option(rsW.getString("notas_conducta")).getOrElse("-")}\n")
-      }
+      val rsW = stmt.executeQuery("SELECT sueno, animo FROM (SELECT * FROM wellness ORDER BY id DESC LIMIT 3) as sub")
+      while(rsW.next()) { sb.append(s"- Sueño: ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5.\n") }
 
-      // Entrenos
       sb.append("\nENTRENAMIENTOS (Foco/Atención):\n")
       val rsT = stmt.executeQuery("SELECT foco, atencion FROM (SELECT * FROM trainings ORDER BY id DESC LIMIT 3) as sub")
-      while(rsT.next()) {
-        sb.append(s"- Foco en: ${rsT.getString("foco")}. Nivel Atención: ${rsT.getInt("atencion")}/5\n")
-      }
+      while(rsT.next()) { sb.append(s"- Foco: ${rsT.getString("foco")}. Atención: ${rsT.getInt("atencion")}/5\n") }
 
-      // 2. LLAMAR A LA IA
       callGeminiAI(sb.toString())
 
     } catch {
@@ -85,7 +97,7 @@ object DatabaseManager {
     }
   }
 
-  // --- RESTO DEL CÓDIGO (Igual que v5.8) ---
+  // --- RESTO DEL CÓDIGO (Sin cambios) ---
   def getLatestCardData(): PlayerCardData = {
     var conn: Connection = null; try { conn = getConnection(); val rs = conn.createStatement().executeQuery("SELECT club_escudo_url, foto_jugador_url, nombre_club, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos FROM seasons ORDER BY id DESC LIMIT 1"); if (rs.next()) {
       val (f, c, n) = (Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("nombre_club")).getOrElse("Club"))
@@ -99,7 +111,8 @@ object DatabaseManager {
   def updateSeasonSettings(f: String, c: String, n: String): String = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club) WHERE id=(SELECT MAX(id) FROM seasons)"); s.setString(1,f); s.setString(2,c); s.setString(3,n); s.executeUpdate(); "DATOS ACTUALIZADOS" } finally { conn.close() } }
   def updateStats(s: PlayerCardData): Unit = { val conn=getConnection(); try { val st=conn.prepareStatement("UPDATE seasons SET media=?, stat_div=?, stat_han=?, stat_kic=?, stat_ref=?, stat_spd=?, stat_pos=? WHERE id=(SELECT MAX(id) FROM seasons)"); st.setDouble(1,s.media.toDouble); st.setDouble(2,s.divRaw); st.setDouble(3,s.hanRaw); st.setDouble(4,s.kicRaw); st.setDouble(5,s.refRaw); st.setDouble(6,s.spdRaw); st.setDouble(7,s.posRaw); st.executeUpdate() } finally { conn.close() } }
   def logMatch(riv: String, gf: Int, gc: Int, min: Int, n: Double, med: Double, par: Int, zG: String, zT: String, zP: String, p1v1: Int, pAir: Int, pPie: Int, clima: String, temp: Int, notas: String, video: String, reaccion: String, fechaStr: String): Unit = { val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons"); if(rs.next()){ val s=conn.prepareStatement("INSERT INTO matches (season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica, paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas, acciones_pie, clima, temperatura, notas_partido, video_url, reaccion_goles, fecha) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"); s.setInt(1,rs.getInt("id")); s.setString(2,riv); s.setInt(3,gf); s.setInt(4,gc); s.setInt(5,min); s.setDouble(6,n); s.setDouble(7,med); s.setInt(8,par); s.setString(9,zG); s.setString(10,zT); s.setString(11,zP); s.setInt(12,p1v1); s.setInt(13,pAir); s.setInt(14,pPie); s.setString(15, clima); s.setInt(16, temp); s.setString(17, notas); s.setString(18, video); s.setString(19, reaccion); s.setDate(20, Date.valueOf(fechaStr)); s.executeUpdate() }; conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE") } finally { conn.close() } }
-  def getMatchesList(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT id, rival, goles_favor, goles_contra, minutos, nota, TO_CHAR(fecha, 'YYYY-MM-DD') as f, clima, notas_partido, video_url, reaccion_goles FROM matches ORDER BY fecha DESC, id DESC"); while(rs.next()) { l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getString("f"), Option(rs.getString("clima")).getOrElse("Sol"), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse("")) } } finally { conn.close() }; l }
+  def getMatchesList(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT id, rival, goles_favor, goles_contra, minutos, nota, TO_CHAR(fecha, 'YYYY-MM-DD') as f, clima, notas_partido, video_url, reaccion_goles FROM matches ORDER BY fecha DESC, id DESC"); while(rs.next()) { l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getString("f"), Option(rs.getString("clima")).getOrElse("Sol"), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse("")) } } finally { conn.close() }; l
+  }
   def getMatchById(id: Int): Option[MatchLog] = { var m: Option[MatchLog] = None; val conn = getConnection(); try { val s = conn.prepareStatement("SELECT id, rival, goles_favor, goles_contra, minutos, nota, TO_CHAR(fecha, 'YYYY-MM-DD') as f, clima, notas_partido, video_url, reaccion_goles FROM matches WHERE id = ?"); s.setInt(1, id); val rs = s.executeQuery(); if (rs.next()) { m = Some(MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getString("f"), Option(rs.getString("clima")).getOrElse("Sol"), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""))) } } finally { conn.close() }; m }
   def updateMatch(id: Int, rival: String, gf: Int, gc: Int, min: Int, nota: Double, clima: String, temp: Int, notas: String, video: String, reaccion: String, fechaStr: String): Unit = { val conn = getConnection(); try { val s = conn.prepareStatement("UPDATE matches SET rival=?, goles_favor=?, goles_contra=?, minutos=?, nota=?, clima=?, temperatura=?, notas_partido=?, video_url=?, reaccion_goles=?, fecha=? WHERE id=?"); s.setString(1, rival); s.setInt(2, gf); s.setInt(3, gc); s.setInt(4, min); s.setDouble(5, nota); s.setString(6, clima); s.setInt(7, temp); s.setString(8, notas); s.setString(9, video); s.setString(10, reaccion); s.setDate(11, Date.valueOf(fechaStr)); s.setInt(12, id); s.executeUpdate() } finally { conn.close() } }
   def deleteMatch(id: Int): Unit = { val conn = getConnection(); try { val s = conn.prepareStatement("DELETE FROM matches WHERE id=?"); s.setInt(1, id); s.executeUpdate() } finally { conn.close() } }
@@ -119,5 +132,4 @@ object DatabaseManager {
   private def getDefaultData() = PlayerCardData("HECTOR", 59, "GK", "", "", "", "Club", 80, 60, 55, 60, 62, 58, 80.0, 60.0, 55.0, 60.0, 62.0, 58.0)
   def importMatchesCSV(csvData: String): String = { var count = 0; val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("rival"))) lines.tail else lines; val today = LocalDate.now().toString; dataLines.foreach { line => try { val p = line.split(",").map(_.trim); if (p.length >= 6) { val rival = p(0); val gf = p(1).toInt; val gc = p(2).toInt; val min = p(3).toInt; val nota = p(4).toDouble; val paradas = p(5).toInt; val clima = if(p.length > 6) p(6) else "Sol"; val notas = if(p.length > 7) p(7) else "Importado"; val reaccion = if(p.length > 8) p(8) else ""; val c = getLatestCardData(); val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas); updateStats(n); val m = (n.divRaw * 0.2 + n.hanRaw * 0.2 + n.refRaw * 0.2 + n.posRaw * 0.2 + n.spdRaw * 0.05 + n.kicRaw * 0.15); logMatch(rival, gf, gc, min, nota, m, paradas, "", "", "", 0, 0, 0, clima, 20, notas, "", reaccion, today); count += 1 } } catch { case e: Exception => println(s"Error import line: $line") } }; s"Importados $count partidos" }
   def importWellnessCSV(csvData: String): String = { var count = 0; val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("sueno"))) lines.tail else lines; dataLines.foreach { line => try { val p = line.split(",").map(_.trim); if (p.length >= 3) { val sueno = p(0).toInt; val energia = p(1).toInt; val dolor = p(2).toInt; val zona = if(p.length > 3) p(3) else ""; logWellness(sueno, energia, dolor, zona, 0, 0.0, 3, ""); count += 1 } } catch { case e: Exception => println(s"Error import wellness: $line") } }; s"Importados $count registros wellness" }
-
 }
