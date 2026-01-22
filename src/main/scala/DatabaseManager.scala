@@ -86,27 +86,32 @@ object DatabaseManager {
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches ORDER BY fecha ASC, id ASC LIMIT 15"); while(rs.next()) { l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally { conn.close() }; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
   def getAchievements(): List[Achievement] = { var l=List[Achievement](); val conn=getConnection(); try { val s=conn.createStatement(); val r1=s.executeQuery("SELECT COUNT(*) FROM matches WHERE goles_contra=0"); if(r1.next() && r1.getInt(1)>=5) l=l:+Achievement("(M)","El Muro",r1.getInt(1)/5,""); val r2=s.executeQuery("SELECT COUNT(*) FROM matches WHERE nota>=9"); if(r2.next() && r2.getInt(1)>0) l=l:+Achievement("(E)","MVP",r2.getInt(1),"") } finally { conn.close() }; l }
 
-  // --- IA COACH 3.0: DEEP MIND (EXPLICACIONES REALES) ---
+  // --- IA COACH 3.1: CORRECCIÓN SQL SUBQUERIES ---
   def getDeepAnalysis(): String = {
     var conn: Connection = null; val sb = new StringBuilder()
     try {
       conn = getConnection(); val stmt = conn.createStatement()
 
-      // 1. RECOGER DATOS (Medias recientes)
-      val rsM = stmt.executeQuery("SELECT AVG(nota) as m FROM matches ORDER BY fecha DESC LIMIT 5"); var avgMatch=0.0; if(rsM.next()){ avgMatch=rsM.getDouble("m") }
-      val rsW = stmt.executeQuery("SELECT AVG(sueno) as s, AVG(animo) as a FROM wellness ORDER BY id DESC LIMIT 7"); var avgSleep=0.0; var avgMood=0.0; if(rsW.next()){ avgSleep=rsW.getDouble("s"); avgMood=rsW.getDouble("a") }
-      val rsT = stmt.executeQuery("SELECT AVG(atencion) as f FROM trainings ORDER BY id DESC LIMIT 5"); var avgFocus=0.0; if(rsT.next()){ avgFocus=rsT.getDouble("f") }
+      // 1. RECOGER DATOS (Usando subconsultas para evitar el error de GROUP BY)
+      val rsM = stmt.executeQuery("SELECT AVG(nota) as m FROM (SELECT nota FROM matches ORDER BY fecha DESC, id DESC LIMIT 5) as sub")
+      var avgMatch=0.0; if(rsM.next()){ avgMatch=rsM.getDouble("m") }
+
+      val rsW = stmt.executeQuery("SELECT AVG(sueno) as s, AVG(animo) as a FROM (SELECT sueno, animo FROM wellness ORDER BY id DESC LIMIT 7) as sub")
+      var avgSleep=0.0; var avgMood=0.0; if(rsW.next()){ avgSleep=rsW.getDouble("s"); avgMood=rsW.getDouble("a") }
+
+      val rsT = stmt.executeQuery("SELECT AVG(atencion) as f FROM (SELECT atencion FROM trainings ORDER BY id DESC LIMIT 5) as sub")
+      var avgFocus=0.0; if(rsT.next()){ avgFocus=rsT.getDouble("f") }
 
       // 2. ANALISIS CRUZADO TDA (Foco vs Rendimiento)
       if (avgFocus > 0 && avgFocus < 3.0 && avgMatch < 7.0) {
-        sb.append("📉 <b>Alerta de Foco (TDA):</b> He detectado un patrón claro. Tu bajada de rendimiento reciente (Nota media <b>" + f"$avgMatch%1.1f" + "</b>) coincide con una semana de muy baja atención en los entrenos (Foco <b>" + f"$avgFocus%1.1f" + "</b>). Cuando te 'desconectas' entre semana, el cerebro llega menos ágil al partido.<br><br>")
+        sb.append("📉 <b>Alerta de Foco (TDA):</b> He detectado un patrón. Tu bajada de rendimiento reciente (Nota media <b>" + f"$avgMatch%1.1f" + "</b>) coincide con una semana de baja atención en los entrenos (Foco <b>" + f"$avgFocus%1.1f" + "</b>).<br><br>")
       } else if (avgFocus > 4.0 && avgMatch > 7.5) {
-        sb.append("🚀 <b>Estado de Flow:</b> ¡Esta es la clave! Tu 'Hiper-Foco' en los entrenos (<b>" + f"$avgFocus%1.1f" + "</b>) se está traduciendo en seguridad total bajo palos. Mantén este nivel de estimulación.<br><br>")
+        sb.append("🚀 <b>Estado de Flow:</b> ¡Esta es la clave! Tu 'Hiper-Foco' en los entrenos (<b>" + f"$avgFocus%1.1f" + "</b>) se está traduciendo en seguridad total bajo palos.<br><br>")
       }
 
       // 3. ANALISIS BIO-EMOCIONAL (Sueño/Animo vs Regulación)
       if (avgSleep < 3.5 && avgMood < 3.0) {
-        sb.append("🧠 <b>Riesgo de Regulación:</b> Cuidado. Tus registros muestran poco sueño y ánimo bajo. En este estado, el cerebro 'ejecutivo' funciona peor y es fácil frustrarse tras un error. Prioridad absoluta: Descanso hoy.<br><br>")
+        sb.append("🧠 <b>Riesgo de Regulación:</b> Tus registros muestran poco sueño y ánimo bajo. En este estado es fácil frustrarse tras un error. Prioridad: Descanso.<br><br>")
       }
 
       // 4. ANALISIS TÁCTICO (Patrones de Goles)
@@ -122,13 +127,13 @@ object DatabaseManager {
       }
 
       if (totGoals > 0) {
-        if (highGoals >= 3) sb.append("🧤 <b>Patrón Técnico:</b> Atención a los balones aéreos. En los últimos 5 partidos, muchos goles han entrado por arriba. ¿Estamos dudando en la salida o nos quedamos bajo el larguero?<br>")
-        else if (lowGoals >= 3) sb.append("🦵 <b>Patrón Técnico:</b> Estamos sufriendo abajo. Varios goles rasos recientes. Revisar velocidad de caída y posición de manos bajas.<br>")
+        if (highGoals >= 3) sb.append("🧤 <b>Patrón Técnico:</b> Atención a los balones aéreos. En los últimos 5 partidos, muchos goles han entrado por arriba.<br>")
+        else if (lowGoals >= 3) sb.append("🦵 <b>Patrón Técnico:</b> Estamos sufriendo abajo. Varios goles rasos recientes.<br>")
       }
 
       if (sb.isEmpty) sb.append("🤖 <b>Recopilando datos...</b> Sigue registrando entrenos, bio y partidos para que pueda encontrar tus patrones ocultos.")
 
-    } catch { case e: Exception => println("Err AI Deep: " + e.getMessage); sb.append("Analizando...") } finally { if(conn!=null) conn.close() }
+    } catch { case e: Exception => println("Err AI Deep: " + e.getMessage); sb.append("Analizando datos...") } finally { if(conn!=null) conn.close() }
 
     sb.toString()
   }
