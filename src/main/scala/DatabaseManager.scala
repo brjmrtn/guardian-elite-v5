@@ -28,7 +28,7 @@ object DatabaseManager {
     // ⬇️⬇️ PON AQUI TU NUEVA CLAVE DE PROYECTO NUEVO ⬇️⬇️
     val apiKey = "GEMINI_API_KEY"
 
-    if (apiKey.isemp) return "⚠️ Falta API Key nueva en el código."
+    if (apiKey.isEmpty) return "⚠️ Falta API Key nueva en el código."
 
     // Usamos el modelo más estándar y robusto
     val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
