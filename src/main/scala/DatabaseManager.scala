@@ -25,7 +25,7 @@ object DatabaseManager {
 
   // --- IA GEMINI INTEGRATION ---
   def callGeminiAI(prompt: String): String = {
-    val apiKey = "AIzaSyCk11VUA0Fbop3GsWgruTbo1QLt38mZO6A"
+    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "")
     if (apiKey.isEmpty) return "⚠️ <b>Falta API Key:</b> Configura GEMINI_API_KEY en Render para activar mi cerebro."
 
     try {
