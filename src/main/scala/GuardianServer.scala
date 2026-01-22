@@ -8,7 +8,7 @@ object GuardianServer extends cask.MainRoutes {
   override def host: String = "0.0.0.0"
   override def port: Int = sys.env.getOrElse("PORT", "8081").toInt
 
-  // Función mágica para limpiar caracteres raros (Ã³ -> ó)
+  // FIX: LIMPIADOR DE CARACTERES (UTF-8 FORZADO)
   def fixEncoding(s: String): String = {
     try {
       if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s
@@ -49,16 +49,11 @@ object GuardianServer extends cask.MainRoutes {
       div(cls := "card-body p-3", form(action := "/match-center/save", method := "post", attr("accept-charset") := "UTF-8",
         div(cls := "mb-3", label(cls := "form-label text-warning small", "RIVAL"), input(tpe := "text", name := "rival", cls := "form-control form-control-lg", placeholder := "Ej: Rayo", required := true)),
         div(cls := "mb-3", label(cls := "form-label text-white small", "FECHA"), input(tpe := "date", name := "fecha", cls := "form-control", value := today)),
-
         div(cls := "row mb-3 bg-secondary bg-opacity-25 p-2 rounded mx-0", div(cls := "col-4 text-center", label(cls := "small fw-bold", "GOLES (GC)"), input(tpe := "number", name := "gc", id:="gcInput", cls := "form-control text-center bg-danger text-white border-0 fw-bold fs-4", value := "0", readonly:=true)), div(cls := "col-4 text-center", label(cls := "small fw-bold", "PARADAS"), input(tpe := "number", name := "paradas", id:="parInput", cls := "form-control text-center bg-success text-white border-0 fw-bold fs-4", value := "0", readonly:=true)), div(cls := "col-4 text-center", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))),
-
         div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))), div(cls:="goal-grid-3x3", for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }, input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas")), div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"), label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "CASUISTICAS DE PORTERO"), div(cls:="row g-2", div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-info btn-sm", onclick:="incCounter('p1v1')", "1vs1"), input(tpe:="number", name:="p1v1", id:="p1v1", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))), div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-warning btn-sm", onclick:="incCounter('pAir')", "Aereo"), input(tpe:="number", name:="pAir", id:="pAir", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))), div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-light btn-sm", onclick:="incCounter('pPie')", "Pie"), input(tpe:="number", name:="pPie", id:="pPie", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true)))), label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"), div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))),
-
         div(cls:="mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="form-label text-white small fw-bold w-100 text-center", "ENTORNO"), div(cls:="row mb-2", div(cls:="col-6", label(cls:="small text-muted", "Clima"), select(name:="clima", cls:="form-select form-select-sm bg-dark text-white", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Viento", "Viento"))), div(cls:="col-6", label(cls:="small text-muted", "Temp (C)"), input(tpe:="number", name:="temp", cls:="form-control form-control-sm bg-dark text-white", value:="20"))), div(cls:="mb-0", input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white", placeholder:="Link Video (Youtube/Drive)"))),
-
         div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
         div(cls:="mb-4", label(cls:="form-label text-danger small fw-bold", "ANALISIS GOLES / REACCION"), textarea(name:="reaccion", cls:="form-control form-control-sm bg-dark text-white border-danger", rows:="3", placeholder:="Descripcion goles encajados y reaccion mental posterior.")),
-
         div(cls := "mb-3", label(cls := "form-label small", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control", value := "40", attr("inputmode") := "numeric")),
         div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
         div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3", "GUARDAR PARTIDO"))
@@ -69,11 +64,8 @@ object GuardianServer extends cask.MainRoutes {
 
   @cask.postForm("/match-center/save")
   def saveMatch(rival: String, gf: Int, gc: Int, minutos: Int, nota: Double, paradas: Int, zonaGoles: String, zonaTiros: String, zonaParadas: String, p1v1: Int, pAir: Int, pPie: Int, clima: String, temp: Int, notas: String, video: String, reaccion: String, fecha: String, mode: String) = {
-    // APLICAMOS LA CURA DE CARACTERES
-    val cleanRival = fixEncoding(rival)
-    val cleanNotas = fixEncoding(notas)
-    val cleanReaccion = fixEncoding(reaccion)
-
+    // FIX: LIMPIEZA DE CARACTERES ANTES DE GUARDAR
+    val cleanRival = fixEncoding(rival); val cleanNotas = fixEncoding(notas); val cleanReaccion = fixEncoding(reaccion)
     val c = DatabaseManager.getLatestCardData()
     val n = StatsCalculator.calculateGrowth(c, minutos, gc, nota, paradas)
     DatabaseManager.updateStats(n)
@@ -84,7 +76,7 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  // 3. SCOUTING, GEAR
+  // 3. SCOUTING, GEAR, BIO
   @cask.get("/scouting")
   def scoutingPage(query: String = "") = {
     val (matches, stats) = if(query.nonEmpty) DatabaseManager.getRivalScouting(query) else (List[MatchLog](), Map[String,Int]())
@@ -159,7 +151,7 @@ object GuardianServer extends cask.MainRoutes {
 
   @cask.get("/match/delete/:id") def deleteMatchAction(id: Int) = { DatabaseManager.deleteMatch(id); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) }
 
-  // SOLUCIÓN RAW HTML: Explicit headers + direct content return
+  // EDIT MATCH (FIX: HEADERS & CONTENT)
   @cask.get("/match/edit/:id")
   def editMatchPage(id: Int) = {
     val m = DatabaseManager.getMatchById(id)
@@ -180,8 +172,8 @@ object GuardianServer extends cask.MainRoutes {
         ))
       )))).render
 
-      // KEY FIX: Passing content as string directly to ensure correct header handling
-      cask.Response(content, headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+      // KEY FIX: Passing content as BYTES directly to match the 'else' branch return type
+      cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
     }
   }
   @cask.postForm("/match/update") def updateMatchAction(id: Int, rival: String, gf: Int, gc: Int, nota: Double, notas: String, video: String, reaccion: String, fecha: String) = {
@@ -189,9 +181,11 @@ object GuardianServer extends cask.MainRoutes {
     DatabaseManager.updateMatch(id, cleanRival, gf, gc, 60, nota, "Sol", 20, cleanNotas, video, cleanReaccion, fecha); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
   }
 
-  // 5. SETTINGS ACTUALIZADO (Con Nombre Club)
+  // 5. SETTINGS Y ADMIN (IGUAL QUE ANTES)
   @cask.get("/settings") def settingsPage() = { val content = basePage("settings", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Fotos y Club"), form(action := "/settings/save_base64", method := "post", div(cls := "mb-4", label(cls := "form-label text-info", "Nombre del Club"), input(tpe := "text", name := "nombreClub", cls := "form-control", placeholder := "Ej: Rayo Vallecano")), div(cls := "mb-4", label(cls := "form-label text-info", "Foto Jugador"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_foto')"), input(tpe := "hidden", name := "fotoBase64", id := "hidden_foto")), div(cls := "mb-4", label(cls := "form-label text-warning", "Escudo Club"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_club')"), input(tpe := "hidden", name := "clubBase64", id := "hidden_club")), div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg", "Guardar"))), script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-grid", a(href:="/admin", cls:="btn btn-outline-danger", "ZONA ADMIN"))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.postForm("/settings/save_base64") def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String) = { val res = DatabaseManager.updateSeasonSettings(if(fotoBase64!=null) fotoBase64 else "", if(clubBase64!=null) clubBase64 else "", if(nombreClub!=null) nombreClub else ""); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Exito"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(res), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.get("/career") def careerPage() = { val c = DatabaseManager.getCareerSummary(); val content=basePage("career", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12", div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center", h2(cls := "text-warning m-0 mb-2", "Trayectoria"), div(cls:="card bg-secondary p-2 w-100", form(action := "/career/new-season", method := "post", cls:="d-flex flex-column gap-2", div(label(cls:="form-label text-white small m-0", "Nueva Categoria:"), input(tpe := "text", name := "categoria", cls := "form-control form-control-sm", placeholder := "Ej: Benjamin A", required := true)), button(tpe := "submit", cls := "btn btn-danger btn-sm", onclick := "return confirm('Seguro?');", "Cerrar & Empezar")))), div(cls := "card shadow-sm border-0", div(cls := "card-body p-0 table-responsive", table(cls := "table table-hover tm-table mb-0", thead(tr(th("Cat"), th("Ficha"), th("PJ"), th("GC"), th("Media"))), tbody(for (s <- c) yield tr(td(cls:="fw-bold text-primary small", s.categoria), td(img(src := s.fotoUrl, style := "height: 35px; width: 35px; border-radius: 50%; object-fit: cover; border: 2px solid #ddd;")), td(cls:="text-center fw-bold small", s.partidosJugados), td(cls:="text-center text-danger small", s.golesContra), td(cls:="text-center", span(cls:="badge bg-dark text-warning", s.mediaFinal)))))))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.postForm("/career/new-season") def newSeasonAction(categoria: String) = { val msg = DatabaseManager.startNewSeason(categoria); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Nueva Temp"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(msg), p(s"Etapa iniciada: $categoria"), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Ir a Inicio"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.get("/admin") def adminPage() = { val objs = DatabaseManager.getSeasonObjectives(); val content = basePage("settings", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", h2(cls:="text-danger text-center mb-4", "ADMINISTRACION"), div(cls:="card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", h5(cls:="text-white", "Copia de Seguridad"), p(cls:="small text-muted", "Descarga todos los partidos en formato Excel/CSV."), a(href:="/admin/download_csv", cls:="btn btn-primary w-100", "Descargar CSV")), div(cls:="card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", h5(cls:="text-white", "Informe PDF"), p(cls:="small text-muted", "Genera un informe limpio para imprimir o guardar como PDF."), a(href:="/admin/print_report", target:="_blank", cls:="btn btn-info w-100", "Generar Informe")), div(cls:="card bg-dark border-info shadow p-3", h5(cls:="text-info", "Gestionar Objetivos"), if(objs.isEmpty) div("Sin objetivos.") else div(for(o <- objs) yield form(action:="/admin/update_obj", method:="post", cls:="row align-items-center mb-2", div(cls:="col-7 small text-white", o.descripcion), div(cls:="col-3", input(tpe:="number", name:="meta", value:=o.meta.toString, cls:="form-control form-control-sm text-center")), input(tpe:="hidden", name:="id", value:=o.id.toString), div(cls:="col-2", button(tpe:="submit", cls:="btn btn-sm btn-outline-success", "S"))))), div(cls:="d-grid mt-4", a(href:="/admin/importer", cls:="btn btn-warning fw-bold", "IMPORTAR DATOS MASIVOS (CSV)"))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.postForm("/admin/update_obj") def updateObj(id: Int, meta: Int) = { DatabaseManager.updateObjective(id, meta); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/admin")) }
   @cask.get("/admin/download_csv") def downloadCsv() = { cask.Response(DatabaseManager.getBackupCSV().getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/csv; charset=utf-8", "Content-Disposition" -> "attachment; filename=guardian_backup.csv")) }
