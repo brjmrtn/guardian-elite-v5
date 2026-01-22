@@ -26,9 +26,9 @@ object DatabaseManager {
   def callGeminiAI(prompt: String): String = {
 
     // ⬇️⬇️⬇️ PEGA TU CLAVE AQUÍ DENTRO ⬇️⬇️⬇️
-    val apiKey = "PEGAR_AQUI_TU_CLAVE_AIzaSy..."
+    val apiKey = "GEMINI_API_KEY"
 
-    if (apiKey.contains("PEGAR_AQUI")) return "⚠️ <b>Falta API Key:</b> Edita DatabaseManager.scala."
+    if (apiKey.isEmpty) return "⚠️ <b>Falta API Key:</b> Edita DatabaseManager.scala."
 
     // LISTA DE DELANTEROS (Si falla uno, sale el otro)
     val models = Seq("gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro", "gemini-2.0-flash-exp")
