@@ -16,9 +16,7 @@ object GuardianServer extends cask.MainRoutes {
     }
   }
 
-  // ==========================================
   // 1. DASHBOARD
-  // ==========================================
   @cask.get("/")
   def dashboard() = {
     val card = DatabaseManager.getLatestCardData()
@@ -37,7 +35,6 @@ object GuardianServer extends cask.MainRoutes {
     val trendText = if (trendDiff > 0.5) "MEJORA" else if (trendDiff < -0.5) "BAJA" else "IGUAL"
     val trendColor = if (trendDiff > 0) "text-success" else if (trendDiff < 0) "text-danger" else "text-muted"
     val radarData = s"""[${card.div}, ${card.han}, ${card.kic}, ${card.ref}, ${card.spd}, ${card.pos}]"""
-
     def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
     val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
     val (ga, gm, gr) = (pct(tac("g_alt"),totG), pct(tac("g_med"),totG), pct(tac("g_ras"),totG))
@@ -45,12 +42,11 @@ object GuardianServer extends cask.MainRoutes {
     val totP = if(tac("p_tot") > 0) tac("p_tot").toDouble else 1.0
     val (pa, pm, pr) = (pct(tac("p_alt"),totP), pct(tac("p_med"),totP), pct(tac("p_ras"),totP))
     val (pl, pc, pd) = (pct(tac("p_izq"),totP), pct(tac("p_cen"),totP), pct(tac("p_der"),totP))
-
     def tactCell(label: String, valPct: Int, colorBg: String) = div(cls:=s"flex-fill text-center p-1 border border-secondary $colorBg", style:="font-size: 10px; color: black; font-weight: bold;", div(label), div(s"$valPct%"))
 
     val nextMatchWidget = upcoming match {
       case Some(m) => div(cls:="alert alert-dark border-warning shadow p-3 mb-3", div(cls:="d-flex justify-content-between align-items-center", div(h6(cls:="text-muted mb-0 small", "PROXIMO PARTIDO"), h4(cls:="text-white fw-bold mb-0", m.rival)), div(cls:="text-end", span(cls:="badge bg-warning text-dark", m.fecha), a(href:=s"/match-center?scheduleId=${m.id}", cls:="btn btn-sm btn-outline-light ms-2", "JUGAR"))))
-      case None => div(cls:="alert alert-dark border-secondary p-2 mb-3 text-center text-muted small", "Sin partidos programados.")
+      case None => div(cls:="alert alert-dark border-secondary p-2 mb-3 text-center text-muted small", "Sin partidos programados. Importa el calendario.")
     }
 
     val content = basePage("home", div(cls := "row justify-content-center",
@@ -60,9 +56,7 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  // ==========================================
-  // 2. MATCH CENTER
-  // ==========================================
+  // 2. MATCH CENTER (CON AGRUPACIÓN DE DATOS PARA EVITAR ERROR 22 ARGUMENTOS)
   @cask.get("/match-center")
   def matchCenterPage(scheduleId: Int = 0) = {
     val today = java.time.LocalDate.now().toString
@@ -81,7 +75,7 @@ object GuardianServer extends cask.MainRoutes {
         div(cls := "row mb-3 bg-secondary bg-opacity-25 p-2 rounded mx-0", div(cls := "col-4 text-center", label(cls := "small fw-bold", "GOLES (GC)"), input(tpe := "number", name := "gc", id:="gcInput", cls := "form-control text-center bg-danger text-white border-0 fw-bold fs-4", value := "0", readonly:=true)), div(cls := "col-4 text-center", label(cls := "small fw-bold", "PARADAS"), input(tpe := "number", name := "paradas", id:="parInput", cls := "form-control text-center bg-success text-white border-0 fw-bold fs-4", value := "0", readonly:=true)), div(cls := "col-4 text-center", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))),
 
         div(cls:="mb-4 p-2 border border-info rounded bg-info bg-opacity-10",
-          label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCIÓN / PASES"),
+          label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCIÓN"),
           div(cls:="row mb-2 align-items-center",
             div(cls:="col-4 text-end small", "CORTO"),
             div(cls:="col-8", div(cls:="btn-group w-100",
@@ -98,39 +92,90 @@ object GuardianServer extends cask.MainRoutes {
               input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)
             ))
           ),
-          input(tpe:="hidden", name:="pcTot", id:="pcTot", value:="0"), input(tpe:="hidden", name:="pcOk", id:="pcOk", value:="0"),
-          input(tpe:="hidden", name:="plTot", id:="plTot", value:="0"), input(tpe:="hidden", name:="plOk", id:="plOk", value:="0")
+          // AGRUPADOS PARA EVITAR ERROR: passData = "pcTot,pcOk,plTot,plOk"
+          input(tpe:="hidden", name:="passData", id:="passData", value:="0,0,0,0"),
+          // Inputs temporales para JS (no name para no enviar)
+          input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"),
+          input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0")
         ),
 
-        div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))), div(cls:="goal-grid-3x3", for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }, input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas")), div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"), label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "CASUISTICAS DE PORTERO"), div(cls:="row g-2", div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-info btn-sm", onclick:="incCounter('p1v1')", "1vs1"), input(tpe:="number", name:="p1v1", id:="p1v1", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))), div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-warning btn-sm", onclick:="incCounter('pAir')", "Aereo"), input(tpe:="number", name:="pAir", id:="pAir", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))), div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-light btn-sm", onclick:="incCounter('pPie')", "Pie"), input(tpe:="number", name:="pPie", id:="pPie", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true)))), label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"), div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))),
+        div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))), div(cls:="goal-grid-3x3", for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }, input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas")), div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"),
+
+          label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "ACCIONES"),
+          div(cls:="row g-2",
+            div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-info btn-sm", onclick:="incCounter('p1v1')", "1vs1"), input(tpe:="text", id:="disp_p1v1", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))),
+            div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-warning btn-sm", onclick:="incCounter('pAir')", "Aereo"), input(tpe:="text", id:="disp_pAir", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))),
+            div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-light btn-sm", onclick:="incCounter('pPie')", "Pie"), input(tpe:="text", id:="disp_pPie", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true)))
+          ),
+          // AGRUPADOS PARA EVITAR ERROR: actionData = "p1v1,pAir,pPie"
+          input(tpe:="hidden", name:="actionData", id:="actionData", value:="0,0,0"),
+          input(tpe:="hidden", id:="cnt_p1v1", value:="0"), input(tpe:="hidden", id:="cnt_pAir", value:="0"), input(tpe:="hidden", id:="cnt_pPie", value:="0"),
+
+          label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"), div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))),
         div(cls:="mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="form-label text-white small fw-bold w-100 text-center", "ENTORNO"), div(cls:="row mb-2", div(cls:="col-6", label(cls:="small text-muted", "Clima"), select(name:="clima", cls:="form-select form-select-sm bg-dark text-white", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Viento", "Viento"))), div(cls:="col-6", label(cls:="small text-muted", "Temp (C)"), input(tpe:="number", name:="temp", cls:="form-control form-control-sm bg-dark text-white", value:="20"))), div(cls:="mb-0", input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white", placeholder:="Link Video (Youtube/Drive)"))),
         div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
         div(cls:="mb-4", label(cls:="form-label text-danger small fw-bold", "ANALISIS GOLES / REACCION"), textarea(name:="reaccion", cls:="form-control form-control-sm bg-dark text-white border-danger", rows:="3", placeholder:="Descripcion goles encajados y reaccion mental posterior.")),
         div(cls := "mb-3", label(cls := "form-label small", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control", value := "40", attr("inputmode") := "numeric")),
         div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
         div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3", "GUARDAR PARTIDO"))
-      ), script(raw("""var currentMode='save';var goals=[];var saves=[];var origins=[];function setMode(mode){currentMode=mode;}function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">●</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">●</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}function incCounter(id){var el=document.getElementById(id);el.value=parseInt(el.value||0)+1;}function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');} function pass(type, success) { var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type); var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0); totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t; }"""))
+      ), script(raw("""
+        var currentMode='save';var goals=[];var saves=[];var origins=[];
+        function setMode(mode){currentMode=mode;}
+        function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">●</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">●</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
+
+        function incCounter(key){
+          var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val;
+          document.getElementById('disp_'+key).value=val;
+          updateActionData();
+        }
+        function updateActionData(){
+          var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value];
+          document.getElementById('actionData').value = d.join(',');
+        }
+
+        function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
+
+        function pass(type, success) {
+          var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type);
+          var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0);
+          totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t;
+          updatePassData();
+        }
+        function updatePassData(){
+          var d = [document.getElementById('pcTot').value, document.getElementById('pcOk').value, document.getElementById('plTot').value, document.getElementById('plOk').value];
+          document.getElementById('passData').value = d.join(',');
+        }
+      """))
       )))))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
   @cask.postForm("/match-center/save")
-  def saveMatch(scheduleId: Int, rival: String, gf: Int, gc: Int, minutos: Int, nota: Double, paradas: Int, zonaGoles: String, zonaTiros: String, zonaParadas: String, p1v1: Int, pAir: Int, pPie: Int, clima: String, temp: Int, notas: String, video: String, reaccion: String, fecha: String, mode: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int) = {
+  def saveMatch(scheduleId: Int, rival: String, gf: Int, gc: Int, minutos: Int, nota: Double, paradas: Int, zonaGoles: String, zonaTiros: String, zonaParadas: String, clima: String, temp: Int, notas: String, video: String, reaccion: String, fecha: String, mode: String, passData: String, actionData: String) = {
+    // DESCOMPRIMIR DATOS AGRUPADOS (PARA EVITAR LIMITE DE 22 ARGUMENTOS)
+    // passData: "pcTot,pcOk,plTot,plOk"
+    val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
+    val (pcTot, pcOk, plTot, plOk) = if(pArr.length >= 4) (pArr(0), pArr(1), pArr(2), pArr(3)) else (0,0,0,0)
+
+    // actionData: "p1v1,pAir,pPie"
+    val aArr = actionData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
+    val (p1v1, pAir, pPie) = if(aArr.length >= 3) (aArr(0), aArr(1), aArr(2)) else (0,0,0)
+
     val cleanRival = fixEncoding(rival); val cleanNotas = fixEncoding(notas); val cleanReaccion = fixEncoding(reaccion)
     val c = DatabaseManager.getLatestCardData()
     val n = StatsCalculator.calculateGrowth(c, minutos, gc, nota, paradas, pcTot, pcOk, plTot, plOk)
     DatabaseManager.updateStats(n)
+
     if (scheduleId > 0) DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk)
     else DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, temp, cleanNotas, video, cleanReaccion, fecha, pcTot, pcOk, plTot, plOk)
+
     val d = n.media - c.media
     val msg = if(d > 0) s"SUBIDA DE NIVEL! +$d" else "Experiencia acumulada..."
     val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Guardado"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(style := "color: #d4af37;", "ANALISIS GUARDADO"), div(style := "margin: 30px auto; width: 300px; background: #333; padding: 20px; border-radius: 10px;", h3("Media Global"), div(style := "font-size: 50px; font-weight: bold;", c.media, span(style:="color: #28a745; margin-left: 10px;", "-> " + n.media)), p(style := "color: #ffc107;", msg)), div(style := "margin-top: 40px;", a(href := "/", cls := "btn btn-outline-light btn-lg", "Volver a Inicio"))))).render
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  // ==========================================
   // 3. SCOUTING, GEAR
-  // ==========================================
   @cask.get("/scouting")
   def scoutingPage(query: String = "") = {
     val (matches, stats) = if(query.nonEmpty) DatabaseManager.getRivalScouting(query) else (List[MatchLog](), Map[String,Int]())
@@ -146,9 +191,7 @@ object GuardianServer extends cask.MainRoutes {
   }
   @cask.postForm("/gear/add") def addGear(nombre: String, tipo: String, vida: Int) = { DatabaseManager.addNewGear(nombre, tipo, vida); gearPage() }
 
-  // ==========================================
   // 4. BIO PAGE
-  // ==========================================
   @cask.get("/bio")
   def bioPage() = {
     val activeDrills = DatabaseManager.getActiveDrills()
@@ -188,9 +231,7 @@ object GuardianServer extends cask.MainRoutes {
   @cask.postForm("/bio/save_training") def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: String) = { val att = if(atencion != null && atencion.nonEmpty) atencion.toInt else 3; DatabaseManager.logTraining(tipo, foco, rpe, calidad, att); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
   @cask.postForm("/bio/add_drill") def addDrill(nombre: String) = { DatabaseManager.addNewDrill(nombre, ""); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
 
-  // ==========================================
-  // 5. HISTORIAL Y EDICIÓN
-  // ==========================================
+  // 5. RESTO (HISTORIAL, ADMIN, ETC.)
   @cask.get("/history") def historyPage() = {
     val matches = DatabaseManager.getMatchesList()
     val content = basePage("history", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12",
