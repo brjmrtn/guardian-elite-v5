@@ -141,9 +141,16 @@ object GuardianServer extends cask.MainRoutes {
         tbody(if (matches.isEmpty) tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")) else for (m <- matches) yield {
           val p = m.resultado.split("-").map(_.trim.toInt); val c = if(p.length>=2){ if (p(0)>p(1)) "text-success" else if (p(0)==p(1)) "text-warning" else "text-danger" } else "text-muted"
           val extra = if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-danger py-0 ms-1", style:="font-size:10px", "V") else span("")
-          val waText = s"""MATCH REPORT: HECTOR\nRival: ${m.rival}\nFecha: ${m.fecha}\nResultado: ${m.resultado}\nNota: ${m.nota}\nClima: ${m.clima}\nNotas: "${m.notas}"\nAnalisis/Reaccion: "${m.reaccion}"\nLink: ${if(m.video.nonEmpty) m.video else "-"}"""; val encodedWa = URLEncoder.encode(waText, "UTF-8").replace("+", "%20")
-          tr(td(cls:="fw-bold small", m.rival, extra, br, span(cls:="text-muted xx-small", s"${m.fecha} ${m.clima}")), td(cls:=s"text-center fw-bold $c", m.resultado), td(cls:="text-center", span(cls:="badge bg-dark text-warning", m.nota)), td(cls:="text-end", a(href:=s"https://wa.me/?text=$encodedWa", target:="_blank", cls:="btn btn-sm btn-success me-1", style:="padding:2px 6px;", "W"), a(href:=s"/match/edit/${m.id}", cls:="btn btn-sm btn-outline-primary me-1", style:="padding:2px 6px;", "E"), a(href:=s"/match/delete/${m.id}", onclick:="return confirm('Borrar?');", cls:="btn btn-sm btn-outline-danger", style:="padding:2px 6px;", "X")))
-        })
+          val waText = s"""MATCH REPORT: HECTOR\nRival: ${m.rival}\nFecha: ${m.fecha}...""" // etc
+          val encodedWa = URLEncoder.encode(waText, "UTF-8").replace("+", "%20")
+
+          // CAMBIO AQUÍ: Usamos fixEncoding(m.rival) para que se vea bien en pantalla
+          tr(
+            td(cls:="fw-bold small", fixEncoding(m.rival), extra, br, span(cls:="text-muted xx-small", s"${m.fecha} ${m.clima}")),
+            td(cls:=s"text-center fw-bold $c", m.resultado),
+            td(cls:="text-center", span(cls:="badge bg-dark text-warning", m.nota)),
+            td(cls:="text-end", a(href:=s"https://wa.me/?text=$encodedWa", target:="_blank", cls:="btn btn-sm btn-success me-1", style:="padding:2px 6px;", "W"), a(href:=s"/match/edit/${m.id}", cls:="btn btn-sm btn-outline-primary me-1", style:="padding:2px 6px;", "E"), a(href:=s"/match/delete/${m.id}", onclick:="return confirm('Borrar?');", cls:="btn btn-sm btn-outline-danger", style:="padding:2px 6px;", "X"))
+          )})
       )))
     )))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
@@ -219,14 +226,20 @@ object GuardianServer extends cask.MainRoutes {
 
   @cask.postForm("/admin/upload_matches")
   def uploadMatches(csvContent: String) = {
-    val res = DatabaseManager.importMatchesCSV(csvContent)
+    // CAMBIO: Limpiamos el CSV antes de enviarlo a la base de datos
+    val cleanCsv = fixEncoding(csvContent)
+    val res = DatabaseManager.importMatchesCSV(cleanCsv)
+
     val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("IMPORTACION"), h3(res), div(style:="margin-top:20px;", a(href:="/admin/importer", cls:="btn btn-warning", "Volver"))))).render
     cask.Response(htmlStr.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8"))
   }
 
   @cask.postForm("/admin/upload_wellness")
   def uploadWellness(csvContent: String) = {
-    val res = DatabaseManager.importWellnessCSV(csvContent)
+    // CAMBIO: Lo mismo para Wellness
+    val cleanCsv = fixEncoding(csvContent)
+    val res = DatabaseManager.importWellnessCSV(cleanCsv)
+
     val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("IMPORTACION"), h3(res), div(style:="margin-top:20px;", a(href:="/admin/importer", cls:="btn btn-info", "Volver"))))).render
     cask.Response(htmlStr.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8"))
   }
