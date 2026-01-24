@@ -75,18 +75,39 @@ object DatabaseManager {
     try {
       conn = getConnection(); val stmt = conn.createStatement()
       val sb = new StringBuilder()
-      sb.append("Eres el entrenador de porteros y psicólogo de Héctor (niño portero). Analiza estos datos y dame un consejo breve (max 30 palabras) y motivador con HTML (<b>negritas</b>).\n\n")
 
-      sb.append("--- DATOS RECIENTES ---\n")
+      // PROMPT MEJORADO: Rol específico + Instrucciones de formato visual
+      sb.append("Actúa como la IA Táctica 'Neuro-Scout' para Héctor (portero joven). Analiza los datos recientes.\n")
+      sb.append("Genera un mensaje breve (máx 30 palabras), directo y motivador.\n")
+      sb.append("REGLAS DE FORMATO (ESTRICTO):\n")
+      sb.append("1. Responde SOLO con código HTML limpio. NO uses bloques Markdown (```).\n")
+      sb.append("2. Usa este formato exacto para que quede bonito en fondo oscuro:\n")
+      sb.append("<div style='border-left: 4px solid #0dcaf0; padding-left: 10px;'>")
+      sb.append("<strong style='color: #0dcaf0; display:block; margin-bottom:4px;'>ANALISIS TACTICO:</strong>")
+      sb.append("<span style='color: #e0e0e0; font-style: italic;'>[Aquí tu consejo corto]</span>")
+      sb.append("</div>")
+
+      sb.append("\n--- DATOS RECIENTES ---\n")
       val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
-      while(rsM.next()) { sb.append(s"- Partido vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
+      while(rsM.next()) { sb.append(s"- vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
 
       val rsW = stmt.executeQuery("SELECT sueno, animo FROM (SELECT * FROM wellness ORDER BY id DESC LIMIT 3) as sub")
       while(rsW.next()) { sb.append(s"- Bio: Sueño ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5.\n") }
 
-      callGeminiAI(sb.toString())
+      val rsT = stmt.executeQuery("SELECT foco, atencion FROM (SELECT * FROM trainings ORDER BY id DESC LIMIT 3) as sub")
+      while(rsT.next()) { sb.append(s"- Entreno: Foco ${rsT.getString("foco")}. Atención: ${rsT.getInt("atencion")}/5\n") }
 
-    } catch { case e: Exception => "Analizando datos..." } finally { if(conn!=null) conn.close() }
+      // LLAMADA Y LIMPIEZA DE BASURA MARKDOWN
+      val rawResponse = callGeminiAI(sb.toString())
+
+      // Limpiamos si la IA se pone terca y manda ```html
+      rawResponse.replace("```html", "").replace("```", "").trim
+
+    } catch {
+      case e: Exception =>
+        // Mensaje de fallback bonito por si falla
+        "<div style='border-left: 4px solid #6c757d; padding-left: 10px; color: #aaa;'>Recopilando datos del sistema...</div>"
+    } finally { if(conn!=null) conn.close() }
   }
 
   // --- RESTO DE FUNCIONES (SIN CAMBIOS) ---
