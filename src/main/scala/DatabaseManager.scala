@@ -22,51 +22,52 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI: LECTURA DESDE RENDER ENVIRONMENT + FALLBACK ROBUSTO ---
+  // --- IA GEMINI: DIAGNÓSTICO DE CLAVE ---
   def callGeminiAI(prompt: String): String = {
 
-    // 1. BUSCA LA LLAVE EN LAS VARIABLES DE RENDER
-    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "")
+    // 1. LEER DEL ENTORNO DE RENDER
+    val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
 
-    // Si no está en Render, mira si la pusiste "a fuego" (fallback de seguridad)
-    val finalKey = if (apiKey.nonEmpty) apiKey else "TU_CLAVE_SI_QUIERES_HARDCODEARLA_AQUI"
+    // Diagnóstico: ¿Qué está leyendo?
+    if (envKey.isEmpty) return "⚠️ <b>Error Config:</b> La variable GEMINI_API_KEY está vacía en Render."
+    if (envKey.length < 10) return s"⚠️ <b>Error Key:</b> La clave parece demasiado corta (${envKey})."
 
-    if (finalKey.isEmpty || finalKey.contains("TU_CLAVE")) return "⚠️ <b>Error Config:</b> No encuentro la variable GEMINI_API_KEY en Render."
+    val maskedKey = envKey.take(4) + "..." // Solo para mostrar en pantalla si falla
 
     try {
-      // INTENTO 1: Modelo 1.5-flash (El rápido)
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$finalKey"
-      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+      // INTENTO 1: Modelo 1.5 Flash (El más rápido)
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$envKey"
 
-      // 'check = false' ES LA CLAVE: Evita que el código explote si da error 404, permitiendo el Plan B
+      val payload = ujson.Obj(
+        "contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))
+      )
+
       val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"), check = false)
 
       if (r.statusCode == 200) {
         val json = ujson.read(r.text())
         json("candidates")(0)("content")("parts")(0)("text").str
       } else {
-        // SI FALLA, EJECUTAMOS EL PLAN B AUTOMÁTICAMENTE
-        tryFallbackModel(prompt, finalKey, r.statusCode)
+        // Si falla 1.5, intentamos PRO
+        tryFallbackModel(prompt, envKey, r.statusCode, maskedKey)
       }
     } catch {
-      case e: Exception => s"❌ Error Crítico IA: ${e.getMessage}"
+      case e: Exception => s"❌ Error Crítico usando clave ($maskedKey): ${e.getMessage}"
     }
   }
 
-  // Plan B: Gemini Pro (El veterano fiable)
-  def tryFallbackModel(prompt: String, apiKey: String, originalStatus: Int): String = {
+  def tryFallbackModel(prompt: String, apiKey: String, originalStatus: Int, maskedKey: String): String = {
     try {
+      // INTENTO 2: Gemini Pro Clásico
       val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey"
-      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
-
-      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"), check = false)
+      val r = requests.post(url, data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false)
 
       if(r.statusCode == 200) {
         ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
       } else {
-        s"⚠️ <b>IA Saturada:</b> Google rechaza la conexión (Error $originalStatus y luego ${r.statusCode}). Revisa si la API Key es válida en AI Studio."
+        s"⚠️ <b>Google rechaza la conexión.</b><br>Clave usada: $maskedKey<br>Error 1: $originalStatus<br>Error 2: ${r.statusCode}<br>Solución: Habilita 'Generative Language API' en Google Cloud Console."
       }
-    } catch { case _: Exception => s"⚠️ Error Fallback ($originalStatus)" }
+    } catch { case _: Exception => s"⚠️ Error Total ($originalStatus)" }
   }
 
   def getDeepAnalysis(): String = {
@@ -91,7 +92,7 @@ object DatabaseManager {
     } catch { case e: Exception => "Analizando datos..." } finally { if(conn!=null) conn.close() }
   }
 
-  // --- RESTO IGUAL ---
+  // --- RESTO SIN CAMBIOS ---
   def getLatestCardData(): PlayerCardData = {
     var conn: Connection = null; try { conn = getConnection(); val rs = conn.createStatement().executeQuery("SELECT club_escudo_url, foto_jugador_url, nombre_club, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos FROM seasons ORDER BY id DESC LIMIT 1"); if (rs.next()) {
       val (f, c, n) = (Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("nombre_club")).getOrElse("Club"))
