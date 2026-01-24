@@ -22,29 +22,28 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI: LISTA DE MODELOS DE RESPALDO ---
-  // Si falla el primero, prueba el siguiente automáticamente.
+  // --- IA GEMINI: ACTUALIZADO A MODELOS 2.0 y 2.5 ---
+  // Basado en la lista que te ha devuelto Google
   val modelList = Seq(
-    "gemini-1.5-flash",          // Opción A: Flash Estándar
-    "gemini-1.5-flash-latest",   // Opción B: Flash Latest
-    "gemini-1.5-pro",            // Opción C: Pro Estándar
-    "gemini-1.5-pro-latest",     // Opción D: Pro Latest
-    "gemini-pro"                 // Opción E: Versión 1.0 (Compatibilidad total)
+    "gemini-2.0-flash",          // Prioridad 1: Versión estable 2.0 (La tienes en la lista)
+    "gemini-2.5-flash",          // Prioridad 2: Versión 2.5 (La tienes en la lista)
+    "gemini-flash-latest",       // Prioridad 3: La última disponible genérica
+    "gemini-1.5-flash"           // Prioridad 4: Respaldo clásico
   )
 
   def callGeminiAI(prompt: String): String = {
     val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
-    if (envKey.isEmpty) return "⚠️ Error Config: Falta GEMINI_API_KEY."
+    if (envKey.isEmpty) return "⚠️ Error Config: Falta GEMINI_API_KEY en Render."
 
-    // Iniciamos la cadena de intentos con el primer modelo de la lista (índice 0)
+    // Iniciamos la cadena de intentos
     attemptNextModel(prompt, envKey, 0)
   }
 
   def attemptNextModel(prompt: String, apiKey: String, index: Int): String = {
-    // Si ya probamos todos y fallaron
-    if (index >= modelList.length) return "❌ Error: Ningún modelo de Gemini respondió. Revisa permisos en Google AI Studio."
+    if (index >= modelList.length) return "❌ Error: Ningún modelo respondió. Verifica que la API Key en Render sea la NUEVA."
 
     val modelName = modelList(index)
+    // Usamos v1beta que es compatible con los modelos 2.0
     val url = s"https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
 
     try {
@@ -53,21 +52,19 @@ object DatabaseManager {
         data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(),
         headers = Map("Content-Type" -> "application/json"),
         check = false,
-        readTimeout = 10000
+        readTimeout = 15000 // 15 segundos de timeout
       )
 
       if (r.statusCode == 200) {
-        // ¡ÉXITO!
         val json = ujson.read(r.text())
+        // Ruta segura al texto
         json("candidates")(0)("content")("parts")(0)("text").str
       } else {
-        // FALLO (404, 500, etc) -> Probamos el siguiente de la lista
-        println(s"⚠️ Falló modelo '$modelName' (Status ${r.statusCode}). Probando siguiente...")
+        println(s"⚠️ Falló modelo '$modelName' (${r.statusCode}). Probando siguiente...")
         attemptNextModel(prompt, apiKey, index + 1)
       }
     } catch {
       case e: Exception =>
-        // Error de red o timeout -> Probamos siguiente
         println(s"⚠️ Excepción en '$modelName': ${e.getMessage}")
         attemptNextModel(prompt, apiKey, index + 1)
     }
@@ -78,24 +75,21 @@ object DatabaseManager {
     try {
       conn = getConnection(); val stmt = conn.createStatement()
       val sb = new StringBuilder()
-      sb.append("Eres el entrenador de porteros y psicólogo de Héctor. Analiza estos datos y dame un consejo breve (max 30 palabras) y motivador con HTML (<b>negritas</b>).\n\n")
+      sb.append("Eres el entrenador de porteros y psicólogo de Héctor (niño portero). Analiza estos datos y dame un consejo breve (max 30 palabras) y motivador con HTML (<b>negritas</b>).\n\n")
 
-      sb.append("--- DATOS ---\n")
+      sb.append("--- DATOS RECIENTES ---\n")
       val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
-      while(rsM.next()) { sb.append(s"Partido vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
+      while(rsM.next()) { sb.append(s"- Partido vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
 
       val rsW = stmt.executeQuery("SELECT sueno, animo FROM (SELECT * FROM wellness ORDER BY id DESC LIMIT 3) as sub")
-      while(rsW.next()) { sb.append(s"Bio: Sueño ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5.\n") }
-
-      val rsT = stmt.executeQuery("SELECT foco, atencion FROM (SELECT * FROM trainings ORDER BY id DESC LIMIT 3) as sub")
-      while(rsT.next()) { sb.append(s"Entreno: Foco ${rsT.getString("foco")}. Atención: ${rsT.getInt("atencion")}/5\n") }
+      while(rsW.next()) { sb.append(s"- Bio: Sueño ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5.\n") }
 
       callGeminiAI(sb.toString())
 
     } catch { case e: Exception => "Analizando datos..." } finally { if(conn!=null) conn.close() }
   }
 
-  // --- RESTO SIN CAMBIOS ---
+  // --- RESTO DE FUNCIONES (SIN CAMBIOS) ---
   def getLatestCardData(): PlayerCardData = {
     var conn: Connection = null; try { conn = getConnection(); val rs = conn.createStatement().executeQuery("SELECT club_escudo_url, foto_jugador_url, nombre_club, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos FROM seasons ORDER BY id DESC LIMIT 1"); if (rs.next()) {
       val (f, c, n) = (Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("nombre_club")).getOrElse("Club"))
