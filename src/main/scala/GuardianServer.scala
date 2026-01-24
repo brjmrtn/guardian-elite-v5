@@ -18,7 +18,8 @@ object GuardianServer extends cask.MainRoutes {
     val upcoming = DatabaseManager.getUpcomingMatches().headOption
 
     val last5 = matches.take(5); val avgLast5 = if (last5.nonEmpty) last5.map(_.nota).sum / last5.length else 0.0; val avgSeason = if (matches.nonEmpty) matches.map(_.nota).sum / matches.length else 0.0
-    val trendDiff = avgLast5 - avgSeason; val trendText = if (trendDiff > 0.5) "MEJORA" else if (trendDiff < -0.5) "BAJA" else "IGUAL"
+    val trendDiff = avgLast5 - avgSeason
+    val trendText = if (trendDiff > 0.5) "MEJORA" else if (trendDiff < -0.5) "BAJA" else "IGUAL"
     val trendColor = if (trendDiff > 0) "text-success" else if (trendDiff < 0) "text-danger" else "text-muted"
     val radarData = s"""[${card.div}, ${card.han}, ${card.kic}, ${card.ref}, ${card.spd}, ${card.pos}]"""
     def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
@@ -78,7 +79,16 @@ object GuardianServer extends cask.MainRoutes {
           input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"), input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0")
         ),
 
-        div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))), div(cls:="goal-grid-3x3", for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }, input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas")), div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"),
+        div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))),
+
+          // FIX: SEPARAR BUCLE DE INPUTS PARA EVITAR SERIALIZABLE ERROR
+          div(cls:="goal-grid-3x3",
+            for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }
+          ),
+          input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"),
+          input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas"),
+
+          div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"),
           label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "ACCIONES"),
           div(cls:="row g-2",
             div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-info btn-sm", onclick:="incCounter('p1v1')", "1vs1"), input(tpe:="text", id:="disp_p1v1", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))),
@@ -137,7 +147,6 @@ object GuardianServer extends cask.MainRoutes {
       h2(cls := "text-info mb-4 text-center", "SCOUTING"),
       form(action:="/scouting", method:="get", cls:="mb-4", div(cls:="input-group", input(tpe:="text", name:="query", cls:="form-control form-control-lg bg-dark text-white border-secondary", placeholder:="Nombre equipo", value:=query), button(tpe:="submit", cls:="btn btn-info", "Buscar"))),
 
-      // BLACK BOOK WIDGET
       if(query.nonEmpty) div(cls:="card bg-dark border-secondary shadow mb-4",
         div(cls:="card-header bg-secondary text-white fw-bold", "FICHA RIVAL (BLACK BOOK)"),
         div(cls:="card-body",
@@ -151,7 +160,14 @@ object GuardianServer extends cask.MainRoutes {
         )
       ),
 
-      if(query.nonEmpty && matches.isEmpty) div(cls:="alert alert-warning text-center", s"Sin datos vs '$query'") else if(matches.nonEmpty) div(div(cls:="card bg-secondary bg-opacity-25 border-info mb-4 p-3", h5(cls:="text-center text-white mb-3", s"Vs ${matches.head.rival}"), div(cls:="d-flex justify-content-around text-center text-white", div(h3(stats("pj")), span(cls:="small text-muted", "PJ")), div(h3(cls:="text-success", stats("ganados")), span(cls:="small text-muted", "G")), div(h3(cls:="text-danger", stats("gc")), span(cls:="small text-muted", "GC")))), h6(cls:="text-white border-bottom border-secondary pb-2 mb-3", "Partidos"), for(m <- matches) yield div(cls:="card bg-dark border-secondary shadow mb-3", div(cls:="card-body", div(cls:="d-flex justify-content-between align-items-center mb-2", div(strong(cls:="text-warning", m.fecha), span(cls:="ms-2 badge bg-secondary", m.clima)), div(cls:="fs-5 fw-bold text-white", m.resultado)), if(m.notas.nonEmpty) div(cls:="alert alert-dark border-secondary p-2 small text-light fst-italic mb-2", s"Nota: ${m.notas}"), if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-outline-danger w-100", "Video")))) else div(cls:="text-center text-muted mt-5", "Busca un rival..."))))
+      if(query.nonEmpty && matches.isEmpty) div(cls:="alert alert-warning text-center", s"Sin datos vs '$query'") else if(matches.nonEmpty) div(div(cls:="card bg-secondary bg-opacity-25 border-info mb-4 p-3", h5(cls:="text-center text-white mb-3", s"Vs ${matches.head.rival}"), div(cls:="d-flex justify-content-around text-center text-white", div(h3(stats("pj")), span(cls:="small text-muted", "PJ")), div(h3(cls:="text-success", stats("ganados")), span(cls:="small text-muted", "G")), div(h3(cls:="text-danger", stats("gc")), span(cls:="small text-muted", "GC")))), h6(cls:="text-white border-bottom border-secondary pb-2 mb-3", "Partidos"),
+
+        // FIX: SEPARAR BUCLE DE DIV PADRE
+        div(
+          for(m <- matches) yield div(cls:="card bg-dark border-secondary shadow mb-3", div(cls:="card-body", div(cls:="d-flex justify-content-between align-items-center mb-2", div(strong(cls:="text-warning", m.fecha), span(cls:="ms-2 badge bg-secondary", m.clima)), div(cls:="fs-5 fw-bold text-white", m.resultado)), if(m.notas.nonEmpty) div(cls:="alert alert-dark border-secondary p-2 small text-light fst-italic mb-2", s"Nota: ${m.notas}"), if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-outline-danger w-100", "Video")))
+        )
+
+      ) else div(cls:="text-center text-muted mt-5", "Busca un rival..."))))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/scouting/save_rival") def saveRivalInfo(nombre: String, estilo: String, claves: String, notas: String) = { DatabaseManager.saveRivalInfo(fixEncoding(nombre), estilo, fixEncoding(claves), fixEncoding(notas)); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> s"/scouting?query=$nombre")) }
@@ -159,12 +175,19 @@ object GuardianServer extends cask.MainRoutes {
   @cask.get("/gear")
   def gearPage() = {
     val items = DatabaseManager.getActiveGear()
-    val content = basePage("gear", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", h2(cls := "text-warning mb-4 text-center", "MATERIAL"), if(items.isEmpty) div(cls:="alert alert-secondary text-center", "Sin material registrado.") else div(cls:="row", for(i <- items) yield { val pct = if(i.maxUsos>0) (i.usos.toDouble/i.maxUsos.toDouble*100).toInt else 0; val color = if(pct > 90) "bg-danger" else if(pct > 75) "bg-warning" else "bg-success"; div(cls:="col-12 mb-3", div(cls:="card bg-dark border-secondary shadow", div(cls:="card-body d-flex align-items-center", div(cls:="me-3", style:="font-size: 30px;", if(i.tipo=="Guantes") "G" else "B"), div(cls:="flex-grow-1", h5(cls:="text-white mb-0", i.nombre), div(cls:="small text-muted mb-1", i.tipo + " | " + i.estado), div(cls:="progress", style:="height: 10px;", div(cls:=s"progress-bar $color", style:=s"width: $pct%"))), div(cls:="ms-3 text-end", div(cls:="fw-bold text-white", s"${i.usos}/${i.maxUsos}"), div(style:="font-size:10px", "USOS"))))) }), div(cls:="card bg-secondary bg-opacity-10 border-secondary mt-4", div(cls:="card-body", h5(cls:="text-white mb-3", "Nuevo"), form(action:="/gear/add", method:="post", div(cls:="row", div(cls:="col-6 mb-2", input(tpe:="text", name:="nombre", cls:="form-control", placeholder:="Nombre", required:=true)), div(cls:="col-6 mb-2", select(name:="tipo", cls:="form-select", option(value:="Guantes", "Guantes"), option(value:="Botas", "Botas"))), div(cls:="col-12 mb-2", input(tpe:="number", name:="vida", cls:="form-control", value:="30", placeholder:="Vida util")), div(cls:="col-12", button(tpe:="submit", cls:="btn btn-warning w-100", "Anadir")))))))))
+    val content = basePage("gear", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", h2(cls := "text-warning mb-4 text-center", "MATERIAL"), if(items.isEmpty) div(cls:="alert alert-secondary text-center", "Sin material registrado.") else
+
+      // FIX: BUCLE DENTRO DE FRAG O DIV APARTE
+      div(cls:="row",
+        for(i <- items) yield { val pct = if(i.maxUsos>0) (i.usos.toDouble/i.maxUsos.toDouble*100).toInt else 0; val color = if(pct > 90) "bg-danger" else if(pct > 75) "bg-warning" else "bg-success"; div(cls:="col-12 mb-3", div(cls:="card bg-dark border-secondary shadow", div(cls:="card-body d-flex align-items-center", div(cls:="me-3", style:="font-size: 30px;", if(i.tipo=="Guantes") "G" else "B"), div(cls:="flex-grow-1", h5(cls:="text-white mb-0", i.nombre), div(cls:="small text-muted mb-1", i.tipo + " | " + i.estado), div(cls:="progress", style:="height: 10px;", div(cls:=s"progress-bar $color", style:=s"width: $pct%"))), div(cls:="ms-3 text-end", div(cls:="fw-bold text-white", s"${i.usos}/${i.maxUsos}"), div(style:="font-size:10px", "USOS"))))) }
+      ),
+
+      div(cls:="card bg-secondary bg-opacity-10 border-secondary mt-4", div(cls:="card-body", h5(cls:="text-white mb-3", "Nuevo"), form(action:="/gear/add", method:="post", div(cls:="row", div(cls:="col-6 mb-2", input(tpe:="text", name:="nombre", cls:="form-control", placeholder:="Nombre", required:=true)), div(cls:="col-6 mb-2", select(name:="tipo", cls:="form-select", option(value:="Guantes", "Guantes"), option(value:="Botas", "Botas"))), div(cls:="col-12 mb-2", input(tpe:="number", name:="vida", cls:="form-control", value:="30", placeholder:="Vida util")), div(cls:="col-12", button(tpe:="submit", cls:="btn btn-warning w-100", "Anadir")))))))))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/gear/add") def addGear(nombre: String, tipo: String, vida: Int) = { DatabaseManager.addNewGear(nombre, tipo, vida); gearPage() }
 
-  // 4. BIO PAGE (CON BIO-GROWTH TRACKER)
+  // 4. BIO PAGE
   @cask.get("/bio")
   def bioPage() = {
     val activeDrills = DatabaseManager.getActiveDrills()
@@ -180,18 +203,11 @@ object GuardianServer extends cask.MainRoutes {
           div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted", span("Crisis"), span("Top"))),
           div(cls:="mb-2", input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white", placeholder:="Notas conducta...")),
           div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control", placeholder:="Zona?"))),
-
-          // BIO-METRIC INPUTS
-          div(cls:="row mb-3 border-top pt-3",
-            div(cls:="col-6", label(cls:="small text-info", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white", placeholder:="Actualizar")),
-            div(cls:="col-6", label(cls:="small text-info", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white", placeholder:="Actualizar"))
-          ),
-
+          div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white", placeholder:="Actualizar"))),
           div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info", "Guardar Bio"))
         ))
       )),
       div(cls := "col-md-6",
-        // GROWTH CHART
         div(cls := "card bg-dark text-white border-secondary shadow mb-3",
           div(cls := "card-header text-secondary fw-bold text-center small", "CURVA DE CRECIMIENTO"),
           div(cls := "card-body p-2", canvas(id:="growthChart", style:="max-height:150px;"))
@@ -201,7 +217,12 @@ object GuardianServer extends cask.MainRoutes {
           div(cls := "card-body p-3",
             form(action := "/bio/save_training", method := "post",
               div(cls:="mb-3", label(cls:="small", "Tipo"), select(name:="tipo", cls:="form-select bg-dark text-white", option(value:="Club", "Club"), option(value:="Academia", "Academia"), option(value:="Papa", "Papa / Técnica Campo", attr("selected"):="selected"))),
-              if (activeDrills.nonEmpty) div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", h6(cls:="text-warning small fw-bold mb-2", "🎯 MISIONES ACTIVAS"), for(d <- activeDrills) yield div(cls:="mb-2", div(cls:="d-flex justify-content-between small", span(d.nombre), span(s"${d.actual}/${d.objetivo}")), div(cls:="progress", style:="height: 6px;", div(cls:="progress-bar bg-warning", style:=s"width:${(d.actual.toDouble/d.objetivo.toDouble*100).toInt}%")))) else div(cls:="alert alert-dark p-2 small text-center", "Sin misiones activas."),
+              if (activeDrills.nonEmpty) div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", h6(cls:="text-warning small fw-bold mb-2", "🎯 MISIONES ACTIVAS"),
+                // FIX: BUCLE EN DIV APARTE
+                div(
+                  for(d <- activeDrills) yield div(cls:="mb-2", div(cls:="d-flex justify-content-between small", span(d.nombre), span(s"${d.actual}/${d.objetivo}")), div(cls:="progress", style:="height: 6px;", div(cls:="progress-bar bg-warning", style:=s"width:${(d.actual.toDouble/d.objetivo.toDouble*100).toInt}%")))
+                )
+              ) else div(cls:="alert alert-dark p-2 small text-center", "Sin misiones activas."),
               div(cls:="mb-3", input(tpe:="text", name:="foco", cls:="form-control", placeholder:="Foco (ej: Pase corto)")),
               div(cls:="row mb-3", div(cls:="col-6 text-center", label(cls:="small", "RPE (Esfuerzo)"), input(tpe:="number", cls:="form-control text-center", name:="rpe", value:="7")), div(cls:="col-6 text-center", label(cls:="small", "Calidad"), input(tpe:="number", cls:="form-control text-center", name:="calidad", value:="8"))),
               div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success", "Guardar Sesión"))
@@ -255,6 +276,7 @@ object GuardianServer extends cask.MainRoutes {
                 div(cls:="col-6", div(cls:="input-group input-group-sm", select(name:="tipo", cls:="form-select", option("PARADA"), option("ERROR"), option("GOL"), option("PASE")), button(tpe:="submit", cls:="btn btn-warning", "+")))
               ),
               // LISTA TAGS
+              // FIX: BUCLE EN DIV APARTE
               div(cls:="list-group",
                 for(t <- tags) yield {
                   val link = if(matchData.video.contains("?")) s"${matchData.video}&t=${t.minuto*60 + t.segundo}" else s"${matchData.video}?t=${t.minuto*60 + t.segundo}"
