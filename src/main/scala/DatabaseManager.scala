@@ -70,43 +70,55 @@ object DatabaseManager {
     }
   }
 
+  // --- IA NEURO-SCOUT V2: DETECTOR DE PATRONES ---
+  // --- IA NEURO-SCOUT V2.1: MEJORA DE LEGIBILIDAD ---
   def getDeepAnalysis(): String = {
     var conn: Connection = null
     try {
       conn = getConnection(); val stmt = conn.createStatement()
       val sb = new StringBuilder()
 
-      // PROMPT MEJORADO: Rol específico + Instrucciones de formato visual
-      sb.append("Actúa como la IA Táctica 'Neuro-Scout' para Héctor (portero joven). Analiza los datos recientes.\n")
-      sb.append("Genera un mensaje breve (máx 30 palabras), directo y motivador.\n")
-      sb.append("REGLAS DE FORMATO (ESTRICTO):\n")
-      sb.append("1. Responde SOLO con código HTML limpio. NO uses bloques Markdown (```).\n")
-      sb.append("2. Usa este formato exacto para que quede bonito en fondo oscuro:\n")
-      sb.append("<div style='border-left: 4px solid #0dcaf0; padding-left: 10px;'>")
-      sb.append("<strong style='color: #0dcaf0; display:block; margin-bottom:4px;'>ANALISIS TACTICO:</strong>")
-      sb.append("<span style='color: #e0e0e0; font-style: italic;'>[Aquí tu consejo corto]</span>")
+      // 1. MACRO DATOS
+      var (gIzq, gCen, gDer, gAlt, gBaj) = (0,0,0,0,0)
+      val rsTac = stmt.executeQuery("SELECT zona_goles FROM matches")
+      while(rsTac.next()) {
+        val z = Option(rsTac.getString("zona_goles")).getOrElse("")
+        if(z.contains("L")) gIzq+=1; if(z.contains("C")) gCen+=1; if(z.contains("R")) gDer+=1
+        if(z.contains("T")) gAlt+=1; if(z.contains("B")) gBaj+=1
+      }
+
+      var avgSleep = 0.0; val rsSleep = stmt.executeQuery("SELECT AVG(sueno) as s FROM wellness"); if(rsSleep.next()) avgSleep = rsSleep.getDouble("s")
+
+      // 2. PROMPT
+      sb.append("Actúa como 'Neuro-Scout', analista deportivo experto. TU OBJETIVO: Detectar patrones ocultos.\n")
+      sb.append("Analiza los datos. Si ves una correlación clara (ej: 'Te marcan por la izquierda cuando duermes poco'), DILO. Si no, da un consejo táctico avanzado.\n")
+
+      sb.append(s"\n--- ESTADÍSTICAS TEMPORADA ---\n Goles Zonas: Izq($gIzq) Cen($gCen) Der($gDer). Altura: Altos($gAlt) Bajos($gBaj). Sueño Medio: $avgSleep h.\n")
+
+      sb.append("\n--- ÚLTIMOS 3 PARTIDOS ---\n")
+      val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles, clima FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
+      while(rsM.next()) { sb.append(s"- vs ${rsM.getString("rival")} (${rsM.getString("clima")}): Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
+
+      sb.append("\n--- BIO RECIENTE ---\n")
+      val rsW = stmt.executeQuery("SELECT sueno, animo, atencion FROM (SELECT w.*, t.atencion FROM wellness w LEFT JOIN trainings t ON w.id = t.id ORDER BY w.id DESC LIMIT 3) as sub")
+      while(rsW.next()) { sb.append(s"- Sueño ${rsW.getInt("sueno")}, Ánimo ${rsW.getInt("animo")}, Atención ${rsW.getInt("atencion")}.\n") }
+
+      // 3. REGLAS DE VISUALIZACIÓN (AQUÍ ESTÁ EL CAMBIO DE LETRA)
+      sb.append("\nREGLAS DE RESPUESTA:\n")
+      sb.append("1. Responde SOLO con HTML. NO uses Markdown.\n")
+      sb.append("2. Usa este formato exacto con FUENTE GRANDE Y LEGIBLE:\n")
+
+      // CAMBIOS CLAVE AQUÍ ABAJO: font-size 16px/18px y font-family sans-serif
+      sb.append("<div style='background: rgba(255, 193, 7, 0.1); border-left: 6px solid #ffc107; padding: 15px; margin: 10px 0; border-radius: 4px;'>")
+      sb.append("<h4 style='color: #ffc107; margin: 0 0 10px 0; font-size: 18px; font-family: sans-serif; letter-spacing: 1px; text-transform: uppercase;'>👁️ ANÁLISIS DETECTADO</h4>")
+      sb.append("<p style='color: #ffffff; font-size: 16px; line-height: 1.6; font-family: sans-serif; margin: 0; font-weight: 400;'>[Aquí tu análisis]</p>")
       sb.append("</div>")
 
-      sb.append("\n--- DATOS RECIENTES ---\n")
-      val rsM = stmt.executeQuery("SELECT rival, nota, reaccion_goles FROM (SELECT * FROM matches ORDER BY fecha DESC, id DESC LIMIT 3) as sub")
-      while(rsM.next()) { sb.append(s"- vs ${rsM.getString("rival")}: Nota ${rsM.getDouble("nota")}. Reacción: ${Option(rsM.getString("reaccion_goles")).getOrElse("-")}\n") }
-
-      val rsW = stmt.executeQuery("SELECT sueno, animo FROM (SELECT * FROM wellness ORDER BY id DESC LIMIT 3) as sub")
-      while(rsW.next()) { sb.append(s"- Bio: Sueño ${rsW.getInt("sueno")}/5. Ánimo: ${rsW.getInt("animo")}/5.\n") }
-
-      val rsT = stmt.executeQuery("SELECT foco, atencion FROM (SELECT * FROM trainings ORDER BY id DESC LIMIT 3) as sub")
-      while(rsT.next()) { sb.append(s"- Entreno: Foco ${rsT.getString("foco")}. Atención: ${rsT.getInt("atencion")}/5\n") }
-
-      // LLAMADA Y LIMPIEZA DE BASURA MARKDOWN
       val rawResponse = callGeminiAI(sb.toString())
-
-      // Limpiamos si la IA se pone terca y manda ```html
       rawResponse.replace("```html", "").replace("```", "").trim
 
     } catch {
-      case e: Exception =>
-        // Mensaje de fallback bonito por si falla
-        "<div style='border-left: 4px solid #6c757d; padding-left: 10px; color: #aaa;'>Recopilando datos del sistema...</div>"
+      case e: Exception => "<div style='color:#aaa; padding:10px;'>Conectando satélites tácticos...</div>"
     } finally { if(conn!=null) conn.close() }
   }
 
