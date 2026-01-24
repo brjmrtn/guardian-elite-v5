@@ -22,47 +22,51 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI: LECTURA DESDE RENDER ENVIRONMENT ---
+  // --- IA GEMINI: LECTURA DESDE RENDER ENVIRONMENT + FALLBACK ROBUSTO ---
   def callGeminiAI(prompt: String): String = {
 
-    // ⬇️⬇️ BUSCA LA LLAVE EN LAS VARIABLES DE RENDER ⬇️⬇️
+    // 1. BUSCA LA LLAVE EN LAS VARIABLES DE RENDER
     val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "")
 
-    // Comprobaciones de seguridad para avisarte si falla
-    if (apiKey.isEmpty) return "⚠️ <b>Error Config:</b> No encuentro la variable GEMINI_API_KEY en Render."
-    if (apiKey == "GEMINI_API_KEY") return "⚠️ <b>Error Config:</b> La variable tiene el nombre pero no el valor."
+    // Si no está en Render, mira si la pusiste "a fuego" (fallback de seguridad)
+    val finalKey = if (apiKey.nonEmpty) apiKey else "TU_CLAVE_SI_QUIERES_HARDCODEARLA_AQUI"
+
+    if (finalKey.isEmpty || finalKey.contains("TU_CLAVE")) return "⚠️ <b>Error Config:</b> No encuentro la variable GEMINI_API_KEY en Render."
 
     try {
-      // Usamos el modelo 1.5-flash en v1beta
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+      // INTENTO 1: Modelo 1.5-flash (El rápido)
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$finalKey"
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
 
-      val payload = ujson.Obj(
-        "contents" -> ujson.Arr(
-          ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
-        )
-      )
-
-      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"))
+      // 'check = false' ES LA CLAVE: Evita que el código explote si da error 404, permitiendo el Plan B
+      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"), check = false)
 
       if (r.statusCode == 200) {
         val json = ujson.read(r.text())
         json("candidates")(0)("content")("parts")(0)("text").str
       } else {
-        // Si falla 1.5, probamos el Plan B
-        tryFallbackModel(prompt, apiKey, r.statusCode)
+        // SI FALLA, EJECUTAMOS EL PLAN B AUTOMÁTICAMENTE
+        tryFallbackModel(prompt, finalKey, r.statusCode)
       }
     } catch {
-      case e: Exception => s"❌ Error Conexión: ${e.getMessage}"
+      case e: Exception => s"❌ Error Crítico IA: ${e.getMessage}"
     }
   }
 
+  // Plan B: Gemini Pro (El veterano fiable)
   def tryFallbackModel(prompt: String, apiKey: String, originalStatus: Int): String = {
     try {
-      // Plan B: Gemini Pro
       val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey"
-      val r = requests.post(url, data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"))
-      if(r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str else s"⚠️ Error Google ($originalStatus). Revisa la API Key en Render."
-    } catch { case _: Exception => s"⚠️ Error IA ($originalStatus)" }
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+
+      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"), check = false)
+
+      if(r.statusCode == 200) {
+        ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+      } else {
+        s"⚠️ <b>IA Saturada:</b> Google rechaza la conexión (Error $originalStatus y luego ${r.statusCode}). Revisa si la API Key es válida en AI Studio."
+      }
+    } catch { case _: Exception => s"⚠️ Error Fallback ($originalStatus)" }
   }
 
   def getDeepAnalysis(): String = {
