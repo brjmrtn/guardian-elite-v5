@@ -22,18 +22,20 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI: MODO "CHIVATO" (DEBUG) ---
+  // --- IA GEMINI: LECTURA DESDE RENDER ENVIRONMENT ---
   def callGeminiAI(prompt: String): String = {
 
-    // ⬇️⬇️ PON AQUI TU NUEVA CLAVE DE PROYECTO NUEVO ⬇️⬇️
-    val apiKey = "GEMINI_API_KEY"
+    // ⬇️⬇️ BUSCA LA LLAVE EN LAS VARIABLES DE RENDER ⬇️⬇️
+    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "")
 
-    if (apiKey.isEmpty) return "⚠️ Falta API Key nueva en el código."
-
-    // Usamos el modelo más estándar y robusto
-    val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+    // Comprobaciones de seguridad para avisarte si falla
+    if (apiKey.isEmpty) return "⚠️ <b>Error Config:</b> No encuentro la variable GEMINI_API_KEY en Render."
+    if (apiKey == "GEMINI_API_KEY") return "⚠️ <b>Error Config:</b> La variable tiene el nombre pero no el valor."
 
     try {
+      // Usamos el modelo 1.5-flash en v1beta
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+
       val payload = ujson.Obj(
         "contents" -> ujson.Arr(
           ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))
@@ -46,12 +48,21 @@ object DatabaseManager {
         val json = ujson.read(r.text())
         json("candidates")(0)("content")("parts")(0)("text").str
       } else {
-        // AQUI ESTÁ LA CLAVE: Mostramos el error real de Google
-        s"⚠️ <b>Error Google (${r.statusCode}):</b> ${r.text().take(100)}..."
+        // Si falla 1.5, probamos el Plan B
+        tryFallbackModel(prompt, apiKey, r.statusCode)
       }
     } catch {
       case e: Exception => s"❌ Error Conexión: ${e.getMessage}"
     }
+  }
+
+  def tryFallbackModel(prompt: String, apiKey: String, originalStatus: Int): String = {
+    try {
+      // Plan B: Gemini Pro
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey"
+      val r = requests.post(url, data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"))
+      if(r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str else s"⚠️ Error Google ($originalStatus). Revisa la API Key en Render."
+    } catch { case _: Exception => s"⚠️ Error IA ($originalStatus)" }
   }
 
   def getDeepAnalysis(): String = {
@@ -73,14 +84,10 @@ object DatabaseManager {
 
       callGeminiAI(sb.toString())
 
-    } catch {
-      case e: Exception => "Analizando datos..."
-    } finally {
-      if(conn!=null) conn.close()
-    }
+    } catch { case e: Exception => "Analizando datos..." } finally { if(conn!=null) conn.close() }
   }
 
-  // --- RESTO DEL CÓDIGO (SIN CAMBIOS) ---
+  // --- RESTO IGUAL ---
   def getLatestCardData(): PlayerCardData = {
     var conn: Connection = null; try { conn = getConnection(); val rs = conn.createStatement().executeQuery("SELECT club_escudo_url, foto_jugador_url, nombre_club, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos FROM seasons ORDER BY id DESC LIMIT 1"); if (rs.next()) {
       val (f, c, n) = (Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("nombre_club")).getOrElse("Club"))
@@ -90,7 +97,6 @@ object DatabaseManager {
       PlayerCardData("HECTOR", m, "GK", if(f.nonEmpty) f else "https://cdn-icons-png.flaticon.com/512/4825/4825038.png", if(c.nonEmpty) c else "https://cdn-icons-png.flaticon.com/512/1077/1077186.png", "https://upload.wikimedia.org/wikipedia/en/9/9a/Flag_of_Spain.svg", n, d.toInt, h.toInt, k.toInt, r.toInt, s.toInt, p.toInt, d, h, k, r, s, p)
     } else getDefaultData() } catch { case e: Exception => println("Err Card"); getDefaultData() } finally { if(conn!=null) conn.close() }
   }
-
   def updateSeasonSettings(f: String, c: String, n: String): String = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club) WHERE id=(SELECT MAX(id) FROM seasons)"); s.setString(1,f); s.setString(2,c); s.setString(3,n); s.executeUpdate(); "DATOS ACTUALIZADOS" } finally { conn.close() } }
   def updateStats(s: PlayerCardData): Unit = { val conn=getConnection(); try { val st=conn.prepareStatement("UPDATE seasons SET media=?, stat_div=?, stat_han=?, stat_kic=?, stat_ref=?, stat_spd=?, stat_pos=? WHERE id=(SELECT MAX(id) FROM seasons)"); st.setDouble(1,s.media.toDouble); st.setDouble(2,s.divRaw); st.setDouble(3,s.hanRaw); st.setDouble(4,s.kicRaw); st.setDouble(5,s.refRaw); st.setDouble(6,s.spdRaw); st.setDouble(7,s.posRaw); st.executeUpdate() } finally { conn.close() } }
   def logMatch(riv: String, gf: Int, gc: Int, min: Int, n: Double, med: Double, par: Int, zG: String, zT: String, zP: String, p1v1: Int, pAir: Int, pPie: Int, clima: String, temp: Int, notas: String, video: String, reaccion: String, fechaStr: String): Unit = { val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons"); if(rs.next()){ val s=conn.prepareStatement("INSERT INTO matches (season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica, paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas, acciones_pie, clima, temperatura, notas_partido, video_url, reaccion_goles, fecha) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"); s.setInt(1,rs.getInt("id")); s.setString(2,riv); s.setInt(3,gf); s.setInt(4,gc); s.setInt(5,min); s.setDouble(6,n); s.setDouble(7,med); s.setInt(8,par); s.setString(9,zG); s.setString(10,zT); s.setString(11,zP); s.setInt(12,p1v1); s.setInt(13,pAir); s.setInt(14,pPie); s.setString(15, clima); s.setInt(16, temp); s.setString(17, notas); s.setString(18, video); s.setString(19, reaccion); s.setDate(20, Date.valueOf(fechaStr)); s.executeUpdate() }; conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE") } finally { conn.close() } }
