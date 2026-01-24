@@ -8,45 +8,27 @@ object GuardianServer extends cask.MainRoutes {
   override def host: String = "0.0.0.0"
   override def port: Int = sys.env.getOrElse("PORT", "8081").toInt
 
-  def fixEncoding(s: String): String = {
-    try {
-      if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s
-    } catch {
-      case e: Exception => s
-    }
-  }
+  def fixEncoding(s: String): String = { try { if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
 
   // 1. DASHBOARD
   @cask.get("/")
   def dashboard() = {
-    val card = DatabaseManager.getLatestCardData()
-    val matches = DatabaseManager.getMatchesList()
-    val chartData = DatabaseManager.getChartData()
-    val logros = DatabaseManager.getAchievements()
-    val aiMessage = DatabaseManager.getDeepAnalysis()
-    val tac = DatabaseManager.getTacticalStats()
-    val objs = DatabaseManager.getSeasonObjectives()
+    val card = DatabaseManager.getLatestCardData(); val matches = DatabaseManager.getMatchesList(); val chartData = DatabaseManager.getChartData()
+    val logros = DatabaseManager.getAchievements(); val aiMessage = DatabaseManager.getDeepAnalysis(); val tac = DatabaseManager.getTacticalStats(); val objs = DatabaseManager.getSeasonObjectives()
     val upcoming = DatabaseManager.getUpcomingMatches().headOption
 
-    val last5 = matches.take(5)
-    val avgLast5 = if (last5.nonEmpty) last5.map(_.nota).sum / last5.length else 0.0
-    val avgSeason = if (matches.nonEmpty) matches.map(_.nota).sum / matches.length else 0.0
-    val trendDiff = avgLast5 - avgSeason
-    val trendText = if (trendDiff > 0.5) "MEJORA" else if (trendDiff < -0.5) "BAJA" else "IGUAL"
+    val last5 = matches.take(5); val avgLast5 = if (last5.nonEmpty) last5.map(_.nota).sum / last5.length else 0.0; val avgSeason = if (matches.nonEmpty) matches.map(_.nota).sum / matches.length else 0.0
+    val trendDiff = avgLast5 - avgSeason; val trendText = if (trendDiff > 0.5) "MEJORA" else if (trendDiff < -0.5) "BAJA" else "IGUAL"
     val trendColor = if (trendDiff > 0) "text-success" else if (trendDiff < 0) "text-danger" else "text-muted"
     val radarData = s"""[${card.div}, ${card.han}, ${card.kic}, ${card.ref}, ${card.spd}, ${card.pos}]"""
     def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
-    val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
-    val (ga, gm, gr) = (pct(tac("g_alt"),totG), pct(tac("g_med"),totG), pct(tac("g_ras"),totG))
-    val (gl, gc, gd) = (pct(tac("g_izq"),totG), pct(tac("g_cen"),totG), pct(tac("g_der"),totG))
-    val totP = if(tac("p_tot") > 0) tac("p_tot").toDouble else 1.0
-    val (pa, pm, pr) = (pct(tac("p_alt"),totP), pct(tac("p_med"),totP), pct(tac("p_ras"),totP))
-    val (pl, pc, pd) = (pct(tac("p_izq"),totP), pct(tac("p_cen"),totP), pct(tac("p_der"),totP))
+    val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0; val (ga, gm, gr) = (pct(tac("g_alt"),totG), pct(tac("g_med"),totG), pct(tac("g_ras"),totG)); val (gl, gc, gd) = (pct(tac("g_izq"),totG), pct(tac("g_cen"),totG), pct(tac("g_der"),totG))
+    val totP = if(tac("p_tot") > 0) tac("p_tot").toDouble else 1.0; val (pa, pm, pr) = (pct(tac("p_alt"),totP), pct(tac("p_med"),totP), pct(tac("p_ras"),totP)); val (pl, pc, pd) = (pct(tac("p_izq"),totP), pct(tac("p_cen"),totP), pct(tac("p_der"),totP))
     def tactCell(label: String, valPct: Int, colorBg: String) = div(cls:=s"flex-fill text-center p-1 border border-secondary $colorBg", style:="font-size: 10px; color: black; font-weight: bold;", div(label), div(s"$valPct%"))
 
     val nextMatchWidget = upcoming match {
       case Some(m) => div(cls:="alert alert-dark border-warning shadow p-3 mb-3", div(cls:="d-flex justify-content-between align-items-center", div(h6(cls:="text-muted mb-0 small", "PROXIMO PARTIDO"), h4(cls:="text-white fw-bold mb-0", m.rival)), div(cls:="text-end", span(cls:="badge bg-warning text-dark", m.fecha), a(href:=s"/match-center?scheduleId=${m.id}", cls:="btn btn-sm btn-outline-light ms-2", "JUGAR"))))
-      case None => div(cls:="alert alert-dark border-secondary p-2 mb-3 text-center text-muted small", "Sin partidos programados. Importa el calendario.")
+      case None => div(cls:="alert alert-dark border-secondary p-2 mb-3 text-center text-muted small", "Sin partidos programados.")
     }
 
     val content = basePage("home", div(cls := "row justify-content-center",
@@ -56,7 +38,7 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  // 2. MATCH CENTER (CON AGRUPACIÓN DE DATOS PARA EVITAR ERROR 22 ARGUMENTOS)
+  // 2. MATCH CENTER
   @cask.get("/match-center")
   def matchCenterPage(scheduleId: Int = 0) = {
     val today = java.time.LocalDate.now().toString
@@ -92,22 +74,17 @@ object GuardianServer extends cask.MainRoutes {
               input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)
             ))
           ),
-          // AGRUPADOS PARA EVITAR ERROR: passData = "pcTot,pcOk,plTot,plOk"
           input(tpe:="hidden", name:="passData", id:="passData", value:="0,0,0,0"),
-          // Inputs temporales para JS (no name para no enviar)
-          input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"),
-          input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0")
+          input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"), input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0")
         ),
 
         div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))), div(cls:="goal-grid-3x3", for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }, input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas")), div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"),
-
           label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "ACCIONES"),
           div(cls:="row g-2",
             div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-info btn-sm", onclick:="incCounter('p1v1')", "1vs1"), input(tpe:="text", id:="disp_p1v1", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))),
             div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-warning btn-sm", onclick:="incCounter('pAir')", "Aereo"), input(tpe:="text", id:="disp_pAir", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))),
             div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-light btn-sm", onclick:="incCounter('pPie')", "Pie"), input(tpe:="text", id:="disp_pPie", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true)))
           ),
-          // AGRUPADOS PARA EVITAR ERROR: actionData = "p1v1,pAir,pPie"
           input(tpe:="hidden", name:="actionData", id:="actionData", value:="0,0,0"),
           input(tpe:="hidden", id:="cnt_p1v1", value:="0"), input(tpe:="hidden", id:="cnt_pAir", value:="0"), input(tpe:="hidden", id:="cnt_pPie", value:="0"),
 
@@ -122,29 +99,11 @@ object GuardianServer extends cask.MainRoutes {
         var currentMode='save';var goals=[];var saves=[];var origins=[];
         function setMode(mode){currentMode=mode;}
         function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">●</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">●</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
-
-        function incCounter(key){
-          var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val;
-          document.getElementById('disp_'+key).value=val;
-          updateActionData();
-        }
-        function updateActionData(){
-          var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value];
-          document.getElementById('actionData').value = d.join(',');
-        }
-
+        function incCounter(key){var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val; document.getElementById('disp_'+key).value=val; updateActionData();}
+        function updateActionData(){var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value]; document.getElementById('actionData').value = d.join(',');}
         function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
-
-        function pass(type, success) {
-          var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type);
-          var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0);
-          totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t;
-          updatePassData();
-        }
-        function updatePassData(){
-          var d = [document.getElementById('pcTot').value, document.getElementById('pcOk').value, document.getElementById('plTot').value, document.getElementById('plOk').value];
-          document.getElementById('passData').value = d.join(',');
-        }
+        function pass(type, success) { var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type); var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0); totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t; updatePassData(); }
+        function updatePassData(){var d = [document.getElementById('pcTot').value, document.getElementById('pcOk').value, document.getElementById('plTot').value, document.getElementById('plOk').value]; document.getElementById('passData').value = d.join(',');}
       """))
       )))))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
@@ -152,36 +111,50 @@ object GuardianServer extends cask.MainRoutes {
 
   @cask.postForm("/match-center/save")
   def saveMatch(scheduleId: Int, rival: String, gf: Int, gc: Int, minutos: Int, nota: Double, paradas: Int, zonaGoles: String, zonaTiros: String, zonaParadas: String, clima: String, temp: Int, notas: String, video: String, reaccion: String, fecha: String, mode: String, passData: String, actionData: String) = {
-    // DESCOMPRIMIR DATOS AGRUPADOS (PARA EVITAR LIMITE DE 22 ARGUMENTOS)
-    // passData: "pcTot,pcOk,plTot,plOk"
     val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
     val (pcTot, pcOk, plTot, plOk) = if(pArr.length >= 4) (pArr(0), pArr(1), pArr(2), pArr(3)) else (0,0,0,0)
-
-    // actionData: "p1v1,pAir,pPie"
     val aArr = actionData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
     val (p1v1, pAir, pPie) = if(aArr.length >= 3) (aArr(0), aArr(1), aArr(2)) else (0,0,0)
-
     val cleanRival = fixEncoding(rival); val cleanNotas = fixEncoding(notas); val cleanReaccion = fixEncoding(reaccion)
     val c = DatabaseManager.getLatestCardData()
     val n = StatsCalculator.calculateGrowth(c, minutos, gc, nota, paradas, pcTot, pcOk, plTot, plOk)
     DatabaseManager.updateStats(n)
-
     if (scheduleId > 0) DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk)
     else DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, temp, cleanNotas, video, cleanReaccion, fecha, pcTot, pcOk, plTot, plOk)
-
     val d = n.media - c.media
     val msg = if(d > 0) s"SUBIDA DE NIVEL! +$d" else "Experiencia acumulada..."
     val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Guardado"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(style := "color: #d4af37;", "ANALISIS GUARDADO"), div(style := "margin: 30px auto; width: 300px; background: #333; padding: 20px; border-radius: 10px;", h3("Media Global"), div(style := "font-size: 50px; font-weight: bold;", c.media, span(style:="color: #28a745; margin-left: 10px;", "-> " + n.media)), p(style := "color: #ffc107;", msg)), div(style := "margin-top: 40px;", a(href := "/", cls := "btn btn-outline-light btn-lg", "Volver a Inicio"))))).render
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  // 3. SCOUTING, GEAR
+  // 3. SCOUTING (BLACK BOOK)
   @cask.get("/scouting")
   def scoutingPage(query: String = "") = {
     val (matches, stats) = if(query.nonEmpty) DatabaseManager.getRivalScouting(query) else (List[MatchLog](), Map[String,Int]())
-    val content = basePage("scouting", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", h2(cls := "text-info mb-4 text-center", "SCOUTING"), form(action:="/scouting", method:="get", cls:="mb-4", div(cls:="input-group", input(tpe:="text", name:="query", cls:="form-control form-control-lg bg-dark text-white border-secondary", placeholder:="Nombre equipo", value:=query), button(tpe:="submit", cls:="btn btn-info", "Buscar"))), if(query.nonEmpty && matches.isEmpty) div(cls:="alert alert-warning text-center", s"Sin datos vs '$query'") else if(matches.nonEmpty) div(div(cls:="card bg-secondary bg-opacity-25 border-info mb-4 p-3", h5(cls:="text-center text-white mb-3", s"Vs ${matches.head.rival}"), div(cls:="d-flex justify-content-around text-center text-white", div(h3(stats("pj")), span(cls:="small text-muted", "PJ")), div(h3(cls:="text-success", stats("ganados")), span(cls:="small text-muted", "G")), div(h3(cls:="text-danger", stats("gc")), span(cls:="small text-muted", "GC")))), h6(cls:="text-white border-bottom border-secondary pb-2 mb-3", "Partidos"), for(m <- matches) yield div(cls:="card bg-dark border-secondary shadow mb-3", div(cls:="card-body", div(cls:="d-flex justify-content-between align-items-center mb-2", div(strong(cls:="text-warning", m.fecha), span(cls:="ms-2 badge bg-secondary", m.clima)), div(cls:="fs-5 fw-bold text-white", m.resultado)), if(m.notas.nonEmpty) div(cls:="alert alert-dark border-secondary p-2 small text-light fst-italic mb-2", s"Nota: ${m.notas}"), if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-outline-danger w-100", "Video")))) else div(cls:="text-center text-muted mt-5", "Busca un rival..."))))
+    val rivalInfo = if(query.nonEmpty) DatabaseManager.getRivalInfo(query) else None
+
+    val content = basePage("scouting", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12",
+      h2(cls := "text-info mb-4 text-center", "SCOUTING"),
+      form(action:="/scouting", method:="get", cls:="mb-4", div(cls:="input-group", input(tpe:="text", name:="query", cls:="form-control form-control-lg bg-dark text-white border-secondary", placeholder:="Nombre equipo", value:=query), button(tpe:="submit", cls:="btn btn-info", "Buscar"))),
+
+      // BLACK BOOK WIDGET
+      if(query.nonEmpty) div(cls:="card bg-dark border-secondary shadow mb-4",
+        div(cls:="card-header bg-secondary text-white fw-bold", "FICHA RIVAL (BLACK BOOK)"),
+        div(cls:="card-body",
+          form(action:="/scouting/save_rival", method:="post",
+            input(tpe:="hidden", name:="nombre", value:=query),
+            div(cls:="mb-2", label(cls:="small text-muted", "Estilo"), select(name:="estilo", cls:="form-select form-select-sm bg-dark text-white", option(value:="Desconocido","?"), option(value:="Directo","Balon Largo"), option(value:="Combinativo","Toque"), option(value:="Contra","Contraataque"), attr("value"):=rivalInfo.map(_.estilo).getOrElse("Desconocido"))),
+            div(cls:="mb-2", label(cls:="small text-muted", "Claves (Jugadores)"), textarea(name:="claves", cls:="form-control form-control-sm bg-dark text-white", rows:="2", rivalInfo.map(_.claves).getOrElse(""))),
+            div(cls:="mb-2", label(cls:="small text-muted", "Notas Tacticas"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white", rows:="2", rivalInfo.map(_.notas).getOrElse(""))),
+            button(tpe:="submit", cls:="btn btn-sm btn-outline-warning w-100", "Guardar Ficha")
+          )
+        )
+      ),
+
+      if(query.nonEmpty && matches.isEmpty) div(cls:="alert alert-warning text-center", s"Sin datos vs '$query'") else if(matches.nonEmpty) div(div(cls:="card bg-secondary bg-opacity-25 border-info mb-4 p-3", h5(cls:="text-center text-white mb-3", s"Vs ${matches.head.rival}"), div(cls:="d-flex justify-content-around text-center text-white", div(h3(stats("pj")), span(cls:="small text-muted", "PJ")), div(h3(cls:="text-success", stats("ganados")), span(cls:="small text-muted", "G")), div(h3(cls:="text-danger", stats("gc")), span(cls:="small text-muted", "GC")))), h6(cls:="text-white border-bottom border-secondary pb-2 mb-3", "Partidos"), for(m <- matches) yield div(cls:="card bg-dark border-secondary shadow mb-3", div(cls:="card-body", div(cls:="d-flex justify-content-between align-items-center mb-2", div(strong(cls:="text-warning", m.fecha), span(cls:="ms-2 badge bg-secondary", m.clima)), div(cls:="fs-5 fw-bold text-white", m.resultado)), if(m.notas.nonEmpty) div(cls:="alert alert-dark border-secondary p-2 small text-light fst-italic mb-2", s"Nota: ${m.notas}"), if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-outline-danger w-100", "Video")))) else div(cls:="text-center text-muted mt-5", "Busca un rival..."))))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
+  @cask.postForm("/scouting/save_rival") def saveRivalInfo(nombre: String, estilo: String, claves: String, notas: String) = { DatabaseManager.saveRivalInfo(fixEncoding(nombre), estilo, fixEncoding(claves), fixEncoding(notas)); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> s"/scouting?query=$nombre")) }
 
   @cask.get("/gear")
   def gearPage() = {
@@ -191,10 +164,12 @@ object GuardianServer extends cask.MainRoutes {
   }
   @cask.postForm("/gear/add") def addGear(nombre: String, tipo: String, vida: Int) = { DatabaseManager.addNewGear(nombre, tipo, vida); gearPage() }
 
-  // 4. BIO PAGE
+  // 4. BIO PAGE (CON BIO-GROWTH TRACKER)
   @cask.get("/bio")
   def bioPage() = {
     val activeDrills = DatabaseManager.getActiveDrills()
+    val growthData = DatabaseManager.getGrowthHistory()
+
     val content = basePage("bio", div(cls := "row justify-content-center",
       div(cls := "col-md-6 mb-4", div(cls := "card bg-dark text-white border-info shadow",
         div(cls := "card-header bg-info text-dark fw-bold text-center", "WELLNESS & STATUS"),
@@ -205,10 +180,22 @@ object GuardianServer extends cask.MainRoutes {
           div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted", span("Crisis"), span("Top"))),
           div(cls:="mb-2", input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white", placeholder:="Notas conducta...")),
           div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control", placeholder:="Zona?"))),
+
+          // BIO-METRIC INPUTS
+          div(cls:="row mb-3 border-top pt-3",
+            div(cls:="col-6", label(cls:="small text-info", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white", placeholder:="Actualizar")),
+            div(cls:="col-6", label(cls:="small text-info", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white", placeholder:="Actualizar"))
+          ),
+
           div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info", "Guardar Bio"))
         ))
       )),
       div(cls := "col-md-6",
+        // GROWTH CHART
+        div(cls := "card bg-dark text-white border-secondary shadow mb-3",
+          div(cls := "card-header text-secondary fw-bold text-center small", "CURVA DE CRECIMIENTO"),
+          div(cls := "card-body p-2", canvas(id:="growthChart", style:="max-height:150px;"))
+        ),
         div(cls := "card bg-dark text-white border-success shadow mb-3",
           div(cls := "card-header bg-success text-dark fw-bold text-center", "REGISTRO ENTRENO"),
           div(cls := "card-body p-3",
@@ -223,7 +210,7 @@ object GuardianServer extends cask.MainRoutes {
         ),
         div(cls:="card bg-secondary bg-opacity-10 border-secondary", div(cls:="card-body p-2", h6(cls:="text-muted small mb-2", "+ Añadir Misión Técnica (10 Sesiones)"), form(action:="/bio/add_drill", method:="post", cls:="d-flex gap-2", input(tpe:="text", name:="nombre", cls:="form-control form-control-sm", placeholder:="Ej: Control Orientado", required:=true), button(tpe:="submit", cls:="btn btn-sm btn-secondary", "Crear"))))
       )
-    ))
+    ), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""const gCtx=document.getElementById('growthChart');const gData=$growthData;if(gCtx){new Chart(gCtx,{type:'line',data:{labels:gData.labels,datasets:[{label:'Altura (cm)',data:gData.data,borderColor:'#0dcaf0',borderWidth:2,tension:0.3,pointBackgroundColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#aaa'},grid:{color:'#444'}},x:{display:false}}}});}""")))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
@@ -231,30 +218,19 @@ object GuardianServer extends cask.MainRoutes {
   @cask.postForm("/bio/save_training") def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: String) = { val att = if(atencion != null && atencion.nonEmpty) atencion.toInt else 3; DatabaseManager.logTraining(tipo, foco, rpe, calidad, att); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
   @cask.postForm("/bio/add_drill") def addDrill(nombre: String) = { DatabaseManager.addNewDrill(nombre, ""); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
 
-  // 5. RESTO (HISTORIAL, ADMIN, ETC.)
-  @cask.get("/history") def historyPage() = {
-    val matches = DatabaseManager.getMatchesList()
-    val content = basePage("history", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12",
-      h2(cls := "text-warning mb-3 text-center", "Historial"),
-      div(cls := "card shadow-sm border-0", div(cls := "card-body p-0", table(cls := "table table-hover tm-table mb-0",
-        thead(tr(th("Rival"), th(cls:="text-center", "Res"), th(cls:="text-center", "Nota"), th(cls:="text-end", "Accion"))),
-        tbody(if (matches.isEmpty) tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")) else for (m <- matches) yield {
-          val p = m.resultado.split("-").map(_.trim.toInt); val c = if(p.length>=2){ if (p(0)>p(1)) "text-success" else if (p(0)==p(1)) "text-warning" else "text-danger" } else "text-muted"; val extra = if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-danger py-0 ms-1", style:="font-size:10px", "V") else span(""); val waText = s"""MATCH REPORT: HECTOR\nRival: ${m.rival}\nFecha: ${m.fecha}..."""; val encodedWa = URLEncoder.encode(waText, "UTF-8").replace("+", "%20")
-          tr(td(cls:="fw-bold small", fixEncoding(m.rival), extra, br, span(cls:="text-muted xx-small", s"${m.fecha} ${m.clima}")), td(cls:=s"text-center fw-bold $c", m.resultado), td(cls:="text-center", span(cls:="badge bg-dark text-warning", m.nota)), td(cls:="text-end", a(href:=s"https://wa.me/?text=$encodedWa", target:="_blank", cls:="btn btn-sm btn-success me-1", style:="padding:2px 6px;", "W"), a(href:=s"/match/edit/${m.id}", cls:="btn btn-sm btn-outline-primary me-1", style:="padding:2px 6px;", "E"), a(href:=s"/match/delete/${m.id}", onclick:="return confirm('Borrar?');", cls:="btn btn-sm btn-outline-danger", style:="padding:2px 6px;", "X")))
-        })
-      )))
-    )))
-    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
-
+  // 5. RESTO
+  @cask.get("/history") def historyPage() = { val matches = DatabaseManager.getMatchesList(); val content = basePage("history", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12", h2(cls := "text-warning mb-3 text-center", "Historial"), div(cls := "card shadow-sm border-0", div(cls := "card-body p-0", table(cls := "table table-hover tm-table mb-0", thead(tr(th("Rival"), th(cls:="text-center", "Res"), th(cls:="text-center", "Nota"), th(cls:="text-end", "Accion"))), tbody(if (matches.isEmpty) tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")) else for (m <- matches) yield { val p = m.resultado.split("-").map(_.trim.toInt); val c = if(p.length>=2){ if (p(0)>p(1)) "text-success" else if (p(0)==p(1)) "text-warning" else "text-danger" } else "text-muted"; val extra = if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-danger py-0 ms-1", style:="font-size:10px", "V") else span(""); val waText = s"""MATCH REPORT: HECTOR\nRival: ${m.rival}\nFecha: ${m.fecha}..."""; val encodedWa = URLEncoder.encode(waText, "UTF-8").replace("+", "%20"); tr(td(cls:="fw-bold small", fixEncoding(m.rival), extra, br, span(cls:="text-muted xx-small", s"${m.fecha} ${m.clima}")), td(cls:=s"text-center fw-bold $c", m.resultado), td(cls:="text-center", span(cls:="badge bg-dark text-warning", m.nota)), td(cls:="text-end", a(href:=s"https://wa.me/?text=$encodedWa", target:="_blank", cls:="btn btn-sm btn-success me-1", style:="padding:2px 6px;", "W"), a(href:=s"/match/edit/${m.id}", cls:="btn btn-sm btn-outline-primary me-1", style:="padding:2px 6px;", "E"), a(href:=s"/match/delete/${m.id}", onclick:="return confirm('Borrar?');", cls:="btn btn-sm btn-outline-danger", style:="padding:2px 6px;", "X"))) }))))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.get("/match/delete/:id") def deleteMatchAction(id: Int) = { DatabaseManager.deleteMatch(id); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) }
-
   @cask.get("/match/edit/:id") def editMatchPage(id: Int) = {
     val m = DatabaseManager.getMatchById(id)
     if (m.isEmpty) { cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) } else {
       val matchData = m.get; val (gf, gc) = if(matchData.resultado.contains("-")) (matchData.resultado.split("-")(0), matchData.resultado.split("-")(1)) else ("0", "0")
+
+      // VIDEO TAGS
+      val tags = DatabaseManager.getVideoTags(id)
+
       val content = basePage("history", div(cls := "row justify-content-center", div(cls := "col-md-6 col-12", div(cls := "card bg-dark text-white border-primary shadow",
-        div(cls := "card-header bg-primary text-white fw-bold text-center", "EDITAR PARTIDO"),
+        div(cls := "card-header bg-primary text-white fw-bold text-center", "EDITAR PARTIDO & VIDEO"),
         div(cls := "card-body p-3", form(action := "/match/update", method := "post", attr("accept-charset") := "UTF-8", input(tpe:="hidden", name:="id", value:=id.toString),
           div(cls:="mb-3", label("Rival"), input(tpe:="text", name:="rival", value:=matchData.rival, cls:="form-control")),
           div(cls:="mb-3", label("Fecha"), input(tpe:="date", name:="fecha", value:=matchData.fecha, cls:="form-control")),
@@ -262,17 +238,43 @@ object GuardianServer extends cask.MainRoutes {
           div(cls:="mb-3", label("Nota"), input(tpe:="number", step:="0.1", name:="nota", value:=matchData.nota.toString, cls:="form-control")),
           div(cls:="mb-3", label("Notas Texto"), textarea(name:="notas", cls:="form-control", rows:="3", matchData.notas)),
           div(cls:="mb-3", label("Reaccion/Goles"), textarea(name:="reaccion", cls:="form-control", rows:="3", matchData.reaccion)),
-          div(cls:="mb-3", label("Video URL"), input(tpe:="text", name:="video", value:=matchData.video, cls:="form-control")),
-          div(cls:="d-grid gap-2", button(tpe:="submit", cls:="btn btn-success", "Guardar Cambios"), a(href:="/history", cls:="btn btn-outline-secondary", "Cancelar"))
-        ))
+          div(cls:="mb-3", label("Video URL (Youtube)"), input(tpe:="text", name:="video", value:=matchData.video, cls:="form-control")),
+          div(cls:="d-grid gap-2 mb-4", button(tpe:="submit", cls:="btn btn-success", "Guardar Cambios"), a(href:="/history", cls:="btn btn-outline-secondary", "Cancelar"))
+        )),
+
+        // VIDEO TAGGING SECTION
+        div(cls:="card-footer bg-secondary bg-opacity-25",
+          h6(cls:="text-white small fw-bold", "CORTES DE VIDEO (TAGS)"),
+          if(matchData.video.nonEmpty) {
+            div(
+              // FORMULARIO NUEVO TAG
+              form(action:="/video/add_tag", method:="post", cls:="row g-2 mb-3",
+                input(tpe:="hidden", name:="matchId", value:=id.toString),
+                div(cls:="col-3", input(tpe:="number", name:="min", cls:="form-control form-control-sm", placeholder:="Min", required:=true)),
+                div(cls:="col-3", input(tpe:="number", name:="sec", cls:="form-control form-control-sm", placeholder:="Sec", required:=true)),
+                div(cls:="col-6", div(cls:="input-group input-group-sm", select(name:="tipo", cls:="form-select", option("PARADA"), option("ERROR"), option("GOL"), option("PASE")), button(tpe:="submit", cls:="btn btn-warning", "+")))
+              ),
+              // LISTA TAGS
+              div(cls:="list-group",
+                for(t <- tags) yield {
+                  val link = if(matchData.video.contains("?")) s"${matchData.video}&t=${t.minuto*60 + t.segundo}" else s"${matchData.video}?t=${t.minuto*60 + t.segundo}"
+                  a(href:=link, target:="_blank", cls:="list-group-item list-group-item-action bg-dark text-white border-secondary d-flex justify-content-between align-items-center",
+                    div(span(cls:="badge bg-danger me-2", s"${t.minuto}:${t.segundo}"), span(t.tipo)),
+                    a(href:=s"/video/delete_tag/${t.id}/${id}", cls:="text-danger fw-bold text-decoration-none", "X")
+                  )
+                }
+              )
+            )
+          } else div(cls:="alert alert-secondary small", "Añade URL de video para usar tags.")
+        )
       )))).render
       cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
     }
   }
 
+  @cask.postForm("/video/add_tag") def addVideoTag(matchId: Int, min: Int, sec: Int, tipo: String) = { DatabaseManager.addVideoTag(matchId, min, sec, tipo, ""); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> s"/match/edit/$matchId")) }
+  @cask.get("/video/delete_tag/:id/:matchId") def deleteVideoTag(id: Int, matchId: Int) = { DatabaseManager.deleteVideoTag(id); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> s"/match/edit/$matchId")) }
   @cask.postForm("/match/update") def updateMatchAction(id: Int, rival: String, gf: Int, gc: Int, nota: Double, notas: String, video: String, reaccion: String, fecha: String) = { val cleanRival = fixEncoding(rival); val cleanNotas = fixEncoding(notas); val cleanReaccion = fixEncoding(reaccion); DatabaseManager.updateMatch(id, cleanRival, gf, gc, 60, nota, "Sol", 20, cleanNotas, video, cleanReaccion, fecha); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) }
-
-  // 6. ADMIN / SETTINGS
   @cask.get("/settings") def settingsPage() = { val content = basePage("settings", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Fotos y Club"), form(action := "/settings/save_base64", method := "post", div(cls := "mb-4", label(cls := "form-label text-info", "Nombre del Club"), input(tpe := "text", name := "nombreClub", cls := "form-control", placeholder := "Ej: Rayo Vallecano")), div(cls := "mb-4", label(cls := "form-label text-info", "Foto Jugador"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_foto')"), input(tpe := "hidden", name := "fotoBase64", id := "hidden_foto")), div(cls := "mb-4", label(cls := "form-label text-warning", "Escudo Club"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_club')"), input(tpe := "hidden", name := "clubBase64", id := "hidden_club")), div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg", "Guardar"))), script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-grid", a(href:="/admin", cls:="btn btn-outline-danger", "ZONA ADMIN"))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.postForm("/settings/save_base64") def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String) = { val res = DatabaseManager.updateSeasonSettings(if(fotoBase64!=null) fotoBase64 else "", if(clubBase64!=null) clubBase64 else "", if(nombreClub!=null) nombreClub else ""); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Exito"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(res), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.get("/career") def careerPage() = { val c = DatabaseManager.getCareerSummary(); val content=basePage("career", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12", div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center", h2(cls := "text-warning m-0 mb-2", "Trayectoria"), div(cls:="card bg-secondary p-2 w-100", form(action := "/career/new-season", method := "post", cls:="d-flex flex-column gap-2", div(label(cls:="form-label text-white small m-0", "Nueva Categoria:"), input(tpe := "text", name := "categoria", cls := "form-control form-control-sm", placeholder := "Ej: Benjamin A", required := true)), button(tpe := "submit", cls := "btn btn-danger btn-sm", onclick := "return confirm('Seguro?');", "Cerrar & Empezar")))), div(cls := "card shadow-sm border-0", div(cls := "card-body p-0 table-responsive", table(cls := "table table-hover tm-table mb-0", thead(tr(th("Cat"), th("Ficha"), th("PJ"), th("GC"), th("Media"))), tbody(for (s <- c) yield tr(td(cls:="fw-bold text-primary small", s.categoria), td(img(src := s.fotoUrl, style := "height: 35px; width: 35px; border-radius: 50%; object-fit: cover; border: 2px solid #ddd;")), td(cls:="text-center fw-bold small", s.partidosJugados), td(cls:="text-center text-danger small", s.golesContra), td(cls:="text-center", span(cls:="badge bg-dark text-warning", s.mediaFinal)))))))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
