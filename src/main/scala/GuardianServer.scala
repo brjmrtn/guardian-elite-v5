@@ -16,7 +16,7 @@ object GuardianServer extends cask.MainRoutes {
     }
   }
 
-  // --- HELPER PARA EVITAR ERRORES EN TABLAS ---
+  // --- HELPER: RENDERIZADO DE FILA DE PARTIDO ---
   def renderMatchRow(m: MatchLog): Modifier = {
     val pParts = m.resultado.split("-").map(s => try s.trim.toInt catch { case _:Exception => 0 })
     val colorClass = if(pParts.length >= 2) {
@@ -110,15 +110,10 @@ object GuardianServer extends cask.MainRoutes {
   @cask.get("/match-center")
   def matchCenterPage(scheduleId: Int = 0) = {
     val today = java.time.LocalDate.now().toString
-    var preRival = ""; var preFecha = today
+    var preRival = ""; var preFecha = today; var isScheduled = false
     if(scheduleId > 0) {
       val matches = DatabaseManager.getUpcomingMatches()
-      matches.find(_.id == scheduleId).foreach { m => preRival = m.rival; preFecha = m.fecha }
-    }
-
-    val gridCells = for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield {
-      val zoneId = r + c
-      div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", ""))
+      matches.find(_.id == scheduleId).foreach { m => preRival = m.rival; preFecha = m.fecha; isScheduled = true }
     }
 
     val content = basePage("match-center", div(cls := "row justify-content-center", div(cls := "col-md-6 col-12", div(cls := "card bg-dark text-white border-warning shadow",
@@ -153,8 +148,11 @@ object GuardianServer extends cask.MainRoutes {
 
         div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger", attr("for"):="modeGoal", "MODO GOL"))),
 
-          div(cls:="goal-grid-3x3", gridCells.toSeq: _*),
-          input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas"),
+          div(cls:="goal-grid-3x3",
+            (for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield { val zoneId = r + c; div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", "")) }).toSeq: _*
+          ),
+          input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"),
+          input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas"),
 
           div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"),
           label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "ACCIONES"),
@@ -205,11 +203,30 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  // 3. SCOUTING
+  // 3. SCOUTING (BLACK BOOK)
   @cask.get("/scouting")
   def scoutingPage(query: String = "") = {
     val (matches, stats) = if(query.nonEmpty) DatabaseManager.getRivalScouting(query) else (List[MatchLog](), Map[String,Int]())
     val rivalInfo = if(query.nonEmpty) DatabaseManager.getRivalInfo(query) else None
+
+    val rivalCardWidget = if(query.nonEmpty) {
+      val estiloVal = rivalInfo.map(_.estilo).getOrElse("Desconocido")
+      val clavesVal = rivalInfo.map(_.claves).getOrElse("")
+      val notasVal = rivalInfo.map(_.notas).getOrElse("")
+
+      div(cls:="card bg-dark border-secondary shadow mb-4",
+        div(cls:="card-header bg-secondary text-white fw-bold", "FICHA RIVAL"),
+        div(cls:="card-body",
+          form(action:="/scouting/save_rival", method:="post",
+            input(tpe:="hidden", name:="nombre", value:=query),
+            div(cls:="mb-2", label(cls:="small text-muted", "Estilo"), select(name:="estilo", cls:="form-select form-select-sm bg-dark text-white", option(value:="Desconocido","?"), option(value:="Directo","Balon Largo"), option(value:="Combinativo","Toque"), option(value:="Contra","Contraataque"), attr("value"):=estiloVal)),
+            div(cls:="mb-2", label(cls:="small text-muted", "Claves"), textarea(name:="claves", cls:="form-control form-control-sm bg-dark text-white", rows:="2", clavesVal)),
+            div(cls:="mb-2", label(cls:="small text-muted", "Notas"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white", rows:="2", notasVal)),
+            button(tpe:="submit", cls:="btn btn-sm btn-outline-warning w-100", "Guardar Ficha")
+          )
+        )
+      )
+    } else div()
 
     val resultsWidget = if(query.nonEmpty && matches.isEmpty) div(cls:="alert alert-warning text-center", s"Sin datos vs '$query'")
     else if(matches.nonEmpty) {
@@ -227,18 +244,7 @@ object GuardianServer extends cask.MainRoutes {
     val content = basePage("scouting", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12",
       h2(cls := "text-info mb-4 text-center", "SCOUTING"),
       form(action:="/scouting", method:="get", cls:="mb-4", div(cls:="input-group", input(tpe:="text", name:="query", cls:="form-control form-control-lg bg-dark text-white border-secondary", placeholder:="Nombre equipo", value:=query), button(tpe:="submit", cls:="btn btn-info", "Buscar"))),
-      if(query.nonEmpty) div(cls:="card bg-dark border-secondary shadow mb-4",
-        div(cls:="card-header bg-secondary text-white fw-bold", "FICHA RIVAL"),
-        div(cls:="card-body",
-          form(action:="/scouting/save_rival", method:="post",
-            input(tpe:="hidden", name:="nombre", value:=query),
-            div(cls:="mb-2", label(cls:="small text-muted", "Estilo"), select(name:="estilo", cls:="form-select form-select-sm bg-dark text-white", option(value:="Desconocido","?"), option(value:="Directo","Balon Largo"), option(value:="Combinativo","Toque"), option(value:="Contra","Contraataque"), attr("value"):=rivalInfo.map(_.estilo).getOrElse("Desconocido"))),
-            div(cls:="mb-2", label(cls:="small text-muted", "Claves"), textarea(name:="claves", cls:="form-control form-control-sm bg-dark text-white", rows:="2", rivalInfo.map(_.claves).getOrElse(""))),
-            div(cls:="mb-2", label(cls:="small text-muted", "Notas"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white", rows:="2", rivalInfo.map(_.notas).getOrElse(""))),
-            button(tpe:="submit", cls:="btn btn-sm btn-outline-warning w-100", "Guardar Ficha")
-          )
-        )
-      ),
+      rivalCardWidget,
       resultsWidget
     )))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
@@ -308,11 +314,16 @@ object GuardianServer extends cask.MainRoutes {
   @cask.postForm("/bio/save_training") def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: String) = { val att = if(atencion != null && atencion.nonEmpty) atencion.toInt else 3; DatabaseManager.logTraining(tipo, foco, rpe, calidad, att); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
   @cask.postForm("/bio/add_drill") def addDrill(nombre: String) = { DatabaseManager.addNewDrill(nombre, ""); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
 
-  // 5. RESTO
+  // 5. HISTORIAL (HELPER CORRECTO: Renderiza una LISTA de filas, no una fila suelta)
   @cask.get("/history") def historyPage() = {
     val matches = DatabaseManager.getMatchesList()
-    val tableRows = if (matches.isEmpty) tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos"))
-    else (for (m <- matches) yield renderMatchRow(m)).toSeq
+
+    // CORRECCIÓN CLAVE: El if/else ahora devuelve siempre el mismo tipo (Seq[Modifier])
+    val tableRows: Seq[Modifier] = if (matches.isEmpty) {
+      Seq(tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")))
+    } else {
+      matches.map(m => renderMatchRow(m))
+    }
 
     val content = basePage("history", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12",
       h2(cls := "text-warning mb-3 text-center", "Historial"),
@@ -373,7 +384,7 @@ object GuardianServer extends cask.MainRoutes {
   @cask.postForm("/match/update") def updateMatchAction(id: Int, rival: String, gf: Int, gc: Int, nota: Double, notas: String, video: String, reaccion: String, fecha: String) = { val cleanRival = fixEncoding(rival); val cleanNotas = fixEncoding(notas); val cleanReaccion = fixEncoding(reaccion); DatabaseManager.updateMatch(id, cleanRival, gf, gc, 60, nota, "Sol", 20, cleanNotas, video, cleanReaccion, fecha); cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history")) }
   @cask.get("/settings") def settingsPage() = { val content = basePage("settings", div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Fotos y Club"), form(action := "/settings/save_base64", method := "post", div(cls := "mb-4", label(cls := "form-label text-info", "Nombre del Club"), input(tpe := "text", name := "nombreClub", cls := "form-control", placeholder := "Ej: Rayo Vallecano")), div(cls := "mb-4", label(cls := "form-label text-info", "Foto Jugador"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_foto')"), input(tpe := "hidden", name := "fotoBase64", id := "hidden_foto")), div(cls := "mb-4", label(cls := "form-label text-warning", "Escudo Club"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_club')"), input(tpe := "hidden", name := "clubBase64", id := "hidden_club")), div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg", "Guardar"))), script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-grid", a(href:="/admin", cls:="btn btn-outline-danger", "ZONA ADMIN"))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.postForm("/settings/save_base64") def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String) = { val res = DatabaseManager.updateSeasonSettings(if(fotoBase64!=null) fotoBase64 else "", if(clubBase64!=null) clubBase64 else "", if(nombreClub!=null) nombreClub else ""); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Exito"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(res), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
-  @cask.get("/career") def careerPage() = { val c = DatabaseManager.getCareerSummary(); val listRows = (for (s <- c) yield tr(td(cls:="fw-bold text-primary small", s.categoria), td(img(src := s.fotoUrl, style := "height: 35px; width: 35px; border-radius: 50%; object-fit: cover; border: 2px solid #ddd;")), td(cls:="text-center fw-bold small", s.partidosJugados), td(cls:="text-center text-danger small", s.golesContra), td(cls:="text-center", span(cls:="badge bg-dark text-warning", s.mediaFinal)))).toSeq; val content=basePage("career", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12", div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center", h2(cls := "text-warning m-0 mb-2", "Trayectoria"), div(cls:="card bg-secondary p-2 w-100", form(action := "/career/new-season", method := "post", cls:="d-flex flex-column gap-2", div(label(cls:="form-label text-white small m-0", "Nueva Categoria:"), input(tpe := "text", name := "categoria", cls := "form-control form-control-sm", placeholder := "Ej: Benjamin A", required := true)), button(tpe := "submit", cls := "btn btn-danger btn-sm", onclick := "return confirm('Seguro?');", "Cerrar & Empezar")))), div(cls := "card shadow-sm border-0", div(cls := "card-body p-0 table-responsive", table(cls := "table table-hover tm-table mb-0", thead(tr(th("Cat"), th("Ficha"), th("PJ"), th("GC"), th("Media"))), tbody(listRows: _*))))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.get("/career") def careerPage() = { val c = DatabaseManager.getCareerSummary(); val content=basePage("career", div(cls := "row justify-content-center", div(cls := "col-md-10 col-12", div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center", h2(cls := "text-warning m-0 mb-2", "Trayectoria"), div(cls:="card bg-secondary p-2 w-100", form(action := "/career/new-season", method := "post", cls:="d-flex flex-column gap-2", div(label(cls:="form-label text-white small m-0", "Nueva Categoria:"), input(tpe := "text", name := "categoria", cls := "form-control form-control-sm", placeholder := "Ej: Benjamin A", required := true)), button(tpe := "submit", cls := "btn btn-danger btn-sm", onclick := "return confirm('Seguro?');", "Cerrar & Empezar")))), div(cls := "card shadow-sm border-0", div(cls := "card-body p-0 table-responsive", table(cls := "table table-hover tm-table mb-0", thead(tr(th("Cat"), th("Ficha"), th("PJ"), th("GC"), th("Media"))), tbody((for (s <- c) yield tr(td(cls:="fw-bold text-primary small", s.categoria), td(img(src := s.fotoUrl, style := "height: 35px; width: 35px; border-radius: 50%; object-fit: cover; border: 2px solid #ddd;")), td(cls:="text-center fw-bold small", s.partidosJugados), td(cls:="text-center text-danger small", s.golesContra), td(cls:="text-center", span(cls:="badge bg-dark text-warning", s.mediaFinal)))).toSeq: _*))))))); cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.postForm("/career/new-season") def newSeasonAction(categoria: String) = { val msg = DatabaseManager.startNewSeason(categoria); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Nueva Temp"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(msg), p(s"Etapa iniciada: $categoria"), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Ir a Inicio"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
 
   @cask.get("/admin")
