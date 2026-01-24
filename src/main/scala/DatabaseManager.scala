@@ -22,61 +22,55 @@ object DatabaseManager {
     val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
   }
 
-  // --- IA GEMINI: CORREGIDO Y ACTUALIZADO ---
+  // --- IA GEMINI: LISTA DE MODELOS DE RESPALDO ---
+  // Si falla el primero, prueba el siguiente automáticamente.
+  val modelList = Seq(
+    "gemini-1.5-flash",          // Opción A: Flash Estándar
+    "gemini-1.5-flash-latest",   // Opción B: Flash Latest
+    "gemini-1.5-pro",            // Opción C: Pro Estándar
+    "gemini-1.5-pro-latest",     // Opción D: Pro Latest
+    "gemini-pro"                 // Opción E: Versión 1.0 (Compatibilidad total)
+  )
+
   def callGeminiAI(prompt: String): String = {
-    // 1. LEER DEL ENTORNO DE RENDER
     val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+    if (envKey.isEmpty) return "⚠️ Error Config: Falta GEMINI_API_KEY."
 
-    if (envKey.isEmpty) return "⚠️ <b>Error Config:</b> La variable GEMINI_API_KEY está vacía en Render."
-    if (envKey.length < 10) return s"⚠️ <b>Error Key:</b> La clave parece inválida (${envKey})."
+    // Iniciamos la cadena de intentos con el primer modelo de la lista (índice 0)
+    attemptNextModel(prompt, envKey, 0)
+  }
 
-    val maskedKey = envKey.take(5) + "..." // Log seguro
+  def attemptNextModel(prompt: String, apiKey: String, index: Int): String = {
+    // Si ya probamos todos y fallaron
+    if (index >= modelList.length) return "❌ Error: Ningún modelo de Gemini respondió. Revisa permisos en Google AI Studio."
+
+    val modelName = modelList(index)
+    val url = s"https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
 
     try {
-      // INTENTO 1: Modelo 1.5 Flash (Rápido y barato)
-      // Usamos v1beta que es el endpoint estándar para la serie 1.5
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$envKey"
-
-      val payload = ujson.Obj(
-        "contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))
+      val r = requests.post(
+        url,
+        data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(),
+        headers = Map("Content-Type" -> "application/json"),
+        check = false,
+        readTimeout = 10000
       )
 
-      // Timeout aumentado a 10s por si Render va lento
-      val r = requests.post(url, data = payload.toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 10000)
-
       if (r.statusCode == 200) {
+        // ¡ÉXITO!
         val json = ujson.read(r.text())
         json("candidates")(0)("content")("parts")(0)("text").str
       } else {
-        // Si falla Flash, intentamos PRO, pero pasamos el error original para debug
-        val errorMsg = try { ujson.read(r.text())("error")("message").str } catch { case _: Exception => r.text() }
-        println(s"Fallo Flash ($maskedKey): ${r.statusCode} - $errorMsg")
-        tryFallbackModel(prompt, envKey, r.statusCode, maskedKey, errorMsg)
+        // FALLO (404, 500, etc) -> Probamos el siguiente de la lista
+        println(s"⚠️ Falló modelo '$modelName' (Status ${r.statusCode}). Probando siguiente...")
+        attemptNextModel(prompt, apiKey, index + 1)
       }
     } catch {
-      case e: Exception => s"❌ Error Crítico: ${e.getMessage}"
+      case e: Exception =>
+        // Error de red o timeout -> Probamos siguiente
+        println(s"⚠️ Excepción en '$modelName': ${e.getMessage}")
+        attemptNextModel(prompt, apiKey, index + 1)
     }
-  }
-
-  def tryFallbackModel(prompt: String, apiKey: String, originalStatus: Int, maskedKey: String, originalError: String): String = {
-    try {
-      // INTENTO 2: Gemini 1.5 PRO (Más potente, NO usar el 'gemini-pro' antiguo que da 404)
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$apiKey"
-
-      val r = requests.post(url, data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false)
-
-      if(r.statusCode == 200) {
-        ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
-      } else {
-        // CAPTURAMOS EL MENSAJE REAL DE GOOGLE
-        val googleError = try { ujson.read(r.text())("error")("message").str } catch { case _: Exception => "Sin mensaje detallado" }
-
-        s"""⚠️ <b>Google rechaza la conexión.</b><br>
-           |Status: $originalStatus / ${r.statusCode}<br>
-           |Google dice: "<i>$googleError</i>"<br>
-           |Check: Revisa que la API Key en Render no tenga espacios extra.""".stripMargin
-      }
-    } catch { case e: Exception => s"⚠️ Error Total: ${e.getMessage}" }
   }
 
   def getDeepAnalysis(): String = {
