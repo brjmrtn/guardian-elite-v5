@@ -343,7 +343,45 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/bio/save_wellness") def saveWellness(sueno: Int, horas: String, energia: Int, dolor: Int, zona: String, altura: String, peso: String, animo: Int, notas_conducta: String, estadoFisico: String) = { val h = if(horas.nonEmpty) horas.toDouble else 0.0; val alt = if(altura.nonEmpty) altura.toInt else 0; val pes = if(peso.nonEmpty) peso.toDouble else 0.0; DatabaseManager.logWellness(sueno, h, energia, dolor, zona, alt, pes, animo, notas_conducta, estadoFisico); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
-  @cask.postForm("/bio/save_training") def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: String, rutina: String) = { val att = if(atencion != null && atencion.nonEmpty) atencion.toInt else 3; DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
+  @cask.postForm("/bio/save_training")
+  def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: String, rutina: String) = {
+    // 1. Procesamos los datos (igual que antes)
+    val att = if(atencion != null && atencion.nonEmpty) atencion.toInt else 3
+    DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina)
+
+    // 2. Generamos la pantalla de ÉXITO (Nuevo)
+    val htmlStr = doctype("html")(
+      html(
+        head(meta(charset := "utf-8"), tags2.title("Entreno Guardado"), tags2.style(raw(getCss()))),
+        body(
+          style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';",
+          // Icono grande de check verde
+          h1(style := "color: #28a745; font-size: 60px; margin-bottom: 0;", "✔"),
+          h2(style := "color: #d4af37; letter-spacing: 2px;", "SESIÓN COMPLETADA"),
+
+          // Resumen visual de lo guardado
+          div(style := "margin: 30px auto; width: 300px; background: #333; padding: 20px; border-radius: 10px; border: 1px solid #444;",
+            h4(style := "color: #0dcaf0; margin-bottom: 5px;", tipo.toUpperCase),
+            div(style := "font-style: italic; color: #ccc; margin-bottom: 15px;", if(foco.nonEmpty) foco else "Entrenamiento General"),
+            div(style := "display: flex; justify-content: space-around; margin-top: 15px; border-top: 1px solid #555; padding-top: 10px;",
+              div(div(style:="font-size:12px; color:#aaa;", "RPE"), div(style:="font-weight:bold; font-size:20px;", rpe)),
+              div(div(style:="font-size:12px; color:#aaa;", "CALIDAD"), div(style:="font-weight:bold; font-size:20px; color:#ffc107;", calidad)),
+              div(div(style:="font-size:12px; color:#aaa;", "ATENCIÓN"), div(style:="font-weight:bold; font-size:20px;", att))
+            )
+          ),
+
+          p(style := "color: #999; font-size: 14px;", "Datos registrados en el historial."),
+
+          // Botón para volver
+          div(style := "margin-top: 40px;",
+            a(href := "/bio", cls := "btn btn-outline-light btn-lg", "Continuar")
+          )
+        )
+      )
+    ).render
+
+    cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
   @cask.get("/bio/ai_gen") def aiGenDrill(focus: String, mode: String) = { cask.Response(DatabaseManager.generateTrainingSession(mode, focus)) }
   @cask.postForm("/bio/add_drill") def addDrill(nombre: String) = { DatabaseManager.addNewDrill(fixEncoding(nombre), ""); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
 
