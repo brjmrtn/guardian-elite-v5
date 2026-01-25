@@ -169,7 +169,7 @@ Accesible desde el icono de engranaje (arriba derecha).
 
 ---
 
-## 🚀 ROADMAP: Guardian X (Next Gen)
+### 🚀 ROADMAP: Guardian X (Next Gen)
 *Conceptos estratégicos para convertir la herramienta en el arma definitiva.*
 
 1.  **👁️ Vision Pro (Computer Vision):** Análisis de video automático. Ingesta de links de YouTube para generar *heatmaps* de posicionamiento y calcular tiempos de reacción (ms) sin etiquetado manual.
@@ -177,12 +177,11 @@ Accesible desde el icono de engranaje (arriba derecha).
 3.  **🔮 El Oráculo (Predictive Analytics):** Proyección de carrera comparativa. Algoritmos que contrastan la curva de evolución de Héctor con datos históricos de porteros profesionales a su misma edad.
 4.  **🧠 Diario de Voz (NLP):** Análisis de sentimiento post-partido. Grabación de audio donde la IA detecta frustración, ansiedad o euforia para gestionar la psicología deportiva.
 5.  **♟️ Simulador Táctico (Gamificación):** Recreación digital 2D de los goles encajados para que el jugador tome la decisión correcta en el simulador ("Corregir el error virtualmente").
-6.  **🛡️ Escudo Rival Dinámico (Scouting 2.0):** *Web Scraping* automático de actas digitales de la liga para detectar goleadores y patrones rivales sin entrada manual de datos.
+6.  **🛡️ Escudo Rival Dinámico (Scouting 2.0):** Integración con **RFFM/Novanet** (fuente MatchApp). *Scraping* automático de la web de la federación para importar calendarios, campos de juego y estadísticas de goleadores rivales sin entrada manual.
 7.  **🧬 Generador Visual (Video GenAI):** Sustitución de texto por video. La IA genera clips animados de avatares ejecutando la técnica exacta sugerida en el entrenamiento.
 8.  **📉 'Moneyball' de Distribución:** Análisis de grafos de pases. Mapeo de conexiones para detectar con qué compañeros tiene mejor química y química negativa bajo presión.
 9.  **🚦 Asistente de Banda (Live Mode):** Botonera simplificada para registro en tiempo real. Algoritmo de "Medio Tiempo" que envía una notificación al descanso con consejos tácticos basados en la 1ª parte.
 10. **🕹️ Modo Legado (RPG Profundo):** Árbol de habilidades desbloqueable, equipamiento virtual legendario y crónicas de prensa generadas por IA tras cada victoria.
-
 ---
 
 ## 🏗️ Stack Tecnológico
