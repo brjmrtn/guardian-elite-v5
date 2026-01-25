@@ -29,23 +29,35 @@ object DatabaseManager {
   val modelList = Seq("gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash")
 
   def callGeminiAI(prompt: String): String = {
+    // IMPORTANTE: Asegúrate de que esta variable de entorno existe en Render
     val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
-    if (envKey.isEmpty) return "⚠️ Error Config: Falta GEMINI_API_KEY."
+    if (envKey.isEmpty) return "⚠️ Error Config: Falta GEMINI_API_KEY en las variables de entorno."
     attemptNextModel(prompt, envKey, 0)
   }
 
   def attemptNextModel(prompt: String, apiKey: String, index: Int): String = {
-    if (index >= modelList.length) return "❌ IA Saturada."
+    if (index >= modelList.length) return "❌ Error IA: Modelos saturados o API Key inválida."
     val modelName = modelList(index)
     val url = s"https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
     try {
       val r = requests.post(url, data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 15000)
-      if (r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
-      else attemptNextModel(prompt, apiKey, index + 1)
-    } catch { case e: Exception => attemptNextModel(prompt, apiKey, index + 1) }
+      if (r.statusCode == 200) {
+        try {
+          ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+        } catch {
+          case e: Exception => s"Error parseando respuesta IA: ${e.getMessage}"
+        }
+      } else {
+        println(s"IA Fail ($modelName): ${r.statusCode} - ${r.text()}")
+        attemptNextModel(prompt, apiKey, index + 1)
+      }
+    } catch { case e: Exception =>
+      println(s"IA Exception ($modelName): ${e.getMessage}")
+      attemptNextModel(prompt, apiKey, index + 1)
+    }
   }
 
-  // --- IA GENERADOR DE ENTRENOS (NUEVO) ---
+  // --- IA GENERADOR DE ENTRENOS ---
   def generateTrainingSession(mode: String, focus: String): String = {
     var context = ""
     val conn = getConnection(); try {
@@ -69,7 +81,7 @@ object DatabaseManager {
     callGeminiAI(prompt).replace("```html", "").replace("```", "").trim
   }
 
-  // --- PENALTY LAB (NUEVO) ---
+  // --- PENALTY LAB ---
   def logPenalty(rival: String, zTiro: String, zSalto: String, esGol: Boolean): Unit = {
     val conn = getConnection(); try {
       val ps = conn.prepareStatement("INSERT INTO penalties (rival, zona_tiro, zona_salto, es_gol) VALUES (?, ?, ?, ?)")
@@ -87,7 +99,7 @@ object DatabaseManager {
     l.toList
   }
 
-  // --- GARAGE CON FOTOS (NUEVO) ---
+  // --- GARAGE CON FOTOS ---
   def addNewGear(nombre: String, tipo: String, vida: Int, img: String): Unit = {
     val conn=getConnection(); try {
       val r=conn.prepareStatement("UPDATE gear SET activo=FALSE WHERE tipo=? AND activo=TRUE"); r.setString(1,tipo); r.executeUpdate();
@@ -98,8 +110,49 @@ object DatabaseManager {
   }
   def getActiveGear(): List[GearItem] = { var l=List[GearItem](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT * FROM gear WHERE activo = TRUE ORDER BY tipo DESC"); while(rs.next()) { val (u,max)=(rs.getInt("usos_actuales"),rs.getInt("vida_util_estimada")); l=l:+GearItem(rs.getInt("id"),rs.getString("nombre"),rs.getString("tipo"),u,max,if(max>0 && u.toDouble/max > 0.9) "Critico" else "Optimo", Option(rs.getString("imagen_url")).getOrElse("")) } } finally { conn.close() }; l }
 
-  // --- FUNCIONES CLÁSICAS (MANTENIDAS) ---
-  def getDeepAnalysis(): String = { var conn: Connection = null; try { conn = getConnection(); val stmt = conn.createStatement(); val sb = new StringBuilder(); var nextRival = "Ninguno"; var nextDate = ""; val rsNext = stmt.executeQuery("SELECT rival, fecha FROM matches WHERE status = 'SCHEDULED' ORDER BY fecha ASC LIMIT 1"); if(rsNext.next()) { nextRival = rsNext.getString("rival"); nextDate = rsNext.getDate("fecha").toString }; var estadoFisico = "Desconocido"; var bioData = ""; val rsW = conn.createStatement().executeQuery("SELECT estado_fisico, sueno, horas_sueno, animo, dolor FROM wellness ORDER BY id DESC LIMIT 1"); if(rsW.next()) { estadoFisico = rsW.getString("estado_fisico"); bioData = s"Sueño: ${rsW.getDouble("horas_sueno")}h, Ánimo: ${rsW.getInt("animo")}/5." }; var growthAlert = ""; val rsG = conn.createStatement().executeQuery("SELECT velocidad_crecimiento FROM physical_growth ORDER BY fecha DESC LIMIT 1"); if(rsG.next() && rsG.getDouble("velocidad_crecimiento") > 0.5) growthAlert = s"⚠️ ALERTA: Crecimiento rápido (${rsG.getDouble("velocidad_crecimiento")}cm). Posible descoordinación."; var passStats = ""; val rsPass = conn.createStatement().executeQuery("SELECT SUM(pc_t) as st, SUM(pc_ok) as so, SUM(pl_t) as lt, SUM(pl_ok) as lo FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 3"); if(rsPass.next()) { val (st, so, lt, lo) = (rsPass.getInt("st"), rsPass.getInt("so"), rsPass.getInt("lt"), rsPass.getInt("lo")); if(st+lt > 0) passStats = s"Pases (Últimos 3): Corto ${so}/${st}, Largo ${lo}/${lt}." }; sb.append("Eres el Director Deportivo. Analiza:\n"); sb.append(s"1. AGENDA: Próximo vs $nextRival ($nextDate).\n"); sb.append(s"2. FÍSICO: $estadoFisico. $bioData. $growthAlert\n"); sb.append(s"3. JUEGO DE PIES: $passStats\n"); sb.append("Responde en HTML bonito (fondo oscuro, letra 16px). Título '🧠 ANÁLISIS DEL MÍSTER'."); sb.append("<div style='background: rgba(13, 202, 240, 0.1); border-left: 6px solid #0dcaf0; padding: 15px; margin: 10px 0; border-radius: 4px;'>"); sb.append("<h4 style='color: #0dcaf0; margin: 0 0 10px 0; font-size: 18px; font-family: sans-serif; letter-spacing: 1px; text-transform: uppercase;'>🧠 ANÁLISIS DEL MÍSTER</h4>"); sb.append("<p style='color: #ffffff; font-size: 16px; line-height: 1.6; font-family: sans-serif; margin: 0; font-weight: 400;'>[Tu consejo]</p>"); sb.append("</div>"); val raw = callGeminiAI(sb.toString()); raw.replace("```html", "").replace("```", "").trim } catch { case e: Exception => "<div style='color:#aaa'>Cargando...</div>" } finally { if(conn!=null) conn.close() } }
+  // --- FUNCIONES CLÁSICAS (DEBUGGEADAS) ---
+  def getDeepAnalysis(): String = {
+    var conn: Connection = null
+    try {
+      conn = getConnection(); val stmt = conn.createStatement()
+      val sb = new StringBuilder()
+      var nextRival = "Ninguno"; var nextDate = ""
+
+      // 1. Agenda
+      val rsNext = stmt.executeQuery("SELECT rival, fecha FROM matches WHERE status = 'SCHEDULED' ORDER BY fecha ASC LIMIT 1")
+      if(rsNext.next()) { nextRival = rsNext.getString("rival"); nextDate = rsNext.getDate("fecha").toString }
+
+      // 2. Wellness
+      var estadoFisico = "Desconocido"; var bioData = ""
+      // Usamos nueva consulta para evitar error si tabla vacía
+      val rsW = conn.createStatement().executeQuery("SELECT estado_fisico, sueno, horas_sueno, animo, dolor FROM wellness ORDER BY id DESC LIMIT 1")
+      if(rsW.next()) { estadoFisico = rsW.getString("estado_fisico"); bioData = s"Sueño: ${rsW.getDouble("horas_sueno")}h, Ánimo: ${rsW.getInt("animo")}/5." }
+
+      // 3. Crecimiento
+      var growthAlert = ""
+      val rsG = conn.createStatement().executeQuery("SELECT velocidad_crecimiento FROM physical_growth ORDER BY fecha DESC LIMIT 1")
+      if(rsG.next() && rsG.getDouble("velocidad_crecimiento") > 0.5) growthAlert = s"⚠️ ALERTA: Crecimiento rápido (${rsG.getDouble("velocidad_crecimiento")}cm). Posible descoordinación."
+
+      // 4. Pases
+      var passStats = ""
+      val rsPass = conn.createStatement().executeQuery("SELECT SUM(pc_t) as st, SUM(pc_ok) as so, SUM(pl_t) as lt, SUM(pl_ok) as lo FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 3")
+      if(rsPass.next()) { val (st, so, lt, lo) = (rsPass.getInt("st"), rsPass.getInt("so"), rsPass.getInt("lt"), rsPass.getInt("lo")); if(st+lt > 0) passStats = s"Pases (Últimos 3): Corto ${so}/${st}, Largo ${lo}/${lt}." }
+
+      sb.append("Eres el Director Deportivo. Analiza:\n"); sb.append(s"1. AGENDA: Próximo vs $nextRival ($nextDate).\n"); sb.append(s"2. FÍSICO: $estadoFisico. $bioData. $growthAlert\n"); sb.append(s"3. JUEGO DE PIES: $passStats\n")
+      sb.append("Responde en HTML bonito (fondo oscuro, letra 16px). Título '🧠 ANÁLISIS DEL MÍSTER'.")
+      sb.append("<div style='background: rgba(13, 202, 240, 0.1); border-left: 6px solid #0dcaf0; padding: 15px; margin: 10px 0; border-radius: 4px;'>"); sb.append("<h4 style='color: #0dcaf0; margin: 0 0 10px 0; font-size: 18px; font-family: sans-serif; letter-spacing: 1px; text-transform: uppercase;'>🧠 ANÁLISIS DEL MÍSTER</h4>"); sb.append("<p style='color: #ffffff; font-size: 16px; line-height: 1.6; font-family: sans-serif; margin: 0; font-weight: 400;'>[Tu consejo]</p>"); sb.append("</div>")
+
+      val raw = callGeminiAI(sb.toString());
+      raw.replace("```html", "").replace("```", "").trim
+
+    } catch {
+      case e: Exception =>
+        println(s"ERROR DEEP ANALYSIS: ${e.getMessage}")
+        e.printStackTrace()
+        s"<div style='color: #ff6b6b; font-size: 12px;'>⚠️ DEBUG IA: ${e.getMessage}</div>"
+    } finally { if(conn!=null) conn.close() }
+  }
+
   def logMatch(riv: String, gf: Int, gc: Int, min: Int, n: Double, med: Double, par: Int, zG: String, zT: String, zP: String, p1v1: Int, pAir: Int, pPie: Int, clima: String, temp: Int, notas: String, video: String, reaccion: String, fechaStr: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int): Unit = { val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons"); if(rs.next()){ val s=conn.prepareStatement("INSERT INTO matches (season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica, paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas, acciones_pie, clima, temperatura, notas_partido, video_url, reaccion_goles, fecha, status, pc_t, pc_ok, pl_t, pl_ok) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PLAYED',?,?,?,?)"); s.setInt(1,rs.getInt("id")); s.setString(2,fixEncoding(riv)); s.setInt(3,gf); s.setInt(4,gc); s.setInt(5,min); s.setDouble(6,n); s.setDouble(7,med); s.setInt(8,par); s.setString(9,zG); s.setString(10,zT); s.setString(11,zP); s.setInt(12,p1v1); s.setInt(13,pAir); s.setInt(14,pPie); s.setString(15,clima); s.setInt(16,temp); s.setString(17,fixEncoding(notas)); s.setString(18,video); s.setString(19,fixEncoding(reaccion)); s.setDate(20,Date.valueOf(fechaStr)); s.setInt(21,pcTot); s.setInt(22,pcOk); s.setInt(23,plTot); s.setInt(24,plOk); s.executeUpdate() } } finally {conn.close()} }
   def updateMatch(id: Int, rival: String, gf: Int, gc: Int, min: Int, nota: Double, clima: String, temp: Int, notas: String, video: String, reaccion: String, fechaStr: String): Unit = { val conn = getConnection(); try { val s = conn.prepareStatement("UPDATE matches SET rival=?, goles_favor=?, goles_contra=?, minutos=?, nota=?, clima=?, temperatura=?, notas_partido=?, video_url=?, reaccion_goles=?, fecha=? WHERE id=?"); s.setString(1, fixEncoding(rival)); s.setInt(2, gf); s.setInt(3, gc); s.setInt(4, min); s.setDouble(5, nota); s.setString(6, clima); s.setInt(7, temp); s.setString(8, fixEncoding(notas)); s.setString(9, video); s.setString(10, fixEncoding(reaccion)); s.setDate(11, Date.valueOf(fechaStr)); s.setInt(12, id); s.executeUpdate() } finally { conn.close() } }
   def addNewDrill(nombre: String, desc: String): Unit = { val conn = getConnection(); try { val ps = conn.prepareStatement("INSERT INTO drills (nombre, descripcion, sesiones_objetivo, sesiones_actuales, activo) VALUES (?, ?, 10, 0, TRUE)"); ps.setString(1, fixEncoding(nombre)); ps.setString(2, fixEncoding(desc)); ps.executeUpdate() } finally { conn.close() } }
