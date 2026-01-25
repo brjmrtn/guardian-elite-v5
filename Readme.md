@@ -96,12 +96,12 @@ Rellenar por la mañana para calibrar la IA.
 
 #### 🏋️ Registro de Entreno (Híbrido)
 * **Tipo:**
-    * *Club / Academia:* Solo registra carga (RPE) y calidad.
-    * *Papá (Portero) / Papá (Jugador):* Habilita el diseñador de sesiones.
+  * *Club / Academia:* Solo registra carga (RPE) y calidad.
+  * *Papá (Portero) / Papá (Jugador):* Habilita el diseñador de sesiones.
 * **Diseñador con IA:**
-    1.  Escribe un objetivo en el campo "Foco" (ej: "Salida de balón", "Reflejos", "Desmarques").
-    2.  Pulsa el botón **🤖 IA**.
-    3.  El sistema generará una rutina de 45 min adaptada al rol (Portero o Jugador) y basada en los errores del último partido.
+  1.  Escribe un objetivo en el campo "Foco" (ej: "Salida de balón", "Reflejos", "Desmarques").
+  2.  Pulsa el botón **🤖 IA**.
+  3.  El sistema generará una rutina de 45 min adaptada al rol (Portero o Jugador) y basada en los errores del último partido.
 
 #### 🎯 Misiones Activas
 Barra de progreso de objetivos a corto plazo (ej: "Completar 10 sesiones de blocaje"). Se llenan solas al registrar entrenos "Papá".
@@ -113,9 +113,9 @@ Barra de progreso de objetivos a corto plazo (ej: "Completar 10 sesiones de bloc
 
 * **Buscador:** Escribe el nombre del equipo rival.
 * **Ficha del Rival:**
-    * **Estilo:** ¿Juegan directo o combinativo?
-    * **Claves:** "El 9 es zurdo y rápido", "El portero duda en salidas".
-    * **Notas:** Historial de observaciones.
+  * **Estilo:** ¿Juegan directo o combinativo?
+  * **Claves:** "El 9 es zurdo y rápido", "El portero duda en salidas".
+  * **Notas:** Historial de observaciones.
 * **Historial vs Rival:** Muestra automáticamente todos los partidos jugados contra ellos, con resultados y links de video.
 
 ---
@@ -126,9 +126,9 @@ Barra de progreso de objetivos a corto plazo (ej: "Completar 10 sesiones de bloc
 * **Añadir Material:** Sube una **FOTO REAL** de los guantes o botas.
 * **Barra de Vida:** Define una vida útil (ej: 30 usos). La barra baja automáticamente cada vez que registras un partido o entrenamiento.
 * **Semáforo:**
-    * 🟢 Verde: Nuevo/Buen estado.
-    * 🟡 Amarillo: Desgaste visible.
-    * 🔴 Rojo: Crítico/Cambiar (Alerta visual).
+  * 🟢 Verde: Nuevo/Buen estado.
+  * 🟡 Amarillo: Desgaste visible.
+  * 🔴 Rojo: Crítico/Cambiar (Alerta visual).
 
 ---
 
@@ -137,10 +137,10 @@ Barra de progreso de objetivos a corto plazo (ej: "Completar 10 sesiones de bloc
 
 * **Canvas Interactivo:** Un campo de fútbol verde proporcional al móvil.
 * **Lápices:**
-    * ⚪ **Blanco:** Balón y movimientos generales.
-    * 🟡 **Amarillo:** Héctor / Portero.
-    * 🔴 **Rojo:** Rival / Peligro.
-    * 🔵 **Azul:** Equipo propio / Defensas.
+  * ⚪ **Blanco:** Balón y movimientos generales.
+  * 🟡 **Amarillo:** Héctor / Portero.
+  * 🔴 **Rojo:** Rival / Peligro.
+  * 🔵 **Azul:** Equipo propio / Defensas.
 * **Multitouch:** Funciona con el dedo.
 * **Borrar:** Limpia la pizarra instantáneamente.
 
@@ -150,10 +150,10 @@ Barra de progreso de objetivos a corto plazo (ej: "Completar 10 sesiones de bloc
 *Análisis específico de la pena máxima.*
 
 * **Registrar:**
-    * **Rival:** (Opcional).
-    * **Zona Tiro:** ¿Dónde fue el balón? (TL=Arriba Izq, MM=Centro, BR=Abajo Der).
-    * **Salto Héctor:** ¿Hacia dónde se venció? (L=Izq, C=Centro, R=Der).
-    * **Resultado:** Gol o No Gol.
+  * **Rival:** (Opcional).
+  * **Zona Tiro:** ¿Dónde fue el balón? (TL=Arriba Izq, MM=Centro, BR=Abajo Der).
+  * **Salto Héctor:** ¿Hacia dónde se venció? (L=Izq, C=Centro, R=Der).
+  * **Resultado:** Gol o No Gol.
 * **Heatmap (Mapa de Calor):** Muestra visualmente las zonas donde más tiran los rivales de su categoría y el porcentaje de goles en cada zona.
 
 ---
@@ -166,6 +166,22 @@ Accesible desde el icono de engranaje (arriba derecha).
 * **Backup:** Descargar toda la base de datos en CSV (Excel).
 * **Importador:** Cargar datos masivos antiguos.
 * **Informe PDF:** Generar un reporte imprimible de la temporada.
+
+---
+
+## 🚀 ROADMAP: Guardian X (Next Gen)
+*Conceptos estratégicos para convertir la herramienta en el arma definitiva.*
+
+1.  **👁️ Vision Pro (Computer Vision):** Análisis de video automático. Ingesta de links de YouTube para generar *heatmaps* de posicionamiento y calcular tiempos de reacción (ms) sin etiquetado manual.
+2.  **⌚ Bio-Telemetría Real (IoT):** Integración con wearables (Apple Watch/Whoop) para medir Carga Interna (FC media) y Sueño real (VFC), sustituyendo la percepción subjetiva.
+3.  **🔮 El Oráculo (Predictive Analytics):** Proyección de carrera comparativa. Algoritmos que contrastan la curva de evolución de Héctor con datos históricos de porteros profesionales a su misma edad.
+4.  **🧠 Diario de Voz (NLP):** Análisis de sentimiento post-partido. Grabación de audio donde la IA detecta frustración, ansiedad o euforia para gestionar la psicología deportiva.
+5.  **♟️ Simulador Táctico (Gamificación):** Recreación digital 2D de los goles encajados para que el jugador tome la decisión correcta en el simulador ("Corregir el error virtualmente").
+6.  **🛡️ Escudo Rival Dinámico (Scouting 2.0):** *Web Scraping* automático de actas digitales de la liga para detectar goleadores y patrones rivales sin entrada manual de datos.
+7.  **🧬 Generador Visual (Video GenAI):** Sustitución de texto por video. La IA genera clips animados de avatares ejecutando la técnica exacta sugerida en el entrenamiento.
+8.  **📉 'Moneyball' de Distribución:** Análisis de grafos de pases. Mapeo de conexiones para detectar con qué compañeros tiene mejor química y química negativa bajo presión.
+9.  **🚦 Asistente de Banda (Live Mode):** Botonera simplificada para registro en tiempo real. Algoritmo de "Medio Tiempo" que envía una notificación al descanso con consejos tácticos basados en la 1ª parte.
+10. **🕹️ Modo Legado (RPG Profundo):** Árbol de habilidades desbloqueable, equipamiento virtual legendario y crónicas de prensa generadas por IA tras cada victoria.
 
 ---
 
