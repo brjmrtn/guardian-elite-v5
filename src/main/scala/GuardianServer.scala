@@ -261,6 +261,7 @@ object GuardianServer extends cask.MainRoutes {
   @cask.postForm("/gear/add") def addGear(nombre: String, tipo: String, vida: Int, img: String) = { DatabaseManager.addNewGear(nombre, tipo, vida, if(img!=null) img else ""); gearPage() }
 
   // 5. BIO PAGE
+  // 5. BIO PAGE
   @cask.get("/bio")
   def bioPage() = {
     val activeDrills = DatabaseManager.getActiveDrills()
@@ -296,14 +297,23 @@ object GuardianServer extends cask.MainRoutes {
               )
             ),
             drillList,
-            div(id:="manualDesign", style:="display:none;",
-              div(cls:="d-flex gap-2 mb-2",
-                input(tpe:="text", name:="foco", id:="drillFocus", cls:="form-control", placeholder:="Objetivo (ej: Pases)"),
-                button(tpe:="button", cls:="btn btn-warning", onclick:="generateAI()", "🤖 IA")
-              ),
-              textarea(name:="rutina", id:="rutinaText", cls:="form-control mb-3", rows:="4", placeholder:="Diseña la sesión o deja que la IA lo haga...")
+            // CAMBIO 1: El Foco ahora es visible SIEMPRE
+            div(cls:="mb-3", label(cls:="small", "Foco / Actividad"),
+              div(cls:="d-flex gap-2",
+                input(tpe:="text", name:="foco", id:="drillFocus", cls:="form-control", placeholder:="Ej: Tiros, Resistencia...", required:=true),
+                // El botón de IA se oculta/muestra con JS si no es Papa
+                button(tpe:="button", id:="aiBtn", cls:="btn btn-warning", onclick:="generateAI()", style:="display:none;", "🤖 IA")
+              )
             ),
-            div(cls:="row mb-3", div(cls:="col-6 text-center", label(cls:="small", "RPE (Esfuerzo)"), input(tpe:="number", cls:="form-control text-center", name:="rpe", value:="7")), div(cls:="col-6 text-center", label(cls:="small", "Calidad"), input(tpe:="number", cls:="form-control text-center", name:="calidad", value:="8"))),
+            div(id:="manualDesign", style:="display:none;",
+              textarea(name:="rutina", id:="rutinaText", cls:="form-control mb-3", rows:="4", placeholder:="Detalle de la sesión...")
+            ),
+            // CAMBIO 2: Fila de Stats completa (RPE, Calidad y ATENCION)
+            div(cls:="row mb-3",
+              div(cls:="col-4 text-center", label(cls:="small", "RPE"), input(tpe:="number", cls:="form-control text-center p-1", name:="rpe", value:="7", min:="1", max:="10")),
+              div(cls:="col-4 text-center", label(cls:="small", "Calidad"), input(tpe:="number", cls:="form-control text-center p-1", name:="calidad", value:="8", min:="1", max:="10")),
+              div(cls:="col-4 text-center", label(cls:="small", "Atención"), input(tpe:="number", cls:="form-control text-center p-1", name:="atencion", value:="8", min:="1", max:="10"))
+            ),
             div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success", "Guardar Sesión"))
           )
           )
@@ -315,8 +325,12 @@ object GuardianServer extends cask.MainRoutes {
         var type=document.getElementById('trainingType').value;
         var container=document.getElementById('drillsContainer');
         var manual=document.getElementById('manualDesign');
+        var aiBtn = document.getElementById('aiBtn');
+
+        // Logica para mostrar/ocultar segun tipo
         if(container){if(type.includes('Papa') && !type.includes('Jugador')) container.style.display='block'; else container.style.display='none';}
         if(manual){if(type.includes('Papa')) manual.style.display='block'; else manual.style.display='none';}
+        if(aiBtn){if(type.includes('Papa')) aiBtn.style.display='block'; else aiBtn.style.display='none';}
     }
     function generateAI(){
         var focus = document.getElementById('drillFocus').value;
@@ -328,7 +342,6 @@ object GuardianServer extends cask.MainRoutes {
     window.addEventListener('DOMContentLoaded', toggleDrills);""")))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
-
   @cask.postForm("/bio/save_wellness") def saveWellness(sueno: Int, horas: String, energia: Int, dolor: Int, zona: String, altura: String, peso: String, animo: Int, notas_conducta: String, estadoFisico: String) = { val h = if(horas.nonEmpty) horas.toDouble else 0.0; val alt = if(altura.nonEmpty) altura.toInt else 0; val pes = if(peso.nonEmpty) peso.toDouble else 0.0; DatabaseManager.logWellness(sueno, h, energia, dolor, zona, alt, pes, animo, notas_conducta, estadoFisico); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
   @cask.postForm("/bio/save_training") def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: String, rutina: String) = { val att = if(atencion != null && atencion.nonEmpty) atencion.toInt else 3; DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
   @cask.get("/bio/ai_gen") def aiGenDrill(focus: String, mode: String) = { cask.Response(DatabaseManager.generateTrainingSession(mode, focus)) }
