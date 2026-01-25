@@ -26,7 +26,8 @@ object DatabaseManager {
   def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
 
   // --- IA CONFIG ---
-  val modelList = Seq("gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash")
+  // CORRECCIÓN: Usar modelos estables primero
+  val modelList = Seq("gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash-latest")
 
   def callGeminiAI(prompt: String): String = {
     // IMPORTANTE: Asegúrate de que esta variable de entorno existe en Render
