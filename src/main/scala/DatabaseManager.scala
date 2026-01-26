@@ -5,7 +5,7 @@ import requests._
 import ujson._
 
 // DATA MODELS
-case class PlayerCardData(nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String, div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int, divRaw: Double, hanRaw: Double, kicRaw: Double, refRaw: Double, spdRaw: Double, posRaw: Double)
+case class PlayerCardData(nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String, div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int, divRaw: Double, hanRaw: Double, kicRaw: Double, refRaw: Double, spdRaw: Double, posRaw: Double, anioNacimiento: Int)
 case class MatchLog(id: Int, rival: String, resultado: String, minutos: Int, nota: Double, fecha: String, clima: String, notas: String, video: String, reaccion: String, status: String, tipo: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int)
 case class SeasonSummary(id: Int, categoria: String, clubUrl: String, fotoUrl: String, partidosJugados: Int, golesContra: Int, porteriasCero: Int, mediaFinal: Int)
 case class Achievement(icono: String, nombre: String, cantidad: Int, descripcion: String)
@@ -59,6 +59,7 @@ object DatabaseManager {
   }
 
   // --- IA GENERADOR DE ENTRENOS ---
+  // --- IA GENERADOR DE ENTRENOS ---
   def generateTrainingSession(mode: String, focus: String): String = {
     var context = ""
     val conn = getConnection(); try {
@@ -66,7 +67,14 @@ object DatabaseManager {
       if(rs.next()) context = s"Último partido: ${rs.getString("notas_partido")}. Fallos recientes: ${rs.getString("reaccion_goles")}."
     } finally { conn.close() }
 
-    val role = if(mode.contains("Jugador")) "JUGADOR DE CAMPO (Fútbol 7, niño 8 años)" else "PORTERO (Fútbol 7, niño 8 años)"
+    // CALCULO EDAD
+    val card = getLatestCardData()
+    val edadReal = java.time.LocalDate.now().getYear - card.anioNacimiento
+
+    // CORRECCIÓN: Asegúrate de que esta línea termina aquí y das ENTER
+    val role = if(mode.contains("Jugador")) s"JUGADOR DE CAMPO (Fútbol 7, niño $edadReal años)" else s"PORTERO (Fútbol 7, niño $edadReal años)"
+
+    // Y que esta línea empieza abajo
     val prompt = s"""
       Eres un Entrenador de Fútbol experto en cantera. Diseña una sesión de entrenamiento individual (Padre e Hijo) de 45 min.
       ROL: $role.
@@ -81,7 +89,6 @@ object DatabaseManager {
     """
     callGeminiAI(prompt).replace("```html", "").replace("```", "").trim
   }
-
   // --- PENALTY LAB ---
   def logPenalty(rival: String, zTiro: String, zSalto: String, esGol: Boolean): Unit = {
     val conn = getConnection(); try {
@@ -113,14 +120,19 @@ object DatabaseManager {
 
   // --- FUNCIONES CLÁSICAS (DEBUGGEADAS) ---
   // --- ANÁLISIS EVOLUTIVO "GUARDIAN 360" ---
+  // --- ANÁLISIS EVOLUTIVO "GUARDIAN 360" ---
   def getDeepAnalysis(): String = {
     var conn: Connection = null
     try {
       conn = getConnection()
       val sb = new StringBuilder()
 
-      // 1. CABECERA DEL PROMPT
-      sb.append("Actúa como un Analista de Rendimiento de Élite para un portero de 8 años (Héctor).\n")
+      // CALCULO DE EDAD REAL
+      val card = getLatestCardData()
+      val edadReal = java.time.LocalDate.now().getYear - card.anioNacimiento
+
+      // 1. CABECERA DEL PROMPT (Ahora con edad exacta)
+      sb.append(s"Actúa como un Analista de Rendimiento de Élite para un portero de $edadReal años (Héctor).\n")
       sb.append("Analiza los siguientes datos cronológicos y detecta TENDENCIAS DE EVOLUCIÓN.\n\n")
 
       // 2. HISTORIAL DE PARTIDOS (CRONOLÓGICO)
@@ -193,7 +205,21 @@ object DatabaseManager {
   def getRivalInfo(nombre: String): Option[RivalInfo] = { var r: Option[RivalInfo]=None; val conn=getConnection(); try{ val ps=conn.prepareStatement("SELECT * FROM rivals WHERE LOWER(nombre)=LOWER(?)"); ps.setString(1,fixEncoding(nombre)); val rs=ps.executeQuery(); if(rs.next()) r=Some(RivalInfo(rs.getString("nombre"), rs.getString("estilo_juego"), rs.getString("jugadores_clave"), rs.getString("notas_scouting"))) } finally {conn.close()}; r }
   def getActiveDrills(): List[Drill] = { var l=List[Drill](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM drills WHERE activo=TRUE ORDER BY id DESC"); while(rs.next()) l=l:+Drill(rs.getInt("id"), rs.getString("nombre"), Option(rs.getString("descripcion")).getOrElse(""), rs.getInt("sesiones_actuales"), rs.getInt("sesiones_objetivo")) } catch {case _:Exception=>} finally {conn.close()}; l }
   def progressDrills(): Unit = { val conn=getConnection(); try{ conn.createStatement().executeUpdate("UPDATE drills SET sesiones_actuales = sesiones_actuales + 1 WHERE activo = TRUE"); conn.createStatement().executeUpdate("UPDATE drills SET activo = FALSE WHERE sesiones_actuales >= sesiones_objetivo") } finally {conn.close()} }
-  def getLatestCardData(): PlayerCardData = { var conn:Connection=null; try{conn=getConnection(); val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1"); if(rs.next()){ PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), "", Option(rs.getString("nombre_club")).getOrElse(""), rs.getDouble("stat_div").toInt, rs.getDouble("stat_han").toInt, rs.getDouble("stat_kic").toInt, rs.getDouble("stat_ref").toInt, rs.getDouble("stat_spd").toInt, rs.getDouble("stat_pos").toInt, rs.getDouble("stat_div"), rs.getDouble("stat_han"), rs.getDouble("stat_kic"), rs.getDouble("stat_ref"), rs.getDouble("stat_spd"), rs.getDouble("stat_pos")) } else PlayerCardData("HECTOR",59,"GK","","","","",80,60,55,60,62,58,80,60,55,60,62,58) } finally {if(conn!=null) conn.close()} }
+  def getLatestCardData(): PlayerCardData = {
+    var conn:Connection=null;
+    try{
+      conn=getConnection();
+      val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1");
+      if(rs.next()){
+        // Recuperamos el año, si falla usamos 2016 por defecto
+        val anio = try { rs.getInt("anio_nacimiento") } catch { case _:Exception => 2020 }
+        PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), "", Option(rs.getString("nombre_club")).getOrElse(""), rs.getDouble("stat_div").toInt, rs.getDouble("stat_han").toInt, rs.getDouble("stat_kic").toInt, rs.getDouble("stat_ref").toInt, rs.getDouble("stat_spd").toInt, rs.getDouble("stat_pos").toInt, rs.getDouble("stat_div"), rs.getDouble("stat_han"), rs.getDouble("stat_kic"), rs.getDouble("stat_ref"), rs.getDouble("stat_spd"), rs.getDouble("stat_pos"), anio)
+      } else {
+        // Carta por defecto
+        PlayerCardData("HECTOR",59,"GK","","","","",80,60,55,60,62,58,80,60,55,60,62,58, 2020)
+      }
+    } finally {if(conn!=null) conn.close()}
+  }
   def getMatchesList(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha DESC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok")) } } finally {conn.close()}; l }
   def getUpcomingMatches(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='SCHEDULED' ORDER BY fecha ASC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), "-", 0, 0, rs.getDate("fecha").toString, "", "", "", "", rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"),0,0,0,0) } } finally {conn.close()}; l }
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches WHERE status='PLAYED' ORDER BY fecha ASC LIMIT 15"); while(rs.next()){ l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally {conn.close()}; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
@@ -209,6 +235,14 @@ object DatabaseManager {
   def getBackupCSV(): String = { val sb=new StringBuilder(); sb.append("Fecha,Rival,GF,GC,Min,Nota,Clima,Notas,Reaccion\n"); getMatchesList().foreach(m => sb.append(s"${m.fecha},${m.rival},${m.resultado},${m.minutos},${m.nota},${m.clima},${m.notas.replace(",",";")},${m.reaccion.replace(",",";")}\n")); sb.toString() }
   def updateObjective(id: Int, nuevo: Int): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE objectives SET objetivo=? WHERE id=?"); s.setInt(1,nuevo); s.setInt(2,id); s.executeUpdate() } finally { conn.close() } }
   def startNewSeason(cat: String): String = { val conn=getConnection(); try { val l=getLatestCardData(); val s=conn.prepareStatement("INSERT INTO seasons (categoria, foto_jugador_url, club_escudo_url, media, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos, nombre_club) VALUES (?,?,?,?,?,?,?,?,?,?,?)"); s.setString(1,fixEncoding(cat)); s.setString(2,l.fotoUrl); s.setString(3,l.clubUrl); s.setDouble(4,l.media.toDouble); s.setDouble(5,l.divRaw); s.setDouble(6,l.hanRaw); s.setDouble(7,l.kicRaw); s.setDouble(8,l.refRaw); s.setDouble(9,l.spdRaw); s.setDouble(10,l.posRaw); s.setString(11, l.clubNombre); s.executeUpdate(); s"Etapa $cat iniciada" } finally { conn.close() } }
-  def updateSeasonSettings(f: String, c: String, n: String): String = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club) WHERE id=(SELECT MAX(id) FROM seasons)"); s.setString(1,f); s.setString(2,c); s.setString(3,fixEncoding(n)); s.executeUpdate(); "DATOS ACTUALIZADOS" } finally { conn.close() } }
+  def updateSeasonSettings(f: String, c: String, n: String, anio: Int): String = {
+    val conn=getConnection();
+    try {
+      val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club), anio_nacimiento=? WHERE id=(SELECT MAX(id) FROM seasons)");
+      s.setString(1,f); s.setString(2,c); s.setString(3,fixEncoding(n)); s.setInt(4, anio);
+      s.executeUpdate();
+      "DATOS ACTUALIZADOS"
+    } finally { conn.close() }
+  }
   def getRivalScouting(rivalBusqueda: String): (List[MatchLog], Map[String, Int]) = { var matches = List[MatchLog](); var stats = scala.collection.mutable.Map("pj"->0, "gf"->0, "gc"->0, "ganados"->0, "empatados"->0, "perdidos"->0); val conn = getConnection(); try { val query = s"SELECT * FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED' ORDER BY fecha DESC"; val stmt = conn.prepareStatement(query); stmt.setString(1, s"%$rivalBusqueda%"); val rs = stmt.executeQuery(); while(rs.next()) { val (gf, gc) = (rs.getInt("goles_favor"), rs.getInt("goles_contra")); matches = matches :+ MatchLog(rs.getInt("id"), rs.getString("rival"), s"$gf-$gc", rs.getInt("minutos"), rs.getDouble("nota"), rs.getString("fecha"), Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok")); stats("pj")+=1; stats("gf")+=gf; stats("gc")+=gc; if(gf>gc) stats("ganados")+=1 else if(gf==gc) stats("empatados")+=1 else stats("perdidos")+=1 } } finally { conn.close() }; (matches, stats.toMap) }
 }
