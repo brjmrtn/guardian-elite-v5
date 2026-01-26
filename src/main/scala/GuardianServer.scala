@@ -444,7 +444,9 @@ object GuardianServer extends cask.MainRoutes {
       form(action := "/settings/save_base64", method := "post",
         div(cls := "mb-4", label(cls := "form-label text-info", "Nombre del Club"), input(tpe := "text", name := "nombreClub", cls := "form-control", value:=card.clubNombre, placeholder := "Ej: Rayo Vallecano")),
         // NUEVO CAMPO AÑO
-        div(cls := "mb-4", label(cls := "form-label text-success", "Año de Nacimiento"), input(tpe := "number", name := "anio", cls := "form-control", value:=card.anioNacimiento.toString)),
+        div(cls := "mb-4", label(cls := "form-label text-success", "Fecha de Nacimiento"),
+          input(tpe := "date", name := "fechaNac", cls := "form-control", value:=card.fechaNacimiento)
+        ),
 
         div(cls := "mb-4", label(cls := "form-label text-info", "Foto Jugador"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_foto')"), input(tpe := "hidden", name := "fotoBase64", id := "hidden_foto")),
         div(cls := "mb-4", label(cls := "form-label text-warning", "Escudo Club"), input(tpe := "file", cls := "form-control", accept := "image/*", onchange := "convertToBase64(this, 'hidden_club')"), input(tpe := "hidden", name := "clubBase64", id := "hidden_club")),
@@ -453,10 +455,11 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/settings/save_base64")
-  def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String, anio: String) = {
-    val anioInt = try { anio.toInt } catch { case _:Exception => 2016 }
-    val res = DatabaseManager.updateSeasonSettings(if(fotoBase64!=null) fotoBase64 else "", if(clubBase64!=null) clubBase64 else "", if(nombreClub!=null) nombreClub else "", anioInt);
-    // ... resto igual ...
+  def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String, fechaNac: String) = {
+    // Si viene vacío, ponemos la fecha de Héctor por defecto
+    val fechaFinal = if(fechaNac != null && fechaNac.nonEmpty) fechaNac else "2020-06-19"
+
+    val res = DatabaseManager.updateSeasonSettings(if(fotoBase64!=null) fotoBase64 else "", if(clubBase64!=null) clubBase64 else "", if(nombreClub!=null) nombreClub else "", fechaFinal);
     val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Exito"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1("OK"), h2(res), div(style := "margin-top: 20px;", a(href := "/", cls := "btn btn-warning", "Volver"))))).render;
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }

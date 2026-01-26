@@ -3,9 +3,11 @@ import java.util.Properties
 import java.time.LocalDate
 import requests._
 import ujson._
+import java.time.{LocalDate, Period}
+import java.sql.Date
 
 // DATA MODELS
-case class PlayerCardData(nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String, div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int, divRaw: Double, hanRaw: Double, kicRaw: Double, refRaw: Double, spdRaw: Double, posRaw: Double, anioNacimiento: Int)
+case class PlayerCardData(nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String, div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int, divRaw: Double, hanRaw: Double, kicRaw: Double, refRaw: Double, spdRaw: Double, posRaw: Double, anioNacimiento: Int, fechaNacimiento: String)
 case class MatchLog(id: Int, rival: String, resultado: String, minutos: Int, nota: Double, fecha: String, clima: String, notas: String, video: String, reaccion: String, status: String, tipo: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int)
 case class SeasonSummary(id: Int, categoria: String, clubUrl: String, fotoUrl: String, partidosJugados: Int, golesContra: Int, porteriasCero: Int, mediaFinal: Int)
 case class Achievement(icono: String, nombre: String, cantidad: Int, descripcion: String)
@@ -24,7 +26,15 @@ object DatabaseManager {
   }
 
   def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
-
+  def calcularEdadExacta(fechaStr: String): Int = {
+    try {
+      val nacimiento = LocalDate.parse(fechaStr)
+      val hoy = LocalDate.now()
+      Period.between(nacimiento, hoy).getYears
+    } catch {
+      case _: Exception => 5 // Fallback por seguridad
+    }
+  }
   // --- IA CONFIG ---
   // CORRECCIÓN: Usar modelos estables primero
   val modelList = Seq("gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash-latest")
@@ -69,7 +79,7 @@ object DatabaseManager {
 
     // CALCULO EDAD
     val card = getLatestCardData()
-    val edadReal = java.time.LocalDate.now().getYear - card.anioNacimiento
+    val edadReal = calcularEdadExacta(card.fechaNacimiento)
 
     // CORRECCIÓN: Asegúrate de que esta línea termina aquí y das ENTER
     val role = if(mode.contains("Jugador")) s"JUGADOR DE CAMPO (Fútbol 7, niño $edadReal años)" else s"PORTERO (Fútbol 7, niño $edadReal años)"
@@ -81,10 +91,23 @@ object DatabaseManager {
       OBJETIVO PRINCIPAL: $focus.
       CONTEXTO RECIENTE: $context
 
-      Estructura la respuesta SOLO con este formato HTML (sin markdown ```html):
-      <p><b>1. Calentamiento (10'):</b> [Ejercicio divertido]</p>
-      <p><b>2. Técnica (20'):</b> [2 ejercicios clave para $role usando el objetivo]</p>
-      <p><b>3. Reto Final (15'):</b> [Juego competitivo]</p>
+      INSTRUCCIONES DE FORMATO:
+      - NO uses HTML (<p>, <b>, etc).
+      - NO uses Markdown (**, ##).
+      - Usa solo texto plano, mayúsculas para títulos y guiones para listas.
+
+      Estructura la respuesta ASÍ:
+
+      1. CALENTAMIENTO (10'):
+      [Ejercicio divertido]
+
+      2. TÉCNICA (20'):
+      - [Ejercicio 1]
+      - [Ejercicio 2]
+
+      3. RETO FINAL (15'):
+      [Juego competitivo]
+
       Sé breve, motivador y directo.
     """
     callGeminiAI(prompt).replace("```html", "").replace("```", "").trim
@@ -129,7 +152,7 @@ object DatabaseManager {
 
       // CALCULO DE EDAD REAL
       val card = getLatestCardData()
-      val edadReal = java.time.LocalDate.now().getYear - card.anioNacimiento
+      val edadReal = calcularEdadExacta(card.fechaNacimiento)
 
       // 1. CABECERA DEL PROMPT (Ahora con edad exacta)
       sb.append(s"Actúa como un Analista de Rendimiento de Élite para un portero de $edadReal años (Héctor).\n")
@@ -211,12 +234,11 @@ object DatabaseManager {
       conn=getConnection();
       val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1");
       if(rs.next()){
-        // Recuperamos el año, si falla usamos 2016 por defecto
-        val anio = try { rs.getInt("anio_nacimiento") } catch { case _:Exception => 2020 }
-        PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), "", Option(rs.getString("nombre_club")).getOrElse(""), rs.getDouble("stat_div").toInt, rs.getDouble("stat_han").toInt, rs.getDouble("stat_kic").toInt, rs.getDouble("stat_ref").toInt, rs.getDouble("stat_spd").toInt, rs.getDouble("stat_pos").toInt, rs.getDouble("stat_div"), rs.getDouble("stat_han"), rs.getDouble("stat_kic"), rs.getDouble("stat_ref"), rs.getDouble("stat_spd"), rs.getDouble("stat_pos"), anio)
+        // Recuperamos la fecha o ponemos una por defecto
+        val fecha = Option(rs.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19")
+        PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", ..., fecha) // <--- OJO AQUÍ al final
       } else {
-        // Carta por defecto
-        PlayerCardData("HECTOR",59,"GK","","","","",80,60,55,60,62,58,80,60,55,60,62,58, 2020)
+        PlayerCardData("HECTOR",59,"GK", ..., "2020-06-19")
       }
     } finally {if(conn!=null) conn.close()}
   }
@@ -235,11 +257,12 @@ object DatabaseManager {
   def getBackupCSV(): String = { val sb=new StringBuilder(); sb.append("Fecha,Rival,GF,GC,Min,Nota,Clima,Notas,Reaccion\n"); getMatchesList().foreach(m => sb.append(s"${m.fecha},${m.rival},${m.resultado},${m.minutos},${m.nota},${m.clima},${m.notas.replace(",",";")},${m.reaccion.replace(",",";")}\n")); sb.toString() }
   def updateObjective(id: Int, nuevo: Int): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE objectives SET objetivo=? WHERE id=?"); s.setInt(1,nuevo); s.setInt(2,id); s.executeUpdate() } finally { conn.close() } }
   def startNewSeason(cat: String): String = { val conn=getConnection(); try { val l=getLatestCardData(); val s=conn.prepareStatement("INSERT INTO seasons (categoria, foto_jugador_url, club_escudo_url, media, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos, nombre_club) VALUES (?,?,?,?,?,?,?,?,?,?,?)"); s.setString(1,fixEncoding(cat)); s.setString(2,l.fotoUrl); s.setString(3,l.clubUrl); s.setDouble(4,l.media.toDouble); s.setDouble(5,l.divRaw); s.setDouble(6,l.hanRaw); s.setDouble(7,l.kicRaw); s.setDouble(8,l.refRaw); s.setDouble(9,l.spdRaw); s.setDouble(10,l.posRaw); s.setString(11, l.clubNombre); s.executeUpdate(); s"Etapa $cat iniciada" } finally { conn.close() } }
-  def updateSeasonSettings(f: String, c: String, n: String, anio: Int): String = {
+  def updateSeasonSettings(f: String, c: String, n: String, fecha: String): String = {
     val conn=getConnection();
     try {
-      val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club), anio_nacimiento=? WHERE id=(SELECT MAX(id) FROM seasons)");
-      s.setString(1,f); s.setString(2,c); s.setString(3,fixEncoding(n)); s.setInt(4, anio);
+      val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club), fecha_nacimiento=? WHERE id=(SELECT MAX(id) FROM seasons)");
+      s.setString(1,f); s.setString(2,c); s.setString(3,fixEncoding(n));
+      s.setDate(4, Date.valueOf(fecha)); // Convertimos String a SQL Date
       s.executeUpdate();
       "DATOS ACTUALIZADOS"
     } finally { conn.close() }
