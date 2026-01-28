@@ -1,10 +1,10 @@
-# 🛡️ GUARDIAN ELITE v4.0 | High Performance Center
+# 🛡️ GUARDIAN ELITE v4.1 | High Performance Center
 
 > **"El talento te lleva al área, el dato te hace dueño de la portería."**
 
 **Guardian Elite** no es una simple app de estadísticas. Es un ecosistema integral de gestión deportiva diseñado para monitorizar, analizar y potenciar la carrera de **Héctor**. Combina la analítica de datos profesional (Big Data), la gamificación (estilo FUT) y la Inteligencia Artificial Generativa (Gemini AI) para maximizar el desarrollo técnico, táctico, físico y mental.
 
-![Version](https://img.shields.io/badge/Version-4.0_Fútbol_Total-blue?style=for-the-badge&logo=scala) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_Powered-orange?style=for-the-badge&logo=google-gemini)
+![Version](https://img.shields.io/badge/Version-4.1_Smart_Data-blue?style=for-the-badge&logo=scala) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_Powered-orange?style=for-the-badge&logo=google-gemini)
 
 ---
 
@@ -12,9 +12,9 @@
 
 La aplicación se estructura en **7 Módulos de Operaciones**, accesibles desde la barra de navegación inferior:
 
-1.  **🏠 Dashboard:** Inteligencia y Estado Actual.
-2.  **⚽ Match Center:** Registro de Partidos (Live/Post).
-3.  **🧬 Bio & Entreno:** Fisiología, Cargas y Entrenador IA.
+1.  **🏠 Dashboard:** Inteligencia, Estado Actual y Alertas Biométras.
+2.  **⚽ Match Center:** Registro de Partidos, Audio-Análisis y Heatmaps.
+3.  **🧬 Bio & Entreno:** Fisiología, Cargas y Entrenador IA Contextual.
 4.  **🧤 Garage:** Gestión de Material (Botas/Guantes).
 5.  **📋 Pizarra Táctica:** The Locker Room.
 6.  **🕵️ Scouting:** Inteligencia de Rivales (Black Book).
@@ -29,159 +29,111 @@ La aplicación se estructura en **7 Módulos de Operaciones**, accesibles desde 
 
 #### 👤 La Carta FUT (Player Card)
 Visualización gamificada del nivel actual.
-* **Media Global:** Calculada con el **Algoritmo de Trinquete**. La media nunca baja; si tiene un mal partido, se estanca, pero no retrocede. Esto protege la moral del jugador.
-* **Barra de XP:** Justo debajo de la carta. Muestra el porcentaje decimal (ej: 45%) para subir al siguiente punto de media.
-* **Stats (DIV, HAN, KIC...):** Se actualizan automáticamente tras cada partido según el rendimiento.
+* **Media Global:** Calculada con el **Algoritmo de Trinquete**. La media nunca baja; si tiene un mal partido, se estanca, pero no retrocede.
+* **Barra de XP:** Porcentaje decimal para subir al siguiente punto de media.
+* **Stats (DIV, HAN, KIC...):** Actualización dinámica tras cada partido.
 
-#### 🧠 IA Neuro-Scout (El Segundo Entrenador)
-Es el recuadro azul de alerta. **Gemini AI** analiza en tiempo real:
-1.  **Bio-Ritmo:** ¿Durmió bien hoy? ¿Está cansado?
-2.  **Crecimiento:** ¿Ha dado un estirón reciente (>0.5cm/mes)? (Alerta de torpeza motora).
-3.  **Racha:** ¿Cómo le fue en los últimos 3 partidos?
-4.  **Agenda:** ¿Quién es el próximo rival?
-* **Resultado:** Te da un consejo táctico/físico específico para HOY.
+#### 🕵️ Inteligencia de Datos (Smart Insights) [NUEVO v4.1]
+El sistema cruza datos en segundo plano para detectar patrones ocultos:
+* **⚠️ Alerta de "Torpeza del Estirón":** Cruza la velocidad de crecimiento (>0.5cm) con bajadas en la nota técnica (Coordinación).
+* **🔍 Patrones de Dolor:** Detecta si el dolor físico coincide recurrentemente con un tipo de superficie o entrenamiento.
 
-#### 📊 Gráficas de Rendimiento
-* **Radar Chart:** Comparativa visual de las 6 estadísticas clave.
-* **Growth Chart:** Evolución de la media a lo largo de la temporada.
-* **Donde te marcan / Donde paras:** Mapa de calor estadístico de la portería.
+#### 🧠 IA Neuro-Scout
+* **Análisis en tiempo real:** Bio-Ritmo + Racha + Próximo Rival.
+* **Resultado:** Consejo táctico/físico específico para HOY.
 
 ---
 
 ### 2. ⚽ MATCH CENTER (El Partido)
-*Donde ocurre la verdad. Diseñado para usarse en el descanso o al llegar a casa.*
+*Donde ocurre la verdad. Registro profesional post-partido.*
 
-#### 📝 Configuración Inicial
-* **Rival:** Nombre del equipo.
-* **Fecha:** Automática (hoy) o seleccionable.
-* **Marcador:** `GF` (Goles Favor) y `GC` (Goles Contra).
-* **Paradas:** Contador total (se actualiza solo al usar la rejilla).
+#### 🎯 El "Módulo Ederson" (Juego de Pies)
+Control obsesivo de la distribución. Afecta al atributo **KIC**.
+* **Corto:** Acierto/Fallo en pases de seguridad.
+* **Largo:** Acierto/Fallo en desplazamientos que rompen líneas.
 
-#### 🎯 El "Módulo Ederson" (Distribución)
-Control obsesivo del juego de pies.
-* **Corto:** Toca `✅` si el pase al defensa fue bueno, `❌` si falló.
-* **Largo:** Toca `✅` si el desplazamiento superó líneas y llegó al compañero.
-* *Nota:* Esto afecta directamente al atributo **KIC**.
+#### 🥅 Rejilla Portería (3x3)
+* **Modo Parada:** Dónde detuvo el balón.
+* **Modo Gol:** Por dónde entró.
 
-#### 🥅 Rejilla Interactiva (3x3)
-La portería se divide en 9 cuadrantes (TL, TM, TR, ML, MM, MR, BL, BM, BR).
-1.  **Modo Parada (Botón Verde):** Toca la zona donde detuvo el balón.
-2.  **Modo Gol (Botón Rojo):** Toca la zona por donde entró el gol.
+#### 🗺️ Heatmap de Campo (Juego Real) [NUEVO v4.1]
+Registro posicional de las intervenciones fuera de la portería.
+* **Uso:** Toca sobre el campo verde dónde intervino Héctor (paradas, cortes de líbero, pases). Define si es un portero valiente o si vive bajo el larguero.
 
-#### ⚡ Acciones Específicas
-* **1vs1:** Duelos ganados al delantero.
-* **Aéreo:** Balones descolgados o despejados por alto.
-* **Pie:** Acciones de corte fuera del área o regates (líbero).
-
-#### 📹 Sala de Video & Entorno
-* **Clima:** Selecciona las condiciones (Lluvia, Sol...). Afecta al atributo **HAN** (Handling).
-* **Link Video:** Pega aquí el enlace de YouTube o Drive del partido.
-
-#### 🧠 Análisis Técnico
-* **Notas:** Observaciones generales (liderazgo, colocación...).
-* **Reacción/Goles:** ¿Cómo reaccionó mentalmente tras un error o gol? Vital para la evolución psicológica.
-* **Nota (0-10):** Tu valoración subjetiva.
+#### 🎙️ Diario de Voz (Psicólogo IA) [NUEVO v4.1]
+* **Grabar:** Permite a Héctor grabar un audio contando cómo se sintió.
+* **Análisis:** Gemini AI procesa el audio y detecta el estado emocional (Frustración, Euforia, Calma) para dar consejos de gestión mental al padre.
 
 ---
 
 ### 3. 🧬 BIO & ENTRENO (El Motor)
 *El cuerpo y la mente del atleta.*
 
-#### 🩺 Wellness (Diario)
-Rellenar por la mañana para calibrar la IA.
-* **Estado Físico:** Disponible, Molestias, Lesión.
-* **Sueño:** Calidad (1-5) y Horas. Fundamental para la recuperación.
-* **Energía/Ánimo:** Sliders del 1 al 5.
-* **Crecimiento:** Introduce Altura (cm) y Peso (kg). El sistema calcula la "Velocidad de Crecimiento".
+#### 🩺 Wellness & Growth
+* **Diario:** Sueño, Energía, Dolor y Estado Físico.
+* **Growth Tracker:** Registro de Altura/Peso para calcular velocidad de crecimiento.
 
-#### 🏋️ Registro de Entreno (Híbrido)
-* **Tipo:**
-  * *Club / Academia:* Solo registra carga (RPE) y calidad.
-  * *Papá (Portero) / Papá (Jugador):* Habilita el diseñador de sesiones.
-* **Diseñador con IA:**
-  1.  Escribe un objetivo en el campo "Foco" (ej: "Salida de balón", "Reflejos", "Desmarques").
-  2.  Pulsa el botón **🤖 IA**.
-  3.  El sistema generará una rutina de 45 min adaptada al rol (Portero o Jugador) y basada en los errores del último partido.
-
-#### 🎯 Misiones Activas
-Barra de progreso de objetivos a corto plazo (ej: "Completar 10 sesiones de blocaje"). Se llenan solas al registrar entrenos "Papá".
+#### 🏋️ Generador de Sesiones "Híbrido" [NUEVO v4.1]
+La IA ahora tiene memoria.
+* **Contexto Real:** Al pedir una sesión ("Papá Portero"), el sistema lee qué hizo ayer (¿Academia? ¿Partido duro?).
+* **Resultado:** Si ayer la carga fue alta, hoy genera automáticamente una sesión de recuperación o técnica suave. Si descansó, sube la intensidad.
 
 ---
 
-### 4. 🕵️ SCOUTING (Black Book)
-*La inteligencia competitiva.*
-
-* **Buscador:** Escribe el nombre del equipo rival.
-* **Ficha del Rival:**
-  * **Estilo:** ¿Juegan directo o combinativo?
-  * **Claves:** "El 9 es zurdo y rápido", "El portero duda en salidas".
-  * **Notas:** Historial de observaciones.
-* **Historial vs Rival:** Muestra automáticamente todos los partidos jugados contra ellos, con resultados y links de video.
+### 4. 🕵️ SCOUTING & 5. 🧤 GARAGE
+* **Rivales:** Base de datos con estilos de juego e historial de enfrentamientos.
+* **Material:** Gestión de vida útil de guantes y botas con semáforo de desgaste.
 
 ---
 
-### 5. 🧤 GARAGE (Gestión de Material)
-*Enseña al profesionalismo cuidando las herramientas.*
-
-* **Añadir Material:** Sube una **FOTO REAL** de los guantes o botas.
-* **Barra de Vida:** Define una vida útil (ej: 30 usos). La barra baja automáticamente cada vez que registras un partido o entrenamiento.
-* **Semáforo:**
-  * 🟢 Verde: Nuevo/Buen estado.
-  * 🟡 Amarillo: Desgaste visible.
-  * 🔴 Rojo: Crítico/Cambiar (Alerta visual).
+### 6. 📋 PIZARRA & 7. 🥅 PENALTY LAB
+* **Pizarra:** Canvas multitáctil para explicaciones tácticas.
+* **Penaltis:** Registro de zonas de tiro y mapa de calor de lanzadores rivales.
 
 ---
 
-### 6. 📋 PIZARRA TÁCTICA (The Locker Room)
-*Para explicaciones rápidas en el descanso o en el coche.*
+## 🚀 ROADMAP: Guardian Elite (Alto Rendimiento)
 
-* **Canvas Interactivo:** Un campo de fútbol verde proporcional al móvil.
-* **Lápices:**
-  * ⚪ **Blanco:** Balón y movimientos generales.
-  * 🟡 **Amarillo:** Héctor / Portero.
-  * 🔴 **Rojo:** Rival / Peligro.
-  * 🔵 **Azul:** Equipo propio / Defensas.
-* **Multitouch:** Funciona con el dedo.
-* **Borrar:** Limpia la pizarra instantáneamente.
+Plan estratégico de desarrollo enfocado en **Sports Science** y profesionalización (v4.2+).
 
----
+### 📂 BLOQUE A: VIDEOANÁLISIS Y BIOMECÁNICA
+*El ojo clínico. Análisis cualitativo.*
+1.  **📹 La "Videoteca" (Clips de Éxito):** Playlist automática de tags `PARADA` o `MVP` para refuerzo visual pre-partido.
+2.  **🩺 Auditor de Gesto Técnico:** Video-checklist para detectar vicios (paso negativo, manos planas, mala caída).
+3.  **📐 Simulador de "La Bisectriz":** Herramienta interactiva para enseñar geometría y reducción de ángulos.
 
-### 7. 🥅 PENALTY LAB (Laboratorio)
-*Análisis específico de la pena máxima.*
+### 📂 BLOQUE B: SPORTS SCIENCE (Fisiología)
+*Datos objetivos para prevención de lesiones.*
+4.  **📉 Ratio ACWR:** Cálculo de carga Aguda/Crónica basado en RPE para prevenir lesiones por sobreentrenamiento. 5.  **🩹 Mapa 3D de Lesiones:** Interfaz "Body Paint" para historial visual de dolor.
+6.  **🌧️ Factor "Guante Mojado":** Correlación automática de rendimiento vs. Clima.
 
-* **Registrar:**
-  * **Rival:** (Opcional).
-  * **Zona Tiro:** ¿Dónde fue el balón? (TL=Arriba Izq, MM=Centro, BR=Abajo Der).
-  * **Salto Héctor:** ¿Hacia dónde se venció? (L=Izq, C=Centro, R=Der).
-  * **Resultado:** Gol o No Gol.
-* **Heatmap (Mapa de Calor):** Muestra visualmente las zonas donde más tiran los rivales de su categoría y el porcentaje de goles en cada zona.
+### 📂 BLOQUE C: INTELIGENCIA TÁCTICA
+*Lectura de juego.*
+7.  **⏱️ Gráfica de Momentum:** Línea de tiempo (0-60') para detectar desconexiones mentales o fatiga.
+8.  **🕸️ Telaraña de Distribución:** Gráfico de red de pases para evitar salidas predecibles.
+9.  **📍 Radar "Sweeper Keeper":** Métrica de altura media en el campo (posicionamiento adelantado).
+10. **♟️ Pizarra ABP Defensiva:** Editor de estrategias para córners y faltas en contra.
 
----
-
-## ⚙️ Zona de Administración
-
-Accesible desde el icono de engranaje (arriba derecha).
-* **Settings:** Actualizar foto de perfil y escudo del club.
-* **Objetivos de Temporada:** Definir metas (ej: "10 Porterías a Cero").
-* **Backup:** Descargar toda la base de datos en CSV (Excel).
-* **Importador:** Cargar datos masivos antiguos.
-* **Informe PDF:** Generar un reporte imprimible de la temporada.
+### 📂 BLOQUE D: GESTIÓN DE CARRERA
+*Profesionalismo y métricas avanzadas.*
+11. **🧤 xS (Expected Saves):** Métrica de "Goles Esperados en Contra" para medir la dificultad real de las paradas.
+12. **🎯 Gap Analysis:** Comparativa "Realidad vs Objetivo" de la temporada.
+13. **📄 Scout Report PRO:** Generador de informes PDF diseño Premier League.
+14. **🎒 Kit Manager:** Checklist pre-partido (rutina profesional).
+15. **📅 Scout Inverso:** Análisis de rendimiento bajo presión externa (ojeadores/público).
 
 ---
 
-### 🚀 ROADMAP: Guardian X (Next Gen)
-*Conceptos estratégicos para convertir la herramienta en el arma definitiva.*
+## 🏗️ Stack Tecnológico
 
-1.  **👁️ Vision Pro (Computer Vision):** Análisis de video automático. Ingesta de links de YouTube para generar *heatmaps* de posicionamiento y calcular tiempos de reacción (ms) sin etiquetado manual.
-2.  **⌚ Bio-Telemetría Real (IoT):** Integración con wearables (Apple Watch/Whoop) para medir Carga Interna (FC media) y Sueño real (VFC), sustituyendo la percepción subjetiva.
-3.  **🔮 El Oráculo (Predictive Analytics):** Proyección de carrera comparativa. Algoritmos que contrastan la curva de evolución de Héctor con datos históricos de porteros profesionales a su misma edad.
-4.  **🧠 Diario de Voz (NLP):** Análisis de sentimiento post-partido. Grabación de audio donde la IA detecta frustración, ansiedad o euforia para gestionar la psicología deportiva.
-5.  **♟️ Simulador Táctico (Gamificación):** Recreación digital 2D de los goles encajados para que el jugador tome la decisión correcta en el simulador ("Corregir el error virtualmente").
-6.  **🛡️ Escudo Rival Dinámico (Scouting 2.0):** Integración con **RFFM/Novanet** (fuente MatchApp). *Scraping* automático de la web de la federación para importar calendarios, campos de juego y estadísticas de goleadores rivales sin entrada manual.
-7.  **🧬 Generador Visual (Video GenAI):** Sustitución de texto por video. La IA genera clips animados de avatares ejecutando la técnica exacta sugerida en el entrenamiento.
-8.  **📉 'Moneyball' de Distribución:** Análisis de grafos de pases. Mapeo de conexiones para detectar con qué compañeros tiene mejor química y química negativa bajo presión.
-9.  **🚦 Asistente de Banda (Live Mode):** Botonera simplificada para registro en tiempo real. Algoritmo de "Medio Tiempo" que envía una notificación al descanso con consejos tácticos basados en la 1ª parte.
-10. **🕹️ Modo Legado (RPG Profundo):** Árbol de habilidades desbloqueable, equipamiento virtual legendario y crónicas de prensa generadas por IA tras cada victoria.
+* **Backend:** Scala (Cask, uPickle, Requests).
+* **Database:** PostgreSQL (Neon Serverless).
+* **Frontend:** ScalaTags + Bootstrap 5 + Chart.js.
+* **AI:** Google Gemini 1.5 Flash.
+
+---
+
+> *"No se trata de parar balones, se trata de evitar goles."*
 ---
 
 ## 🏗️ Stack Tecnológico

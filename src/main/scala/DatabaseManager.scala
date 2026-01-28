@@ -110,15 +110,140 @@ object DatabaseManager {
       if (r.statusCode == 200) { val an = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str; val conn = getConnection(); try { val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?"); ps.setString(1, fixEncoding(an)); ps.setInt(2, matchId); ps.executeUpdate() } finally { conn.close() }; an } else s"Error IA (${r.statusCode})"
     } catch { case e: Exception => s"Error: ${e.getMessage}" }
   }
-  def generateTrainingSession(mode: String, focus: String): String = { var ctx = ""; val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT notas_partido, reaccion_goles FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 1"); if(rs.next()) ctx = s"Último: ${rs.getString(1)}. Fallos: ${rs.getString(2)}." } finally { conn.close() }; val card = getLatestCardData(); val edad = calcularEdadExacta(card.fechaNacimiento); val role = if(mode.contains("Jugador")) s"JUGADOR ($edad años)" else s"PORTERO ($edad años)"; callGeminiAI(s"Eres Entrenador. Crea sesión 45min (Padre/Hijo). ROL: $role. OBJETIVO: $focus. CONTEXTO: $ctx. SOLO TEXTO PLANO (Sin HTML/Markdown). 1. Calentamiento, 2. Técnica, 3. Reto.").replace("```html","").replace("```","").trim }
+  // --- EN: DatabaseManager.scala ---
+
+  def generateTrainingSession(mode: String, focus: String): String = {
+    var ctx = ""
+    val conn = getConnection()
+    try {
+      // 1. Contexto del último PARTIDO (Ya lo tenías)
+      val rsMatch = conn.createStatement().executeQuery("SELECT notas_partido, reaccion_goles FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 1")
+      if(rsMatch.next()) ctx += s"Último Partido: ${rsMatch.getString(1)}. Fallos/Reacción: ${rsMatch.getString(2)}. "
+
+      // 2. NUEVO: Contexto del último ENTRENO (Carga Crónica)
+      val rsTrain = conn.createStatement().executeQuery("SELECT tipo, rpe, foco, fecha FROM trainings ORDER BY id DESC LIMIT 1")
+      if (rsTrain.next()) {
+        val (tipo, rpe, foco) = (rsTrain.getString("tipo"), rsTrain.getInt("rpe"), rsTrain.getString("foco"))
+        ctx += s"AYER entrenó: Tipo $tipo, Foco $foco, Carga RPE $rpe/10. "
+
+        // Lógica de "Director Deportivo" inyectada en el prompt
+        if (rpe >= 8) ctx += "IMPORTANTE: Ayer fue carga muy alta. La sesión de HOY debe ser RECUPERACIÓN o LÚDICA, baja carga física. "
+        else if (tipo == "Academia") ctx += "IMPORTANTE: Viene de Academia (técnica analítica). HOY priorizar TOMA DE DECISIÓN o JUEGO REAL. "
+      }
+    } finally {
+      conn.close()
+    }
+
+    val card = getLatestCardData()
+    val edad = calcularEdadExacta(card.fechaNacimiento)
+    val role = if(mode.contains("Jugador")) s"JUGADOR ($edad años)" else s"PORTERO ($edad años)"
+
+    // Prompt enriquecido
+    callGeminiAI(s"Eres Entrenador Elite de Fútbol Base. Crea sesión 45min (Padre/Hijo). ROL: $role. OBJETIVO USUARIO: $focus. CONTEXTO REAL: $ctx. Estructura: 1. Calentamiento (Ludico), 2. Bloque Principal (Adaptado al contexto), 3. Reto Final. SOLO TEXTO PLANO.")
+      .replace("```html","").replace("```","").trim
+  }
 
   def getRPGStatus(): RPGStatus = { var xp=0; val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT COUNT(*) as pj, SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END) as cs, SUM(paradas) as sv, AVG(nota) as avg_n FROM matches WHERE status='PLAYED'"); if(rs.next()){ val pj=rs.getInt("pj"); val cs=rs.getInt("cs"); val sv=rs.getInt("sv"); val avg=rs.getDouble("avg_n"); xp=(pj*50)+(cs*100)+(sv*5)+(if(avg>7.0)((avg-7.0)*100).toInt else 0) } } finally {conn.close()}; val level=1+(xp/1000); val nextXp=level*1000; val title=level match { case 1=>"Novato Promesa" case 2=>"Portero Local" case 3=>"Muro Regional" case 4=>"Candado Nacional" case _=>"Leyenda Mundial" }; RPGStatus(level, xp, nextXp, title, level) }
 
   def getOraclePrediction(hDad: Double, hMom: Double): String = { val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT altura FROM physical_growth ORDER BY fecha DESC LIMIT 1"); val currentHeight=if(rs.next()) rs.getDouble("altura") else 115.0; val midParent=(hDad+hMom+13)/2.0; val projected=(currentHeight*(180.0/110.0)+midParent)/2.0+5.0; val minH=projected-4; val maxH=projected+4; f"<div class='text-center'><h1 class='display-1 text-warning fw-bold'>${projected.toInt} cm</h1><p class='text-muted'>Proyección Adulta Estimada</p><div class='progress mb-2' style='height:10px;'><div class='progress-bar bg-success' style='width:${(projected/200.0)*100}%%'></div></div><p class='small'>Rango probable: <b>${minH.toInt}cm - ${maxH.toInt}cm</b></p><hr><p class='small text-info'>Comparativa Élite: <b>189 cm</b> (Media Pro)</p></div>" } catch { case _:Exception => "Error calculando." } finally { conn.close() } }
 
   // --- CORE MATCH LOGIC ---
-  def logMatch(riv: String, gf: Int, gc: Int, min: Int, n: Double, med: Double, par: Int, zG: String, zT: String, zP: String, p1v1: Int, pAir: Int, pPie: Int, clima: String, estadio: String, temp: Int, notas: String, video: String, reaccion: String, fechaStr: String, tipo: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int): Unit = { val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons"); if(rs.next()){ val s=conn.prepareStatement("INSERT INTO matches (season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica, paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas, acciones_pie, clima, estadio, temperatura, notas_partido, video_url, reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok, torneo_nombre, fase) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'PLAYED',?,?,?,?,?, '', '')"); s.setInt(1,rs.getInt("id")); s.setString(2,fixEncoding(riv)); s.setInt(3,gf); s.setInt(4,gc); s.setInt(5,min); s.setDouble(6,n); s.setDouble(7,med); s.setInt(8,par); s.setString(9,zG); s.setString(10,zT); s.setString(11,zP); s.setInt(12,p1v1); s.setInt(13,pAir); s.setInt(14,pPie); s.setString(15,clima); s.setString(16,fixEncoding(estadio)); s.setInt(17,temp); s.setString(18,fixEncoding(notas)); s.setString(19,video); s.setString(20,fixEncoding(reaccion)); s.setDate(21,Date.valueOf(fechaStr)); s.setString(22, tipo); s.setInt(23,pcTot); s.setInt(24,pcOk); s.setInt(25,plTot); s.setInt(26,plOk); s.executeUpdate() } } finally {conn.close()} }
-  def playScheduledMatch(id: Int, gf: Int, gc: Int, min: Int, nota: Double, paradas: Int, notas: String, video: String, reaccion: String, clima: String, estadio: String, zonaGoles: String, zonaTiros: String, zonaParadas: String, p1v1: Int, pAir: Int, pPie: Int, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int): Unit = { val conn=getConnection(); try{ val c=getLatestCardData(); val n=StatsCalculator.calculateGrowth(c, min, gc, nota, paradas, pcTot, pcOk, plTot, plOk); updateStats(n); val ps=conn.prepareStatement("UPDATE matches SET status='PLAYED', goles_favor=?, goles_contra=?, minutos=?, nota=?, paradas=?, notas_partido=?, video_url=?, reaccion_goles=?, clima=?, estadio=?, zona_goles=?, zona_tiros=?, zona_paradas=?, paradas_1v1=?, paradas_aereas=?, acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=? WHERE id=?"); ps.setInt(1,gf); ps.setInt(2,gc); ps.setInt(3,min); ps.setDouble(4,nota); ps.setInt(5,paradas); ps.setString(6,fixEncoding(notas)); ps.setString(7,video); ps.setString(8,fixEncoding(reaccion)); ps.setString(9,clima); ps.setString(10,fixEncoding(estadio)); ps.setString(11,zonaGoles); ps.setString(12,zonaTiros); ps.setString(13,zonaParadas); ps.setInt(14,p1v1); ps.setInt(15,pAir); ps.setInt(16,pPie); ps.setInt(17,pcTot); ps.setInt(18,pcOk); ps.setInt(19,plTot); ps.setInt(20,plOk); ps.setInt(21,id); ps.executeUpdate() } finally {conn.close()} }
+  def logMatch(
+                riv: String, gf: Int, gc: Int, min: Int, n: Double, med: Double, par: Int,
+                zG: String, zT: String, zP: String, p1v1: Int, pAir: Int, pPie: Int,
+                clima: String, estadio: String, temp: Int, notas: String, video: String,
+                reaccion: String, fechaStr: String, tipo: String,
+                pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
+                mapaCampo: String // <--- NUEVO PARÁMETRO
+              ): Unit = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons")
+      if(rs.next()){
+        // Consulta SQL actualizada con 'mapa_campo' al final
+        val s = conn.prepareStatement("""
+        INSERT INTO matches (
+          season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica,
+          paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
+          acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
+          reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
+          torneo_nombre, fase, mapa_campo
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          'PLAYED', ?, ?, ?, ?, ?, '', '', ?
+        )
+      """)
+
+        s.setInt(1, rs.getInt("id"))
+        s.setString(2, fixEncoding(riv))
+        s.setInt(3, gf)
+        s.setInt(4, gc)
+        s.setInt(5, min)
+        s.setDouble(6, n)
+        s.setDouble(7, med)
+        s.setInt(8, par)
+        s.setString(9, zG)
+        s.setString(10, zT)
+        s.setString(11, zP)
+        s.setInt(12, p1v1)
+        s.setInt(13, pAir)
+        s.setInt(14, pPie)
+        s.setString(15, clima)
+        s.setString(16, fixEncoding(estadio))
+        s.setInt(17, temp)
+        s.setString(18, fixEncoding(notas))
+        s.setString(19, video)
+        s.setString(20, fixEncoding(reaccion))
+        s.setDate(21, Date.valueOf(fechaStr))
+        s.setString(22, tipo)
+        s.setInt(23, pcTot)
+        s.setInt(24, pcOk)
+        s.setInt(25, plTot)
+        s.setInt(26, plOk)
+        s.setString(27, mapaCampo) // <--- ASIGNACIÓN DEL NUEVO VALOR
+
+        s.executeUpdate()
+      }
+    } finally {
+      conn.close()
+    }
+  }
+  def playScheduledMatch(
+                          id: Int, gf: Int, gc: Int, min: Int, nota: Double, paradas: Int,
+                          notas: String, video: String, reaccion: String, clima: String, estadio: String,
+                          zonaGoles: String, zonaTiros: String, zonaParadas: String,
+                          p1v1: Int, pAir: Int, pPie: Int, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
+                          mapaCampo: String // <--- NUEVO PARÁMETRO
+                        ): Unit = {
+    val conn = getConnection()
+    try {
+      val c = getLatestCardData()
+      val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas, pcTot, pcOk, plTot, plOk)
+      updateStats(n)
+
+      val ps = conn.prepareStatement("""
+      UPDATE matches SET
+        status='PLAYED', goles_favor=?, goles_contra=?, minutos=?, nota=?, paradas=?,
+        notas_partido=?, video_url=?, reaccion_goles=?, clima=?, estadio=?,
+        zona_goles=?, zona_tiros=?, zona_paradas=?, paradas_1v1=?, paradas_aereas=?,
+        acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=?, mapa_campo=?
+      WHERE id=?
+    """)
+
+      ps.setInt(1, gf); ps.setInt(2, gc); ps.setInt(3, min); ps.setDouble(4, nota)
+      ps.setInt(5, paradas); ps.setString(6, fixEncoding(notas)); ps.setString(7, video)
+      ps.setString(8, fixEncoding(reaccion)); ps.setString(9, clima); ps.setString(10, fixEncoding(estadio))
+      ps.setString(11, zonaGoles); ps.setString(12, zonaTiros); ps.setString(13, zonaParadas)
+      ps.setInt(14, p1v1); ps.setInt(15, pAir); ps.setInt(16, pPie)
+      ps.setInt(17, pcTot); ps.setInt(18, pcOk); ps.setInt(19, plTot); ps.setInt(20, plOk)
+      ps.setString(21, mapaCampo) // <--- NUEVO
+      ps.setInt(22, id)
+
+      ps.executeUpdate()
+    } finally {
+      conn.close()
+    }
+  }
 
   // --- LECTURA DE PARTIDOS EXTENDIDA ---
   def getMatchesList(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha DESC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse("")) } } finally {conn.close()}; l }
@@ -149,7 +274,43 @@ object DatabaseManager {
   def addNewDrill(nombre: String, desc: String): Unit = { val conn = getConnection(); try { val ps = conn.prepareStatement("INSERT INTO drills (nombre, descripcion, sesiones_objetivo, sesiones_actuales, activo) VALUES (?, ?, 10, 0, TRUE)"); ps.setString(1, fixEncoding(nombre)); ps.setString(2, fixEncoding(desc)); ps.executeUpdate() } finally { conn.close() } }
   def getActiveDrills(): List[Drill] = { var l=List[Drill](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM drills WHERE activo=TRUE ORDER BY id DESC"); while(rs.next()) l=l:+Drill(rs.getInt("id"), rs.getString("nombre"), Option(rs.getString("descripcion")).getOrElse(""), rs.getInt("sesiones_actuales"), rs.getInt("sesiones_objetivo")) } catch {case _:Exception=>} finally {conn.close()}; l }
   def progressDrills(): Unit = { val conn=getConnection(); try{ conn.createStatement().executeUpdate("UPDATE drills SET sesiones_actuales = sesiones_actuales + 1 WHERE activo = TRUE"); conn.createStatement().executeUpdate("UPDATE drills SET activo = FALSE WHERE sesiones_actuales >= sesiones_objetivo") } finally {conn.close()} }
-  def importMatchesCSV(csvData: String): String = { var count = 0; val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("rival"))) lines.tail else lines; val today = LocalDate.now().toString; dataLines.foreach { line => try { val p = line.split(",").map(_.trim); if (p.length >= 6) { val rival = fixEncoding(p(0)); val gf = p(1).toInt; val gc = p(2).toInt; val min = p(3).toInt; val nota = p(4).toDouble; val paradas = p(5).toInt; val clima = if(p.length > 6) p(6) else "Sol"; val notas = if(p.length > 7) fixEncoding(p(7)) else "Importado"; val reaccion = if(p.length > 8) fixEncoding(p(8)) else ""; val c = getLatestCardData(); val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas, 0,0,0,0); updateStats(n); val m = (n.divRaw * 0.2 + n.hanRaw * 0.2 + n.refRaw * 0.2 + n.posRaw * 0.2 + n.spdRaw * 0.05 + n.kicRaw * 0.15); logMatch(rival, gf, gc, min, nota, m, paradas, "", "", "", 0, 0, 0, clima, "-", 20, notas, "", reaccion, today, "LIGA", 0,0,0,0); count += 1 } } catch { case e: Exception => println(s"Error import line: $line") } }; s"Importados $count partidos" }
+  def importMatchesCSV(csvData: String): String = {
+    var count = 0
+    val lines = csvData.split("\n").map(_.trim).filter(_.nonEmpty)
+    val dataLines = if (lines.headOption.exists(_.toLowerCase.contains("rival"))) lines.tail else lines
+    val today = LocalDate.now().toString
+
+    dataLines.foreach { line =>
+      try {
+        val p = line.split(",").map(_.trim)
+        if (p.length >= 6) {
+          val rival = fixEncoding(p(0))
+          val gf = p(1).toInt
+          val gc = p(2).toInt
+          val min = p(3).toInt
+          val nota = p(4).toDouble
+          val paradas = p(5).toInt
+          val clima = if(p.length > 6) p(6) else "Sol"
+          val notas = if(p.length > 7) fixEncoding(p(7)) else "Importado"
+          val reaccion = if(p.length > 8) fixEncoding(p(8)) else ""
+
+          val c = getLatestCardData()
+          val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas, 0,0,0,0)
+          updateStats(n)
+
+          val m = (n.divRaw * 0.2 + n.hanRaw * 0.2 + n.refRaw * 0.2 + n.posRaw * 0.2 + n.spdRaw * 0.05 + n.kicRaw * 0.15)
+
+          // AQUI ESTABA EL ERROR: Faltaba el último argumento "" para mapaCampo
+          logMatch(rival, gf, gc, min, nota, m, paradas, "", "", "", 0, 0, 0, clima, "-", 20, notas, "", reaccion, today, "LIGA", 0,0,0,0, "")
+
+          count += 1
+        }
+      } catch {
+        case e: Exception => println(s"Error import line: $line")
+      }
+    }
+    s"Importados $count partidos"
+  }
   def importCalendarCSV(csvData: String): String = { var count=0; val lines=csvData.split("\n").map(_.trim).filter(_.nonEmpty); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons"); if(rs.next()){ val sId=rs.getInt("id"); val ps=conn.prepareStatement("INSERT INTO matches (season_id, fecha, rival, tipo_partido, status, goles_favor, goles_contra, minutos, nota, paradas) VALUES (?, ?, ?, ?, 'SCHEDULED', 0, 0, 0, 0, 0)"); lines.foreach { l => try { val p=l.split(",").map(_.trim); if(p.length>=2){ ps.setInt(1,sId); ps.setDate(2,Date.valueOf(p(0))); ps.setString(3,fixEncoding(p(1))); ps.setString(4,if(p.length>2) p(2).toUpperCase else "LIGA"); ps.executeUpdate(); count+=1 } } catch {case _:Exception=>} } } } finally {conn.close()}; s"Importados $count eventos." }
   def importWellnessCSV(csvData: String): String = { var count=0; val lines=csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines=if(lines.headOption.exists(_.toLowerCase.contains("sueno"))) lines.tail else lines; dataLines.foreach { line => try { val p=line.split(",").map(_.trim); if(p.length>=5){ logWellness(p(0).toInt, p(1).toDouble, p(2).toInt, p(3).toInt, if(p.length>4) p(4) else "", 0, 0.0, if(p.length>5) p(5).toInt else 3, "", "DISPONIBLE"); count+=1 } } catch {case _:Exception=>} }; s"Importados $count registros bio." }
   def logGrowth(altura: Double, peso: Double): Unit = { val conn = getConnection(); try { var velocity = 0.0; val rsLast = conn.createStatement().executeQuery("SELECT altura FROM physical_growth ORDER BY fecha DESC LIMIT 1"); if(rsLast.next()) { val lastHeight = rsLast.getDouble("altura"); if(altura > lastHeight) velocity = altura - lastHeight }; val ps = conn.prepareStatement("INSERT INTO physical_growth (altura, peso, velocidad_crecimiento) VALUES (?, ?, ?)"); ps.setDouble(1, altura); ps.setDouble(2, peso); ps.setDouble(3, velocity); ps.executeUpdate() } finally { conn.close() } }
@@ -163,4 +324,59 @@ object DatabaseManager {
   def getActiveGear(): List[GearItem] = { var l=List[GearItem](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT * FROM gear WHERE activo = TRUE ORDER BY tipo DESC"); while(rs.next()) { val (u,max)=(rs.getInt("usos_actuales"),rs.getInt("vida_util_estimada")); l=l:+GearItem(rs.getInt("id"),rs.getString("nombre"),rs.getString("tipo"),u,max,if(max>0 && u.toDouble/max > 0.9) "Critico" else "Optimo", Option(rs.getString("imagen_url")).getOrElse("")) } } finally { conn.close() }; l }
   def logWellness(sueno: Int, horas: Double, energia: Int, dolor: Int, zona: String, altura: Int, peso: Double, animo: Int, notas: String, estadoFisico: String): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("INSERT INTO wellness (sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico) VALUES (?,?,?,?,?,?,?,?,?,?)"); s.setInt(1,sueno); s.setDouble(2, horas); s.setInt(3,energia); s.setInt(4,dolor); s.setString(5,fixEncoding(zona)); s.setInt(6, altura); s.setDouble(7, peso); s.setInt(8, animo); s.setString(9, fixEncoding(notas)); s.setString(10, estadoFisico); s.executeUpdate(); if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso) } finally { conn.close() } }
   def logTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int, rutina: String): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle) VALUES (?,?,?,?,?,?)"); s.setString(1,tipo); s.setString(2,fixEncoding(foco)); s.setInt(3,rpe); s.setInt(4,calidad); s.setInt(5, atencion); s.setString(6,fixEncoding(rutina)); s.executeUpdate(); conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE"); if (tipo.contains("Papa")) progressDrills() } finally { conn.close() } }
+  // --- EN: DatabaseManager.scala ---
+
+  def getSmartInsights(): String = {
+    val conn = getConnection()
+    try {
+      val sb = new StringBuilder()
+
+      // 1. DETECTOR "TORPEZA DEL ESTIRÓN" (Crecimiento Rápido + Bajada Coordinación)
+      val rsGrowth = conn.createStatement().executeQuery("SELECT velocidad_crecimiento FROM physical_growth ORDER BY fecha DESC LIMIT 1")
+      val growthSpeed = if(rsGrowth.next()) rsGrowth.getDouble("velocidad_crecimiento") else 0.0
+
+      if (growthSpeed > 0.5) { // Si ha crecido más de 0.5cm recientemente
+        val rsTech = conn.createStatement().executeQuery("SELECT coordinacion FROM technical_reviews ORDER BY fecha DESC LIMIT 2")
+        if (rsTech.next()) {
+          val currCoord = rsTech.getInt("coordinacion")
+          if (rsTech.next()) {
+            val prevCoord = rsTech.getInt("coordinacion")
+            if (currCoord < prevCoord) {
+              sb.append("<div class='alert alert-danger p-2 small mb-2'><strong>⚠️ ALERTA BIO-MECÁNICA:</strong> Crecimiento acelerado detectado (+"+growthSpeed+"cm) coincidiendo con bajada de coordinación. Riesgo de 'Torpeza del Estirón'. <br>Recomendación: <em>Simplificar tareas técnicas y trabajar propiocepción.</em></div>")
+            }
+          }
+        }
+      }
+
+      // 2. DETECTOR DE PATRONES DE DOLOR (Dolor > 0 vs Tipo de Entreno)
+      // Buscamos si hay correlación entre dolor y superficie/tipo en los últimos 10 registros
+      val rsPain = conn.createStatement().executeQuery(
+        """
+      SELECT w.dolor, t.tipo, t.foco
+      FROM wellness w
+      JOIN trainings t ON w.fecha = t.fecha
+      WHERE w.dolor > 1
+      ORDER BY w.id DESC LIMIT 5
+      """
+      )
+
+      var painCount = 0
+      var lastContext = ""
+      while(rsPain.next()) {
+        painCount += 1
+        lastContext = rsPain.getString("tipo") + " (" + rsPain.getString("foco") + ")"
+      }
+
+      if (painCount >= 2) {
+        sb.append(s"<div class='alert alert-warning p-2 small mb-0'><strong>🔍 PATRÓN DE DOLOR:</strong> Detectadas $painCount sesiones recientes con dolor. Contexto frecuente: $lastContext. <br>Revisar calzado o dureza del terreno.</div>")
+      }
+
+      if (sb.isEmpty) "<div class='text-muted small text-center fst-italic'>Sin anomalías biométricas detectadas hoy.</div>" else sb.toString()
+
+    } catch {
+      case e: Exception => "Error calculando insights."
+    } finally {
+      conn.close()
+    }
+  }
 }
