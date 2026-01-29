@@ -1,155 +1,127 @@
-# 🛡️ GUARDIAN ELITE v4.1 | High Performance Center
+# 🛡️ GUARDIAN ELITE v5.4 | Borja Martín R&D Edition
 
-> **"El talento te lleva al área, el dato te hace dueño de la portería."**
+> **"El talento te lleva al área, el carácter te mantiene en la historia."**
 
-**Guardian Elite** no es una simple app de estadísticas. Es un ecosistema integral de gestión deportiva diseñado para monitorizar, analizar y potenciar la carrera de un portero joven en desarrollo (**Héctor**). Combina la analítica de datos profesional (Big Data), la gamificación (estilo videojuego) y la Inteligencia Artificial Generativa (Gemini AI) para maximizar el desarrollo técnico, táctico, físico y mental.
+**Guardian Elite** es un **Ecosistema de Alto Rendimiento** diseñado para la monitorización longitudinal (5 a 20 años) de activos estratégicos (**Héctor**). Desarrollada bajo estándares de **"La Fábrica"**, esta plataforma integra Big Data, Neurociencia, IA Generativa (Gemini) y Desarrollo Holístico.
 
-![Version](https://img.shields.io/badge/Version-4.1_Smart_Data-blue?style=for-the-badge&logo=scala) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_Powered-orange?style=for-the-badge&logo=google-gemini)
-
----
-
-## 🗺️ Mapa del Territorio
-
-La aplicación se estructura en **7 Módulos de Operaciones**, accesibles desde la barra de navegación inferior:
-
-1.  **🏠 Dashboard:** Inteligencia y Estado Actual.
-2.  **⚽ Match Center:** Registro de Partidos (Live/Post).
-3.  **🧬 Bio & Entreno:** Fisiología, Cargas y Entrenador IA.
-4.  **🧤 Garage:** Gestión de Material (Botas/Guantes).
-5.  **📋 Pizarra Táctica:** The Locker Room.
-6.  **🕵️ Scouting:** Inteligencia de Rivales (Black Book).
-7.  **🥅 Penalty Lab:** Laboratorio de Penaltis.
+![Version](https://img.shields.io/badge/Version-5.4_Galactico_Ready-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_Pro_1.5-orange?style=for-the-badge&logo=google-gemini)
 
 ---
 
-## 📖 MANUAL DE USO DETALLADO
+# 🟢 PARTE I: ECOSISTEMA ACTUAL (OPERATIVO)
 
-### 1. 🏠 DASHBOARD (Centro de Mando)
-*La primera pantalla que ves. Aquí se centraliza la inteligencia.*
+*Módulos funcionales desplegados y en uso activo para la gestión diaria.*
 
-#### 👤 La Carta FUT (Player Card)
-Visualización gamificada del nivel actual del portero.
-* **Algoritmo de Trinquete:** La media (0-99) está calculada mediante un algoritmo matemático personalizado. La clave es que **la media nunca baja**. Si el portero tiene un mal partido, la media se estanca, pero no retrocede. Esto protege la confianza y moral del niño.
-* **Barra de XP:** Muestra el progreso decimal exacto para subir al siguiente punto de media.
-* **Stats Dinámicas:** 6 atributos (DIV, HAN, KIC, REF, SPD, POS) que evolucionan según lo que pase en el campo.
+## 1. 🏠 DASHBOARD (Centro de Mando & Inteligencia)
+El cerebro de la aplicación. Centraliza la toma de decisiones y el estado del jugador.
 
-#### 🕵️ Inteligencia de Datos (Smart Insights) [NUEVO v4.1]
-Un sistema pasivo que cruza datos en segundo plano para detectar anomalías:
-* **⚠️ Alerta "Torpeza del Estirón":** El sistema cruza la velocidad de crecimiento. Si detecta un estirón (>0.5cm/mes) y simultáneamente una bajada en la nota de coordinación técnica, lanza una alerta para avisar al entrenador de que el fallo es biomecánico, no técnico.
-* **🔍 Detector de Patrones de Dolor:** Analiza si los registros de dolor físico coinciden recurrentemente con un tipo de superficie (césped duro) o un tipo de entrenamiento específico.
+* **Carta FUT Dinámica (Player Card):**
+    * **Descripción:** Visualización gamificada del nivel actual (0-99) dividida en atributos (DIV, REF, KIC, SPD, HAN, POS).
+    * **Lógica:** Los atributos se calculan en tiempo real basados en la media ponderada de los últimos 5 partidos + bonificadores por entrenamientos.
+* **Algoritmo de Trinquete (Ratchet Algorithm):**
+    * **Descripción:** Mecánica estadística propietaria que impide que la media global baje tras un mal partido.
+    * **Objetivo TDA:** Protege la tolerancia a la frustración. La media se estanca, pero nunca retrocede, manteniendo la motivación.
+* **Smart Insights (Alertas Pasivas):**
+    * **Descripción:** Sistema SQL que corre en segundo plano para detectar patrones de riesgo.
+    * **Ejemplo:** Alerta "Torpeza del Estirón" (Se activa si `velocidad_crecimiento > 0.5cm/mes` Y `coordinación` baja un 10%).
 
-#### 🧠 IA Neuro-Scout
-Un asistente basado en **Gemini AI** que analiza 4 factores antes de cada sesión:
-1.  **Bio-Ritmo:** ¿Durmió bien? ¿Tiene energía?
-2.  **Racha:** ¿Viene de ganar o perder?
-3.  **Agenda:** ¿Quién es el próximo rival?
-4.  **Contexto:** ¿Está en fase de crecimiento?
-* **Resultado:** Ofrece un consejo táctico o motivacional ultra-corto y específico para el día de hoy.
+## 2. ⚽ MATCH CENTER (Registro de Partido)
+Herramienta de ingestión de datos post-competición.
 
----
+* **El "Módulo Ederson" (Distribución de Juego):**
+    * **Descripción:** Mide la eficacia con los pies, diferenciando pase de seguridad vs. pase de ruptura.
+    * **Impacto:** Alimenta directamente el atributo **KIC** (Kicking).
+* **Rejilla de Portería 3x3:**
+    * **Descripción:** Interfaz visual para marcar dónde se producen las paradas (Blocaje) y dónde entran los goles (Debilidad).
+    * **Uso:** Detectar patrones ciegos (ej: "Sufre abajo a la derecha").
+* **Heatmap Posicional (Líbero):**
+    * **Descripción:** Registro de coordenadas GPS de intervenciones fuera del área.
+    * **Objetivo:** Evaluar la valentía y la lectura táctica de espacios defensivos.
+* **Audio-Diario IA (Psicólogo de Bolsillo):**
+    * **Descripción:** El jugador graba una nota de voz de 30s post-partido.
+    * **Lógica IA:** Gemini analiza el tono de voz y el vocabulario para detectar "Rumia Mental" (obsesión con el error) o "Euforia Desmedida".
 
-### 2. ⚽ MATCH CENTER (El Partido)
-*Herramienta de registro profesional post-partido.*
+## 3. 🧬 BIO & ENTRENO (Human Performance)
+Gestión de la máquina biológica.
 
-#### 🎯 El "Módulo Ederson" (Distribución)
-Control obsesivo del juego de pies, vital para el portero moderno. Afecta directamente al atributo **KIC** (Kicking).
-* **Pase Corto:** Registro de acierto/fallo en pases de seguridad.
-* **Pase Largo:** Registro de acierto/fallo en desplazamientos que rompen líneas de presión.
-
-#### 🥅 Rejilla Portería (3x3)
-Un sistema de coordenadas para analizar la eficacia bajo palos.
-* **Modo Parada:** Registra en qué zona (Escuadra, Raso, Centro...) se detuvo el balón.
-* **Modo Gol:** Registra por dónde entró el balón para detectar debilidades (ej: "Le marcan mucho por abajo a la izquierda").
-
-#### 🗺️ Heatmap de Campo (Juego Real) [NUEVO v4.1]
-Registro posicional de las intervenciones fuera de la portería.
-* **Funcionamiento:** Un mapa interactivo del campo verde. Permite marcar dónde tocó el balón Héctor (cortes de líbero, inicios de jugada fuera del área).
-* **Objetivo:** Verificar si juega adelantado y valiente o si se queda pegado a la línea de gol.
-
-#### 🎙️ Diario de Voz (Psicólogo IA) [NUEVO v4.1]
-Herramienta de descarga emocional.
-* **Grabar:** Permite al niño grabar un audio de 30s contando cómo se sintió en el partido.
-* **Análisis:** La IA procesa el audio, transcribe el texto y detecta el **estado emocional real** (Frustración, Euforia, Calma) para dar consejos al padre sobre cómo gestionar la charla post-partido.
+* **Expediente Médico IA (OCR):**
+    * **Descripción:** Subida de fotos de informes médicos (traumatólogo, fisio).
+    * **Lógica IA:** Gemini Vision lee el papel, extrae el diagnóstico ("Esguince Grado 1") y los plazos de recuperación, guardándolos en BBDD estructurada.
+* **Growth Tracker:**
+    * **Descripción:** Seguimiento mensual de altura y peso. Calcula la velocidad de crecimiento.
+* **Generador de Sesiones Híbrido:**
+    * **Descripción:** Algoritmo que diseña el entrenamiento de hoy.
+    * **Lógica:** Si ayer hubo `Partido` O `Judo` O `RPE > 8`, la sesión generada es "Recuperación/Técnica". Si hubo descanso, genera "Carga/Potencia".
 
 ---
 
-### 3. 🧬 BIO & ENTRENO (El Laboratorio)
-*Gestión fisiológica y diseño de sesiones.*
+# 🟡 PARTE II: ROADMAP EVOLUTIVO (PENDIENTE)
 
-#### 🩺 Wellness & Crecimiento
-* **Diario:** Registro matutino de Calidad de Sueño, Nivel de Energía, Dolor y Estado de Ánimo.
-* **Growth Tracker:** Registro de Altura y Peso. Calcula automáticamente la velocidad de crecimiento (cm/mes) para predecir riesgos de lesión o descoordinación.
+*Mejoras proyectadas para convertir la herramienta en un estándar de industria.*
 
-#### 🏋️ Generador de Sesiones "Híbrido" [NUEVO v4.1]
-Un diseñador de entrenamientos inteligente con memoria.
-* **Contexto:** Al pedir una sesión (ej: "Papá Portero"), el sistema consulta la base de datos para ver qué hizo ayer.
-    * *Si ayer tuvo partido duro:* Genera sesión de Recuperación/Técnica suave.
-    * *Si ayer descansó:* Genera sesión de Alta Intensidad/Carga.
-    * *Si viene de Academia:* Prioriza el Juego Real sobre la técnica analítica.
+## FASE 1: OPTIMIZACIÓN TÁCTICA & PREVENCIÓN (Corto Plazo)
+*Mejoras inmediatas en el código actual.*
 
----
+1.  **📹 La "Videoteca" (Smart Playlist)**
+    * **Evolutivo:** Botón "Motívame" que reproduce un loop infinito de sus mejores paradas (Tags: `MVP`). Refuerzo visual positivo pre-partido.
+2.  **🩺 Auditor Técnico (Checklist de Vicios)**
+    * **Evolutivo:** Formulario de análisis de vídeo para registrar errores recurrentes ("Paso negativo", "Manos planas"). Genera gráficas de corrección técnica.
+3.  **📉 Ratio ACWR (Semáforo de Lesiones)**
+    * **Evolutivo:** Cálculo automático de Carga Aguda (7 días) / Carga Crónica (28 días). Si el ratio > 1.3, salta alerta de riesgo de lesión por sobrecarga.
+4.  **🌧️ Factor Clima (Data Correlation)**
+    * **Evolutivo:** Cruce de datos SQL para determinar si el % de blocaje baja con lluvia o frío extremo (Gestión de guantes).
 
-### 4. 🕵️ SCOUTING (Black Book)
-Base de datos de inteligencia competitiva.
-* **Buscador:** Encuentra historial contra cualquier equipo.
-* **Ficha Rival:** Estilo de juego (Directo/Combinativo), Jugadores Clave y Notas del entrenador.
-* **Historial:** Muestra automáticamente resultados anteriores contra ese equipo para preparar el partido.
+## FASE 2: HOLISTIC ACADEMY & NEURO-ADAPTIVE (Medio Plazo)
+*Implementación de la capa de "Habilidades Blandas" y gestión TDA.*
 
----
+5.  **🧠 Neuro-Adaptive Engine (TDA Focus)**
+    * **Evolutivo:**
+        * **Focus Mode:** Algoritmo que cambia el entreno a "Micro-Tareas" (3 min) si detecta fatiga mental.
+        * **Kit Manager:** Checklist visual interactivo obligatorio antes de salir de casa (Botas, Agua, Guantes) para trabajar la función ejecutiva.
+6.  **🗣️ Torre de Babel (Idiomas Tácticos)**
+    * **Evolutivo:** Módulo de Flashcards con audio para aprender vocabulario de mando en Inglés/Alemán ("Keeper!", "Man On!").
+7.  **🌙 Protocolo Blue Light**
+    * **Evolutivo:** Modo oscuro (filtro rojo) automático en la app a partir de las 20:00h y checklist de higiene del sueño.
+8.  **🥋 Dojo Module (Judo Integration)**
+    * **Evolutivo:** Input de sesiones de Judo. Transfiere XP a atributos de **Agilidad** y **Valentía**. La IA ajusta la carga de fútbol si hubo caídas (Ukemi) intensas ayer.
+9.  **🎓 Academic Intelligence & Kill Switch**
+    * **Evolutivo:**
+        * Subida de notas escolares vía PDF (IA).
+        * **Bloqueo:** Si `notas < 6`, se desactiva la Gamificación (FUT).
 
-### 5. 🧤 GARAGE (Material)
-Gestión profesional del equipamiento.
-* **Vida Útil:** Define cuántos usos tienen unos guantes o botas.
-* **Semáforo:** La barra de vida baja con cada partido/entreno.
-    * 🟢 Verde: Óptimo.
-    * 🟡 Amarillo: Desgaste.
-    * 🔴 Rojo: Crítico/Cambiar (Alerta visual).
+## FASE 3: PROJECT LEGACY (Largo Plazo / Enterprise)
+*I+D Nivel Elite para carrera profesional.*
 
----
+10. **🧬 Bio-Banding (Reloj Biológico)**
+    * **Evolutivo:** Cálculo del PHV (Peak Height Velocity) para bloquear ejercicios de pliometría durante los picos de crecimiento (Prevención Osgood-Schlatter).
+11. **🧪 Farmacogenética**
+    * **Evolutivo:** Campo en Bio para cargar marcadores genéticos (ACTN3, COL5A1). La IA personaliza la carga según predisposición a lesiones de tendón.
+12. **🛡️ Protocolo Zero-Trust**
+    * **Evolutivo:** Sistema de exportación de datos anonimizados (Hash SHA-256) para compartir métricas con ojeadores sin revelar identidad.
+13. **📊 Informe Mensual 360º**
+    * **Evolutivo:** Generador de PDF Ejecutivo. La IA redacta un informe cruzando: Rendimiento Deportivo + Disciplina Judo + Evolución Académica.
 
-### 6. 📋 PIZARRA & 7. 🥅 PENALTY LAB
-* **Pizarra Táctica:** Canvas digital multitáctil para dibujar explicaciones rápidas en el descanso.
-* **Penalty Lab:** Base de datos de penaltis. Registra zona de tiro y zona de salto. Genera un mapa de calor de por dónde suelen tirar los rivales de su categoría.
+## FASE 4: PROJECT OMEGA (Futurismo)
+*Tecnologías experimentales.*
 
----
+14. **🧠 Neuro-Flow (EEG):** Integración con diademas (Muse) para entrenar ondas Alfa.
+15. **🪞 Neuronas Espejo:** Comparador de vídeo split-screen (Héctor vs Oblak).
+16. **🔮 Career Multiverse:** Simulación de Montecarlo para decisiones de fichajes.
+17. **👓 Spatial Tactical:** Visualización holográfica de jugadas (Vision Pro).
 
-## 🚀 ROADMAP: Próximos Pasos (v4.2+)
+## FASE 5: MEMORY LANE (El Alma)
+*Preservación del legado emocional.*
 
-El plan de desarrollo aprobado para convertir la app en una herramienta de **Alto Rendimiento**:
+18. **📚 The Season Chronicle:**
+    * **Evolutivo:** Al final de temporada, la IA recopila todo y maqueta un **Libro-Anuario** narrativo en PDF ("La Historia de la Temporada 2026"), listo para imprimir.
 
-### 📂 BLOQUE A: VIDEOANÁLISIS Y BIOMECÁNICA
-1.  **📹 La "Videoteca":** Playlist automática de mejores paradas para refuerzo positivo pre-partido.
-2.  **🩺 Auditor Técnico:** Checklist para detectar vicios técnicos en video (paso negativo, manos planas).
-3.  **📐 Simulador "Bisectriz":** Herramienta visual para enseñar posicionamiento y reducción de ángulos.
-
-### 📂 BLOQUE B: SPORTS SCIENCE (Prevención)
-4.  **📉 Ratio ACWR:** Cálculo de carga Aguda/Crónica para prevenir lesiones por sobreentrenamiento.
-5.  **🩹 Mapa 3D Lesiones:** Registro visual ("Body Paint") de zonas de dolor recurrentes.
-6.  **🌧️ Factor Clima:** Análisis de cómo la lluvia/viento afecta al rendimiento (blocajes).
-
-### 📂 BLOQUE C: INTELIGENCIA TÁCTICA
-7.  **⏱️ Momentum:** Gráfica lineal del partido para detectar desconexiones mentales.
-8.  **🕸️ Telaraña de Distribución:** Gráfico de red para evitar pases predecibles.
-9.  **♟️ Pizarra ABP:** Editor de estrategias defensivas (córners/faltas).
-
----
-
-## 🏗️ Stack Tecnológico
-
-* **Backend:** Scala (Framework Cask, uPickle, Requests).
-* **Database:** PostgreSQL (Alojada en Neon Serverless).
-* **Frontend:** HTML renderizado en servidor (ScalaTags) + Bootstrap 5.
-* **Gráficos:** Chart.js para radares y curvas evolutivas.
-* **AI:** Google Gemini 1.5 Flash (vía API).
 ---
 
 ## 🏗️ Stack Tecnológico
 
 * **Backend:** Scala (Cask, uPickle, Requests).
 * **Database:** PostgreSQL (Neon Serverless).
-* **Frontend:** ScalaTags (HTML server-side rendering) + Bootstrap 5 + Chart.js.
-* **AI:** Google Gemini 1.5 Flash (vía API).
+* **Frontend:** ScalaTags + Bootstrap 5.
+* **AI Engine:** Google Gemini 1.5 Flash.
 
----
-
-> *"No se trata de parar balones, se trata de evitar goles."*
+> *"No buscamos porteros que paren. Buscamos atletas que piensen, lideren y dominen."* — **Borja Martín**
