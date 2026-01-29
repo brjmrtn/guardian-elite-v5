@@ -75,4 +75,32 @@ object StatsCalculator {
       refRaw = finalRef, spdRaw = finalSpd, posRaw = finalPos
     )
   }
+  def calculateACWR(acuteLoads: Seq[Double], chronicLoads: Seq[Double]): Double = {
+    val acuteAvg = if (acuteLoads.nonEmpty) acuteLoads.sum / 7.0 else 0.0
+    val chronicAvg = if (chronicLoads.nonEmpty) chronicLoads.sum / 28.0 else 1.0
+
+    if (chronicAvg > 0) acuteAvg / chronicAvg else 0.0
+  }
+
+  // --- BONUS JUDO: Mejora Agilidad y Valentía ---
+  def applyJudoBonus(currentStats: PlayerCardData): PlayerCardData = {
+    val bonusRef = 0.08 // El judo mejora los reflejos por las caídas
+    val bonusPos = 0.05 // Mejora el posicionamiento y la valentía
+
+    val finalRef = currentStats.refRaw + bonusRef
+    val finalPos = currentStats.posRaw + bonusPos
+
+    val nuevaMedia = calcularMediaGlobal(
+      currentStats.divRaw, currentStats.hanRaw, currentStats.kicRaw,
+      finalRef, currentStats.spdRaw, finalPos
+    )
+
+    currentStats.copy(
+      media = nuevaMedia,
+      ref = finalRef.toInt,
+      pos = finalPos.toInt,
+      refRaw = finalRef,
+      posRaw = finalPos
+    )
+  }
 }

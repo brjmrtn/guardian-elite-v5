@@ -47,6 +47,14 @@ object GuardianServer extends cask.MainRoutes {
     val radarData = s"""[${card.div}, ${card.han}, ${card.kic}, ${card.ref}, ${card.spd}, ${card.pos}]"""
     val rawMedia = (card.divRaw * 0.20) + (card.hanRaw * 0.20) + (card.kicRaw * 0.15) + (card.refRaw * 0.20) + (card.spdRaw * 0.05) + (card.posRaw * 0.20)
     val xpPercent = ((rawMedia - rawMedia.floor) * 100).toInt
+    // Lógica ACWR para el widget de salud
+    val acute = DatabaseManager.getWorkloads(7)
+    val chronic = DatabaseManager.getWorkloads(28)
+    val acwr = StatsCalculator.calculateACWR(acute, chronic)
+
+    val (acwrColor, acwrText) = if(acwr > 2.0) ("text-danger", "RIESGO ALTO")
+    else if(acwr > 1.5) ("text-warning", "SOBRECARGA")
+    else ("text-success", "ÓPTIMO")
 
     def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
     val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
@@ -66,6 +74,17 @@ object GuardianServer extends cask.MainRoutes {
     val content = basePage("home", div(cls := "row justify-content-center",
       div(cls := "col-md-5 mb-4",
         div(cls := "d-flex justify-content-center mobile-scale", div(cls := "fut-card", div(cls := "left-info", div(cls := "rating", card.media), div(cls := "position", card.posicion), img(src := card.flagUrl, cls := "nation")), img(src := card.clubUrl, cls := "club-badge"), div(cls := "player-circle-container", img(src := card.fotoUrl, cls := "player-img")), div(cls := "name-container", div(cls := "player-name", card.nombre), div(style:="font-size:12px; margin-top:-5px; opacity:0.9; font-weight:bold;", card.clubNombre)), div(cls := "stats-container", div(cls := "stats-grid", div(cls := "stat-item", span(cls:="stat-val", card.div), span(cls:="stat-label", "DIV")), div(cls := "stat-item", span(cls:="stat-val", card.kic), span(cls:="stat-label", "KIC")), div(cls := "stat-item", span(cls:="stat-val", card.spd), span(cls:="stat-label", "SPD")), div(cls := "stat-item", span(cls:="stat-val", card.han), span(cls:="stat-label", "HAN")), div(cls := "stat-item", span(cls:="stat-val", card.ref), span(cls:="stat-label", "REF")), div(cls := "stat-item", span(cls:="stat-val", card.pos), span(cls:="stat-label", "POS")))))),
+        div(cls:="card bg-dark border-secondary shadow p-3 mt-3",
+          div(cls:="d-flex justify-content-between align-items-center",
+            div(
+              h6(cls:="text-muted mb-0 small", "ESTADO FÍSICO (ACWR)"),
+              h3(cls:=s"mb-0 $acwrColor fw-bold", f"$acwr%1.2f")
+            ),
+            div(cls:="text-end",
+              span(cls:="badge bg-dark border border-secondary", acwrText)
+            )
+          )
+        ),
         div(cls:="mt-1 mb-4 text-center", div(cls:="d-flex justify-content-between text-white xx-small px-4", span(s"Nivel ${card.media}"), span(s"${xpPercent}% XP"), span(s"Nivel ${card.media+1}")), div(cls:="progress mx-4", style:="height: 8px; background-color: #333;", div(cls:="progress-bar bg-warning", style:=s"width: $xpPercent%"))),
         div(cls:="d-grid gap-2 mb-3 mt-3", a(href:="/scouting", cls:="btn btn-outline-info shadow fw-bold", "🔍 SCOUTING RIVALES"), div(cls:="d-flex gap-2", a(href:="/penalties", cls:="btn btn-outline-danger shadow fw-bold flex-fill", "🥅 PENALTIS"), a(href:="/minigame", cls:="btn btn-outline-success shadow fw-bold flex-fill", "🎮 REFLEJOS"))),
         div(cls:="card bg-dark border-secondary shadow p-3 mb-3", div(cls:="d-flex justify-content-between align-items-center", div(h6(cls:="text-muted mb-0", "Racha (Ultimos 5)"), h3(cls:=s"mb-0 $trendColor fw-bold", f"$avgLast5%2.2f")), div(cls:="text-end", span(cls:="small text-muted", "Media Temp"), div(cls:="fw-bold text-white", f"$avgSeason%2.2f")))),
@@ -272,6 +291,7 @@ object GuardianServer extends cask.MainRoutes {
     val activeDrills = DatabaseManager.getActiveDrills()
     val growthData = DatabaseManager.getGrowthHistory()
     val techChart = DatabaseManager.getTechEvolutionChart()
+    val rpg = DatabaseManager.getRPGStatus()
 
     val drillList = if (activeDrills.nonEmpty) { val dItems = for(d <- activeDrills) yield div(cls:="mb-2", div(cls:="d-flex justify-content-between small", span(fixEncoding(d.nombre)), span(s"${d.actual}/${d.objetivo}")), div(cls:="progress", style:="height: 6px;", div(cls:="progress-bar bg-warning", style:=s"width:${(d.actual.toDouble/d.objetivo.toDouble*100).toInt}%"))); div(id:="drillsContainer", style:="display:none;", cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", h6(cls:="text-warning small fw-bold mb-2", "🎯 MISIONES ACTIVAS"), dItems) } else div(id:="drillsContainer", style:="display:none;", cls:="alert alert-dark p-2 small text-center", "Sin misiones activas.")
 
@@ -279,6 +299,35 @@ object GuardianServer extends cask.MainRoutes {
       div(cls := "col-md-6 mb-4",
         // LABORATORIO
         div(cls:="card bg-secondary bg-opacity-10 border-info shadow mb-4", div(cls:="card-header bg-dark text-info fw-bold text-center", "🔬 LABORATORIO DE DATOS"), div(cls:="card-body p-2 d-flex justify-content-around", a(href:="/gear", cls:="btn btn-outline-light flex-fill me-1", div(style:="font-size:20px", "👟"), span(cls:="small", "Material")), a(href:="/oracle", cls:="btn btn-outline-info flex-fill me-1", div(style:="font-size:20px", "🔮"), span(cls:="small", "Oráculo")), a(href:="/distribution", cls:="btn btn-outline-warning flex-fill", div(style:="font-size:20px", "📊"), span(cls:="small", "Moneyball")))),
+        // --- NUEVO: MÓDULO JUDO (Insertar aquí) ---
+        div(cls:="card bg-dark border-warning shadow mb-4",
+          div(cls:="card-header bg-warning text-dark fw-bold text-center", "🥋 ESTADO DOJO (JUDO)"),
+          div(cls:="card-body p-3",
+            div(cls:="d-flex align-items-center justify-content-between mb-3",
+              div(
+                div(cls:="small text-muted fw-bold", "Cinturón Actual"),
+                h4(cls:="mb-0 text-white", rpg.cinturonJudo) // Asegúrate de que 'rpg' esté cargado arriba
+              ),
+              div(cls:="px-3 py-2 rounded border border-light",
+                style:=s"background-color: ${rpg.cinturonJudo.toLowerCase match {
+                  case "blanco" => "#fff"
+                  case "amarillo" => "#ff0"
+                  case "naranja" => "#f80"
+                  case "verde" => "#080"
+                  case _ => "#333"
+                }}; color: black; font-weight: bold;", "GRADO")
+            ),
+            form(action:="/bio/update_belt", method:="post", cls:="d-flex gap-2",
+              select(name:="belt", cls:="form-select form-select-sm bg-dark text-white border-warning fw-bold",
+                option(value:="Blanco", "Blanco"),
+                option(value:="Blanco-Amarillo", "Blanco-Amarillo"),
+                option(value:="Amarillo", "Amarillo"),
+                option(value:="Naranja", "Naranja")
+              ),
+              button(tpe:="submit", cls:="btn btn-sm btn-warning fw-bold", "ACTUALIZAR")
+            )
+          )
+        ),
 
         // WELLNESS
         div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUEÑO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠️ Molestias"), option(value:="LESION", "❌ Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueño (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
@@ -297,7 +346,7 @@ object GuardianServer extends cask.MainRoutes {
       div(cls := "col-md-6",
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "PROGRESO TÉCNICO"), div(cls := "card-body p-2", canvas(id:="techChart", style:="max-height:200px;"))),
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "CURVA DE CRECIMIENTO"), div(cls := "card-body p-2", canvas(id:="growthChart", style:="max-height:150px;"))),
-        div(cls := "card bg-dark text-white border-success shadow mb-3", div(cls := "card-header bg-success text-dark fw-bold text-center", "REGISTRO ENTRENO"), div(cls := "card-body p-3", form(action := "/bio/save_training", method := "post", div(cls:="mb-3", label(cls:="small fw-bold", "Tipo"), select(name:="tipo", id:="trainingType", onchange:="toggleDrills()", cls:="form-select bg-dark text-white fw-bold", option(value:="Club", "Club"), option(value:="Academia", "Academia"), option(value:="Papa", "Papa (Portero)"), option(value:="Papa (Jugador)", "Papa (Jugador)"))), drillList, div(cls:="mb-3", label(cls:="small fw-bold", "Foco / Actividad"), div(cls:="d-flex gap-2", input(tpe:="text", name:="foco", id:="drillFocus", cls:="form-control fw-bold", placeholder:="Ej: Tiros, Resistencia...", required:=true), button(tpe:="button", id:="aiBtn", cls:="btn btn-warning fw-bold", onclick:="generateAI()", style:="display:none;", "🤖 IA"))), div(id:="manualDesign", style:="display:none;", textarea(name:="rutina", id:="rutinaText", cls:="form-control mb-3 fw-bold", rows:="4", placeholder:="Detalle de la sesión...")), div(cls:="row mb-3", div(cls:="col-4 text-center", label(cls:="small fw-bold", "RPE"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="rpe", value:="7", min:="1", max:="10")), div(cls:="col-4 text-center", label(cls:="small fw-bold", "Calidad"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="calidad", value:="8", min:="1", max:="10")), div(cls:="col-4 text-center", label(cls:="small fw-bold", "Atención"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="atencion", value:="8", min:="1", max:="10"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success fw-bold", "Guardar Sesión")))),
+        div(cls := "card bg-dark text-white border-success shadow mb-3", div(cls := "card-header bg-success text-dark fw-bold text-center", "REGISTRO ENTRENO"), div(cls := "card-body p-3", form(action := "/bio/save_training", method := "post", div(cls:="mb-3", label(cls:="small fw-bold", "Tipo"), select(name:="tipo", id:="trainingType", onchange:="toggleDrills()", cls:="form-select bg-dark text-white fw-bold", option(value:="Club", "Club"), option(value:="Academia", "Academia"), option(value:="Judo", "🥋 Judo"), option(value:="Papa", "Papa (Portero)"), option(value:="Papa (Jugador)", "Papa (Jugador)"))), drillList, div(cls:="mb-3", label(cls:="small fw-bold", "Foco / Actividad"), div(cls:="d-flex gap-2", input(tpe:="text", name:="foco", id:="drillFocus", cls:="form-control fw-bold", placeholder:="Ej: Tiros, Resistencia...", required:=true), button(tpe:="button", id:="aiBtn", cls:="btn btn-warning fw-bold", onclick:="generateAI()", style:="display:none;", "🤖 IA"))), div(id:="manualDesign", style:="display:none;", textarea(name:="rutina", id:="rutinaText", cls:="form-control mb-3 fw-bold", rows:="4", placeholder:="Detalle de la sesión...")), div(cls:="row mb-3", div(cls:="col-4 text-center", label(cls:="small fw-bold", "RPE"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="rpe", value:="7", min:="1", max:="10")), div(cls:="col-4 text-center", label(cls:="small fw-bold", "Calidad"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="calidad", value:="8", min:="1", max:="10")), div(cls:="col-4 text-center", label(cls:="small fw-bold", "Atención"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="atencion", value:="8", min:="1", max:="10"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success fw-bold", "Guardar Sesión")))),
           div(cls:="card bg-secondary bg-opacity-10 border-secondary", div(cls:="card-body p-2", h6(cls:="text-muted small mb-2", "+ Añadir Misión Técnica (10 Sesiones)"), form(action:="/bio/add_drill", method:="post", cls:="d-flex gap-2", input(tpe:="text", name:="nombre", cls:="form-control form-control-sm fw-bold", placeholder:="Ej: Control Orientado", required:=true), button(tpe:="submit", cls:="btn btn-sm btn-secondary fw-bold", "Crear"))))
         )
       ), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""
@@ -311,6 +360,11 @@ object GuardianServer extends cask.MainRoutes {
   }
   @cask.postForm("/bio/save_wellness") def saveWellness(sueno: Int, horas: String, energia: Int, dolor: Int, zona: String, altura: String, peso: String, animo: Int, notas_conducta: String, estadoFisico: String) = { val h = if(horas.nonEmpty) horas.toDouble else 0.0; val alt = if(altura.nonEmpty) altura.toInt else 0; val pes = if(peso.nonEmpty) peso.toDouble else 0.0; DatabaseManager.logWellness(sueno, h, energia, dolor, zona, alt, pes, animo, notas_conducta, estadoFisico); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
   @cask.postForm("/bio/save_training") def saveTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: String, rutina: String) = { val att = if(atencion != null && atencion.nonEmpty) atencion.toInt else 3; DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina); val htmlStr = doctype("html")(html(head(meta(charset := "utf-8"), tags2.title("Entreno Guardado"), tags2.style(raw(getCss()))), body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';", h1(style := "color: #28a745; font-size: 60px; margin-bottom: 0;", "✔"), h2(style := "color: #d4af37; letter-spacing: 2px;", "SESIÓN COMPLETADA"), div(style := "margin: 30px auto; width: 300px; background: #333; padding: 20px; border-radius: 10px; border: 1px solid #444;", h4(style := "color: #0dcaf0; margin-bottom: 5px;", tipo.toUpperCase), div(style := "font-style: italic; color: #ccc; margin-bottom: 15px;", if(foco.nonEmpty) foco else "Entrenamiento General"), div(style := "display: flex; justify-content: space-around; margin-top: 15px; border-top: 1px solid #555; padding-top: 10px;", div(div(style:="font-size:12px; color:#aaa;", "RPE"), div(style:="font-weight:bold; font-size:20px;", rpe)), div(div(style:="font-size:12px; color:#aaa;", "CALIDAD"), div(style:="font-weight:bold; font-size:20px; color:#ffc107;", calidad)), div(div(style:="font-size:12px; color:#aaa;", "ATENCIÓN"), div(style:="font-weight:bold; font-size:20px;", att)))), p(style := "color: #999; font-size: 14px;", "Datos registrados en el historial."), div(style := "margin-top: 40px;", a(href := "/bio", cls := "btn btn-outline-light btn-lg", "Continuar"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
+  @cask.postForm("/bio/update_belt")
+  def updateBelt(belt: String) = {
+    DatabaseManager.updateJudoBelt(belt)
+    cask.Response("", statusCode=302, headers=Seq("Location" -> "/bio"))
+  }
   @cask.postForm("/bio/save_eval") def saveEval(blocaje: Int, pies: Int, aereo: Int, valentia: Int, concentracion: Int, coordinacion: Int, notas: String) = { DatabaseManager.saveTechnicalReview(blocaje, pies, aereo, valentia, concentracion, coordinacion, notas); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
   @cask.get("/bio/ai_gen") def aiGenDrill(focus: String, mode: String) = { cask.Response(DatabaseManager.generateTrainingSession(mode, focus)) }
   @cask.postForm("/bio/add_drill") def addDrill(nombre: String) = { DatabaseManager.addNewDrill(fixEncoding(nombre), ""); cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio")) }
@@ -456,7 +510,7 @@ object GuardianServer extends cask.MainRoutes {
   // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
     "<!DOCTYPE html>" +
-      html(head(meta(charset := "utf-8"), meta(name := "viewport", content := "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"), link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"), link(rel := "stylesheet", href := "https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap"), tags2.title("GUARDIAN V2 - ACTUALIZADO"), tags2.style(raw(getCss()))),
+      html(head(meta(charset := "utf-8"), meta(name := "viewport", content := "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"), link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"), link(rel := "stylesheet", href := "https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap"), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), tags2.title("GUARDIAN V2 - ACTUALIZADO"), tags2.style(raw(getCss()))),
         body(div(cls := "app-header d-flex justify-content-between align-items-center", div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"), a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "S")), div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "📋"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
       ).render
   }
@@ -505,41 +559,133 @@ object GuardianServer extends cask.MainRoutes {
   // --- 1. EL ORÁCULO (Predicción de Altura) ---
   @cask.get("/oracle")
   def oraclePage(hDad: String = "180", hMom: String = "170") = {
-    // Convierte inputs a Double de forma segura
     val hd = try hDad.toDouble catch { case _: Exception => 180.0 }
     val hm = try hMom.toDouble catch { case _: Exception => 170.0 }
 
-    // Obtiene el HTML ya formateado desde DatabaseManager
-    val predictionHtml = DatabaseManager.getOraclePrediction(hd, hm)
+    // 1. Obtenemos datos base y calculamos edad para la tabla dinámica
+    val card = DatabaseManager.getLatestCardData()
+    val edadActual = DatabaseManager.calcularEdadExacta(card.fechaNacimiento)
 
-    val content = basePage("bio", div(cls:="row justify-content-center",
-      div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-info mb-4", "🔮 EL ORÁCULO"),
-        div(cls:="card bg-dark text-white border-info shadow p-4",
-          h4(cls:="text-center text-info mb-3", "Predicción Genética"),
-          div(cls:="bg-secondary bg-opacity-10 p-3 rounded mb-3",
-            raw(predictionHtml) // Renderiza el HTML generado por el Manager
+    // 2. Obtenemos los percentiles de la OMS para su edad actual (5-18 años)
+    val (p50H, p15H, p85H, p50W, p15W, p85W) = DatabaseManager.getOMSPercents()
+
+    val predictionHtml = DatabaseManager.getOraclePrediction(hd, hm)
+    val bioInsights = DatabaseManager.getOracleInsights()
+    val growthJson = DatabaseManager.getGrowthHistory()
+
+    val content = basePage("bio", div(
+      div(cls:="row justify-content-center",
+        div(cls:="col-md-8 col-12",
+          h2(cls:="text-center text-info mb-4", "🔮 EL ORÁCULO"),
+
+          // TARJETA DE INTELIGENCIA BIOMECÁNICA
+          div(cls:="card bg-dark border-info shadow mb-4",
+            div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
+              span("🧠 INTELIGENCIA DEPORTIVA"),
+              span(cls:="badge bg-dark text-info", s"Edad: $edadActual años")
+            ),
+            div(cls:="card-body", raw(bioInsights))
           ),
-          form(action:="/oracle", method:="get", cls:="mt-4 border-top border-secondary pt-3",
-            div(cls:="row",
-              div(cls:="col-6",
-                label(cls:="form-label small text-muted fw-bold", "Altura Papá (cm)"),
-                input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control fw-bold text-center")
-              ),
-              div(cls:="col-6",
-                label(cls:="form-label small text-muted fw-bold", "Altura Mamá (cm)"),
-                input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control fw-bold text-center")
+
+          // TARJETA DEL GRÁFICO (Altura vs Peso)
+          div(cls:="card bg-dark border-secondary shadow mb-4",
+            div(cls:="card-header text-white small", "Evolución Biométrica Histórica"),
+            div(cls:="card-body", style:="height: 300px; position: relative;",
+              canvas(id:="growthChart")
+            )
+          ),
+
+          // TABLA DINÁMICA OMS (Se adapta de los 5 a los 18 años)
+          div(cls:="card bg-dark border-secondary shadow mb-4",
+            div(cls:="card-header text-muted small fw-bold text-uppercase", s"📊 Referencia OMS para $edadActual años"),
+            div(cls:="card-body p-0",
+              table(cls:="table table-dark table-sm mb-0 small text-center",
+                thead(tr(th("Percentil"), th("Altura (cm)"), th("Peso (kg)"))),
+                tbody(
+                  tr(td("P15 (Bajo)"), td(f"$p15H%.1f"), td(f"$p15W%.1f")),
+                  tr(cls:="table-active text-info", td("P50 (Media)"), td(f"$p50H%.1f"), td(f"$p50W%.1f")),
+                  tr(td("P85 (Alto)"), td(f"$p85H%.1f"), td(f"$p85W%.1f"))
+                )
               )
             ),
-            div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular Proyección"))
-          )
-        ),
-        div(cls:="text-center mt-3 small text-muted", "Basado en la fórmula de Khamis-Roche + Curva de crecimiento actual.")
-      )
-    ))
-    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
+            div(cls:="card-footer p-1 text-center",
+              small(cls:="text-muted", "Los datos se actualizan automáticamente cada cumpleaños.")
+            )
+          ),
 
+          // PREDICCIÓN GENÉTICA
+          div(cls:="card bg-dark text-white border-secondary shadow p-4",
+            h4(cls:="text-center text-warning mb-3", "Predicción Altura Final"),
+            div(cls:="bg-secondary bg-opacity-10 p-3 rounded mb-3", raw(predictionHtml)),
+            form(action:="/oracle", method:="get", cls:="mt-4 border-top border-secondary pt-3",
+              div(cls:="row",
+                div(cls:="col-6",
+                  label(cls:="form-label small text-muted fw-bold", "Papá (cm)"),
+                  input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")
+                ),
+                div(cls:="col-6",
+                  label(cls:="form-label small text-muted fw-bold", "Mamá (cm)"),
+                  input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center")
+                )
+              ),
+              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular"))
+            )
+          )
+        )
+      ),
+      // SCRIPT DE CARGA
+      script(raw(s"""
+    (function() {
+      const rawData = $growthJson;
+      const ctx = document.getElementById('growthChart').getContext('2d');
+      new Chart(ctx, {
+          type: 'line',
+          data: {
+              labels: rawData.labels,
+              datasets: [
+                  {
+                      label: 'Altura (cm)',
+                      data: rawData.altura,
+                      borderColor: '#0dcaf0',
+                      backgroundColor: 'rgba(13, 202, 240, 0.1)',
+                      yAxisID: 'y',
+                      tension: 0.3,
+                      fill: true
+                  },
+                  {
+                      label: 'Peso (kg)',
+                      data: rawData.peso,
+                      borderColor: '#ffc107',
+                      borderDash: [5, 5],
+                      yAxisID: 'y1',
+                      tension: 0.3,
+                      fill: false
+                  }
+              ]
+          },
+          options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                  y: {
+                    type: 'linear', position: 'left',
+                    title: { display: true, text: 'cm', color: '#0dcaf0' },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                  },
+                  y1: {
+                    type: 'linear', position: 'right',
+                    title: { display: true, text: 'kg', color: '#ffc107' },
+                    grid: { drawOnChartArea: false }
+                  }
+              },
+              plugins: { legend: { labels: { color: '#aaa', font: { size: 10 } } } }
+          }
+      });
+    })();
+    """))
+    ))
+    renderHtml(content)
+  }
   // --- 2. MONEYBALL (Distribución Táctica) ---
   @cask.get("/distribution")
   def distributionPage() = {
@@ -605,8 +751,8 @@ object GuardianServer extends cask.MainRoutes {
         div(cls:="card bg-dark text-white border-warning shadow mb-4",
           div(cls:="card-body text-center",
             h6(cls:="text-muted text-uppercase letter-spacing-2", "Rango Actual"),
-            h1(cls:="display-4 fw-bold text-warning mb-0", rpg.title),
-            div(cls:="badge bg-secondary mb-3", s"Nivel ${rpg.level}"),
+            h1(cls:="display-4 fw-bold text-warning mb-0", rpg.titulo),
+            div(cls:="badge bg-secondary mb-3", s"Nivel ${rpg.nivel}"),
 
             div(cls:="progress bg-secondary mb-2", style:="height: 25px;",
               div(cls:="progress-bar bg-warning progress-bar-striped progress-bar-animated",
@@ -794,6 +940,12 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
+  def renderHtml(content: String) = {
+    cask.Response(
+      content.getBytes("UTF-8"),
+      headers = Seq("Content-Type" -> "text/html; charset=utf-8")
+    )
+  }
   initialize()
 
 }
