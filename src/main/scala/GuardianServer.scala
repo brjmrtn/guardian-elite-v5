@@ -86,7 +86,7 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  // --- 2. MATCH CENTER (JUGAR) ---
+
   // --- 2. MATCH CENTER (JUGAR) - VERSIÓN CORREGIDA 4.1 ---
   @cask.get("/match-center")
   def matchCenterPage(scheduleId: Int = 0) = {
@@ -795,4 +795,5 @@ object GuardianServer extends cask.MainRoutes {
   }
 
   initialize()
+
 }
