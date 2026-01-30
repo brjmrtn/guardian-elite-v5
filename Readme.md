@@ -66,13 +66,14 @@
     * **Evolutivo:** Repositorio blindado para la subida de PDFs médicos con procesamiento OCR mediante Gemini para el análisis automático de diagnósticos y analíticas.
     * **Objetivo:** Garantizar la "Disponibilidad Competitiva" mediante el cruce del historial de lesiones con los tiempos de recuperación en el semáforo ACWR.
     * **Valor:** Ofrece al Director Deportivo un "Pasaporte Biológico" que asegura que el activo no es un jugador con fragilidad estructural recurrente.---
-
+17. **🔐 Guardian Gatekeeper:** Implementación de acceso restringido mediante credenciales únicas para blindar el entorno frente a intrusiones externas.
+18. **🎭 Módulo de Anonimización:** Motor de limpieza de metadatos identificativos. El sistema permite generar informes de rendimiento "Ciegos" para procesos de captación, protegiendo la privacidad del menor.
 ## 🚀 FASE 5: INTELIGENCIA PROACTIVA (Vision & Prediction)
 *Hacia un modelo de entrenamiento autónomo y predictivo.*
 
-17. **🤖 Pose-Estimation Analyst:** IA que analiza clips de video para corregir el ángulo de ataque y la base de sustentación en tiempo real.
-18. **🧠 Emotional Intelligence Engine:** Correlación automática entre el bienestar psicológico (NLP) y la probabilidad de error técnico para optimizar el 'tapering' competitivo.
-19. **⚽ GK Influence Analytics:** Algoritmos de grafos para medir el impacto de la distribución de juego en la generación de ocasiones de gol.
+19. **🤖 Pose-Estimation Analyst:** IA que analiza clips de video para corregir el ángulo de ataque y la base de sustentación en tiempo real.
+20. **🧠 Emotional Intelligence Engine:** Correlación automática entre el bienestar psicológico (NLP) y la probabilidad de error técnico para optimizar el 'tapering' competitivo.
+21. **⚽ GK Influence Analytics:** Algoritmos de grafos para medir el impacto de la distribución de juego en la generación de ocasiones de gol.
 ## 🏗️ Stack Tecnológico
 * **Backend:** Scala (Cask, Requests).
 * **Database:** PostgreSQL (Neon Serverless).
