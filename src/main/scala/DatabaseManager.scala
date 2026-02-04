@@ -139,9 +139,9 @@ object DatabaseManager {
     }
 
     private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
-      val apiKey = "AIzaSyDQ6IvvzjUissW5D6jPjCKDU9eom6soZjc"
+      val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
       val model = "gemini-1.5-flash"
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+      val url = s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$apiKey"
 
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
 
