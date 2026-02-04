@@ -139,7 +139,7 @@ object DatabaseManager {
     }
 
     private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
-      val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+      val apiKey = "AIzaSyDQ6IvvzjUissW5D6jPjCKDU9eom6soZjc"
       val model = "gemini-1.5-flash"
       val url = s"https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
@@ -459,7 +459,11 @@ object DatabaseManager {
       if(c<2) return "Pocos datos.";
       // Cambio aquí: Llamamos a AIProvider.ask
       AIProvider.ask(sb.toString()+"\nDame HTML limpio: <h4>ANALISIS</h4>...").replace("```html","").replace("```","").trim
-    } catch { case e:Exception=>"Error" } finally { if(conn!=null) conn.close() }
+    } catch {
+      case e:Exception =>
+        e.printStackTrace() // Esto hará que el error aparezca en el log de Render/Consola
+        "Error: " + e.getMessage
+    }
   }
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches WHERE status='PLAYED' ORDER BY fecha ASC LIMIT 15"); while(rs.next()){ l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally {conn.close()}; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
   def getAchievements(): List[Achievement] = { var l=List[Achievement](); val conn=getConnection(); try { val s=conn.createStatement(); val r1=s.executeQuery("SELECT COUNT(*) FROM matches WHERE goles_contra=0 AND status='PLAYED'"); if(r1.next()&&r1.getInt(1)>=5) l=l:+Achievement("(M)","El Muro",r1.getInt(1)/5,""); val r2=s.executeQuery("SELECT COUNT(*) FROM matches WHERE nota>=9 AND status='PLAYED'"); if(r2.next()&&r2.getInt(1)>0) l=l:+Achievement("(E)","MVP",r2.getInt(1),"") } finally { conn.close() }; l }
