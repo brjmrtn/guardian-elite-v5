@@ -101,18 +101,66 @@ object DatabaseManager {
   }
 
   // --- IA CONFIG ---
-  val modelList = Seq("gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash-latest")
-  def callGeminiAI(prompt: String): String = { val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim; if (envKey.isEmpty) return "⚠️ Error Config: Falta GEMINI_API_KEY"; attemptNextModel(prompt, envKey, 0) }
-  def attemptNextModel(prompt: String, apiKey: String, index: Int): String = { if (index >= modelList.length) return "❌ Error IA"; try { val r = requests.post(s"https://generativelanguage.googleapis.com/v1beta/models/${modelList(index)}:generateContent?key=$apiKey", data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 15000); if (r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str else attemptNextModel(prompt, apiKey, index + 1) } catch { case _: Exception => attemptNextModel(prompt, apiKey, index + 1) } }
-  def analyzeAudioLog(matchId: Int, audioBase64: String): String = {
-    val prompt = "Eres un Psicólogo Deportivo experto en niños. Analiza este audio post-partido de un portero de 5 años. 1) Transcribe. 2) Estado emocional. 3) Consejo breve para el padre. Texto plano."
-    val cleanBase64 = if(audioBase64.contains(",")) audioBase64.split(",")(1) else audioBase64
-    val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
-    try {
-      val r = requests.post(s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$envKey", data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt), ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> "audio/webm", "data" -> cleanBase64)))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 30000)
-      if (r.statusCode == 200) { val an = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str; val conn = getConnection(); try { val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?"); ps.setString(1, fixEncoding(an)); ps.setInt(2, matchId); ps.executeUpdate() } finally { conn.close() }; an } else s"Error IA (${r.statusCode})"
-    } catch { case e: Exception => s"Error: ${e.getMessage}" }
+  val modelList = Seq("gemini-1.5-flash", "gemini-flash-latest")
+  object AIProvider {
+    import java.security.MessageDigest
+
+    private def getHash(s: String): String =
+      MessageDigest.getInstance("MD5").digest(s.getBytes).map("%02x".format(_)).mkString
+
+    // Función principal: intenta caché, si no, llama a Gemini
+    def ask(prompt: String, media: Option[(String, String)] = None, bypassCache: Boolean = false): String = {
+      val conn = DatabaseManager.getConnection()
+      // Creamos un hash único combinando el prompt y los primeros bytes del archivo (si existe)
+      val combinedKey = prompt + media.map(_._2.take(100)).getOrElse("")
+      val hash = getHash(combinedKey)
+
+      try {
+        if (!bypassCache) {
+          val ps = conn.prepareStatement("SELECT respuesta FROM ai_cache WHERE prompt_hash = ?")
+          ps.setString(1, hash)
+          val rs = ps.executeQuery()
+          if (rs.next()) return rs.getString("respuesta")
+        }
+
+        // Llamada real a la API (Unificada)
+        val response = callGeminiUnified(prompt, media)
+
+        // Guardar en caché para la próxima vez
+        val save = conn.prepareStatement(
+          "INSERT INTO ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta"
+        )
+        save.setString(1, hash)
+        save.setString(2, response)
+        save.executeUpdate()
+
+        response
+      } finally { conn.close() }
+    }
+
+    private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
+      val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+      val model = "gemini-1.5-flash"
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+
+      val parts = ujson.Arr(ujson.Obj("text" -> prompt))
+
+      media.foreach { case (mime, data) =>
+        val cleanData = if(data.contains(",")) data.split(",")(1) else data
+        parts.value.append(ujson.Obj(
+          "inlineData" -> ujson.Obj("mimeType" -> mime, "data" -> cleanData)
+        ))
+      }
+
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> parts)))
+
+      val r = requests.post(url, data = ujson.write(payload), headers = Map("Content-Type" -> "application/json"), readTimeout = 30000)
+      if (r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+      else s"Error IA (${r.statusCode})"
+    }
   }
+  def attemptNextModel(prompt: String, apiKey: String, index: Int): String = { if (index >= modelList.length) return "❌ Error IA"; try { val r = requests.post(s"https://generativelanguage.googleapis.com/v1beta/models/${modelList(index)}:generateContent?key=$apiKey", data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 15000); if (r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str else attemptNextModel(prompt, apiKey, index + 1) } catch { case _: Exception => attemptNextModel(prompt, apiKey, index + 1) } }
+
   // --- EN: DatabaseManager.scala ---
 
   def generateTrainingSession(mode: String, focus: String): String = {
@@ -161,7 +209,7 @@ object DatabaseManager {
     SOLO TEXTO PLANO.
   """
 
-    callGeminiAI(prompt).replace("```html","").replace("```","").trim
+    AIProvider.ask(prompt).replace("```html","").replace("```","").trim
   }
   // --- NUEVO: CENTRO DE PREDICCIÓN BIOMÉTRICA (EL ORÁCULO) ---
   def getOracleInsights(): String = {
@@ -401,7 +449,18 @@ object DatabaseManager {
   def updateRFFMSettings(url: String, teamName: String): Unit = { val conn=getConnection(); try{ val ps=conn.prepareStatement("UPDATE seasons SET rffm_url=?, rffm_team_name=? WHERE id=(SELECT MAX(id) FROM seasons)"); ps.setString(1,url); ps.setString(2,teamName); ps.executeUpdate() } finally { conn.close() } }
   def updateSeasonSettings(f: String, c: String, n: String, fecha: String): String = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club), fecha_nacimiento=? WHERE id=(SELECT MAX(id) FROM seasons)"); s.setString(1,f); s.setString(2,c); s.setString(3,fixEncoding(n)); s.setDate(4, Date.valueOf(fecha)); s.executeUpdate(); "DATOS ACTUALIZADOS" } finally { conn.close() } }
   def getLatestCardData(): PlayerCardData = { var conn: Connection=null; try { conn=getConnection(); val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1"); if(rs.next()){ val fecha=Option(rs.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19"); PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), "", Option(rs.getString("nombre_club")).getOrElse(""), rs.getDouble("stat_div").toInt, rs.getDouble("stat_han").toInt, rs.getDouble("stat_kic").toInt, rs.getDouble("stat_ref").toInt, rs.getDouble("stat_spd").toInt, rs.getDouble("stat_pos").toInt, rs.getDouble("stat_div"), rs.getDouble("stat_han"), rs.getDouble("stat_kic"), rs.getDouble("stat_ref"), rs.getDouble("stat_spd"), rs.getDouble("stat_pos"), fecha, Option(rs.getString("rffm_url")).getOrElse(""), Option(rs.getString("rffm_team_name")).getOrElse("")) } else { PlayerCardData("HECTOR", 59, "GK", "", "", "", "", 80, 60, 55, 60, 62, 58, 80, 60, 55, 60, 62, 58, "2020-06-19", "", "") } } finally { if(conn!=null) conn.close() } }
-  def getDeepAnalysis(): String = { var conn:Connection=null; try { conn=getConnection(); val sb=new StringBuilder(); val card=getLatestCardData(); val edad=calcularEdadExacta(card.fechaNacimiento); sb.append(s"Analista Elite ($edad años). Tendencias:\n"); val rs=conn.createStatement().executeQuery("SELECT fecha, rival, nota FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"); var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString(1)}|${rs.getString(2)}|${rs.getDouble(3)}\n") }; if(c<2) return "Pocos datos."; callGeminiAI(sb.toString()+"\nDame HTML limpio: <h4>ANALISIS</h4>...").replace("```html","").replace("```","").trim } catch { case e:Exception=>"Error" } finally { if(conn!=null) conn.close() } }
+  def getDeepAnalysis(): String = {
+    var conn:Connection=null;
+    try {
+      conn=getConnection(); val sb=new StringBuilder(); val card=getLatestCardData(); val edad=calcularEdadExacta(card.fechaNacimiento);
+      sb.append(s"Analista Elite ($edad años). Tendencias:\n");
+      val rs=conn.createStatement().executeQuery("SELECT fecha, rival, nota FROM matches WHERE status='PLAYED' ORDER BY fecha ASC");
+      var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString(1)}|${rs.getString(2)}|${rs.getDouble(3)}\n") };
+      if(c<2) return "Pocos datos.";
+      // Cambio aquí: Llamamos a AIProvider.ask
+      AIProvider.ask(sb.toString()+"\nDame HTML limpio: <h4>ANALISIS</h4>...").replace("```html","").replace("```","").trim
+    } catch { case e:Exception=>"Error" } finally { if(conn!=null) conn.close() }
+  }
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches WHERE status='PLAYED' ORDER BY fecha ASC LIMIT 15"); while(rs.next()){ l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally {conn.close()}; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
   def getAchievements(): List[Achievement] = { var l=List[Achievement](); val conn=getConnection(); try { val s=conn.createStatement(); val r1=s.executeQuery("SELECT COUNT(*) FROM matches WHERE goles_contra=0 AND status='PLAYED'"); if(r1.next()&&r1.getInt(1)>=5) l=l:+Achievement("(M)","El Muro",r1.getInt(1)/5,""); val r2=s.executeQuery("SELECT COUNT(*) FROM matches WHERE nota>=9 AND status='PLAYED'"); if(r2.next()&&r2.getInt(1)>0) l=l:+Achievement("(E)","MVP",r2.getInt(1),"") } finally { conn.close() }; l }
   def getSeasonObjectives(): List[Objective] = { var l=List[Objective](); val conn=getConnection(); try { val rsObj=conn.createStatement().executeQuery("SELECT id, tipo, objetivo, descripcion FROM objectives"); val objs=new scala.collection.mutable.ListBuffer[(Int,String,Int,String)](); while(rsObj.next()) objs+=((rsObj.getInt("id"),rsObj.getString("tipo"),rsObj.getInt("objetivo"),rsObj.getString("descripcion"))); val rsStats=conn.createStatement().executeQuery("SELECT COUNT(*) as pj, COUNT(CASE WHEN goles_contra=0 THEN 1 END) as cs, AVG(nota) as media FROM matches WHERE status='PLAYED'"); var (cs,pj,md)=(0,0,0.0); if(rsStats.next()){cs=rsStats.getInt("cs");pj=rsStats.getInt("pj");md=rsStats.getDouble("media")}; objs.foreach { case (id,t,m,d) => val act=t match { case "CleanSheets"=>cs.toDouble case "MediaNota"=>md case "PartidosJugados"=>pj.toDouble case _=>0.0 }; l=l:+Objective(id,t,act,m,d) } } finally { conn.close() }; l }
@@ -661,35 +720,33 @@ object DatabaseManager {
   def saveMedicalReport(fecha: String, tipo: String, fileBase64: String, esPrevio: Boolean): String = {
     val conn = getConnection()
     try {
-      // 1. Prompt de Inteligencia Médica
       val prompt = """
       Analiza este informe médico de un niño deportista.
-      Extrae: 1) Diagnóstico claro. 2) Impacto en el deporte (ej: limitar saltos, reposo, dieta).
+      Extrae: 1) Diagnóstico claro. 2) Impacto en el deporte (ej: limitar saltos, reposo).
       3) Si es una analítica, destaca valores fuera de rango.
       Responde en formato: DIAGNÓSTICO: ... | RECOMENDACIÓN: ...
     """
 
-      // 2. Llamada a Gemini con el archivo (PDF/Imagen)
-      // Nota: Usamos la capacidad multimodal de Gemini 1.5 Flash
-      val analisisCompleto = callGeminiAI(s"$prompt [Archivo: $fileBase64]")
-      val partes = analisisCompleto.split("\\|")
-      val diag = partes.headOption.getOrElse("No detectado")
-      val rec = partes.lastOption.getOrElse("No hay recomendaciones específicas")
+      // Detectamos el formato para el AIProvider
+      val mime = if (fileBase64.contains("pdf")) "application/pdf" else "image/jpeg"
 
-      // 3. Persistencia en DB
-      val ps = conn.prepareStatement(
-        "INSERT INTO medical_vault (fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, url_archivo, es_previo_futbol) VALUES (?, ?, ?, ?, ?, ?)"
-      )
+      // La magia: AIProvider.ask devolverá el análisis de la caché si ya se subió este mismo archivo
+      val analisisIA = AIProvider.ask(prompt, Some((mime, fileBase64)))
+
+      val partes = analisisIA.split("\\|")
+      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNÓSTICO:", "").trim
+      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACIÓN:", "").trim
+
+      val ps = conn.prepareStatement("INSERT INTO medical_vault (fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol) VALUES (?, ?, ?, ?, ?)")
       ps.setDate(1, java.sql.Date.valueOf(fecha))
       ps.setString(2, tipo)
       ps.setString(3, fixEncoding(diag))
       ps.setString(4, fixEncoding(rec))
-      ps.setString(5, "") // Aquí iría la URL de almacenamiento (S3/Cloudinary)
-      ps.setBoolean(6, esPrevio)
+      ps.setBoolean(5, esPrevio)
       ps.executeUpdate()
 
       s"Informe procesado: $diag"
-    } finally { conn.close() }
+    } catch { case e: Exception => s"Error médico: ${e.getMessage}" } finally { conn.close() }
   }
 
   def getLatestMedicalInsight(): String = {
@@ -759,41 +816,47 @@ object DatabaseManager {
     }
     reports.toList
   }
-  def callGeminiMultimodal(prompt: String, base64Data: String, mimeType: String): String = {
-    // Usamos la API Key que ya tienes configurada en tu sistema
-    val apiKey = "GEMINI_API_KEY" // Asegúrate de que apunte a tu variable de entorno
-    val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+  def getCoachAdvice(): String = {
+    val card = getLatestCardData()
+    val matches = getMatchesList().take(3) // Últimos 3 partidos
+    val cog = getCognitiveInsight() // Datos de estudios/atención
+    val wellness = getOracleInsights() // Datos físicos/crecimiento
 
-    val payload = ujson.Obj(
-      "contents" -> ujson.Arr(
-        ujson.Obj(
-          "parts" -> ujson.Arr(
-            ujson.Obj("text" -> prompt),
-            ujson.Obj(
-              "inline_data" -> ujson.Obj(
-                "mime_type" -> mimeType,
-                "data" -> base64Data
-              )
-            )
-          )
-        )
-      )
-    )
+    val prompt = s"""
+    Actúa como un Coach de Élite para un portero de ${calcularEdadExacta(card.fechaNacimiento)} años.
+    CONTEXTO TÉCNICO: Media ${card.media}, Reflejos ${card.ref}.
+    ESTADO FÍSICO: $wellness
+    ESTADO COGNITIVO: $cog
+    ÚLTIMOS PARTIDOS: ${matches.map(m => m.rival + " nota:" + m.nota).mkString(", ")}
 
-    try {
-      val response = requests.post(
-        url,
-        data = ujson.write(payload),
-        headers = Map("Content-Type" -> "application/json"),
-        readTimeout = 30000 // Los informes médicos pueden tardar un poco más en procesarse
-      )
+    Dame 3 consejos breves y motivadores. Si detectas fatiga o baja atención académica, prioriza el descanso psicológico.
+  """
 
-      val json = ujson.read(response.text())
-      json("candidates")(0)("content")("parts")(0)("text").str
-    } catch {
-      case e: Exception =>
-        println(s"Error en Gemini Multimodal: ${e.getMessage}")
-        "ERROR: No se pudo procesar el informe médico."
-    }
+    // Usamos el AIProvider centralizado con caché (se refresca una vez al día o tras cambios)
+    AIProvider.ask(prompt)
   }
+  def analyzeAudioLog(matchId: Int, audioBase64: String): String = {
+    // Prompt personalizado para Héctor (5 años) y su gestión emocional
+    val prompt = """
+      Eres un Psicólogo Deportivo experto en formación base.
+      Analiza este audio post-partido de Héctor, un portero de 5 años.
+      1) Transcribe lo que dice (ignora ruidos de fondo).
+      2) Evalúa su estado emocional: ¿frustración, alegría, timidez, cansancio?
+      3) Da un consejo breve y práctico al padre para reforzar la autoestima de Héctor hoy.
+      Responde en texto plano, sin formato Markdown complejo.
+    """
+
+    // Llamada al motor unificado con soporte para audio
+    val res = AIProvider.ask(prompt, Some(("audio/webm", audioBase64)))
+
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?")
+      ps.setString(1, fixEncoding(res))
+      ps.setInt(2, matchId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+    res
+  }
+
 }

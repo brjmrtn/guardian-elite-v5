@@ -1153,7 +1153,7 @@ object GuardianServer extends cask.MainRoutes {
 
       val medicalPrompt = s"Analiza este informe ($tipo) de Héctor. Extrae DIAGNÓSTICO y RECOMENDACIÓN DEPORTIVA. Formato: DIAGNÓSTICO: [texto] | RECOMENDACIÓN: [texto]"
 
-      val analisisIA = DatabaseManager.callGeminiMultimodal(medicalPrompt, base64Content, mimeType)
+      val analisisIA = DatabaseManager.AIProvider.ask(medicalPrompt, Some((mimeType, base64Content)))
       val partes = analisisIA.split("\\|")
       val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNÓSTICO:", "").trim
       val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACIÓN:", "").trim
