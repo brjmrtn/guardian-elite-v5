@@ -862,5 +862,12 @@ object DatabaseManager {
     } finally { conn.close() }
     res
   }
+  def testAIConnection(): String = {
+    try {
+      AIProvider.ask("Responde solo con la palabra OK si me escuchas.", None, bypassCache = true)
+    } catch {
+      case e: Exception => s"Fallo total: ${e.getMessage}"
+    }
+  }
 
 }
