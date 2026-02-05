@@ -140,23 +140,29 @@ object DatabaseManager {
 
     private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
       val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
-      val model = "gemini-1.5-flash"
-      // Probamos con v1beta que es la que suele estar habilitada para "Flash" en EU
-      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
-      val parts = ujson.Arr(ujson.Obj("text" -> prompt))
+      // Lista de variantes de URL para asegurar compatibilidad en Europa
+      val urls = Seq(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$apiKey"
+      )
 
+      val parts = ujson.Arr(ujson.Obj("text" -> prompt))
       media.foreach { case (mime, data) =>
         val cleanData = if(data.contains(",")) data.split(",")(1) else data
-        parts.value.append(ujson.Obj(
-          "inlineData" -> ujson.Obj("mimeType" -> mime, "data" -> cleanData)
-        ))
+        parts.value.append(ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> mime, "data" -> cleanData)))
       }
-
       val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> parts)))
 
-      val r = requests.post(url, data = ujson.write(payload), headers = Map("Content-Type" -> "application/json"), readTimeout = 30000)
-      if (r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
-      else s"Error IA (${r.statusCode})"
+      // Intenta cada URL hasta que una funcione
+      var lastError = ""
+      for (url <- urls) {
+        try {
+          val r = requests.post(url, data = ujson.write(payload), headers = Map("Content-Type" -> "application/json"), readTimeout = 30000)
+          if (r.statusCode == 200) return ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+          else lastError = s"Status ${r.statusCode}: ${r.text()}"
+        } catch { case e: Exception => lastError = e.getMessage }
+      }
+      s"Error tras agotar variantes: $lastError"
     }
   }
   def attemptNextModel(prompt: String, apiKey: String, index: Int): String = { if (index >= modelList.length) return "❌ Error IA"; try { val r = requests.post(s"https://generativelanguage.googleapis.com/v1beta/models/${modelList(index)}:generateContent?key=$apiKey", data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 15000); if (r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str else attemptNextModel(prompt, apiKey, index + 1) } catch { case _: Exception => attemptNextModel(prompt, apiKey, index + 1) } }
