@@ -146,6 +146,11 @@ object DatabaseManager {
         s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$apiKey"
       )
 
+      if (rawKey.nonEmpty) {
+        println(s"DEBUG: Usando Key [${rawKey.take(4)}...${rawKey.takeRight(4)}]")
+      } else {
+        println("DEBUG: ⚠️ GEMINI_API_KEY está VACÍA")
+      }
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
       media.foreach { case (mime, data) =>
         val cleanData = if(data.contains(",")) data.split(",")(1) else data
