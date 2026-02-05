@@ -143,11 +143,12 @@ object DatabaseManager {
       // Lista de variantes de URL para asegurar compatibilidad en Europa
       val urls = Seq(
         s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-001:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=$apiKey"
       )
 
-      if (rawKey.nonEmpty) {
-        println(s"DEBUG: Usando Key [${rawKey.take(4)}...${rawKey.takeRight(4)}]")
+      if (apiKey.nonEmpty) {
+        println(s"DEBUG: Usando Key [${apiKey.take(4)}...${apiKey.takeRight(4)}]")
       } else {
         println("DEBUG: ⚠️ GEMINI_API_KEY está VACÍA")
       }
