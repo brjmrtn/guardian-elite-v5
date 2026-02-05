@@ -141,8 +141,8 @@ object DatabaseManager {
     private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
       val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
       val model = "gemini-1.5-flash"
-      val url = s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-001:generateContent?key=$apiKey"
-
+      // Probamos con v1beta que es la que suele estar habilitada para "Flash" en EU
+      val url = s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
 
       media.foreach { case (mime, data) =>
