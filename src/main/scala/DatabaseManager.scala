@@ -141,10 +141,10 @@ object DatabaseManager {
     private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
       val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
       // Lista de variantes de URL para asegurar compatibilidad en Europa
-      
+
       val urls = Seq(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=$apiKey"
       )
 
       if (apiKey.nonEmpty) {
