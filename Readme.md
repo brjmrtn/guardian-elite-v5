@@ -53,6 +53,51 @@
 * **🎭 Módulo de Anonimización:** Generación de informes "Ciegos" para procesos de captación profesional.
 * **🧬 Bio-Banding Pro:** Monitorización del **PHV (Peak Height Velocity)** para ajustar cargas durante picos de crecimiento.
 
+## 🔵 FASE 6: INNOVACIÓN EXCLUSIVA & OPTIMIZACIÓN (Propuestas)
+
+* **🧤 Termómetro de Guantes (Smart Gear):** Sistema de recomendación que sugiere el par de guantes ideal (tipo de látex) cruzando los datos meteorológicos de la **RFFM** con el inventario de `GearItem`.
+* **🛡️ Escudo "Clean Sheet" Predictivo:** Algoritmo de confianza que calcula la probabilidad de mantener la portería a cero, analizando el ratio **ACWR**, el historial contra el rival y el estado anímico del **Audio-Diario**.
+* **🧠 Flash-Cards de Decisión:** Briefing visual pre-partido con los 3 mejores clips recientes y recordatorios de posicionamiento basados en los puntos ciegos detectados en **Moneyball**.
+* **🎤 Analizador de Liderazgo Acústico:** Módulo de procesamiento de audio para medir la "Voz de Mando" de Héctor, puntuando su capacidad para organizar la defensa durante el juego.
+
+## 🏆 FASE 7: EL OLIMPO (Gestión de Alto Rendimiento)
+
+* **🧬 Digital Twin Proyectivo:** Simulación del alcance físico en portería basado en el historial de crecimiento (velocidad y altura) y proyección del Oráculo para ajustar el entrenamiento de posicionamiento a largo plazo.
+* **📉 Clutch Factor Analytics:** Algoritmo que mide la eficiencia técnica en función de la importancia del partido (Torneo vs. Amistoso) y el estado cognitivo/emocional previo.
+* **🛡️ Scouting Proactivo Automático:** Generación de planes de contingencia táctica al detectar un rival en el calendario de la RFFM, analizando debilidades previas y patrones de tiro detectados en enfrentamientos anteriores.
+* **🥋 Correlación Dojo-Portería:** Análisis de transferencia de habilidades motoras desde el Judo (caídas y propiocepción) hacia la velocidad de reincorporación y valentía en el área.
+
+## 🌌 FASE 8: GESTIÓN DE CANTERA PRO (Alto Impacto)
+
+* **🔄 Tracking de Segunda Acción:** Medición de la velocidad de reincorporación tras parada, vinculando la agilidad del Judo con la técnica de portería.
+* **🥅 Goal Coverage Mapping:** Visualización dinámica de la superficie de portería cubierta según el biotipo actual vs. dimensiones de la portería reglamentaria.
+* **📢 Liderazgo Acústico (Voice Command):** Análisis de audios de partido para puntuar la capacidad de Héctor para organizar y mandar sobre su línea defensiva.
+* **⚠️ Alerta de Fatiga Silenciosa:** Algoritmo predictivo que cruza ACWR, calidad de sueño y carga académica para identificar riesgos de lesión antes de que se manifiesten físicamente.
+
+## 🚀 FASE 9: INTELIGENCIA PREDICTIVA & NETWORKING (Nivel Pro-Scout)
+
+* **🎥 Deep-Video Highlights IA:** Generación automática de "Mini-Movies" de los mejores momentos de la temporada, con música y efectos, lista para enviar a ojeadores o compartir, utilizando Gemini para seleccionar las paradas más estéticamente espectaculares.
+* **📉 Benchmarking de Élite:** Comparativa en tiempo real de las estadísticas de Héctor (nota media, paradas por partido, precisión de pase) con las medias de las mejores canteras de España por categoría (Real Madrid, Atlético, Barça).
+* **🧠 Simulador de Escenarios Tácticos:** Mini-juegos dentro de la app que presentan situaciones reales capturadas en sus partidos ("El delantero viene por aquí, ¿qué haces?") para entrenar la toma de decisiones sin desgaste físico.
+* **📂 Exportación de "Dossier de Captación":** Botón de un solo clic para generar un PDF profesional que incluya: trayectoria, biometría, evolución técnica y enlaces a clips de vídeo, diseñado específicamente para procesos de captación en clubes profesionales.
+* **🤖 Bot de Estrategia Personalizado:** Un chat de IA entrenado con TODO el historial de Héctor que le permita preguntarle: "¿Cómo me fue contra equipos que juegan al contraataque?" o "¿En qué debo centrarme en el entrenamiento de hoy según mis últimos errores?".
+
+## 🌌 FASE 10: BIO-INGENIERÍA & ENTRENAMIENTO COGNITIVO (The Final Frontier)
+
+* **🧠 Neuro-Feedback en Tiempo Real:** Integración con dispositivos wearables (tipo bandas EEG) para medir la concentración y el estado de "Flow" durante los entrenamientos, permitiendo saber exactamente qué ejercicios optimizan su foco mental.
+* **🕶️ Pizarra Táctica en Realidad Aumentada (AR):** Visualización de las "Flash-Cards" y jugadas ensayadas proyectadas sobre el campo real mediante el móvil, permitiendo que Héctor vea las líneas de pase y ángulos de tiro mientras se posiciona.
+* **🧬 Análisis de Bio-Banding Pro:** Algoritmo avanzado que ajusta las estadísticas de la Carta FUT no por edad cronológica, sino por maduración biológica (PHV - Peak Height Velocity), asegurando que su evaluación sea justa durante los picos de crecimiento.
+* **🤖 Asistente de IA "Coach Personal":** Un agente autónomo que analiza la base de datos completa de Neon y RFFM para enviar mensajes motivadores o correcciones técnicas personalizadas a Héctor antes de cada entreno, actuando como un mentor 24/7.
+* **🔒 Guardian Vault (Blockchain Identity):** Encriptación de todo el historial médico y deportivo para crear un "Pasaporte de Portero" inmutable, garantizando la propiedad de sus datos de cara a futuras negociaciones profesionales.
+
+## 🌐 FASE 11: ECOSISTEMA GLOBAL & IA PRESCRIPTIVA (The Professional Agent)
+
+* **📈 Market Value Estimator:** Algoritmo que genera una valoración de mercado estimada basada en el rendimiento longitudinal, biometría y comparativa con el histórico de traspasos en categorías base de élite.
+* **🛡️ Guardian Network (P2P Scouting):** Sistema de compartición selectiva de datos que permite a ojeadores autorizados acceder a un "Streaming de Datos" en tiempo real del progreso de Héctor, con permisos granulares de privacidad.
+* **🧠 IA Prescriptiva de Cargas:** El sistema deja de ser descriptivo (qué pasó) para ser prescriptivo (qué hacer), diseñando micro-ciclos de entrenamiento de 7 días que se auto-ajustan cada noche según el sueño, la fatiga académica y el rendimiento en el campo.
+* **🌍 Global Benchmarking:** Comparativa automatizada contra bases de datos globales de porteros de la misma edad cronológica y biológica en las 5 grandes ligas europeas.
+* **🤖 Entrenamiento en Realidad Virtual (VR Sync):** Exportación de los patrones de tiro de los rivales (registrados en el Match Center) a un entorno de VR para que Héctor pueda entrenar la lectura de esos disparos específicos en casa, sin impacto físico.
+
 ---
 
 ## 🏗️ Stack Tecnológico
