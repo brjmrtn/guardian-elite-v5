@@ -1161,7 +1161,9 @@ object GuardianServer extends cask.MainRoutes {
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini (Base64)
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
-      val mimeType = if (nameOfFile.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
+      val mimeType = if (fileName.endsWith(".pdf")) "application/pdf" 
+                     else if (fileName.endsWith(".png")) "image/png"
+                     else "image/jpeg"
 
       // 3. Llamada al gestor de base de datos y IA
       // Esto usará automáticamente la tabla 'ai_cache'
@@ -1233,6 +1235,7 @@ object GuardianServer extends cask.MainRoutes {
   initialize()
 
 }
+
 
 
 
