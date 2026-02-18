@@ -1145,32 +1145,36 @@ object GuardianServer extends cask.MainRoutes {
     ))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
-  @cask.postForm("/bio/medical/upload")
-  def uploadMedical(fecha: String,
+ @cask.postForm("/bio/medical/upload")
+def uploadMedical(fecha: String,
                   tipo: String,
                   archivo: cask.model.FormFile,
                   esPrevio: String = "false") = {
     
     val isPrevio = esPrevio == "on"
 
-    // 1. Lectura segura del archivo desde el disco
-    // Cask guarda el archivo en un path temporal. Usamos la API de Java para leer los bytes.
-    val fileBytes = java.nio.file.Files.readAllBytes(archivo.filePath)
-    val nameOfFile = archivo.fileName 
+    // Usamos Pattern Matching para extraer el nombre y la ruta del archivo de forma segura
+    // Estructura de FormFile: FormFile(nombre, ruta, headers)
+    val (nameOfFile, fileBytes) = archivo match {
+      case cask.model.FormFile(name, path, _) => 
+        (name, java.nio.file.Files.readAllBytes(path))
+    }
 
     if (fileBytes.nonEmpty) {
-      // 2. Proceso para Gemini (Base64)
+      // 1. Limpiamos el Base64 (Gemini necesita el string puro)
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
-      val mimeType = if (fileName.endsWith(".pdf")) "application/pdf" 
-                     else if (fileName.endsWith(".png")) "image/png"
+      
+      // 2. Definimos el MIME type basado en la extensión extraída
+      val lowerName = nameOfFile.toLowerCase
+      val mimeType = if (lowerName.endsWith(".pdf")) "application/pdf" 
+                     else if (lowerName.endsWith(".png")) "image/png"
                      else "image/jpeg"
 
-      // 3. Llamada al gestor de base de datos y IA
-      // Esto usará automáticamente la tabla 'ai_cache'
+      // 3. Sistema de persistencia (Caché): saveMedicalReport centraliza el análisis e inserción
+      // Se usará ai_cache para no repetir llamadas si el PDF es el mismo
       DatabaseManager.saveMedicalReport(fecha, tipo, base64Content, isPrevio)
     }
 
-    // Redirección limpia tras procesar
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
 }
   // --- 3. MODO LEGADO (RPG) ---
@@ -1235,6 +1239,7 @@ object GuardianServer extends cask.MainRoutes {
   initialize()
 
 }
+
 
 
 
