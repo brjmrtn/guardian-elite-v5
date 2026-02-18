@@ -1146,23 +1146,26 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/bio/medical/upload")
-  def uploadMedical(fecha: String,
+def uploadMedical(fecha: String,
                   tipo: String,
                   esPrevio: String = "false",
                   archivo: cask.model.FormFile) = {
+    
     val isPrevio = esPrevio == "on"
-    val fileBytes = archivo.data
-    val fileName = archivo.name
+
+    // 1. Corrección de los miembros de FormFile
+    // En Cask, los campos se llaman 'data' (bytes) y 'fileName' (nombre)
+    val fileBytes = archivo.data 
+    val nameOfFile = archivo.fileName 
 
     if (fileBytes.nonEmpty) {
+      // 2. Proceso para Gemini
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
-      
-      // Utilizamos saveMedicalReport que ya centraliza la lógica de prompt y caché
-      // Este método devuelve un String con el diagnóstico procesado
-      val resultadoIA = DatabaseManager.saveMedicalReport(fecha, tipo, base64Content, isPrevio)
-      
-      // Opcional: Log para verificar en consola que la IA respondió
-      println(s"Análisis Médico Completado: $resultadoIA")
+      val mimeType = if (nameOfFile.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
+
+      // 3. Sistema de persistencia (Caché)
+      // Usamos saveMedicalReport para que se gestione la IA y la tabla medical_vault
+      DatabaseManager.saveMedicalReport(fecha, tipo, base64Content, isPrevio)
     }
 
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
@@ -1229,5 +1232,6 @@ object GuardianServer extends cask.MainRoutes {
   initialize()
 
 }
+
 
 
