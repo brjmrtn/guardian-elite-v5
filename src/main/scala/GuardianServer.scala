@@ -1146,28 +1146,29 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/bio/medical/upload")
-def uploadMedical(fecha: String,
+  def uploadMedical(fecha: String,
                   tipo: String,
-                  esPrevio: String = "false",
-                  archivo: cask.model.FormFile) = {
+                  archivo: cask.model.FormFile,
+                  esPrevio: String = "false") = {
     
     val isPrevio = esPrevio == "on"
 
-    // 1. Corrección de los miembros de FormFile
-    // En Cask, los campos se llaman 'data' (bytes) y 'fileName' (nombre)
-    val fileBytes = archivo.data 
+    // 1. Lectura segura del archivo desde el disco
+    // Cask guarda el archivo en un path temporal. Usamos la API de Java para leer los bytes.
+    val fileBytes = java.nio.file.Files.readAllBytes(archivo.filePath)
     val nameOfFile = archivo.fileName 
 
     if (fileBytes.nonEmpty) {
-      // 2. Proceso para Gemini
+      // 2. Proceso para Gemini (Base64)
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
       val mimeType = if (nameOfFile.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
 
-      // 3. Sistema de persistencia (Caché)
-      // Usamos saveMedicalReport para que se gestione la IA y la tabla medical_vault
+      // 3. Llamada al gestor de base de datos y IA
+      // Esto usará automáticamente la tabla 'ai_cache'
       DatabaseManager.saveMedicalReport(fecha, tipo, base64Content, isPrevio)
     }
 
+    // Redirección limpia tras procesar
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
 }
   // --- 3. MODO LEGADO (RPG) ---
@@ -1232,6 +1233,7 @@ def uploadMedical(fecha: String,
   initialize()
 
 }
+
 
 
 
