@@ -1147,42 +1147,26 @@ object GuardianServer extends cask.MainRoutes {
   }
   @cask.postForm("/bio/medical/upload")
   def uploadMedical(fecha: String,
-                    tipo: String,
-                    esPrevio: String = "false", // Cambiado a String
-                    archivo: cask.model.FormFile) = {
+                  tipo: String,
+                  esPrevio: String = "false",
+                  archivo: cask.model.FormFile) = {
     val isPrevio = esPrevio == "on"
-
-    // 1. Extraemos los bytes directamente usando la interfaz de datos de Cask
-    // Intentamos obtener los bytes y el nombre sin llamar a la clase interna .File
-    val fileBytes = try {
-      archivo.getClass.getMethod("data").invoke(archivo).asInstanceOf[Array[Byte]]
-    } catch {
-      case _: Exception => Array.empty[Byte]
-    }
-
-    val fileName = try {
-      archivo.getClass.getMethod("name").invoke(archivo).asInstanceOf[String]
-    } catch {
-      case _: Exception => "documento.pdf"
-    }
+    val fileBytes = archivo.data
+    val fileName = archivo.name
 
     if (fileBytes.nonEmpty) {
-      // 2. Proceso para Gemini
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
-      val mimeType = if (fileName.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
-
-      val medicalPrompt = s"Analiza este informe ($tipo) de Héctor. Extrae DIAGNÓSTICO y RECOMENDACIÓN DEPORTIVA. Formato: DIAGNÓSTICO: [texto] | RECOMENDACIÓN: [texto]"
-
-      val analisisIA = DatabaseManager.AIProvider.ask(medicalPrompt, Some((mimeType, base64Content)))
-      val partes = analisisIA.split("\\|")
-      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNÓSTICO:", "").trim
-      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACIÓN:", "").trim
-
-      DatabaseManager.saveMedicalRecordFull(fecha, tipo, diag, rec, isPrevio)
+      
+      // Utilizamos saveMedicalReport que ya centraliza la lógica de prompt y caché
+      // Este método devuelve un String con el diagnóstico procesado
+      val resultadoIA = DatabaseManager.saveMedicalReport(fecha, tipo, base64Content, isPrevio)
+      
+      // Opcional: Log para verificar en consola que la IA respondió
+      println(s"Análisis Médico Completado: $resultadoIA")
     }
 
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
-  }
+}
   // --- 3. MODO LEGADO (RPG) ---
   @cask.get("/career/legacy")
   def legacyPage() = {
@@ -1245,4 +1229,5 @@ object GuardianServer extends cask.MainRoutes {
   initialize()
 
 }
+
 
