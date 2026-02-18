@@ -1149,7 +1149,7 @@ object GuardianServer extends cask.MainRoutes {
   def uploadMedical(fecha: String,
                     tipo: String,
                     esPrevio: String = "false", // Cambiado a String
-                    archivo: cask.FormValue) = {
+                    archivo: cask.model.FormFile) = {
     val isPrevio = esPrevio == "on"
 
     // 1. Extraemos los bytes directamente usando la interfaz de datos de Cask
@@ -1245,3 +1245,4 @@ object GuardianServer extends cask.MainRoutes {
   initialize()
 
 }
+
