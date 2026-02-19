@@ -808,7 +808,7 @@ object GuardianServer extends cask.MainRoutes {
   @cask.get("/admin/print_report") def printReport() = { val card = DatabaseManager.getLatestCardData(); val matches = DatabaseManager.getMatchesList(); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.title("Informe Temporada"), tags2.style("""body{font-family:sans-serif;color:black;background:white;padding:20px;}h1,h2{text-align:center;color:#333;}table{width:100%;border-collapse:collapse;margin-top:20px;font-size:12px;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background-color:#f2f2f2;}.header{text-align:center;margin-bottom:30px;border-bottom:2px solid #333;padding-bottom:20px;}@media print{.no-print{display:none;}}""")), body(div(cls:="no-print", style:="text-align:center;margin-bottom:20px;", button(onclick:="window.print()", style:="padding:10px 20px;font-size:16px;cursor:pointer;", "IMPRIMIR / GUARDAR PDF")), div(cls:="header", h1(s"INFORME DE TEMPORADA - ${card.nombre}"), div(s"Media: ${card.media} | Posicion: ${card.posicion}"), div(s"Estirada: ${card.div} | Manos: ${card.han} | Saque: ${card.kic}"), div(s"Reflejos: ${card.ref} | Velocidad: ${card.spd} | Posicion: ${card.pos}")), h2("Historial de Partidos"), table(thead(tr(th("Fecha"), th("Rival"), th("Resultado"), th("Min"), th("Nota"), th("Clima"))), tbody((for(m <- matches) yield tr(td(m.fecha), td(m.rival), td(m.resultado), td(m.minutos), td(m.nota), td(m.clima))).toSeq))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8")) }
   @cask.get("/admin/importer") def importerPage() = { val content = basePage("settings", div(cls:="row justify-content-center", div(cls:="col-md-8", h2(cls:="text-info text-center mb-4", "IMPORTADOR DE DATOS"), div(cls:="card bg-dark text-white border-success shadow p-4 mb-4", h4("🌍 Conexión RFFM"), p(cls:="small text-muted fw-bold", "Descarga calendario y rivales directamente de la Federación."), form(action:="/admin/sync_rffm", method:="post", button(tpe:="submit", cls:="btn btn-success w-100 fw-bold", "🔄 Sincronizar Calendario"))), div(cls:="card bg-dark text-white border-primary shadow p-4 mb-4", h4("📅 Importar Calendario Manual"), p(cls:="small text-muted fw-bold", "Formato: FECHA, RIVAL, TIPO"), form(action:="/admin/upload_calendar", method:="post", textarea(name:="csvContent", cls:="form-control mb-3 fw-bold", rows:="3"), button(tpe:="submit", cls:="btn btn-primary w-100 fw-bold", "Cargar"))), div(cls:="card bg-dark text-white border-warning shadow p-4 mb-4", h4("Importar Historial"), form(action:="/admin/upload_matches", method:="post", textarea(name:="csvContent", cls:="form-control mb-3 fw-bold", rows:="3"), button(tpe:="submit", cls:="btn btn-warning w-100 fw-bold", "Procesar"))), div(cls:="card bg-dark text-white border-info shadow p-4", h4("Importar Wellness"), form(action:="/admin/upload_wellness", method:="post", textarea(name:="csvContent", cls:="form-control mb-3 fw-bold", rows:="3"), button(tpe:="submit", cls:="btn btn-info w-100 fw-bold", "Procesar"))), div(cls:="mt-3 text-center", a(href:="/admin", cls:="btn btn-outline-light fw-bold", "Volver"))))); cask.Response(content.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8")) }
   @cask.postForm("/admin/upload_calendar") def uploadCalendar(csvContent: String) = { val res = DatabaseManager.importCalendarCSV(fixEncoding(csvContent)); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("CALENDARIO"), h3(res), div(style:="margin-top:20px;", a(href:="/admin/importer", cls:="btn btn-primary fw-bold", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8")) }
-  @cask.postForm("/admin/upload_matches") def uploadMatches(csvContent: String) = { val cleanCsv = fixEncoding(csvContent); val res = DatabaseManager.importMatchesCSV(cleanCsv); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("IMPORTACION"), h3(res), div(style:="margin-top:20px;", a(href:="/admin/importer", cls:="btn btn-warning fw-bold", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8")) }
+  @cask.postForm("/admin/upload_matches") def atches(csvContent: String) = { val cleanCsv = fixEncoding(csvContent); val res = DatabaseManager.importMatchesCSV(cleanCsv); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("IMPORTACION"), h3(res), div(style:="margin-top:20px;", a(href:="/admin/importer", cls:="btn btn-warning fw-bold", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8")) }
   @cask.postForm("/admin/upload_wellness") def uploadWellness(csvContent: String) = { val cleanCsv = fixEncoding(csvContent); val res = DatabaseManager.importWellnessCSV(cleanCsv); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("IMPORTACION"), h3(res), div(style:="margin-top:20px;", a(href:="/admin/importer", cls:="btn btn-info fw-bold", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8")) }
   @cask.postForm("/admin/sync_rffm") def syncRffmAction() = { val log = DatabaseManager.syncRFFMCalendar(); val htmlStr = doctype("html")(html(head(meta(charset:="utf-8"), tags2.style(raw(getCss()))), body(style:="background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';", h1("SCOUTING 2.0"), pre(style:="text-align:left; background:#333; padding:20px; margin:20px; fw-bold", log), div(style:="margin-top:20px;", a(href:="/admin/importer", cls:="btn btn-primary fw-bold", "Volver"))))).render; cask.Response(htmlStr.getBytes("UTF-8"), headers=Seq("Content-Type"->"text/html; charset=utf-8")) }
   @cask.get("/admin/test-ai")
@@ -1146,36 +1146,36 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
  @cask.postForm("/bio/medical/upload")
-def uploadMedical(fecha: String,
+ def uploadMedical(fecha: String,
                   tipo: String,
                   archivo: cask.model.FormFile,
                   esPrevio: String = "false") = {
     
     val isPrevio = esPrevio == "on"
 
-    // Usamos Pattern Matching para extraer el nombre y la ruta del archivo de forma segura
-    // Estructura de FormFile: FormFile(nombre, ruta, headers)
+    // Extraemos los datos usando Pattern Matching para evitar errores de nombres de atributos
+    // La estructura de FormFile es (String, java.nio.file.Path, Map)
     val (nameOfFile, fileBytes) = archivo match {
       case cask.model.FormFile(name, path, _) => 
         (name, java.nio.file.Files.readAllBytes(path))
     }
 
     if (fileBytes.nonEmpty) {
-      // 1. Limpiamos el Base64 (Gemini necesita el string puro)
+      // 1. Convertimos a Base64 puro para Gemini
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
       
-      // 2. Definimos el MIME type basado en la extensión extraída
+      // 2. Identificamos el MIME Type por extensión
       val lowerName = nameOfFile.toLowerCase
       val mimeType = if (lowerName.endsWith(".pdf")) "application/pdf" 
                      else if (lowerName.endsWith(".png")) "image/png"
                      else "image/jpeg"
 
-      // 3. Sistema de persistencia (Caché): saveMedicalReport centraliza el análisis e inserción
-      // Se usará ai_cache para no repetir llamadas si el PDF es el mismo
+      // 3. Procesamos y guardamos (Esto ya gestiona la caché interna)
       DatabaseManager.saveMedicalReport(fecha, tipo, base64Content, isPrevio)
     }
 
-    cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
+    // Redirección a la sección Bio tras el procesamiento
+    cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
 }
   // --- 3. MODO LEGADO (RPG) ---
   @cask.get("/career/legacy")
@@ -1239,6 +1239,7 @@ def uploadMedical(fecha: String,
   initialize()
 
 }
+
 
 
 
