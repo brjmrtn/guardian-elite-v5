@@ -1146,35 +1146,33 @@ object GuardianServer extends cask.MainRoutes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
  @cask.postForm("/bio/medical/upload")
- def uploadMedical(fecha: String,
+def uploadMedical(fecha: String,
                   tipo: String,
-                  archivo: cask.model.FormFile,
-                  esPrevio: String = "false") = {
+                  esPrevio: String = "false",
+                  archivo: cask.model.FormFile) = {
     
     val isPrevio = esPrevio == "on"
 
-    // Extraemos los datos usando Pattern Matching para evitar errores de nombres de atributos
-    // La estructura de FormFile es (String, java.nio.file.Path, Map)
+    // Pattern Matching para extraer el nombre y la ruta física del archivo
     val (nameOfFile, fileBytes) = archivo match {
       case cask.model.FormFile(name, path, _) => 
         (name, java.nio.file.Files.readAllBytes(path))
     }
 
     if (fileBytes.nonEmpty) {
-      // 1. Convertimos a Base64 puro para Gemini
+      // 1. Convertir a Base64 puro (sin prefijos "data:application/pdf;base64,")
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
       
-      // 2. Identificamos el MIME Type por extensión
+      // 2. Identificar MIME Type exacto según la extensión
       val lowerName = nameOfFile.toLowerCase
       val mimeType = if (lowerName.endsWith(".pdf")) "application/pdf" 
                      else if (lowerName.endsWith(".png")) "image/png"
                      else "image/jpeg"
 
-      // 3. Procesamos y guardamos (Esto ya gestiona la caché interna)
+      // 3. Procesar y guardar (Gestión automática de ai_cache)
       DatabaseManager.saveMedicalReport(fecha, tipo, base64Content, isPrevio)
     }
 
-    // Redirección a la sección Bio tras el procesamiento
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
 }
   // --- 3. MODO LEGADO (RPG) ---
@@ -1239,6 +1237,7 @@ object GuardianServer extends cask.MainRoutes {
   initialize()
 
 }
+
 
 
 
