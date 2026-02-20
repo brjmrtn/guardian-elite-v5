@@ -26,10 +26,20 @@ case class AcademicNote(id: Int, fecha: String, asignatura: String, nota: Double
 case class MedicalReport(id: Int, fecha: String, tipo: String, diagnostico: String, recomendaciones: String, esPrevio: Boolean)
 
 object DatabaseManager {
-  val url = "jdbc:postgresql://ep-fancy-cherry-abkfneqp-pooler.eu-west-2.aws.neon.tech/neondb?user=neondb_owner&password=npg_5VxYysTm8vQa&sslmode=require&options=-c%20client_encoding=UTF8"
+  private val dbHost = sys.env.getOrElse("DB_HOST", "ep-fancy-cherry-abkfneqp-pooler.eu-west-2.aws.neon.tech")
+  private val dbName = sys.env.getOrElse("DB_NAME", "neondb")
+  private val dbUser = sys.env.getOrElse("DB_USER", "neondb_owner")
+  private val dbPass = sys.env.getOrElse("DB_PASS", "")
+
+  val url = s"jdbc:postgresql://$dbHost/$dbName?sslmode=require&options=-c%20client_encoding=UTF8"
 
   def getConnection(): Connection = {
-    val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
+    if (dbPass.isEmpty) throw new IllegalStateException("DB_PASS no configurada. Añádela como variable de entorno.")
+    val props = new Properties()
+    props.setProperty("user", dbUser)
+    props.setProperty("password", dbPass)
+    props.setProperty("ssl", "true")
+    DriverManager.getConnection(url, props)
   }
 
   def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
