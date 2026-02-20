@@ -1,10 +1,11 @@
 import cask._
 
-//
+
+//**
 // * GUARDIAN ELITE — Punto de entrada del servidor.
 // *
 // * Este objeto solo se encarga de:
- //*   1. Configurar host/puerto.
+// *   1. Configurar host/puerto.
 // *   2. Registrar todos los controladores en el router de Cask.
 // *   3. Inicializar la base de datos al arrancar.
 // *
@@ -18,7 +19,6 @@ import cask._
 // *   - AdminController      → /admin/*, /settings, /tactics
 // *
 // * Utilidades compartidas → SharedLayout
-
 
  object GuardianServer extends cask.Main {
 
