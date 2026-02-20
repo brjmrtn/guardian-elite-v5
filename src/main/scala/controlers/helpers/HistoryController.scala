@@ -62,7 +62,7 @@ object HistoryController extends cask.Routes {
               div(strong(cls := "text-warning", m.fecha), span(cls := "ms-2 badge bg-secondary", m.clima)),
               div(cls := "fs-5 fw-bold text-white", m.resultado)
             ),
-            if (m.estadio.nonEmpty) div(cls := "small text-muted mb-2 fw-bold", s"📍 ${m.estadio}"),
+            if (m.estadio.nonEmpty) div(cls := "small text-muted mb-2 fw-bold", s"[loc] ${m.estadio}"),
             if (m.notas.nonEmpty)   div(cls := "alert alert-dark border-secondary p-2 small text-light fst-italic mb-2 fw-bold",
               s"Nota: ${fixEncoding(m.notas)}"),
             extra
@@ -119,7 +119,7 @@ object HistoryController extends cask.Routes {
       matches.map(m => renderMatchRow(m))
     }
 
-    // 2. Definimos el contenido central (SIN llamar a basePage aquí)
+    // 2. Definimos el contenido central (SIN llamar a basePage aqui)
     val mainContent = div(cls := "row justify-content-center",
       div(cls := "col-md-10 col-12",
         h2(cls := "text-warning mb-3 text-center", "HISTORIAL"),
@@ -130,7 +130,7 @@ object HistoryController extends cask.Routes {
                 th("Rival"),
                 th(cls:="text-center", "Res"),
                 th(cls:="text-center", "Nota"),
-                th(cls:="text-end", "Acción")
+                th(cls:="text-end", "Accion")
               )),
               tbody(tableRows)
             )

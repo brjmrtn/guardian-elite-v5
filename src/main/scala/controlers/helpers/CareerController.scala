@@ -18,7 +18,7 @@ object CareerController extends cask.Routes {
         val imgTag = if (i.img.length > 50)
           img(src := i.img, style := "width:50px; height:50px; object-fit:cover; border-radius:50%; margin-right:10px;")
         else
-          div(cls := "me-3", style := "font-size: 30px;", if (i.tipo == "Guantes") "🧤" else "👟")
+          div(cls := "me-3", style := "font-size: 30px;", if (i.tipo == "Guantes") "[guantes]" else "[botas]")
 
         div(cls := "col-12 mb-3",
           div(cls := "card bg-dark border-secondary shadow",
@@ -89,13 +89,13 @@ object CareerController extends cask.Routes {
     // 1. Guardamos el nuevo material
     DatabaseManager.addNewGear(nombre, tipo, vida, if(img != null) img else "")
 
-    // 2. Redireccionamos a la página de material (Gear) de forma limpia
+    // 2. Redireccionamos a la pagina de material (Gear) de forma limpia
     renderRedirect("/gear")
   }
 
   def medicalSection(reports: List[MedicalReport]) = {
     div(cls := "card bg-dark text-white border-danger shadow mb-3",
-      div(cls := "card-header bg-danger text-white fw-bold text-center small", "🏥 MEDICAL VAULT & PASAPORTE BIOLÓGICO"),
+      div(cls := "card-header bg-danger text-white fw-bold text-center small", "[hospital] MEDICAL VAULT & PASAPORTE BIOLOGICO"),
       div(cls := "card-body p-3",
         // Formulario de Subida
         form(action := "/bio/medical/upload", method := "post", enctype := "multipart/form-data",
@@ -103,9 +103,9 @@ object CareerController extends cask.Routes {
             div(cls:="col-7",
               label(cls:="xx-small text-muted text-uppercase", "Tipo de Informe"),
               select(name:="tipo", cls:="form-select form-select-sm bg-dark text-white border-secondary",
-                option(value:="Pediatría", "Pediatría (Crecimiento)"),
-                option(value:="Analítica", "Analítica de Sangre"),
-                option(value:="Traumatología", "Traumatología / Fisio"),
+                option(value:="Pediatria", "Pediatria (Crecimiento)"),
+                option(value:="Analitica", "Analitica de Sangre"),
+                option(value:="Traumatologia", "Traumatologia / Fisio"),
                 option(value:="Otros", "Otros")
               )
             ),
@@ -120,20 +120,20 @@ object CareerController extends cask.Routes {
           ),
           div(cls:="form-check form-switch mb-3",
             input(cls:="form-check-input", tpe:="checkbox", name:="esPrevio", id:="checkPrevio"),
-            label(cls:="form-check-label small text-muted", `for`:="checkPrevio", "Informe previo al inicio en fútbol")
+            label(cls:="form-check-label small text-muted", `for`:="checkPrevio", "Informe previo al inicio en futbol")
           ),
           div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-sm btn-danger fw-bold", "Subir y Analizar con IA"))
         ),
         hr(cls:="border-secondary"),
         // Lista de Informes Procesados
         div(cls:="medical-history",
-          if(reports.isEmpty) p(cls:="text-center text-muted small", "No hay registros médicos aún.")
+          if(reports.isEmpty) p(cls:="text-center text-muted small", "No hay registros medicos aun.")
           else for(r <- reports) yield div(cls:="border-start border-danger border-3 ps-2 mb-3",
             div(cls:="d-flex justify-content-between",
               span(cls:="fw-bold small text-danger", r.tipo),
               span(cls:="xx-small text-muted", r.fecha)
             ),
-            div(cls:="xx-small text-light fst-italic", strong("Diagnóstico: "), r.diagnostico),
+            div(cls:="xx-small text-light fst-italic", strong("Diagnostico: "), r.diagnostico),
             div(cls:="xx-small text-info", strong("Rec. IA: "), r.recomendaciones)
           )
         )
@@ -141,7 +141,7 @@ object CareerController extends cask.Routes {
     )
   }
 
-  // --- 5. BIO & EVALUACIÓN (CORREGIDO MODO OSCURO) ---
+  // --- 5. BIO & EVALUACION (CORREGIDO MODO OSCURO) ---
 
   @cask.get("/career")
   def careerPage(request: cask.Request) = withAuth(request) {
@@ -158,7 +158,7 @@ object CareerController extends cask.Routes {
         div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center",
           h2(cls := "text-warning m-0 mb-2", "Trayectoria"),
           div(cls := "mb-3 w-100",
-            a(href := "/career/legacy", cls := "btn btn-warning w-100 fw-bold", "⭐ MODO LEGADO (RPG)")
+            a(href := "/career/legacy", cls := "btn btn-warning w-100 fw-bold", "[star] MODO LEGADO (RPG)")
           ),
           raw(DatabaseManager.getLegendComparison()),
           div(cls := "card bg-secondary p-2 w-100 mt-3",
@@ -280,7 +280,7 @@ object CareerController extends cask.Routes {
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/penalties"))
   }
 
-  // 8. PIZARRA TÁCTICA
+  // 8. PIZARRA TACTICA
 
   @cask.get("/oracle")
   def oraclePage(request: cask.Request, hDad: String = "180", hMom: String = "170") = withAuth(request) {
@@ -299,20 +299,20 @@ object CareerController extends cask.Routes {
     val mainContent = div(
       div(cls:="row justify-content-center",
         div(cls:="col-md-8 col-12",
-          h2(cls:="text-center text-info mb-4", "🔮 EL ORÁCULO"),
+          h2(cls:="text-center text-info mb-4", "[oracle] EL ORACULO"),
 
           // Tarjeta Inteligencia
           div(cls:="card bg-dark border-info shadow mb-4",
             div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
-              span("🧠 INTELIGENCIA DEPORTIVA"),
-              span(cls:="badge bg-dark text-info", s"Edad: $edadActual años")
+              span("[IA] INTELIGENCIA DEPORTIVA"),
+              span(cls:="badge bg-dark text-info", s"Edad: $edadActual anos")
             ),
             div(cls:="card-body", raw(bioInsights))
           ),
 
-          // Tarjeta Gráfico
+          // Tarjeta Grafico
           div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-white small", "Evolución Biométrica Histórica"),
+            div(cls:="card-header text-white small", "Evolucion Biometrica Historica"),
             div(cls:="card-body", style:="height: 300px; position: relative;",
               canvas(id:="growthChart")
             )
@@ -320,7 +320,7 @@ object CareerController extends cask.Routes {
 
           // Tabla OMS
           div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-muted small fw-bold text-uppercase", s"📊 Referencia OMS para $edadActual años"),
+            div(cls:="card-header text-muted small fw-bold text-uppercase", s"[stats] Referencia OMS para $edadActual anos"),
             div(cls:="card-body p-0",
               table(cls:="table table-dark table-sm mb-0 small text-center",
                 thead(tr(th("Percentil"), th("Altura (cm)"), th("Peso (kg)"))),
@@ -333,21 +333,21 @@ object CareerController extends cask.Routes {
             )
           ),
 
-          // Predicción Genética
+          // Prediccion Genetica
           div(cls:="card bg-dark text-white border-secondary shadow p-4",
-            h4(cls:="text-center text-warning mb-3", "Predicción Altura Final"),
+            h4(cls:="text-center text-warning mb-3", "Prediccion Altura Final"),
             div(cls:="bg-secondary bg-opacity-10 p-3 rounded mb-3", raw(predictionHtml)),
             form(action:="/oracle", method:="get", cls:="mt-4 border-top border-secondary pt-3",
               div(cls:="row",
-                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papá (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
-                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mamá (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
+                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papa (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
+                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mama (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
               ),
-              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular"))
+              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "[sync] Recalcular"))
             )
           )
         )
       ),
-      // 2. Script inyectado (Aseguramos que Chart.js esté cargado en basePage)
+      // 2. Script inyectado (Aseguramos que Chart.js este cargado en basePage)
       script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
       script(raw(s"""
       window.addEventListener('load', function() {
@@ -381,12 +381,12 @@ object CareerController extends cask.Routes {
     // 3. Renderizado final
     renderHtml(basePage("bio", mainContent))
   }
-  // --- 2. MONEYBALL (Distribución Táctica) ---
+  // --- 2. MONEYBALL (Distribucion Tactica) ---
   @cask.get("/distribution")
   def distributionPage() = {
     val tac = DatabaseManager.getTacticalStats()
 
-    // Función auxiliar para calcular porcentajes seguros
+    // Funcion auxiliar para calcular porcentajes seguros
     def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
 
     val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
@@ -397,7 +397,7 @@ object CareerController extends cask.Routes {
     val (pa, pm, pr) = (pct(tac("p_alt"), totP), pct(tac("p_med"), totP), pct(tac("p_ras"), totP))
     val (pl, pc, pd) = (pct(tac("p_izq"), totP), pct(tac("p_cen"), totP), pct(tac("p_der"), totP))
 
-    // Celda táctica visual
+    // Celda tactica visual
     def tCell(label: String, p: Int, color: String) = div(
       cls:=s"flex-fill text-center p-3 border border-secondary $color",
       style:="color: #000; font-weight: 800;",
@@ -407,9 +407,9 @@ object CareerController extends cask.Routes {
 
     val content = basePage("bio", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "📊 MONEYBALL TACTICS"),
+        h2(cls:="text-center text-warning mb-4", "[stats] MONEYBALL TACTICS"),
 
-        // Sección Goles Encajados
+        // Seccion Goles Encajados
         div(cls:="card bg-dark text-white border-danger shadow mb-4",
           div(cls:="card-header bg-danger text-white fw-bold text-center", "ZONA DE ENCAJE (Debilidades)"),
           div(cls:="card-body p-0",
@@ -418,7 +418,7 @@ object CareerController extends cask.Routes {
           )
         ),
 
-        // Sección Paradas
+        // Seccion Paradas
         div(cls:="card bg-dark text-white border-success shadow mb-4",
           div(cls:="card-header bg-success text-white fw-bold text-center", "ZONA DE SEGURIDAD (Fortalezas)"),
           div(cls:="card-body p-0",
@@ -440,7 +440,7 @@ object CareerController extends cask.Routes {
 
     val content = basePage("career", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
+        h2(cls:="text-center text-warning mb-4", "[star] MODO LEGADO"),
 
         div(cls:="card bg-dark text-white border-warning shadow mb-4",
           div(cls:="card-body text-center",
@@ -460,17 +460,17 @@ object CareerController extends cask.Routes {
         ),
 
         div(cls:="row g-2",
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🛡️"), h6("Muro"), small("Bonus por Portería a Cero"))),
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🧤"), h6("Manos de Oro"), small("Bonus por Paradas")))
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[shield]"), h6("Muro"), small("Bonus por Porteria a Cero"))),
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[guantes]"), h6("Manos de Oro"), small("Bonus por Paradas")))
         ),
 
         div(cls:="alert alert-dark border-info mt-4 text-center",
           h5(cls:="text-info", "Sistema de Puntos"),
           ul(cls:="list-unstyled small text-start d-inline-block",
-            li("• Partido Jugado: +50 XP"),
-            li("• Portería a Cero: +100 XP"),
-            li("• Parada: +5 XP"),
-            li("• Nota > 7.0: +100 XP (Bonus)")
+            li("- Partido Jugado: +50 XP"),
+            li("- Porteria a Cero: +100 XP"),
+            li("- Parada: +5 XP"),
+            li("- Nota > 7.0: +100 XP (Bonus)")
           )
         )
       )

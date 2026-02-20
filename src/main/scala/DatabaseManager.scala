@@ -22,7 +22,7 @@ case class RPGStatus(nivel: Int, xp: Int, nextLevelXp: Int, titulo: String, cint
 case class TechReview(id: Int, fecha: String, blocaje: Int, pies: Int, aereo: Int, valentia: Int, concentracion: Int, coordinacion: Int, notas: String)
 // Academic notes
 case class AcademicNote(id: Int, fecha: String, asignatura: String, nota: Double, tipo: String)
-// Vault Médico
+// Vault Medico
 case class MedicalReport(id: Int, fecha: String, tipo: String, diagnostico: String, recomendaciones: String, esPrevio: Boolean)
 
 object DatabaseManager {
@@ -37,7 +37,7 @@ object DatabaseManager {
   // Se inicializa UNA sola vez al arrancar. Neon free tier soporta ~10 conexiones;
   // con maximumPoolSize=5 dejamos margen para el dashboard de Neon.
   private val pool: com.zaxxer.hikari.HikariDataSource = {
-    if (dbPass.isEmpty) throw new IllegalStateException("DB_PASS no configurada. Añadela como variable de entorno.")
+    if (dbPass.isEmpty) throw new IllegalStateException("DB_PASS no configurada. Anadela como variable de entorno.")
     val config = new com.zaxxer.hikari.HikariConfig()
     config.setJdbcUrl(url)
     config.setUsername(dbUser)
@@ -57,15 +57,15 @@ object DatabaseManager {
   // La unica diferencia es que ahora devuelve una conexion del pool, no una nueva.
   def getConnection(): Connection = pool.getConnection()
 
-  // --- INICIALIZACIÓN DE TABLAS (se llama UNA vez al arrancar el servidor) ---
+  // --- INICIALIZACION DE TABLAS (se llama UNA vez al arrancar el servidor) ---
   // Centraliza todos los CREATE TABLE IF NOT EXISTS que antes estaban dispersos
-  // por cada método de consulta, eliminando el overhead en cada request.
+  // por cada metodo de consulta, eliminando el overhead en cada request.
   def initDB(): Unit = {
     val conn = getConnection()
     try {
       val stmt = conn.createStatement()
 
-      // Temporadas y partidos (núcleo del sistema)
+      // Temporadas y partidos (nucleo del sistema)
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS seasons (
         id               SERIAL PRIMARY KEY,
         nombre_club      TEXT,
@@ -121,7 +121,7 @@ object DatabaseManager {
         fase             TEXT
       )""")
 
-      // Biometría y salud
+      // Biometria y salud
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS wellness (
         id            SERIAL PRIMARY KEY,
         fecha         DATE DEFAULT CURRENT_DATE,
@@ -153,7 +153,7 @@ object DatabaseManager {
         es_previo        BOOLEAN DEFAULT FALSE
       )""")
 
-      // Entrenamiento y progresión técnica
+      // Entrenamiento y progresion tecnica
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS trainings (
         id             SERIAL PRIMARY KEY,
         fecha          DATE DEFAULT CURRENT_DATE,
@@ -215,7 +215,7 @@ object DatabaseManager {
         es_gol      BOOLEAN DEFAULT FALSE
       )""")
 
-      // Video y análisis
+      // Video y analisis
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS video_tags (
         id          SERIAL PRIMARY KEY,
         match_id    INT,
@@ -233,7 +233,7 @@ object DatabaseManager {
         descripcion TEXT
       )""")
 
-      // Académico
+      // Academico
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS academic_performance (
         id              SERIAL PRIMARY KEY,
         fecha           DATE DEFAULT CURRENT_DATE,
@@ -243,7 +243,7 @@ object DatabaseManager {
         comentarios     TEXT
       )""")
 
-      // Leyendas (comparativa histórica)
+      // Leyendas (comparativa historica)
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS legends_milestones (
         id     SERIAL PRIMARY KEY,
         nombre TEXT,
@@ -251,14 +251,14 @@ object DatabaseManager {
         hito   TEXT
       )""")
 
-      // Caché de respuestas IA (evita llamadas duplicadas a Gemini)
+      // Cache de respuestas IA (evita llamadas duplicadas a Gemini)
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS ai_cache (
         prompt_hash TEXT PRIMARY KEY,
         respuesta   TEXT,
         creado_en   TIMESTAMP DEFAULT NOW()
       )""")
 
-      // Columnas opcionales añadidas en versiones posteriores (ALTER IF NOT EXISTS es idempotente)
+      // Columnas opcionales anadidas en versiones posteriores (ALTER IF NOT EXISTS es idempotente)
       stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS judo_belt TEXT DEFAULT 'Blanco'")
       stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS rffm_url TEXT")
       stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS rffm_team_name TEXT")
@@ -266,31 +266,31 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS mapa_campo TEXT")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS analisis_voz TEXT")
 
-      println("✅ initDB: todas las tablas verificadas.")
+      println("[OK] initDB: todas las tablas verificadas.")
     } catch {
-      case e: Exception => println(s"⚠️ initDB error: ${e.getMessage}")
+      case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
     } finally {
       conn.close()
     }
   }
 
-  def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
+  def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("A")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
 
   /** Escapa caracteres HTML peligrosos en strings que provienen de la BD
    *  y van a ser embebidos en HTML (raw()). Previene XSS.
-   *  Úsalo siempre que hagas: s"...$variableDeBD..." dentro de un bloque HTML.
+   *  Usalo siempre que hagas: s"...$variableDeBD..." dentro de un bloque HTML.
    */
   def escHtml(s: String): String = {
     if (s == null) ""
     else s.replace("&", "&amp;")
-      .replace("<", "&lt;")
-      .replace(">", "&gt;")
-      .replace(""", "&quot;")
+          .replace("<", "&lt;")
+          .replace(">", "&gt;")
+          .replace(""", "&quot;")
           .replace("'", "&#x27;")
   }
   def calcularEdadExacta(fechaStr: String): Int = { try { Period.between(LocalDate.parse(fechaStr), LocalDate.now()).getYears } catch { case _: Exception => 5 } }
 
-  // --- NUEVO: SISTEMA DE AUDITORÍA TÉCNICA ---
+  // --- NUEVO: SISTEMA DE AUDITORIA TECNICA ---
   def saveTechnicalReview(blocaje: Int, pies: Int, aereo: Int, valentia: Int, concentracion: Int, coordinacion: Int, notas: String): Unit = {
     val conn = getConnection(); try {
       val ps = conn.prepareStatement("INSERT INTO technical_reviews (fecha, blocaje, pies, aereo, valentia, concentracion, coordinacion, notas) VALUES (?,?,?,?,?,?,?,?)")
@@ -318,13 +318,13 @@ object DatabaseManager {
     val d2 = reviews.map(_.valentia).mkString(",")
     val d3 = reviews.map(_.concentracion).mkString(",")
     s"""{
-        "labels": [$labels],
-        "datasets": [
+      "labels": [$labels],
+      "datasets": [
         { "label": "Blocaje/Manos", "data": [$d1], "borderColor": "#0dcaf0", "tension": 0.3, "fill": false },
-        { "label": "Valentía", "data": [$d2], "borderColor": "#dc3545", "tension": 0.3, "fill": false },
-        { "label": "Concentración", "data": [$d3], "borderColor": "#ffc107", "tension": 0.3, "fill": false }
-        ]
-      }"""
+        { "label": "Valentia", "data": [$d2], "borderColor": "#dc3545", "tension": 0.3, "fill": false },
+        { "label": "Concentracion", "data": [$d3], "borderColor": "#ffc107", "tension": 0.3, "fill": false }
+      ]
+    }"""
   }
 
   // --- LEYENDAS Y COMPARATIVA (Mantenido) ---
@@ -333,7 +333,7 @@ object DatabaseManager {
       val stmt = conn.createStatement()
       stmt.executeUpdate("DELETE FROM legends_milestones")
       val ps = conn.prepareStatement("INSERT INTO legends_milestones (nombre, edad, hito) VALUES (?,?,?)")
-      val data = Seq(("Marc-André ter Stegen", 5, "Jugaba de DELANTERO. No se puso de portero hasta los 10 años."), ("Thibaut Courtois", 5, "Su deporte principal era el VOLEIBOL."), ("Iker Casillas", 6, "Jugaba en el patio del colegio El Recuerdo sobre cemento."), ("Gianluigi Buffon", 6, "Jugaba de centrocampista. Le gustaba correr y marcar goles."), ("Manuel Neuer", 5, "Llevaba un osito de peluche a la portería."))
+      val data = Seq(("Marc-Andre ter Stegen", 5, "Jugaba de DELANTERO. No se puso de portero hasta los 10 anos."), ("Thibaut Courtois", 5, "Su deporte principal era el VOLEIBOL."), ("Iker Casillas", 6, "Jugaba en el patio del colegio El Recuerdo sobre cemento."), ("Gianluigi Buffon", 6, "Jugaba de centrocampista. Le gustaba correr y marcar goles."), ("Manuel Neuer", 5, "Llevaba un osito de peluche a la porteria."))
       data.foreach { case (n, e, h) => ps.setString(1, n); ps.setInt(2, e); ps.setString(3, fixEncoding(h)); ps.executeUpdate() }
       "Base de datos de Leyendas actualizada."
     } catch { case e: Exception => s"Error: ${e.getMessage}" } finally { conn.close() }
@@ -369,10 +369,10 @@ object DatabaseManager {
     private def getHash(s: String): String =
       MessageDigest.getInstance("SHA-256").digest(s.getBytes("UTF-8")).map("%02x".format(_)).mkString
 
-    // Función principal: intenta caché, si no, llama a Gemini
+    // Funcion principal: intenta cache, si no, llama a Gemini
     def ask(prompt: String, media: Option[(String, String)] = None, bypassCache: Boolean = false): String = {
       val conn = DatabaseManager.getConnection()
-      // Creamos un hash único combinando el prompt y los primeros bytes del archivo (si existe)
+      // Creamos un hash unico combinando el prompt y los primeros bytes del archivo (si existe)
       val combinedKey = prompt + media.map(_._2.take(100)).getOrElse("")
       val hash = getHash(combinedKey)
 
@@ -387,7 +387,7 @@ object DatabaseManager {
         // Llamada real a la API (Unificada)
         val response = callGeminiUnified(prompt, media)
 
-        // Guardar en caché para la próxima vez
+        // Guardar en cache para la proxima vez
         val save = conn.prepareStatement(
           "INSERT INTO ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta"
         )
@@ -412,7 +412,7 @@ object DatabaseManager {
       if (apiKey.nonEmpty) {
         println(s"DEBUG: Usando Key [${keySeg.take(4)}...${keySeg.takeRight(4)}]")
       } else {
-        println("DEBUG: ⚠️ GEMINI_API_KEY está VACÍA")
+        println("DEBUG: [!] GEMINI_API_KEY esta VACIA")
       }
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
       media.foreach { case (mime, data) =>
@@ -440,27 +440,27 @@ object DatabaseManager {
     var ctx = ""
     val conn = getConnection()
     try {
-      // 1. Contexto Académico (Fase 2: Detector de Fatiga Mental)
+      // 1. Contexto Academico (Fase 2: Detector de Fatiga Mental)
       val rsAcad = conn.createStatement().executeQuery(
         "SELECT nota FROM academic_performance ORDER BY fecha DESC LIMIT 1"
       )
       if(rsAcad.next()) {
         val ultimaNota = rsAcad.getDouble("nota")
-        // Lógica de fatiga cognitiva inyectada al prompt
-        if(ultimaNota < 6.0) ctx += "ESTADO COGNITIVO: Carga académica alta o estrés detectado. Priorizar sesión lúdica y de baja frustración. "
-        else ctx += "ESTADO COGNITIVO: Óptimo. Se puede exigir alta concentración táctica. "
+        // Logica de fatiga cognitiva inyectada al prompt
+        if(ultimaNota < 6.0) ctx += "ESTADO COGNITIVO: Carga academica alta o estres detectado. Priorizar sesion ludica y de baja frustracion. "
+        else ctx += "ESTADO COGNITIVO: Optimo. Se puede exigir alta concentracion tactica. "
       }
 
       // 2. Dojo Synergy (Fase 2: Judo Integration)
       val rsJudo = conn.createStatement().executeQuery("SELECT judo_belt FROM seasons ORDER BY id DESC LIMIT 1")
       if(rsJudo.next()) {
         val belt = rsJudo.getString("judo_belt")
-        ctx += s"CONOCIMIENTO DOJO: Cinturón $belt. Incorporar dinámicas de caídas y agilidad de judo a la portería. "
+        ctx += s"CONOCIMIENTO DOJO: Cinturon $belt. Incorporar dinamicas de caidas y agilidad de judo a la porteria. "
       }
 
-      // 3. Alertas Técnicas y Clima (Lo que ya teníamos de Fase 1)
+      // 3. Alertas Tecnicas y Clima (Lo que ya teniamos de Fase 1)
       val alerts = getTechnicalAlerts()
-      if(alerts.nonEmpty) ctx += s"ALERTAS TÉCNICAS: ${alerts.mkString(", ")}. "
+      if(alerts.nonEmpty) ctx += s"ALERTAS TECNICAS: ${alerts.mkString(", ")}. "
     } finally {
       conn.close()
     }
@@ -470,27 +470,27 @@ object DatabaseManager {
 
     // Prompt enriquecido con Fatiga Mental y Dojo Synergy
     val prompt = s"""
-    Eres Entrenador Elite. Crea una sesión de 45min (Padre/Hijo).
-      ROL: PORTERO ($edad años).
-      OBJETIVO: $focus.
+    Eres Entrenador Elite. Crea una sesion de 45min (Padre/Hijo).
+    ROL: PORTERO ($edad anos).
+    OBJETIVO: $focus.
     CONTEXTO MULTI-DISCIPLINA: $ctx.
 
-      ESTRUCTURA:
-      1. Calentamiento (Ludico + Caídas tipo Judo).
-    2. Bloque Principal (Ajustar dificultad según ESTADO COGNITIVO).
+    ESTRUCTURA:
+    1. Calentamiento (Ludico + Caidas tipo Judo).
+    2. Bloque Principal (Ajustar dificultad segun ESTADO COGNITIVO).
     3. Reto Final.
-      SOLO TEXTO PLANO.
-    """
+    SOLO TEXTO PLANO.
+  """
 
     AIProvider.ask(prompt).replace("```html","").replace("```","").trim
   }
-  // --- NUEVO: CENTRO DE PREDICCIÓN BIOMÉTRICA (EL ORÁCULO) ---
+  // --- NUEVO: CENTRO DE PREDICCION BIOMETRICA (EL ORACULO) ---
   def getOracleInsights(): String = {
     val conn = getConnection()
     try {
       val sb = new StringBuilder()
 
-      // 1. Obtener datos de crecimiento (últimos 2 para comparar)
+      // 1. Obtener datos de crecimiento (ultimos 2 para comparar)
       val rsG = conn.createStatement().executeQuery("SELECT altura, peso FROM physical_growth ORDER BY fecha DESC LIMIT 2")
 
       // Variables para guardar los datos y usarlos luego
@@ -511,34 +511,34 @@ object DatabaseManager {
         }
       }
 
-      // 2. Análisis de Biotipo y Composición
+      // 2. Analisis de Biotipo y Composicion
       val imc = if(currentH > 0) currentW / Math.pow(currentH/100, 2) else 0.0
-      sb.append(s"<div class='mb-3 text-white'><b>📊 COMPOSICIÓN:</b> ${currentH}cm / ${currentW}kg</div>")
+      sb.append(s"<div class='mb-3 text-white'><b>[stats] COMPOSICION:</b> ${currentH}cm / ${currentW}kg</div>")
 
       val (perfilNombre, perfilDesc) = if (imc < 15) {
         ("<span class='text-info fw-bold'>VELOCISTA</span>", "Peso ligero que favorece la <b>agilidad pura</b> y velocidad de desplazamiento.")
       } else if (imc >= 15 && imc <= 17) {
-        ("<span class='text-success fw-bold'>EQUILIBRADO</span>", "Relación potencia-peso óptima. Buen equilibrio entre <b>salto y velocidad</b>.")
+        ("<span class='text-success fw-bold'>EQUILIBRADO</span>", "Relacion potencia-peso optima. Buen equilibrio entre <b>salto y velocidad</b>.")
       } else {
-        ("<span class='text-warning fw-bold'>TANQUE</span>", "Mayor masa corporal. Ventaja en <b>protección de balón</b> y duelos 1v1.")
+        ("<span class='text-warning fw-bold'>TANQUE</span>", "Mayor masa corporal. Ventaja en <b>proteccion de balon</b> y duelos 1v1.")
       }
-      sb.append(s"<div class='mb-3 small text-light'><b>🕵️ Perfil Físico:</b> $perfilNombre. $perfilDesc</div>")
+      sb.append(s"<div class='mb-3 small text-light'><b>[scout] Perfil Fisico:</b> $perfilNombre. $perfilDesc</div>")
 
-      // 3. Alerta de Estirón (Solo si hay historial)
+      // 3. Alerta de Estiron (Solo si hay historial)
       if (hasPrev && currentH > prevH && currentW <= prevW) {
         sb.append("<div class='alert alert-warning p-2 small mb-3'>")
-        sb.append("<b>🦴 ESTIRÓN DETECTADO:</b> Ha crecido en altura sin aumentar masa. ")
-        sb.append("Es probable que esté algo más impreciso. Trabajar <b>propiocepción</b>.</div>")
+        sb.append("<b>[hueso] ESTIRON DETECTADO:</b> Ha crecido en altura sin aumentar masa. ")
+        sb.append("Es probable que este algo mas impreciso. Trabajar <b>propiocepcion</b>.</div>")
       }
 
-      // 4. Cálculo de Cargas (ACWR)
+      // 4. Calculo de Cargas (ACWR)
       val acuteLoads = getWorkloads(7)
       val chronicLoads = getWorkloads(28)
       val acuteAvg = if (acuteLoads.nonEmpty) acuteLoads.sum / 7.0 else 0.0
       val chronicAvg = if (chronicLoads.nonEmpty) chronicLoads.sum / 28.0 else 1.0
       val acwr = if (chronicAvg > 0) acuteAvg / chronicAvg else 0.0
 
-      // 5. Gráfico de Barras ACWR
+      // 5. Grafico de Barras ACWR
       val maxVal = Math.max(acuteAvg, chronicAvg).max(100.0)
       val acuteWidth = (acuteAvg / maxVal * 100).toInt
       val chronicWidth = (chronicAvg / maxVal * 100).toInt
@@ -546,24 +546,24 @@ object DatabaseManager {
 
       sb.append("<div class='mb-4 p-3 bg-black bg-opacity-25 rounded border border-secondary'>")
       sb.append("<h6 class='text-uppercase x-small fw-bold text-muted mb-3'>Estado de Carga (ACWR)</h6>")
-      sb.append(s"<div class='mb-2'><div class='progress' style='height: 6px; background:#111;'><div class='progress-bar bg-secondary' style='width: $chronicWidth%'></div></div><div class='x-small text-muted'>Carga Crónica</div></div>")
+      sb.append(s"<div class='mb-2'><div class='progress' style='height: 6px; background:#111;'><div class='progress-bar bg-secondary' style='width: $chronicWidth%'></div></div><div class='x-small text-muted'>Carga Cronica</div></div>")
       sb.append(s"<div class='mb-2'><div class='progress' style='height: 12px; background:#111;'><div class='progress-bar $barColor progress-bar-striped progress-bar-animated' style='width: $acuteWidth%'></div></div><div class='x-small text-muted'>Carga Aguda (Semana)</div></div>")
       sb.append(f"<div class='text-center mt-2'><span class='badge bg-dark border border-secondary'>Ratio: $acwr%.2f</span></div>")
       sb.append("</div>")
 
-      // 6. Plan de Trabajo Dinámico
+      // 6. Plan de Trabajo Dinamico
       sb.append("<div class='card bg-primary bg-opacity-10 border-primary p-3 mb-2'>")
       sb.append("<h6 class='text-primary fw-bold'><i class='fas fa-clipboard-list'></i> Plan Recomendado:</h6>")
       if (acwr > 1.5) {
-        sb.append("<p class='small text-warning mb-0'><b>⚠️ FATIGA DETECTADA:</b> Sesión teórica o técnica manual sentado.</p>")
+        sb.append("<p class='small text-warning mb-0'><b>[!] FATIGA DETECTADA:</b> Sesion teorica o tecnica manual sentado.</p>")
       } else {
-        sb.append("<p class='small text-light mb-0'><b>✅ LISTO:</b> Coordinación de pies y blocajes en movimiento.</p>")
+        sb.append("<p class='small text-light mb-0'><b>[OK] LISTO:</b> Coordinacion de pies y blocajes en movimiento.</p>")
       }
       sb.append("</div>")
 
       sb.toString()
     } catch {
-      case e: Exception => s"Analizando datos bioptométricos... (${e.getMessage})"
+      case e: Exception => s"Analizando datos bioptometricos... (${e.getMessage})"
     } finally {
       conn.close()
     }
@@ -575,7 +575,7 @@ object DatabaseManager {
     val conn = getConnection()
 
     try {
-      // 1. Cálculo de XP basado en rendimiento real
+      // 1. Calculo de XP basado en rendimiento real
       val rs = conn.createStatement().executeQuery("SELECT COUNT(*) as pj, SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END) as cs, SUM(paradas) as sv, AVG(nota) as avg_n FROM matches WHERE status='PLAYED'")
       if(rs.next()){
         val pj = rs.getInt("pj")
@@ -585,14 +585,14 @@ object DatabaseManager {
         xp = (pj * 50) + (cs * 100) + (sv * 5) + (if(avg > 7.0) ((avg - 7.0) * 100).toInt else 0)
       }
 
-      // 2. Obtención del cinturón de Judo
+      // 2. Obtencion del cinturon de Judo
       val rsBelt = conn.createStatement().executeQuery("SELECT judo_belt FROM seasons ORDER BY id DESC LIMIT 1")
       if(rsBelt.next()) {
         belt = Option(rsBelt.getString("judo_belt")).getOrElse("Blanco")
       }
     } finally { conn.close() }
 
-    // 3. Lógica de progresión (Se calcula una sola vez aquí)
+    // 3. Logica de progresion (Se calcula una sola vez aqui)
     val level = 1 + (xp / 1000)
     val nextLevelXp = level * 1000 // Usamos el nombre exacto de tu Case Class
 
@@ -608,7 +608,7 @@ object DatabaseManager {
     RPGStatus(level, xp, nextLevelXp, title, belt)
   }
 
-  def getOraclePrediction(hDad: Double, hMom: Double): String = { val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT altura FROM physical_growth ORDER BY fecha DESC LIMIT 1"); val currentHeight=if(rs.next()) rs.getDouble("altura") else 115.0; val midParent=(hDad+hMom+13)/2.0; val projected=(currentHeight*(180.0/110.0)+midParent)/2.0+5.0; val minH=projected-4; val maxH=projected+4; f"<div class='text-center'><h1 class='display-1 text-warning fw-bold'>${projected.toInt} cm</h1><p class='text-muted'>Proyección Adulta Estimada</p><div class='progress mb-2' style='height:10px;'><div class='progress-bar bg-success' style='width:${(projected/200.0)*100}%%'></div></div><p class='small'>Rango probable: <b>${minH.toInt}cm - ${maxH.toInt}cm</b></p><hr><p class='small text-info'>Comparativa Élite: <b>189 cm</b> (Media Pro)</p></div>" } catch { case _:Exception => "Error calculando." } finally { conn.close() } }
+  def getOraclePrediction(hDad: Double, hMom: Double): String = { val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT altura FROM physical_growth ORDER BY fecha DESC LIMIT 1"); val currentHeight=if(rs.next()) rs.getDouble("altura") else 115.0; val midParent=(hDad+hMom+13)/2.0; val projected=(currentHeight*(180.0/110.0)+midParent)/2.0+5.0; val minH=projected-4; val maxH=projected+4; f"<div class='text-center'><h1 class='display-1 text-warning fw-bold'>${projected.toInt} cm</h1><p class='text-muted'>Proyeccion Adulta Estimada</p><div class='progress mb-2' style='height:10px;'><div class='progress-bar bg-success' style='width:${(projected/200.0)*100}%%'></div></div><p class='small'>Rango probable: <b>${minH.toInt}cm - ${maxH.toInt}cm</b></p><hr><p class='small text-info'>Comparativa Elite: <b>189 cm</b> (Media Pro)</p></div>" } catch { case _:Exception => "Error calculando." } finally { conn.close() } }
 
   // --- CORE MATCH LOGIC ---
   def logMatch(
@@ -617,7 +617,7 @@ object DatabaseManager {
                 clima: String, estadio: String, temp: Int, notas: String, video: String,
                 reaccion: String, fechaStr: String, tipo: String,
                 pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
-                mapaCampo: String // <--- NUEVO PARÁMETRO
+                mapaCampo: String // <--- NUEVO PARAMETRO
               ): Unit = {
     val conn = getConnection()
     try {
@@ -625,17 +625,17 @@ object DatabaseManager {
       if(rs.next()){
         // Consulta SQL actualizada con 'mapa_campo' al final
         val s = conn.prepareStatement("""
-    INSERT INTO matches (
-      season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica,
-      paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
-      acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
-      reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
-      torneo_nombre, fase, mapa_campo
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      'PLAYED', ?, ?, ?, ?, ?, '', '', ?
-    )
-    """)
+        INSERT INTO matches (
+          season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica,
+          paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
+          acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
+          reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
+          torneo_nombre, fase, mapa_campo
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          'PLAYED', ?, ?, ?, ?, ?, '', '', ?
+        )
+      """)
 
         s.setInt(1, rs.getInt("id"))
         s.setString(2, fixEncoding(riv))
@@ -663,7 +663,7 @@ object DatabaseManager {
         s.setInt(24, pcOk)
         s.setInt(25, plTot)
         s.setInt(26, plOk)
-        s.setString(27, mapaCampo) // <--- ASIGNACIÓN DEL NUEVO VALOR
+        s.setString(27, mapaCampo) // <--- ASIGNACION DEL NUEVO VALOR
 
         s.executeUpdate()
       }
@@ -676,7 +676,7 @@ object DatabaseManager {
                           notas: String, video: String, reaccion: String, clima: String, estadio: String,
                           zonaGoles: String, zonaTiros: String, zonaParadas: String,
                           p1v1: Int, pAir: Int, pPie: Int, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
-                          mapaCampo: String // <--- NUEVO PARÁMETRO
+                          mapaCampo: String // <--- NUEVO PARAMETRO
                         ): Unit = {
     val conn = getConnection()
     try {
@@ -685,11 +685,11 @@ object DatabaseManager {
       updateStats(n)
 
       val ps = conn.prepareStatement("""
-    UPDATE matches SET
-    status='PLAYED', goles_favor=?, goles_contra=?, minutos=?, nota=?, paradas=?,
-    notas_partido=?, video_url=?, reaccion_goles=?, clima=?, estadio=?,
-    zona_goles=?, zona_tiros=?, zona_paradas=?, paradas_1v1=?, paradas_aereas=?,
-    acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=?, mapa_campo=?
+      UPDATE matches SET
+        status='PLAYED', goles_favor=?, goles_contra=?, minutos=?, nota=?, paradas=?,
+        notas_partido=?, video_url=?, reaccion_goles=?, clima=?, estadio=?,
+        zona_goles=?, zona_tiros=?, zona_paradas=?, paradas_1v1=?, paradas_aereas=?,
+        acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=?, mapa_campo=?
       WHERE id=?
     """)
 
@@ -726,15 +726,15 @@ object DatabaseManager {
     var conn:Connection=null;
     try {
       conn=getConnection(); val sb=new StringBuilder(); val card=getLatestCardData(); val edad=calcularEdadExacta(card.fechaNacimiento);
-      sb.append(s"Analista Elite ($edad años). Tendencias:\n");
+      sb.append(s"Analista Elite ($edad anos). Tendencias:\n");
       val rs=conn.createStatement().executeQuery("SELECT fecha, rival, nota FROM matches WHERE status='PLAYED' ORDER BY fecha ASC");
       var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString(1)}|${rs.getString(2)}|${rs.getDouble(3)}\n") };
       if(c<2) return "Pocos datos.";
-      // Cambio aquí: Llamamos a AIProvider.ask
+      // Cambio aqui: Llamamos a AIProvider.ask
       AIProvider.ask(sb.toString()+"\nDame HTML limpio: <h4>ANALISIS</h4>...").replace("```html","").replace("```","").trim
     } catch {
       case e:Exception =>
-        e.printStackTrace() // Esto hará que el error aparezca en el log de Render/Consola
+        e.printStackTrace() // Esto hara que el error aparezca en el log de Render/Consola
         "Error: " + e.getMessage
     }
   }
@@ -754,7 +754,7 @@ object DatabaseManager {
     val card = getLatestCardData()
     val edad = calcularEdadExacta(card.fechaNacimiento)
 
-    // Tabla Maestra OMS 5-18 años (Percentiles 15, 50, 85)
+    // Tabla Maestra OMS 5-18 anos (Percentiles 15, 50, 85)
     // Estructura: Edad -> (H50, H15, H85, W50, W15, W85)
     val tablaOMS = Map(
       5  -> (110.0, 105.3, 114.7, 18.3, 16.2, 21.0),
@@ -803,7 +803,7 @@ object DatabaseManager {
 
           val m = (n.divRaw * 0.2 + n.hanRaw * 0.2 + n.refRaw * 0.2 + n.posRaw * 0.2 + n.spdRaw * 0.05 + n.kicRaw * 0.15)
 
-          // AQUI ESTABA EL ERROR: Faltaba el último argumento "" para mapaCampo
+          // AQUI ESTABA EL ERROR: Faltaba el ultimo argumento "" para mapaCampo
           logMatch(rival, gf, gc, min, nota, m, paradas, "", "", "", 0, 0, 0, clima, "-", 20, notas, "", reaccion, today, "LIGA", 0,0,0,0, "")
 
           count += 1
@@ -848,33 +848,33 @@ object DatabaseManager {
     try {
       val sb = new StringBuilder()
 
-      // 1. DETECTOR "TORPEZA DEL ESTIRÓN" (Crecimiento Rápido + Bajada Coordinación)
+      // 1. DETECTOR "TORPEZA DEL ESTIRON" (Crecimiento Rapido + Bajada Coordinacion)
       val rsGrowth = conn.createStatement().executeQuery("SELECT velocidad_crecimiento FROM physical_growth ORDER BY fecha DESC LIMIT 1")
       val growthSpeed = if(rsGrowth.next()) rsGrowth.getDouble("velocidad_crecimiento") else 0.0
 
-      if (growthSpeed > 0.5) { // Si ha crecido más de 0.5cm recientemente
+      if (growthSpeed > 0.5) { // Si ha crecido mas de 0.5cm recientemente
         val rsTech = conn.createStatement().executeQuery("SELECT coordinacion FROM technical_reviews ORDER BY fecha DESC LIMIT 2")
         if (rsTech.next()) {
           val currCoord = rsTech.getInt("coordinacion")
           if (rsTech.next()) {
             val prevCoord = rsTech.getInt("coordinacion")
             if (currCoord < prevCoord) {
-              sb.append("<div class='alert alert-danger p-2 small mb-2'><strong>⚠️ ALERTA BIO-MECÁNICA:</strong> Crecimiento acelerado detectado (+"+growthSpeed+"cm) coincidiendo con bajada de coordinación. Riesgo de 'Torpeza del Estirón'. <br>Recomendación: <em>Simplificar tareas técnicas y trabajar propiocepción.</em></div>")
+              sb.append("<div class='alert alert-danger p-2 small mb-2'><strong>[!] ALERTA BIO-MECANICA:</strong> Crecimiento acelerado detectado (+"+growthSpeed+"cm) coincidiendo con bajada de coordinacion. Riesgo de 'Torpeza del Estiron'. <br>Recomendacion: <em>Simplificar tareas tecnicas y trabajar propiocepcion.</em></div>")
             }
           }
         }
       }
 
       // 2. DETECTOR DE PATRONES DE DOLOR (Dolor > 0 vs Tipo de Entreno)
-      // Buscamos si hay correlación entre dolor y superficie/tipo en los últimos 10 registros
+      // Buscamos si hay correlacion entre dolor y superficie/tipo en los ultimos 10 registros
       val rsPain = conn.createStatement().executeQuery(
         """
-    SELECT w.dolor, t.tipo, t.foco
-    FROM wellness w
-    JOIN trainings t ON w.fecha = t.fecha
-    WHERE w.dolor > 1
-    ORDER BY w.id DESC LIMIT 5
-    """
+      SELECT w.dolor, t.tipo, t.foco
+      FROM wellness w
+      JOIN trainings t ON w.fecha = t.fecha
+      WHERE w.dolor > 1
+      ORDER BY w.id DESC LIMIT 5
+      """
       )
 
       var painCount = 0
@@ -885,10 +885,10 @@ object DatabaseManager {
       }
 
       if (painCount >= 2) {
-        sb.append(s"<div class='alert alert-warning p-2 small mb-0'><strong>🔍 PATRÓN DE DOLOR:</strong> Detectadas $painCount sesiones recientes con dolor. Contexto frecuente: $lastContext. <br>Revisar calzado o dureza del terreno.</div>")
+        sb.append(s"<div class='alert alert-warning p-2 small mb-0'><strong>[buscar] PATRON DE DOLOR:</strong> Detectadas $painCount sesiones recientes con dolor. Contexto frecuente: $lastContext. <br>Revisar calzado o dureza del terreno.</div>")
       }
 
-      if (sb.isEmpty) "<div class='text-muted small text-center fst-italic'>Sin anomalías biométricas detectadas hoy.</div>" else sb.toString()
+      if (sb.isEmpty) "<div class='text-muted small text-center fst-italic'>Sin anomalias biometricas detectadas hoy.</div>" else sb.toString()
 
     } catch {
       case e: Exception => "Error calculando insights."
@@ -901,8 +901,8 @@ object DatabaseManager {
     var loads = List[Double]()
     try {
       val ps = conn.prepareStatement("""
-    (SELECT (minutos * 4) as load FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - ?)
-    UNION ALL
+      (SELECT (minutos * 4) as load FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - ?)
+      UNION ALL
       (SELECT (60 * rpe) as load FROM trainings WHERE fecha >= CURRENT_DATE - ?)
     """)
       ps.setInt(1, days); ps.setInt(2, days)
@@ -912,7 +912,7 @@ object DatabaseManager {
     loads
   }
 
-  // --- GESTIÓN DE CINTURÓN DE JUDO ---
+  // --- GESTION DE CINTURON DE JUDO ---
   def updateJudoBelt(nuevoCinturon: String): Unit = {
     val conn = getConnection(); try {
       // Nos aseguramos de que la columna existe en la tabla seasons
@@ -926,10 +926,10 @@ object DatabaseManager {
     val stats = scala.collection.mutable.Map[String, (Double, Double)]()
     try {
       val query = """
-    SELECT clima, AVG(nota) as media_nota, AVG(goles_contra) as media_gc
-    FROM matches
+      SELECT clima, AVG(nota) as media_nota, AVG(goles_contra) as media_gc
+      FROM matches
       WHERE status='PLAYED'
-    GROUP BY clima
+      GROUP BY clima
     """
       val rs = conn.createStatement().executeQuery(query)
       while(rs.next()) {
@@ -940,20 +940,20 @@ object DatabaseManager {
   }
 
   def getTechnicalAlerts(): List[String] = {
-    val reviews = getTechnicalReviews().takeRight(3) // Analizamos las últimas 3
+    val reviews = getTechnicalReviews().takeRight(3) // Analizamos las ultimas 3
     if (reviews.size < 2) return Nil
 
     var alerts = List[String]()
 
-    // Ejemplo: Lógica para detectar bajada en blocaje
+    // Ejemplo: Logica para detectar bajada en blocaje
     val blocajes = reviews.map(_.blocaje)
     if (blocajes.last < blocajes.head) {
-      alerts = alerts :+ "⚠️ Tendencia a la baja en BLOCAJE. Se recomienda sesión técnica analítica."
+      alerts = alerts :+ "[!] Tendencia a la baja en BLOCAJE. Se recomienda sesion tecnica analitica."
     }
 
-    // Ejemplo: Lógica para detectar valentía baja
+    // Ejemplo: Logica para detectar valentia baja
     if (reviews.last.valentia < 5) {
-      alerts = alerts :+ "🔥 Alerta de VALENTÍA: Héctor necesita refuerzo en salidas 1v1."
+      alerts = alerts :+ "[fire] Alerta de VALENTIA: Hector necesita refuerzo en salidas 1v1."
     }
 
     alerts
@@ -974,22 +974,22 @@ object DatabaseManager {
   def getCognitiveInsight(): String = {
     val conn = getConnection()
     try {
-      // Buscamos la media de notas de los últimos 30 días
+      // Buscamos la media de notas de los ultimos 30 dias
       val rsAcad = conn.createStatement().executeQuery("SELECT AVG(nota) FROM academic_performance WHERE fecha > CURRENT_DATE - 30")
       val avgAcad = if(rsAcad.next()) rsAcad.getDouble(1) else 0.0
 
-      // Buscamos la media de 'atencion' en los entrenamientos de los últimos 30 días
+      // Buscamos la media de 'atencion' en los entrenamientos de los ultimos 30 dias
       val rsTrain = conn.createStatement().executeQuery("SELECT AVG(atencion) FROM trainings WHERE fecha > CURRENT_DATE - 30")
       val avgAtt = if(rsTrain.next()) rsTrain.getDouble(1) else 0.0
 
       if (avgAcad > 0 && avgAtt > 0) {
         if (avgAcad < 6.0 && avgAtt < 7.0)
-          "🧠 **ALERTA COGNITIVA**: Baja concentración detectada en ambos entornos. Posible fatiga mental general."
+          "[IA] **ALERTA COGNITIVA**: Baja concentracion detectada en ambos entornos. Posible fatiga mental general."
         else if (avgAcad > 8.0 && avgAtt < 6.0)
-          "⚽ **DESCONEXIÓN**: Alto rendimiento académico pero baja atención en campo. ¿Falta de motivación deportiva?"
+          "[futbol] **DESCONEXION**: Alto rendimiento academico pero baja atencion en campo. ?Falta de motivacion deportiva?"
         else
-          "✅ **SINERGIA ÓPTIMA**: Equilibrio detectado entre estudios y deporte."
-      } else "Faltan datos para análisis cognitivo."
+          "[OK] **SINERGIA OPTIMA**: Equilibrio detectado entre estudios y deporte."
+      } else "Faltan datos para analisis cognitivo."
     } finally { conn.close() }
   }
 
@@ -997,21 +997,21 @@ object DatabaseManager {
     val conn = getConnection()
     try {
       val prompt = """
-    Analiza este informe médico de un niño deportista.
-    Extrae: 1) Diagnóstico claro. 2) Impacto en el deporte (ej: limitar saltos, reposo).
-    3) Si es una analítica, destaca valores fuera de rango.
-      Responde en formato: DIAGNÓSTICO: ... | RECOMENDACIÓN: ...
+      Analiza este informe medico de un nino deportista.
+      Extrae: 1) Diagnostico claro. 2) Impacto en el deporte (ej: limitar saltos, reposo).
+      3) Si es una analitica, destaca valores fuera de rango.
+      Responde en formato: DIAGNOSTICO: ... | RECOMENDACION: ...
     """
 
       // Detectamos el formato para el AIProvider
       val mime = if (fileBase64.contains("pdf")) "application/pdf" else "image/jpeg"
 
-      // La magia: AIProvider.ask devolverá el análisis de la caché si ya se subió este mismo archivo
+      // La magia: AIProvider.ask devolvera el analisis de la cache si ya se subio este mismo archivo
       val analisisIA = AIProvider.ask(prompt, Some((mime, fileBase64)))
 
       val partes = analisisIA.split("\\|")
-      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNÓSTICO:", "").trim
-      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACIÓN:", "").trim
+      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNOSTICO:", "").trim
+      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACION:", "").trim
 
       val ps = conn.prepareStatement("INSERT INTO medical_vault (fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol) VALUES (?, ?, ?, ?, ?)")
       ps.setDate(1, java.sql.Date.valueOf(fecha))
@@ -1022,25 +1022,25 @@ object DatabaseManager {
       ps.executeUpdate()
 
       s"Informe procesado: $diag"
-    } catch { case e: Exception => s"Error médico: ${e.getMessage}" } finally { conn.close() }
+    } catch { case e: Exception => s"Error medico: ${e.getMessage}" } finally { conn.close() }
   }
 
   def getLatestMedicalInsight(): String = {
     val conn = getConnection()
     try {
-      // Buscamos el último informe que no sea un simple 'Baseline' previo
+      // Buscamos el ultimo informe que no sea un simple 'Baseline' previo
       val query = """
-    SELECT diagnostico_ia, recomendaciones_ia
-    FROM medical_vault
+      SELECT diagnostico_ia, recomendaciones_ia
+      FROM medical_vault
       WHERE es_previo_futbol = FALSE
-    ORDER BY fecha_informe DESC LIMIT 1
+      ORDER BY fecha_informe DESC LIMIT 1
     """
       val rs = conn.createStatement().executeQuery(query)
       if (rs.next()) {
         val diag = rs.getString("diagnostico_ia")
         val rec = rs.getString("recomendaciones_ia")
         // Retornamos un string combinado para el widget
-        s"$diag. RECOMENDACIÓN: $rec"
+        s"$diag. RECOMENDACION: $rec"
       } else ""
     } catch {
       case _: Exception => ""
@@ -1068,12 +1068,12 @@ object DatabaseManager {
     val conn = getConnection()
     val reports = scala.collection.mutable.ListBuffer[MedicalReport]()
     try {
-      // Consultamos los informes ordenados por fecha, los más recientes primero
+      // Consultamos los informes ordenados por fecha, los mas recientes primero
       val query = """
-    SELECT id, fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol
-    FROM medical_vault
+      SELECT id, fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol
+      FROM medical_vault
       ORDER BY fecha_informe DESC
-      """
+    """
       val rs = conn.createStatement().executeQuery(query)
       while (rs.next()) {
         reports += MedicalReport(
@@ -1086,7 +1086,7 @@ object DatabaseManager {
         )
       }
     } catch {
-      case e: Exception => println(s"Error recuperando informes médicos: ${e.getMessage}")
+      case e: Exception => println(s"Error recuperando informes medicos: ${e.getMessage}")
     } finally {
       conn.close()
     }
@@ -1094,31 +1094,31 @@ object DatabaseManager {
   }
   def getCoachAdvice(): String = {
     val card = getLatestCardData()
-    val matches = getMatchesList().take(3) // Últimos 3 partidos
-    val cog = getCognitiveInsight() // Datos de estudios/atención
-    val wellness = getOracleInsights() // Datos físicos/crecimiento
+    val matches = getMatchesList().take(3) // Ultimos 3 partidos
+    val cog = getCognitiveInsight() // Datos de estudios/atencion
+    val wellness = getOracleInsights() // Datos fisicos/crecimiento
 
     val prompt = s"""
-    Actúa como un Coach de Élite para un portero de ${calcularEdadExacta(card.fechaNacimiento)} años.
-    CONTEXTO TÉCNICO: Media ${card.media}, Reflejos ${card.ref}.
-      ESTADO FÍSICO: $wellness
+    Actua como un Coach de Elite para un portero de ${calcularEdadExacta(card.fechaNacimiento)} anos.
+    CONTEXTO TECNICO: Media ${card.media}, Reflejos ${card.ref}.
+    ESTADO FISICO: $wellness
     ESTADO COGNITIVO: $cog
-    ÚLTIMOS PARTIDOS: ${matches.map(m => m.rival + " nota:" + m.nota).mkString(", ")}
+    ULTIMOS PARTIDOS: ${matches.map(m => m.rival + " nota:" + m.nota).mkString(", ")}
 
-    Dame 3 consejos breves y motivadores. Si detectas fatiga o baja atención académica, prioriza el descanso psicológico.
-    """
+    Dame 3 consejos breves y motivadores. Si detectas fatiga o baja atencion academica, prioriza el descanso psicologico.
+  """
 
-    // Usamos el AIProvider centralizado con caché (se refresca una vez al día o tras cambios)
+    // Usamos el AIProvider centralizado con cache (se refresca una vez al dia o tras cambios)
     AIProvider.ask(prompt)
   }
   def analyzeAudioLog(matchId: Int, audioBase64: String): String = {
-    // Prompt personalizado para Héctor (5 años) y su gestión emocional
+    // Prompt personalizado para Hector (5 anos) y su gestion emocional
     val prompt = """
-    Eres un Psicólogo Deportivo experto en formación base.
-    Analiza este audio post-partido de Héctor, un portero de 5 años.
-    1) Transcribe lo que dice (ignora ruidos de fondo).
-    2) Evalúa su estado emocional: ¿frustración, alegría, timidez, cansancio?
-      3) Da un consejo breve y práctico al padre para reforzar la autoestima de Héctor hoy.
+      Eres un Psicologo Deportivo experto en formacion base.
+      Analiza este audio post-partido de Hector, un portero de 5 anos.
+      1) Transcribe lo que dice (ignora ruidos de fondo).
+      2) Evalua su estado emocional: ?frustracion, alegria, timidez, cansancio?
+      3) Da un consejo breve y practico al padre para reforzar la autoestima de Hector hoy.
       Responde en texto plano, sin formato Markdown complejo.
     """
 

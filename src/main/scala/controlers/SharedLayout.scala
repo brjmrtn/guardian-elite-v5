@@ -10,14 +10,14 @@ object SharedLayout {
     if (isAuthenticated) {
       block
     } else {
-      // Guardamos la ruta actual para volver después del login
+      // Guardamos la ruta actual para volver despues del login
       val currentPath = request.exchange.getRequestPath
       val red = cask.Redirect(s"/login?next=$currentPath")
       cask.Response(Array.empty[Byte], red.statusCode, red.headers ++ Seq("Cache-Control" -> "no-store, no-cache, must-revalidate"), red.cookies)
     }
   }
 
-  def fixEncoding(s: String): String = { try { if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
+  def fixEncoding(s: String): String = { try { if (s.contains("A")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
 
   // ==========================================
 
@@ -27,7 +27,7 @@ object SharedLayout {
     val extraBtn = if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-danger py-0 ms-1", style:="font-size:10px", "V") else span("")
     val waText = URLEncoder.encode(s"MATCH: ${m.rival} ${m.resultado}", "UTF-8").replace("+", "%20")
     val tipoBadge = if(m.tipo == "LIGA") span(cls:="badge bg-primary me-1", style:="font-size:9px", "LIGA") else if(m.tipo=="AMISTOSO") span(cls:="badge bg-secondary me-1", style:="font-size:9px", "AMIST") else span(cls:="badge bg-warning text-dark me-1", style:="font-size:9px", "TORNEO")
-    val estadioInfo = if(m.estadio.nonEmpty && m.estadio != "-") span(cls:="d-block text-muted fst-italic", style:="font-size:10px", s"🏟️ ${fixEncoding(m.estadio)}") else span("")
+    val estadioInfo = if(m.estadio.nonEmpty && m.estadio != "-") span(cls:="d-block text-muted fst-italic", style:="font-size:10px", s"[estadio] ${fixEncoding(m.estadio)}") else span("")
 
     tr(
       td(cls:="fw-bold small", tipoBadge, fixEncoding(m.rival), extraBtn, br, span(cls:="text-muted xx-small", style:="font-size:11px", s"${m.fecha} ${m.clima}"), estadioInfo),
@@ -60,10 +60,10 @@ object SharedLayout {
             div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"),
             div(cls:="d-flex align-items-center gap-3",
               a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
-              a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
+              a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "[config]")
             )
           ),
-          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "📋"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
+          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "[star]"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "[info]"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
       ).render
   }
 
@@ -118,7 +118,7 @@ object SharedLayout {
   // PAGINAS FALTANTES (RESTAURADAS)
   // ==========================================
 
-  // --- 1. EL ORÁCULO (Predicción de Altura) ---
+  // --- 1. EL ORACULO (Prediccion de Altura) ---
   @cask.get("/oracle")
   def oraclePage(request: cask.Request, hDad: String = "180", hMom: String = "170") = withAuth(request) {
     val hd = try hDad.toDouble catch { case _: Exception => 180.0 }
@@ -136,20 +136,20 @@ object SharedLayout {
     val mainContent = div(
       div(cls:="row justify-content-center",
         div(cls:="col-md-8 col-12",
-          h2(cls:="text-center text-info mb-4", "🔮 EL ORÁCULO"),
+          h2(cls:="text-center text-info mb-4", "[oracle] EL ORACULO"),
 
           // Tarjeta Inteligencia
           div(cls:="card bg-dark border-info shadow mb-4",
             div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
-              span("🧠 INTELIGENCIA DEPORTIVA"),
-              span(cls:="badge bg-dark text-info", s"Edad: $edadActual años")
+              span("[IA] INTELIGENCIA DEPORTIVA"),
+              span(cls:="badge bg-dark text-info", s"Edad: $edadActual anos")
             ),
             div(cls:="card-body", raw(bioInsights))
           ),
 
-          // Tarjeta Gráfico
+          // Tarjeta Grafico
           div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-white small", "Evolución Biométrica Histórica"),
+            div(cls:="card-header text-white small", "Evolucion Biometrica Historica"),
             div(cls:="card-body", style:="height: 300px; position: relative;",
               canvas(id:="growthChart")
             )
@@ -157,7 +157,7 @@ object SharedLayout {
 
           // Tabla OMS
           div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-muted small fw-bold text-uppercase", s"📊 Referencia OMS para $edadActual años"),
+            div(cls:="card-header text-muted small fw-bold text-uppercase", s"[stats] Referencia OMS para $edadActual anos"),
             div(cls:="card-body p-0",
               table(cls:="table table-dark table-sm mb-0 small text-center",
                 thead(tr(th("Percentil"), th("Altura (cm)"), th("Peso (kg)"))),
@@ -170,21 +170,21 @@ object SharedLayout {
             )
           ),
 
-          // Predicción Genética
+          // Prediccion Genetica
           div(cls:="card bg-dark text-white border-secondary shadow p-4",
-            h4(cls:="text-center text-warning mb-3", "Predicción Altura Final"),
+            h4(cls:="text-center text-warning mb-3", "Prediccion Altura Final"),
             div(cls:="bg-secondary bg-opacity-10 p-3 rounded mb-3", raw(predictionHtml)),
             form(action:="/oracle", method:="get", cls:="mt-4 border-top border-secondary pt-3",
               div(cls:="row",
-                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papá (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
-                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mamá (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
+                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papa (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
+                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mama (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
               ),
-              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular"))
+              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "[sync] Recalcular"))
             )
           )
         )
       ),
-      // 2. Script inyectado (Aseguramos que Chart.js esté cargado en basePage)
+      // 2. Script inyectado (Aseguramos que Chart.js este cargado en basePage)
       script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
       script(raw(s"""
       window.addEventListener('load', function() {
@@ -218,12 +218,12 @@ object SharedLayout {
     // 3. Renderizado final
     renderHtml(basePage("bio", mainContent))
   }
-  // --- 2. MONEYBALL (Distribución Táctica) ---
+  // --- 2. MONEYBALL (Distribucion Tactica) ---
   @cask.get("/distribution")
   def distributionPage() = {
     val tac = DatabaseManager.getTacticalStats()
 
-    // Función auxiliar para calcular porcentajes seguros
+    // Funcion auxiliar para calcular porcentajes seguros
     def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
 
     val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
@@ -234,7 +234,7 @@ object SharedLayout {
     val (pa, pm, pr) = (pct(tac("p_alt"), totP), pct(tac("p_med"), totP), pct(tac("p_ras"), totP))
     val (pl, pc, pd) = (pct(tac("p_izq"), totP), pct(tac("p_cen"), totP), pct(tac("p_der"), totP))
 
-    // Celda táctica visual
+    // Celda tactica visual
     def tCell(label: String, p: Int, color: String) = div(
       cls:=s"flex-fill text-center p-3 border border-secondary $color",
       style:="color: #000; font-weight: 800;",
@@ -244,9 +244,9 @@ object SharedLayout {
 
     val content = basePage("bio", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "📊 MONEYBALL TACTICS"),
+        h2(cls:="text-center text-warning mb-4", "[stats] MONEYBALL TACTICS"),
 
-        // Sección Goles Encajados
+        // Seccion Goles Encajados
         div(cls:="card bg-dark text-white border-danger shadow mb-4",
           div(cls:="card-header bg-danger text-white fw-bold text-center", "ZONA DE ENCAJE (Debilidades)"),
           div(cls:="card-body p-0",
@@ -255,7 +255,7 @@ object SharedLayout {
           )
         ),
 
-        // Sección Paradas
+        // Seccion Paradas
         div(cls:="card bg-dark text-white border-success shadow mb-4",
           div(cls:="card-header bg-success text-white fw-bold text-center", "ZONA DE SEGURIDAD (Fortalezas)"),
           div(cls:="card-body p-0",
@@ -295,12 +295,12 @@ object SharedLayout {
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
       val mimeType = if (fileName.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
 
-      val medicalPrompt = s"Analiza este informe ($tipo) de Héctor. Extrae DIAGNÓSTICO y RECOMENDACIÓN DEPORTIVA. Formato: DIAGNÓSTICO: [texto] | RECOMENDACIÓN: [texto]"
+      val medicalPrompt = s"Analiza este informe ($tipo) de Hector. Extrae DIAGNOSTICO y RECOMENDACION DEPORTIVA. Formato: DIAGNOSTICO: [texto] | RECOMENDACION: [texto]"
 
       val analisisIA = DatabaseManager.AIProvider.ask(medicalPrompt, Some((mimeType, base64Content)))
       val partes = analisisIA.split("\\|")
-      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNÓSTICO:", "").trim
-      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACIÓN:", "").trim
+      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNOSTICO:", "").trim
+      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACION:", "").trim
 
       DatabaseManager.saveMedicalRecordFull(fecha, tipo, diag, rec, isPrevio)
     }
@@ -315,7 +315,7 @@ object SharedLayout {
 
     val content = basePage("career", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
+        h2(cls:="text-center text-warning mb-4", "[star] MODO LEGADO"),
 
         div(cls:="card bg-dark text-white border-warning shadow mb-4",
           div(cls:="card-body text-center",
@@ -335,17 +335,17 @@ object SharedLayout {
         ),
 
         div(cls:="row g-2",
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🛡️"), h6("Muro"), small("Bonus por Portería a Cero"))),
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🧤"), h6("Manos de Oro"), small("Bonus por Paradas")))
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[shield]"), h6("Muro"), small("Bonus por Porteria a Cero"))),
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[guantes]"), h6("Manos de Oro"), small("Bonus por Paradas")))
         ),
 
         div(cls:="alert alert-dark border-info mt-4 text-center",
           h5(cls:="text-info", "Sistema de Puntos"),
           ul(cls:="list-unstyled small text-start d-inline-block",
-            li("• Partido Jugado: +50 XP"),
-            li("• Portería a Cero: +100 XP"),
-            li("• Parada: +5 XP"),
-            li("• Nota > 7.0: +100 XP (Bonus)")
+            li("- Partido Jugado: +50 XP"),
+            li("- Porteria a Cero: +100 XP"),
+            li("- Parada: +5 XP"),
+            li("- Nota > 7.0: +100 XP (Bonus)")
           )
         )
       )

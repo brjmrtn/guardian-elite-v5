@@ -6,13 +6,13 @@ import SharedLayout._
 object AuthController extends cask.Routes {
 
   @cask.get("/login")
-  def loginPage(error: Boolean = false, next: String = "/") = { // 1. Aceptamos el parámetro 'next'
+  def loginPage(error: Boolean = false, next: String = "/") = { // 1. Aceptamos el parametro 'next'
     val content = basePage("login", div(cls:="container d-flex justify-content-center align-items-center", style:="height: 80vh",
       div(cls:="card bg-dark border-info p-4 shadow", style:="width: 350px",
-        h3(cls:="text-info text-center mb-4", "🛡️ GUARDIAN LOGIN"),
+        h3(cls:="text-info text-center mb-4", "[shield] GUARDIAN LOGIN"),
         if(error) div(cls:="alert alert-danger small p-2", "Credenciales incorrectas") else "",
         form(action:="/login", method:="post",
-          // 2. AÑADIMOS ESTA LÍNEA (Campo oculto para no perder la ruta):
+          // 2. ANADIMOS ESTA LINEA (Campo oculto para no perder la ruta):
           input(tpe:="hidden", name:="next", value:=next),
 
           div(cls:="mb-3",
@@ -20,7 +20,7 @@ object AuthController extends cask.Routes {
             input(tpe:="text", name:="user", cls:="form-control bg-dark text-white border-secondary", required:=true)
           ),
           div(cls:="mb-3",
-            label(cls:="text-muted small fw-bold", "CONTRASEÑA"),
+            label(cls:="text-muted small fw-bold", "CONTRASENA"),
             input(tpe:="password", name:="pass", cls:="form-control bg-dark text-white border-secondary", required:=true)
           ),
           button(tpe:="submit", cls:="btn btn-info w-100 fw-bold", "ENTRAR AL SISTEMA")
@@ -38,7 +38,7 @@ object AuthController extends cask.Routes {
         statusCode = 302,
         headers = Seq(
           "Location" -> next,
-          // Aumentamos a 24h (86400) y añadimos SameSite=Lax para evitar bloqueos del navegador
+          // Aumentamos a 24h (86400) y anadimos SameSite=Lax para evitar bloqueos del navegador
           "Set-Cookie" -> s"$sessionCookieName=active; Path=/; SameSite=Lax; HttpOnly; Max-Age=86400"
         )
       )

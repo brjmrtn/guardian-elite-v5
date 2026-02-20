@@ -7,11 +7,11 @@ object AdminController extends cask.Routes {
 
   @cask.get("/settings") def settingsPage() = {
     val card = DatabaseManager.getLatestCardData()
-    val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Configuración General"),
+    val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Configuracion General"),
       form(action := "/settings/save_base64", method := "post",
         div(cls := "mb-4", label(cls := "form-label text-info fw-bold", "Nombre Visual (Carta)"), input(tpe := "text", name := "nombreClub", cls := "form-control fw-bold", value:=card.clubNombre, placeholder := "Ej: Rayo (Corto)")),
         div(cls := "mb-4", label(cls := "form-label text-success fw-bold", "Fecha de Nacimiento"), input(tpe := "date", name := "fechaNac", cls := "form-control fw-bold", value:=card.fechaNacimiento)),
-        div(cls := "mb-4 border-top border-secondary pt-3", h5(cls:="text-info", "Scouting 2.0 (RFFM)"), div(cls:="mb-3", label(cls:="small text-muted fw-bold", "URL Grupo RFFM"), input(tpe:="text", name:="rffmUrl", cls:="form-control fw-bold", value:=Option(card.rffmUrl).getOrElse(""), placeholder:="https://www.rffm.es/competicion/...")), div(cls:="mb-3", label(cls:="small text-muted fw-bold", "Nombre Oficial (Federación)"), input(tpe:="text", name:="rffmName", cls:="form-control fw-bold", value:=Option(card.rffmName).getOrElse(""), placeholder:="Ej: RAYO VALLECANO DE MADRID 'B'"))),
+        div(cls := "mb-4 border-top border-secondary pt-3", h5(cls:="text-info", "Scouting 2.0 (RFFM)"), div(cls:="mb-3", label(cls:="small text-muted fw-bold", "URL Grupo RFFM"), input(tpe:="text", name:="rffmUrl", cls:="form-control fw-bold", value:=Option(card.rffmUrl).getOrElse(""), placeholder:="https://www.rffm.es/competicion/...")), div(cls:="mb-3", label(cls:="small text-muted fw-bold", "Nombre Oficial (Federacion)"), input(tpe:="text", name:="rffmName", cls:="form-control fw-bold", value:=Option(card.rffmName).getOrElse(""), placeholder:="Ej: RAYO VALLECANO DE MADRID 'B'"))),
         div(cls := "mb-4", label(cls := "form-label text-info fw-bold", "Foto Jugador"), input(tpe := "file", cls := "form-control fw-bold", accept := "image/*", onchange := "convertToBase64(this, 'hidden_foto')"), input(tpe := "hidden", name := "fotoBase64", id := "hidden_foto")),
         div(cls := "mb-4", label(cls := "form-label text-warning fw-bold", "Escudo Club"), input(tpe := "file", cls := "form-control fw-bold", accept := "image/*", onchange := "convertToBase64(this, 'hidden_club')"), input(tpe := "hidden", name := "clubBase64", id := "hidden_club")),
         div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg fw-bold", "Guardar"))),
@@ -158,14 +158,14 @@ object AdminController extends cask.Routes {
         div(cls := "col-md-8",
           h2(cls := "text-info text-center mb-4", "IMPORTADOR DE DATOS"),
           div(cls := "card bg-dark text-white border-success shadow p-4 mb-4",
-            h4("🌍 Conexion RFFM"),
+            h4("[mundo] Conexion RFFM"),
             p(cls := "small text-muted fw-bold", "Descarga calendario y rivales directamente de la Federacion."),
             form(action := "/admin/sync_rffm", method := "post",
-              button(tpe := "submit", cls := "btn btn-success w-100 fw-bold", "🔄 Sincronizar Calendario")
+              button(tpe := "submit", cls := "btn btn-success w-100 fw-bold", "[sync] Sincronizar Calendario")
             )
           ),
           div(cls := "card bg-dark text-white border-primary shadow p-4 mb-4",
-            h4("📅 Importar Calendario Manual"),
+            h4("[cal] Importar Calendario Manual"),
             p(cls := "small text-muted fw-bold", "Formato: FECHA, RIVAL, TIPO"),
             form(action := "/admin/upload_calendar", method := "post",
               textarea(name := "csvContent", cls := "form-control mb-3 fw-bold", rows := "3"),
@@ -249,7 +249,7 @@ object AdminController extends cask.Routes {
   def testAI(request: cask.Request) = withAuth(request) {
     val resultado = DatabaseManager.testAIConnection()
     renderHtml(basePage("settings", div(cls:="container mt-5 text-center",
-      h2("Diagnóstico de IA"),
+      h2("Diagnostico de IA"),
       div(cls:=s"alert ${if(resultado.contains("OK")) "alert-success" else "alert-danger"}", resultado),
       a(href:="/admin", cls:="btn btn-primary", "Volver")
     )))
@@ -259,13 +259,13 @@ object AdminController extends cask.Routes {
     val content = basePage("tactics",
       div(cls := "row justify-content-center",
         div(cls := "col-12",
-          h2(cls := "text-center text-info mb-3", "PIZARRA TÁCTICA"),
+          h2(cls := "text-center text-info mb-3", "PIZARRA TACTICA"),
           div(cls:="d-flex justify-content-center gap-2 mb-3",
-            button(cls:="btn btn-outline-light", onclick:="setColor('#ffffff')", "⚪"),
-            button(cls:="btn btn-outline-warning", onclick:="setColor('#ffc107')", "🟡"),
-            button(cls:="btn btn-outline-danger", onclick:="setColor('#dc3545')", "🔴"),
-            button(cls:="btn btn-outline-info", onclick:="setColor('#0dcaf0')", "🔵"),
-            button(cls:="btn btn-secondary", onclick:="clearBoard()", "🗑️ BORRAR")
+            button(cls:="btn btn-outline-light", onclick:="setColor('#ffffff')", "[grey]"),
+            button(cls:="btn btn-outline-warning", onclick:="setColor('#ffc107')", "[yellow]"),
+            button(cls:="btn btn-outline-danger", onclick:="setColor('#dc3545')", "[red]"),
+            button(cls:="btn btn-outline-info", onclick:="setColor('#0dcaf0')", "[blue]"),
+            button(cls:="btn btn-secondary", onclick:="clearBoard()", "[del] BORRAR")
           ),
           div(cls:="field-container shadow border border-secondary",
             canvas(id:="tacticsBoard", width:="350", height:="500")
@@ -367,10 +367,10 @@ object AdminController extends cask.Routes {
             div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"),
             div(cls:="d-flex align-items-center gap-3",
               a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
-              a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
+              a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "[config]")
             )
           ),
-          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "📋"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
+          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "[star]"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "[info]"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
       ).render
   }
 
@@ -425,7 +425,7 @@ object AdminController extends cask.Routes {
   // PAGINAS FALTANTES (RESTAURADAS)
   // ==========================================
 
-  // --- 1. EL ORÁCULO (Predicción de Altura) ---
+  // --- 1. EL ORACULO (Prediccion de Altura) ---
 
   initialize()
 }
