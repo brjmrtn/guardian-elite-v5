@@ -33,22 +33,266 @@ object DatabaseManager {
 
   val url = s"jdbc:postgresql://$dbHost/$dbName?sslmode=require&options=-c%20client_encoding=UTF8"
 
-  def getConnection(): Connection = {
-    if (dbPass.isEmpty) throw new IllegalStateException("DB_PASS no configurada. Añádela como variable de entorno.")
-    val props = new Properties()
-    props.setProperty("user", dbUser)
-    props.setProperty("password", dbPass)
-    props.setProperty("ssl", "true")
-    DriverManager.getConnection(url, props)
+  // --- POOL DE CONEXIONES (HikariCP) ---
+  // Se inicializa UNA sola vez al arrancar. Neon free tier soporta ~10 conexiones;
+  // con maximumPoolSize=5 dejamos margen para el dashboard de Neon.
+  private val pool: com.zaxxer.hikari.HikariDataSource = {
+    if (dbPass.isEmpty) throw new IllegalStateException("DB_PASS no configurada. Añadela como variable de entorno.")
+    val config = new com.zaxxer.hikari.HikariConfig()
+    config.setJdbcUrl(url)
+    config.setUsername(dbUser)
+    config.setPassword(dbPass)
+    config.setMaximumPoolSize(5)
+    config.setMinimumIdle(1)
+    config.setConnectionTimeout(10000)   // 10s esperando conexion libre del pool
+    config.setIdleTimeout(300000)        // Cierra idle tras 5 min
+    config.setMaxLifetime(600000)        // Vida max de conexion: 10 min
+    config.setKeepaliveTime(120000)      // Ping cada 2 min para mantener vivas las conexiones
+    config.addDataSourceProperty("ssl", "true")
+    config.setConnectionInitSql("SET client_encoding TO 'UTF8'")
+    new com.zaxxer.hikari.HikariDataSource(config)
+  }
+
+  // API identica a antes: todos los metodos del DatabaseManager siguen igual.
+  // La unica diferencia es que ahora devuelve una conexion del pool, no una nueva.
+  def getConnection(): Connection = pool.getConnection()
+
+  // --- INICIALIZACIÓN DE TABLAS (se llama UNA vez al arrancar el servidor) ---
+  // Centraliza todos los CREATE TABLE IF NOT EXISTS que antes estaban dispersos
+  // por cada método de consulta, eliminando el overhead en cada request.
+  def initDB(): Unit = {
+    val conn = getConnection()
+    try {
+      val stmt = conn.createStatement()
+
+      // Temporadas y partidos (núcleo del sistema)
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS seasons (
+        id               SERIAL PRIMARY KEY,
+        nombre_club      TEXT,
+        categoria        TEXT,
+        foto_jugador_url TEXT,
+        club_escudo_url  TEXT,
+        media            DOUBLE PRECISION DEFAULT 59,
+        stat_div         DOUBLE PRECISION DEFAULT 80,
+        stat_han         DOUBLE PRECISION DEFAULT 60,
+        stat_kic         DOUBLE PRECISION DEFAULT 55,
+        stat_ref         DOUBLE PRECISION DEFAULT 60,
+        stat_spd         DOUBLE PRECISION DEFAULT 62,
+        stat_pos         DOUBLE PRECISION DEFAULT 58,
+        fecha_inicio     DATE,
+        fecha_nacimiento DATE DEFAULT '2020-06-19',
+        rffm_url         TEXT,
+        rffm_team_name   TEXT,
+        judo_belt        TEXT DEFAULT 'Blanco'
+      )""")
+
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS matches (
+        id               SERIAL PRIMARY KEY,
+        season_id        INT,
+        fecha            DATE,
+        rival            TEXT,
+        tipo_partido     TEXT DEFAULT 'LIGA',
+        status           TEXT DEFAULT 'SCHEDULED',
+        goles_favor      INT DEFAULT 0,
+        goles_contra     INT DEFAULT 0,
+        minutos          INT DEFAULT 0,
+        nota             DOUBLE PRECISION DEFAULT 0,
+        paradas          INT DEFAULT 0,
+        paradas_1v1      INT DEFAULT 0,
+        paradas_aereas   INT DEFAULT 0,
+        acciones_pie     INT DEFAULT 0,
+        clima            TEXT,
+        estadio          TEXT,
+        temperatura      INT,
+        notas_partido    TEXT,
+        video_url        TEXT,
+        reaccion_goles   TEXT,
+        analisis_voz     TEXT,
+        zona_goles       TEXT,
+        zona_paradas     TEXT,
+        zona_tiros       TEXT,
+        mapa_campo       TEXT,
+        pc_t             INT DEFAULT 0,
+        pc_ok            INT DEFAULT 0,
+        pl_t             INT DEFAULT 0,
+        pl_ok            INT DEFAULT 0,
+        media_historica  DOUBLE PRECISION DEFAULT 0,
+        torneo_nombre    TEXT,
+        fase             TEXT
+      )""")
+
+      // Biometría y salud
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS wellness (
+        id            SERIAL PRIMARY KEY,
+        fecha         DATE DEFAULT CURRENT_DATE,
+        sueno         INT,
+        horas_sueno   DOUBLE PRECISION,
+        energia       INT,
+        dolor         INT,
+        zona_dolor    TEXT,
+        altura        DOUBLE PRECISION,
+        peso          DOUBLE PRECISION,
+        animo         INT,
+        notas_conducta TEXT,
+        estado_fisico TEXT DEFAULT 'DISPONIBLE'
+      )""")
+
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS growth_history (
+        id     SERIAL PRIMARY KEY,
+        fecha  DATE DEFAULT CURRENT_DATE,
+        altura DOUBLE PRECISION,
+        peso   DOUBLE PRECISION
+      )""")
+
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS medical_records (
+        id               SERIAL PRIMARY KEY,
+        fecha            DATE,
+        tipo             TEXT,
+        diagnostico      TEXT,
+        recomendaciones  TEXT,
+        es_previo        BOOLEAN DEFAULT FALSE
+      )""")
+
+      // Entrenamiento y progresión técnica
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS trainings (
+        id             SERIAL PRIMARY KEY,
+        fecha          DATE DEFAULT CURRENT_DATE,
+        tipo           TEXT,
+        foco           TEXT,
+        rpe            INT,
+        calidad        INT,
+        atencion       INT,
+        rutina_detalle TEXT
+      )""")
+
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS drills (
+        id                SERIAL PRIMARY KEY,
+        nombre            TEXT,
+        descripcion       TEXT,
+        sesiones_objetivo INT DEFAULT 10,
+        sesiones_actuales INT DEFAULT 0,
+        activo            BOOLEAN DEFAULT TRUE
+      )""")
+
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS technical_reviews (
+        id             SERIAL PRIMARY KEY,
+        fecha          DATE DEFAULT CURRENT_DATE,
+        blocaje        INT,
+        pies           INT,
+        aereo          INT,
+        valentia       INT,
+        concentracion  INT,
+        coordinacion   INT,
+        notas          TEXT
+      )""")
+
+      // Material deportivo
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS gear (
+        id                   SERIAL PRIMARY KEY,
+        nombre               TEXT,
+        tipo                 TEXT,
+        vida_util_estimada   INT DEFAULT 30,
+        usos_actuales        INT DEFAULT 0,
+        activo               BOOLEAN DEFAULT TRUE,
+        imagen_url           TEXT
+      )""")
+
+      // Scouting y rivales
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS rivals (
+        id              SERIAL PRIMARY KEY,
+        nombre          TEXT UNIQUE,
+        estilo_juego    TEXT,
+        jugadores_clave TEXT,
+        notas_scouting  TEXT
+      )""")
+
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS penalties (
+        id          SERIAL PRIMARY KEY,
+        fecha       DATE DEFAULT CURRENT_DATE,
+        rival       TEXT,
+        zona_tiro   TEXT,
+        zona_salto  TEXT,
+        es_gol      BOOLEAN DEFAULT FALSE
+      )""")
+
+      // Video y análisis
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS video_tags (
+        id          SERIAL PRIMARY KEY,
+        match_id    INT,
+        minuto      INT,
+        segundo     INT,
+        tipo        TEXT,
+        descripcion TEXT
+      )""")
+
+      // Objetivos y logros
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS objectives (
+        id          SERIAL PRIMARY KEY,
+        tipo        TEXT,
+        objetivo    INT,
+        descripcion TEXT
+      )""")
+
+      // Académico
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS academic_performance (
+        id              SERIAL PRIMARY KEY,
+        fecha           DATE DEFAULT CURRENT_DATE,
+        asignatura      TEXT,
+        nota            DOUBLE PRECISION,
+        tipo_evaluacion TEXT,
+        comentarios     TEXT
+      )""")
+
+      // Leyendas (comparativa histórica)
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS legends_milestones (
+        id     SERIAL PRIMARY KEY,
+        nombre TEXT,
+        edad   INT,
+        hito   TEXT
+      )""")
+
+      // Caché de respuestas IA (evita llamadas duplicadas a Gemini)
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS ai_cache (
+        prompt_hash TEXT PRIMARY KEY,
+        respuesta   TEXT,
+        creado_en   TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // Columnas opcionales añadidas en versiones posteriores (ALTER IF NOT EXISTS es idempotente)
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS judo_belt TEXT DEFAULT 'Blanco'")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS rffm_url TEXT")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS rffm_team_name TEXT")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS fecha_nacimiento DATE DEFAULT '2020-06-19'")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS mapa_campo TEXT")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS analisis_voz TEXT")
+
+      println("✅ initDB: todas las tablas verificadas.")
+    } catch {
+      case e: Exception => println(s"⚠️ initDB error: ${e.getMessage}")
+    } finally {
+      conn.close()
+    }
   }
 
   def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
+
+  /** Escapa caracteres HTML peligrosos en strings que provienen de la BD
+   *  y van a ser embebidos en HTML (raw()). Previene XSS.
+   *  Úsalo siempre que hagas: s"...$variableDeBD..." dentro de un bloque HTML.
+   */
+  def escHtml(s: String): String = {
+    if (s == null) ""
+    else s.replace("&", "&amp;")
+      .replace("<", "&lt;")
+      .replace(">", "&gt;")
+      .replace(""", "&quot;")
+          .replace("'", "&#x27;")
+  }
   def calcularEdadExacta(fechaStr: String): Int = { try { Period.between(LocalDate.parse(fechaStr), LocalDate.now()).getYears } catch { case _: Exception => 5 } }
 
   // --- NUEVO: SISTEMA DE AUDITORÍA TÉCNICA ---
   def saveTechnicalReview(blocaje: Int, pies: Int, aereo: Int, valentia: Int, concentracion: Int, coordinacion: Int, notas: String): Unit = {
     val conn = getConnection(); try {
-      conn.createStatement().executeUpdate("CREATE TABLE IF NOT EXISTS technical_reviews (id SERIAL PRIMARY KEY, fecha DATE, blocaje INT, pies INT, aereo INT, valentia INT, concentracion INT, coordinacion INT, notas TEXT)")
       val ps = conn.prepareStatement("INSERT INTO technical_reviews (fecha, blocaje, pies, aereo, valentia, concentracion, coordinacion, notas) VALUES (?,?,?,?,?,?,?,?)")
       ps.setDate(1, Date.valueOf(LocalDate.now()))
       ps.setInt(2, blocaje); ps.setInt(3, pies); ps.setInt(4, aereo); ps.setInt(5, valentia); ps.setInt(6, concentracion); ps.setInt(7, coordinacion)
@@ -59,7 +303,6 @@ object DatabaseManager {
 
   def getTechnicalReviews(): List[TechReview] = {
     var l = List[TechReview](); val conn = getConnection(); try {
-      conn.createStatement().executeUpdate("CREATE TABLE IF NOT EXISTS technical_reviews (id SERIAL PRIMARY KEY, fecha DATE, blocaje INT, pies INT, aereo INT, valentia INT, concentracion INT, coordinacion INT, notas TEXT)")
       val rs = conn.createStatement().executeQuery("SELECT * FROM technical_reviews ORDER BY fecha ASC")
       while(rs.next()) {
         l = l :+ TechReview(rs.getInt("id"), rs.getDate("fecha").toString, rs.getInt("blocaje"), rs.getInt("pies"), rs.getInt("aereo"), rs.getInt("valentia"), rs.getInt("concentracion"), rs.getInt("coordinacion"), rs.getString("notas"))
@@ -75,19 +318,19 @@ object DatabaseManager {
     val d2 = reviews.map(_.valentia).mkString(",")
     val d3 = reviews.map(_.concentracion).mkString(",")
     s"""{
-      "labels": [$labels],
-      "datasets": [
+        "labels": [$labels],
+        "datasets": [
         { "label": "Blocaje/Manos", "data": [$d1], "borderColor": "#0dcaf0", "tension": 0.3, "fill": false },
         { "label": "Valentía", "data": [$d2], "borderColor": "#dc3545", "tension": 0.3, "fill": false },
         { "label": "Concentración", "data": [$d3], "borderColor": "#ffc107", "tension": 0.3, "fill": false }
-      ]
-    }"""
+        ]
+      }"""
   }
 
   // --- LEYENDAS Y COMPARATIVA (Mantenido) ---
   def initLegendsTable(): String = {
     val conn = getConnection(); try {
-      val stmt = conn.createStatement(); stmt.executeUpdate("CREATE TABLE IF NOT EXISTS legends_milestones (id SERIAL PRIMARY KEY, nombre TEXT, edad INT, hito TEXT)")
+      val stmt = conn.createStatement()
       stmt.executeUpdate("DELETE FROM legends_milestones")
       val ps = conn.prepareStatement("INSERT INTO legends_milestones (nombre, edad, hito) VALUES (?,?,?)")
       val data = Seq(("Marc-André ter Stegen", 5, "Jugaba de DELANTERO. No se puso de portero hasta los 10 años."), ("Thibaut Courtois", 5, "Su deporte principal era el VOLEIBOL."), ("Iker Casillas", 6, "Jugaba en el patio del colegio El Recuerdo sobre cemento."), ("Gianluigi Buffon", 6, "Jugaba de centrocampista. Le gustaba correr y marcar goles."), ("Manuel Neuer", 5, "Llevaba un osito de peluche a la portería."))
@@ -104,7 +347,15 @@ object DatabaseManager {
       val rsMyStats = conn.createStatement().executeQuery("SELECT AVG(goles_contra) as mi_media FROM matches WHERE status='PLAYED'")
       var miMedia = 0.0; if(rsMyStats.next()) miMedia = rsMyStats.getDouble("mi_media")
       val rsLegend = conn.createStatement().executeQuery(s"SELECT * FROM legends_milestones WHERE edad <= $edad ORDER BY edad DESC LIMIT 1")
-      val legendHtml = if (rsLegend.next()) s"<div class='mb-3'><h6 class='text-warning text-uppercase mb-1'>A TU EDAD ($edad AÑOS)...</h6><h4 class='text-white fw-bold mb-1'>${rsLegend.getString("nombre")}</h4><p class='text-light small fst-italic'>\"${rsLegend.getString("hito")}\"</p></div>" else ""
+      val legendHtml = if (rsLegend.next()) {
+        val safeNombre = escHtml(fixEncoding(rsLegend.getString("nombre")))
+        val safeHito   = escHtml(fixEncoding(rsLegend.getString("hito")))
+        s"""<div class='mb-3'>
+    <h6 class='text-warning text-uppercase mb-1'>A TU EDAD ($edad AÑOS)...</h6>
+      <h4 class='text-white fw-bold mb-1'>$safeNombre</h4>
+      <p class='text-light small fst-italic'>"$safeHito"</p>
+    </div>"""
+      } else ""
       val diff = mediaLiga - miMedia; val color = if(diff >= 0) "text-success" else "text-danger"
       f"""<div class="card bg-secondary bg-opacity-10 border-warning shadow mb-4"><div class="card-header bg-dark text-warning fw-bold text-center small">CONTEXTO & LEYENDAS</div><div class="card-body">$legendHtml<hr class="border-secondary"><h6 class="text-info text-uppercase text-center mb-2 small fw-bold">COMPARATIVA RFFM</h6><div class="row text-center align-items-center"><div class="col-6 border-end border-secondary"><div class="small text-muted fw-bold">TU MEDIA</div><div class="display-6 fw-bold $color">${f"$miMedia%1.1f"}</div></div><div class="col-6"><div class="small text-muted fw-bold">MEDIA LIGA</div><div class="display-6 fw-bold text-white">${f"$mediaLiga%1.1f"}</div></div></div></div></div>"""
     } catch { case e: Exception => "" } finally { conn.close() }
@@ -116,7 +367,7 @@ object DatabaseManager {
     import java.security.MessageDigest
 
     private def getHash(s: String): String =
-      MessageDigest.getInstance("MD5").digest(s.getBytes).map("%02x".format(_)).mkString
+      MessageDigest.getInstance("SHA-256").digest(s.getBytes("UTF-8")).map("%02x".format(_)).mkString
 
     // Función principal: intenta caché, si no, llama a Gemini
     def ask(prompt: String, media: Option[(String, String)] = None, bypassCache: Boolean = false): String = {
@@ -220,16 +471,16 @@ object DatabaseManager {
     // Prompt enriquecido con Fatiga Mental y Dojo Synergy
     val prompt = s"""
     Eres Entrenador Elite. Crea una sesión de 45min (Padre/Hijo).
-    ROL: PORTERO ($edad años).
-    OBJETIVO: $focus.
+      ROL: PORTERO ($edad años).
+      OBJETIVO: $focus.
     CONTEXTO MULTI-DISCIPLINA: $ctx.
 
-    ESTRUCTURA:
-    1. Calentamiento (Ludico + Caídas tipo Judo).
+      ESTRUCTURA:
+      1. Calentamiento (Ludico + Caídas tipo Judo).
     2. Bloque Principal (Ajustar dificultad según ESTADO COGNITIVO).
     3. Reto Final.
-    SOLO TEXTO PLANO.
-  """
+      SOLO TEXTO PLANO.
+    """
 
     AIProvider.ask(prompt).replace("```html","").replace("```","").trim
   }
@@ -374,17 +625,17 @@ object DatabaseManager {
       if(rs.next()){
         // Consulta SQL actualizada con 'mapa_campo' al final
         val s = conn.prepareStatement("""
-        INSERT INTO matches (
-          season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica,
-          paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
-          acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
-          reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
-          torneo_nombre, fase, mapa_campo
-        ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          'PLAYED', ?, ?, ?, ?, ?, '', '', ?
-        )
-      """)
+    INSERT INTO matches (
+      season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica,
+      paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
+      acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
+      reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
+      torneo_nombre, fase, mapa_campo
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      'PLAYED', ?, ?, ?, ?, ?, '', '', ?
+    )
+    """)
 
         s.setInt(1, rs.getInt("id"))
         s.setString(2, fixEncoding(riv))
@@ -434,11 +685,11 @@ object DatabaseManager {
       updateStats(n)
 
       val ps = conn.prepareStatement("""
-      UPDATE matches SET
-        status='PLAYED', goles_favor=?, goles_contra=?, minutos=?, nota=?, paradas=?,
-        notas_partido=?, video_url=?, reaccion_goles=?, clima=?, estadio=?,
-        zona_goles=?, zona_tiros=?, zona_paradas=?, paradas_1v1=?, paradas_aereas=?,
-        acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=?, mapa_campo=?
+    UPDATE matches SET
+    status='PLAYED', goles_favor=?, goles_contra=?, minutos=?, nota=?, paradas=?,
+    notas_partido=?, video_url=?, reaccion_goles=?, clima=?, estadio=?,
+    zona_goles=?, zona_tiros=?, zona_paradas=?, paradas_1v1=?, paradas_aereas=?,
+    acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=?, mapa_campo=?
       WHERE id=?
     """)
 
@@ -618,19 +869,19 @@ object DatabaseManager {
       // Buscamos si hay correlación entre dolor y superficie/tipo en los últimos 10 registros
       val rsPain = conn.createStatement().executeQuery(
         """
-      SELECT w.dolor, t.tipo, t.foco
-      FROM wellness w
-      JOIN trainings t ON w.fecha = t.fecha
-      WHERE w.dolor > 1
-      ORDER BY w.id DESC LIMIT 5
-      """
+    SELECT w.dolor, t.tipo, t.foco
+    FROM wellness w
+    JOIN trainings t ON w.fecha = t.fecha
+    WHERE w.dolor > 1
+    ORDER BY w.id DESC LIMIT 5
+    """
       )
 
       var painCount = 0
       var lastContext = ""
       while(rsPain.next()) {
         painCount += 1
-        lastContext = rsPain.getString("tipo") + " (" + rsPain.getString("foco") + ")"
+        lastContext = escHtml(fixEncoding(rsPain.getString("tipo"))) + " (" + escHtml(fixEncoding(rsPain.getString("foco"))) + ")"
       }
 
       if (painCount >= 2) {
@@ -650,8 +901,8 @@ object DatabaseManager {
     var loads = List[Double]()
     try {
       val ps = conn.prepareStatement("""
-      (SELECT (minutos * 4) as load FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - ?)
-      UNION ALL
+    (SELECT (minutos * 4) as load FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - ?)
+    UNION ALL
       (SELECT (60 * rpe) as load FROM trainings WHERE fecha >= CURRENT_DATE - ?)
     """)
       ps.setInt(1, days); ps.setInt(2, days)
@@ -665,7 +916,6 @@ object DatabaseManager {
   def updateJudoBelt(nuevoCinturon: String): Unit = {
     val conn = getConnection(); try {
       // Nos aseguramos de que la columna existe en la tabla seasons
-      conn.createStatement().executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS judo_belt TEXT DEFAULT 'Blanco'")
       val ps = conn.prepareStatement("UPDATE seasons SET judo_belt = ? WHERE id = (SELECT MAX(id) FROM seasons)")
       ps.setString(1, nuevoCinturon); ps.executeUpdate()
     } finally { conn.close() }
@@ -676,10 +926,10 @@ object DatabaseManager {
     val stats = scala.collection.mutable.Map[String, (Double, Double)]()
     try {
       val query = """
-      SELECT clima, AVG(nota) as media_nota, AVG(goles_contra) as media_gc
-      FROM matches
+    SELECT clima, AVG(nota) as media_nota, AVG(goles_contra) as media_gc
+    FROM matches
       WHERE status='PLAYED'
-      GROUP BY clima
+    GROUP BY clima
     """
       val rs = conn.createStatement().executeQuery(query)
       while(rs.next()) {
@@ -747,9 +997,9 @@ object DatabaseManager {
     val conn = getConnection()
     try {
       val prompt = """
-      Analiza este informe médico de un niño deportista.
-      Extrae: 1) Diagnóstico claro. 2) Impacto en el deporte (ej: limitar saltos, reposo).
-      3) Si es una analítica, destaca valores fuera de rango.
+    Analiza este informe médico de un niño deportista.
+    Extrae: 1) Diagnóstico claro. 2) Impacto en el deporte (ej: limitar saltos, reposo).
+    3) Si es una analítica, destaca valores fuera de rango.
       Responde en formato: DIAGNÓSTICO: ... | RECOMENDACIÓN: ...
     """
 
@@ -780,10 +1030,10 @@ object DatabaseManager {
     try {
       // Buscamos el último informe que no sea un simple 'Baseline' previo
       val query = """
-      SELECT diagnostico_ia, recomendaciones_ia
-      FROM medical_vault
+    SELECT diagnostico_ia, recomendaciones_ia
+    FROM medical_vault
       WHERE es_previo_futbol = FALSE
-      ORDER BY fecha_informe DESC LIMIT 1
+    ORDER BY fecha_informe DESC LIMIT 1
     """
       val rs = conn.createStatement().executeQuery(query)
       if (rs.next()) {
@@ -820,10 +1070,10 @@ object DatabaseManager {
     try {
       // Consultamos los informes ordenados por fecha, los más recientes primero
       val query = """
-      SELECT id, fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol
-      FROM medical_vault
+    SELECT id, fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol
+    FROM medical_vault
       ORDER BY fecha_informe DESC
-    """
+      """
       val rs = conn.createStatement().executeQuery(query)
       while (rs.next()) {
         reports += MedicalReport(
@@ -851,12 +1101,12 @@ object DatabaseManager {
     val prompt = s"""
     Actúa como un Coach de Élite para un portero de ${calcularEdadExacta(card.fechaNacimiento)} años.
     CONTEXTO TÉCNICO: Media ${card.media}, Reflejos ${card.ref}.
-    ESTADO FÍSICO: $wellness
+      ESTADO FÍSICO: $wellness
     ESTADO COGNITIVO: $cog
     ÚLTIMOS PARTIDOS: ${matches.map(m => m.rival + " nota:" + m.nota).mkString(", ")}
 
     Dame 3 consejos breves y motivadores. Si detectas fatiga o baja atención académica, prioriza el descanso psicológico.
-  """
+    """
 
     // Usamos el AIProvider centralizado con caché (se refresca una vez al día o tras cambios)
     AIProvider.ask(prompt)
@@ -864,10 +1114,10 @@ object DatabaseManager {
   def analyzeAudioLog(matchId: Int, audioBase64: String): String = {
     // Prompt personalizado para Héctor (5 años) y su gestión emocional
     val prompt = """
-      Eres un Psicólogo Deportivo experto en formación base.
-      Analiza este audio post-partido de Héctor, un portero de 5 años.
-      1) Transcribe lo que dice (ignora ruidos de fondo).
-      2) Evalúa su estado emocional: ¿frustración, alegría, timidez, cansancio?
+    Eres un Psicólogo Deportivo experto en formación base.
+    Analiza este audio post-partido de Héctor, un portero de 5 años.
+    1) Transcribe lo que dice (ignora ruidos de fondo).
+    2) Evalúa su estado emocional: ¿frustración, alegría, timidez, cansancio?
       3) Da un consejo breve y práctico al padre para reforzar la autoestima de Héctor hoy.
       Responde en texto plano, sin formato Markdown complejo.
     """

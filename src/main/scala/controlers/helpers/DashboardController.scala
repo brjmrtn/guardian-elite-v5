@@ -20,7 +20,7 @@ object DashboardController extends cask.Routes {
     val cognitiveWidget = div(cls:="card bg-dark border-info shadow mb-3",
       div(cls:="card-header border-info text-info fw-bold py-1 text-center small", "🧠 ANALISTA COGNITIVO"),
       div(cls:="card-body p-2",
-        p(cls:="text-light small mb-0 text-center fw-bold", raw(cognitiveInsight))
+        p(cls:="text-light small mb-0 text-center fw-bold", cognitiveInsight)
       )
     )
     val tac = DatabaseManager.getTacticalStats()
@@ -143,7 +143,7 @@ object DashboardController extends cask.Routes {
       div(cls := "col-md-5",
         nextMatchWidget,
         cognitiveWidget,
-        div(cls := "alert alert-dark border-info shadow p-3 mb-3", div(cls:="d-flex align-items-center mb-2", span(style:="font-size: 24px; margin-right: 10px;", "🧠"), strong(cls:="text-info", "IA NEURO-SCOUT")), div(cls:="text-light small fst-italic lh-sm fw-bold", raw(aiMessage))),
+        div(cls := "alert alert-dark border-info shadow p-3 mb-3", div(cls:="d-flex align-items-center mb-2", span(style:="font-size: 24px; margin-right: 10px;", "🧠"), strong(cls:="text-info", "IA NEURO-SCOUT")), div(cls:="text-light small fst-italic lh-sm fw-bold", aiMessage)),
 
         weatherPerformanceWidget,
 
