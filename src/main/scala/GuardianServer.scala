@@ -20,24 +20,24 @@ import cask._
 // *
 // * Utilidades compartidas → SharedLayout
 
- object GuardianServer extends cask.Main {
+object GuardianServer extends cask.Main {
 
- override def host: String = "0.0.0.0"
- override def port: Int    = sys.env.getOrElse("PORT", "8081").toInt
+  // Inicializar tablas de BD ANTES de que el servidor empiece a aceptar peticiones
+  DatabaseManager.initDB()
 
- override def allRoutes: Seq[cask.Routes] = Seq(
- AuthController,
- DashboardController,
- MatchController,
- BioController,
- HistoryController,
- CareerController,
- AdminController
- )
+  override def host: String = "0.0.0.0"
+  override def port: Int    = sys.env.getOrElse("PORT", "8081").toInt
 
- // Inicializar tablas de BD una sola vez al arrancar
- DatabaseManager.initDB()
- }
+  override def allRoutes: Seq[cask.Routes] = Seq(
+    AuthController,
+    DashboardController,
+    MatchController,
+    BioController,
+    HistoryController,
+    CareerController,
+    AdminController
+  )
+}
 
 
 
