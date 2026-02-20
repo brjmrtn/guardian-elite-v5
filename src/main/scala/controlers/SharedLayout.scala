@@ -360,10 +360,20 @@ object SharedLayout {
   }
 
   // --- Helpers de respuesta HTTP ---
-  def renderHtml(content: String): cask.Response[String] =
-    cask.Response(content, headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  def renderHtml(content: String): cask.Response[Array[Byte]] =
+    cask.Response(
+      data       = content.getBytes("UTF-8"),
+      statusCode = 200,
+      headers    = Seq("Content-Type" -> "text/html; charset=utf-8"),
+      cookies    = Seq.empty
+    )
 
-  def renderRedirect(url: String): cask.Response[String] =
-    cask.Response("", statusCode = 302, headers = Seq("Location" -> url))
+  def renderRedirect(url: String): cask.Response[Array[Byte]] =
+    cask.Response(
+      data       = Array.emptyByteArray,
+      statusCode = 302,
+      headers    = Seq("Location" -> url),
+      cookies    = Seq.empty
+    )
 
 }
