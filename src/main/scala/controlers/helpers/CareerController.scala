@@ -18,7 +18,7 @@ object CareerController extends cask.Routes {
         val imgTag = if (i.img.length > 50)
           img(src := i.img, style := "width:50px; height:50px; object-fit:cover; border-radius:50%; margin-right:10px;")
         else
-          div(cls := "me-3", style := "font-size: 30px;", if (i.tipo == "Guantes") "[guantes]" else "[botas]")
+          div(cls := "me-3", style := "font-size: 30px;", if (i.tipo == "Guantes") "🧤" else "⚽")
 
         div(cls := "col-12 mb-3",
           div(cls := "card bg-dark border-secondary shadow",
@@ -95,7 +95,7 @@ object CareerController extends cask.Routes {
 
   def medicalSection(reports: List[MedicalReport]) = {
     div(cls := "card bg-dark text-white border-danger shadow mb-3",
-      div(cls := "card-header bg-danger text-white fw-bold text-center small", "[hospital] MEDICAL VAULT & PASAPORTE BIOLOGICO"),
+      div(cls := "card-header bg-danger text-white fw-bold text-center small", "🏥 MEDICAL VAULT & PASAPORTE BIOLOGICO"),
       div(cls := "card-body p-3",
         // Formulario de Subida
         form(action := "/bio/medical/upload", method := "post", enctype := "multipart/form-data",
@@ -158,7 +158,7 @@ object CareerController extends cask.Routes {
         div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center",
           h2(cls := "text-warning m-0 mb-2", "Trayectoria"),
           div(cls := "mb-3 w-100",
-            a(href := "/career/legacy", cls := "btn btn-warning w-100 fw-bold", "[star] MODO LEGADO (RPG)")
+            a(href := "/career/legacy", cls := "btn btn-warning w-100 fw-bold", "⭐ MODO LEGADO (RPG)")
           ),
           raw(DatabaseManager.getLegendComparison()),
           div(cls := "card bg-secondary p-2 w-100 mt-3",
@@ -299,12 +299,12 @@ object CareerController extends cask.Routes {
     val mainContent = div(
       div(cls:="row justify-content-center",
         div(cls:="col-md-8 col-12",
-          h2(cls:="text-center text-info mb-4", "[oracle] EL ORACULO"),
+          h2(cls:="text-center text-info mb-4", "🔮 EL ORACULO"),
 
           // Tarjeta Inteligencia
           div(cls:="card bg-dark border-info shadow mb-4",
             div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
-              span("[IA] INTELIGENCIA DEPORTIVA"),
+              span("🧠 INTELIGENCIA DEPORTIVA"),
               span(cls:="badge bg-dark text-info", s"Edad: $edadActual anos")
             ),
             div(cls:="card-body", raw(bioInsights))
@@ -320,7 +320,7 @@ object CareerController extends cask.Routes {
 
           // Tabla OMS
           div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-muted small fw-bold text-uppercase", s"[stats] Referencia OMS para $edadActual anos"),
+            div(cls:="card-header text-muted small fw-bold text-uppercase", s"📊 Referencia OMS para $edadActual anos"),
             div(cls:="card-body p-0",
               table(cls:="table table-dark table-sm mb-0 small text-center",
                 thead(tr(th("Percentil"), th("Altura (cm)"), th("Peso (kg)"))),
@@ -342,7 +342,7 @@ object CareerController extends cask.Routes {
                 div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papa (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
                 div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mama (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
               ),
-              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "[sync] Recalcular"))
+              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular"))
             )
           )
         )
@@ -407,7 +407,7 @@ object CareerController extends cask.Routes {
 
     val content = basePage("bio", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "[stats] MONEYBALL TACTICS"),
+        h2(cls:="text-center text-warning mb-4", "📊 MONEYBALL TACTICS"),
 
         // Seccion Goles Encajados
         div(cls:="card bg-dark text-white border-danger shadow mb-4",
@@ -440,7 +440,7 @@ object CareerController extends cask.Routes {
 
     val content = basePage("career", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "[star] MODO LEGADO"),
+        h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
 
         div(cls:="card bg-dark text-white border-warning shadow mb-4",
           div(cls:="card-body text-center",
@@ -460,8 +460,8 @@ object CareerController extends cask.Routes {
         ),
 
         div(cls:="row g-2",
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[shield]"), h6("Muro"), small("Bonus por Porteria a Cero"))),
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[guantes]"), h6("Manos de Oro"), small("Bonus por Paradas")))
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🛡"), h6("Muro"), small("Bonus por Porteria a Cero"))),
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🧤"), h6("Manos de Oro"), small("Bonus por Paradas")))
         ),
 
         div(cls:="alert alert-dark border-info mt-4 text-center",

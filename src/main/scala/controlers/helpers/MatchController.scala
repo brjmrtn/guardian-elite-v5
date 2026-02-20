@@ -41,9 +41,9 @@ object MatchController extends cask.Routes {
                 input(tpe:="hidden", name:="scheduleId", value:=scheduleId.toString),
                 div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "TIPO DE PARTIDO"),
                   if(isScheduled) {
-                    div(input(tpe:="hidden", name:="tipo", value:="LIGA"), input(tpe:="text", cls:="form-control bg-dark text-white border-primary fw-bold", value:="[trofeo] LIGA (OFICIAL RFFM)", readonly:=true))
+                    div(input(tpe:="hidden", name:="tipo", value:="LIGA"), input(tpe:="text", cls:="form-control bg-dark text-white border-primary fw-bold", value:="🏆 LIGA (OFICIAL RFFM)", readonly:=true))
                   } else {
-                    div(cls:="d-flex", select(name:="tipo", cls:="form-select bg-dark text-white fw-bold flex-grow-1", option(value:="AMISTOSO", "[vs] AMISTOSO"), option(value:="TORNEO", "[medalla] TORNEO"), option(value:="LIGA", "[trofeo] LIGA (Manual)")), a(href:="/tournament/new", cls:="btn btn-sm btn-outline-warning ms-2 d-flex align-items-center fw-bold", "+ CREAR TORNEO"))
+                    div(cls:="d-flex", select(name:="tipo", cls:="form-select bg-dark text-white fw-bold flex-grow-1", option(value:="AMISTOSO", "🤝 AMISTOSO"), option(value:="TORNEO", "🏅 TORNEO"), option(value:="LIGA", "🏆 LIGA (Manual)")), a(href:="/tournament/new", cls:="btn btn-sm btn-outline-warning ms-2 d-flex align-items-center fw-bold", "+ CREAR TORNEO"))
                   }
                 ),
                 div(cls := "mb-3",
@@ -72,8 +72,8 @@ object MatchController extends cask.Routes {
 
                 // 3. DISTRIBUCION (EDERSON)
                 div(cls:="mb-4 p-2 border border-info rounded bg-info bg-opacity-10", label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCION"),
-                  div(cls:="row mb-2 align-items-center", div(cls:="col-4 text-end small fw-bold", "CORTO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pc', true)", "[OK]"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pc', false)", "X"), input(tpe:="text", id:="display_pc", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)))),
-                  div(cls:="row align-items-center", div(cls:="col-4 text-end small fw-bold", "LARGO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pl', true)", "[OK]"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pl', false)", "X"), input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true))))
+                  div(cls:="row mb-2 align-items-center", div(cls:="col-4 text-end small fw-bold", "CORTO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pc', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pc', false)", "X"), input(tpe:="text", id:="display_pc", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)))),
+                  div(cls:="row align-items-center", div(cls:="col-4 text-end small fw-bold", "LARGO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pl', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pl', false)", "X"), input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true))))
                 ),
                 input(tpe:="hidden", name:="passData", id:="passData", value:="0,0,0,0"), input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"), input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0"),
 
@@ -250,7 +250,7 @@ object MatchController extends cask.Routes {
       div(cls := "row justify-content-center",
         div(cls := "col-md-8",
           div(cls := "card bg-dark text-white border-warning shadow",
-            div(cls := "card-header bg-warning text-dark fw-bold text-center", "[trofeo] NUEVO TORNEO"),
+            div(cls := "card-header bg-warning text-dark fw-bold text-center", "🏆 NUEVO TORNEO"),
             div(cls := "card-body",
               form(action := "/tournament/create", method := "post",
                 div(cls := "mb-3",
@@ -396,13 +396,13 @@ object MatchController extends cask.Routes {
 
               // --- Footer: Diario de voz ---
               div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary mt-3",
-                h6(cls := "text-info small fw-bold mb-2", "[mic] DIARIO DE VOZ (POST-PARTIDO)"),
+                h6(cls := "text-info small fw-bold mb-2", "🎙 DIARIO DE VOZ (POST-PARTIDO)"),
                 div(cls := "mb-2 small text-muted", "Graba a Hector contando como se sintio o sube un audio."),
                 div(cls := "d-flex gap-2 mb-3",
                   button(id := "btnRecord", cls := "btn btn-sm btn-outline-danger",
-                    onclick := "toggleRecording()", "[rec] Grabar"),
+                    onclick := "toggleRecording()", "⏺ Grabar"),
                   button(id := "btnStop", cls := "btn btn-sm btn-danger",
-                    style := "display:none;", onclick := "stopRecording()", "[stop] Parar"),
+                    style := "display:none;", onclick := "stopRecording()", "⏹ Parar"),
                   input(tpe := "file", id := "fileUpload", accept := "audio/*",
                     cls := "form-control form-control-sm bg-dark text-white",
                     onchange := "handleFileUpload(this)")
@@ -413,7 +413,7 @@ object MatchController extends cask.Routes {
                   input(tpe := "hidden", name := "matchId",    value := matchId.toString),
                   input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
                   button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
-                    onclick := "submitAudio()", disabled := true, "[IA] Analizar Emociones con IA")
+                    onclick := "submitAudio()", disabled := true, "🧠 Analizar Emociones con IA")
                 ),
                 if (matchData.analisisVoz.nonEmpty)
                   div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
@@ -431,7 +431,7 @@ object MatchController extends cask.Routes {
             ),
 
             // Script grabacion de audio
-            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "[IA] Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "[IA] Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "[wait] Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
+            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
           )
         )
       )
