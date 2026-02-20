@@ -185,9 +185,7 @@ object CareerController extends cask.Routes {
     )
     renderHtml(basePage("career", content))
   }
-    // AQUÍ VA LA COMPARATIVA DE LEYENDAS
-    raw(DatabaseManager.getLegendComparison()),
-    div(cls:="card bg-secondary p-2 w-100 mt-3", form(action := "/career/new-season", method := "post", cls:="d-flex flex-column gap-2", div(label(cls:="form-label text-white small m-0 fw-bold", "Nueva Categoria:"), input(tpe := "text", name := "categoria", cls := "form-control form-control-sm fw-bold", placeholder := "Ej: Benjamin A", required := true)), button(tpe := "submit", cls := "btn btn-danger btn-sm fw-bold", onclick := "return confirm('Seguro?');", "Cerrar & Empezar")))), div(cls := "card shadow-sm border-0", div(cls := "card-body p-0 table-responsive", table(cls := "table table-hover tm-table mb-0", thead(tr(th("Cat"), th("Ficha"), th("PJ"), th("GC"), th("Media"))), tbody(listRows)))))); renderHtml(basePage("career", content)) }
+
   @cask.postForm("/career/new-season")
   def newSeasonAction(categoria: String) = {
     val msg = DatabaseManager.startNewSeason(categoria)

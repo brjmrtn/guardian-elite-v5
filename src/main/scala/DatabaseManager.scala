@@ -350,11 +350,11 @@ object DatabaseManager {
       val legendHtml = if (rsLegend.next()) {
         val safeNombre = escHtml(fixEncoding(rsLegend.getString("nombre")))
         val safeHito   = escHtml(fixEncoding(rsLegend.getString("hito")))
-        s"""<div class='mb-3'>
-    <h6 class='text-warning text-uppercase mb-1'>A TU EDAD ($edad AÑOS)...</h6>
-      <h4 class='text-white fw-bold mb-1'>$safeNombre</h4>
-      <p class='text-light small fst-italic'>"$safeHito"</p>
-    </div>"""
+        "<div class='mb-3'>" +
+        "<h6 class='text-warning text-uppercase mb-1'>A TU EDAD (" + edad + " A\u00d1OS)...</h6>" +
+        "<h4 class='text-white fw-bold mb-1'>" + safeNombre + "</h4>" +
+        "<p class='text-light small fst-italic'>&quot;" + safeHito + "&quot;</p>" +
+        "</div>"
       } else ""
       val diff = mediaLiga - miMedia; val color = if(diff >= 0) "text-success" else "text-danger"
       f"""<div class="card bg-secondary bg-opacity-10 border-warning shadow mb-4"><div class="card-header bg-dark text-warning fw-bold text-center small">CONTEXTO & LEYENDAS</div><div class="card-body">$legendHtml<hr class="border-secondary"><h6 class="text-info text-uppercase text-center mb-2 small fw-bold">COMPARATIVA RFFM</h6><div class="row text-center align-items-center"><div class="col-6 border-end border-secondary"><div class="small text-muted fw-bold">TU MEDIA</div><div class="display-6 fw-bold $color">${f"$miMedia%1.1f"}</div></div><div class="col-6"><div class="small text-muted fw-bold">MEDIA LIGA</div><div class="display-6 fw-bold text-white">${f"$mediaLiga%1.1f"}</div></div></div></div></div>"""
