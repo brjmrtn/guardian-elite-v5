@@ -1,9 +1,12 @@
 import cask._
 import scalatags.Text.all._
 import scalatags.Text.tags2
-import SharedLayout._
-
 object SharedLayout {
+
+  // --- Configuracion de seguridad (desde variables de entorno) ---
+  val authUser          = sys.env.getOrElse("GUARDIAN_USER", "admin")
+  val authPass          = sys.env.getOrElse("GUARDIAN_PASS", "hector2026")
+  val sessionCookieName = "guardian_session"
 
   def withAuth(request: cask.Request)(block: => cask.Response[Array[Byte]]): cask.Response[Array[Byte]] = {
     val isAuthenticated = request.cookies.get(sessionCookieName).exists(_.value == "active")
@@ -351,6 +354,16 @@ object SharedLayout {
       )
     ))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // --- Helpers de respuesta HTTP ---
+  def renderHtml(content: scalatags.Text.TypedTag[String]): cask.Response[Array[Byte]] = {
+    val html = doctype("html")(content).render
+    cask.Response(html.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  def renderRedirect(url: String): cask.Response[Array[Byte]] = {
+    cask.Response(Array.emptyByteArray, statusCode = 302, headers = Seq("Location" -> url))
   }
 
 }
