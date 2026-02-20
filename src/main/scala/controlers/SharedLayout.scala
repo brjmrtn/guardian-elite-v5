@@ -33,7 +33,7 @@ object SharedLayout {
     val extraBtn = if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-danger py-0 ms-1", style:="font-size:10px", "V") else span("")
     val waText = URLEncoder.encode(s"MATCH: ${m.rival} ${m.resultado}", "UTF-8").replace("+", "%20")
     val tipoBadge = if(m.tipo == "LIGA") span(cls:="badge bg-primary me-1", style:="font-size:9px", "LIGA") else if(m.tipo=="AMISTOSO") span(cls:="badge bg-secondary me-1", style:="font-size:9px", "AMIST") else span(cls:="badge bg-warning text-dark me-1", style:="font-size:9px", "TORNEO")
-    val estadioInfo = if(m.estadio.nonEmpty && m.estadio != "-") span(cls:="d-block text-muted fst-italic", style:="font-size:10px", s"[estadio] ${fixEncoding(m.estadio)}") else span("")
+    val estadioInfo = if(m.estadio.nonEmpty && m.estadio != "-") span(cls:="d-block text-muted fst-italic", style:="font-size:10px", s"🏟 ${fixEncoding(m.estadio)}") else span("")
 
     tr(
       td(cls:="fw-bold small", tipoBadge, fixEncoding(m.rival), extraBtn, br, span(cls:="text-muted xx-small", style:="font-size:11px", s"${m.fecha} ${m.clima}"), estadioInfo),
@@ -66,10 +66,10 @@ object SharedLayout {
             div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"),
             div(cls:="d-flex align-items-center gap-3",
               a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
-              a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "[config]")
+              a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
             )
           ),
-          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "[star]"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "[info]"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
+          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "ℹ️"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
       ).render
   }
 
@@ -142,12 +142,12 @@ object SharedLayout {
     val mainContent = div(
       div(cls:="row justify-content-center",
         div(cls:="col-md-8 col-12",
-          h2(cls:="text-center text-info mb-4", "[oracle] EL ORACULO"),
+          h2(cls:="text-center text-info mb-4", "🔮 EL ORACULO"),
 
           // Tarjeta Inteligencia
           div(cls:="card bg-dark border-info shadow mb-4",
             div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
-              span("[IA] INTELIGENCIA DEPORTIVA"),
+              span("🧠 INTELIGENCIA DEPORTIVA"),
               span(cls:="badge bg-dark text-info", s"Edad: $edadActual anos")
             ),
             div(cls:="card-body", raw(bioInsights))
@@ -163,7 +163,7 @@ object SharedLayout {
 
           // Tabla OMS
           div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-muted small fw-bold text-uppercase", s"[stats] Referencia OMS para $edadActual anos"),
+            div(cls:="card-header text-muted small fw-bold text-uppercase", s"📊 Referencia OMS para $edadActual anos"),
             div(cls:="card-body p-0",
               table(cls:="table table-dark table-sm mb-0 small text-center",
                 thead(tr(th("Percentil"), th("Altura (cm)"), th("Peso (kg)"))),
@@ -185,7 +185,7 @@ object SharedLayout {
                 div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papa (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
                 div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mama (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
               ),
-              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "[sync] Recalcular"))
+              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular"))
             )
           )
         )
@@ -250,7 +250,7 @@ object SharedLayout {
 
     val content = basePage("bio", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "[stats] MONEYBALL TACTICS"),
+        h2(cls:="text-center text-warning mb-4", "📊 MONEYBALL TACTICS"),
 
         // Seccion Goles Encajados
         div(cls:="card bg-dark text-white border-danger shadow mb-4",
@@ -301,7 +301,7 @@ object SharedLayout {
       val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
       val mimeType = if (fileName.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
 
-      val medicalPrompt = s"Analiza este informe ($tipo) de Hector. Extrae DIAGNOSTICO y RECOMENDACION DEPORTIVA. Formato: DIAGNOSTICO: [texto] | RECOMENDACION: [texto]"
+      val medicalPrompt = s"Analiza este informe ($tipo) de Hector. Extrae DIAGNOSTICO y RECOMENDACION DEPORTIVA. Formato: DIAGNOSTICO: 📝 | RECOMENDACION: 📝"
 
       val analisisIA = DatabaseManager.AIProvider.ask(medicalPrompt, Some((mimeType, base64Content)))
       val partes = analisisIA.split("\\|")
@@ -321,7 +321,7 @@ object SharedLayout {
 
     val content = basePage("career", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "[star] MODO LEGADO"),
+        h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
 
         div(cls:="card bg-dark text-white border-warning shadow mb-4",
           div(cls:="card-body text-center",
@@ -341,8 +341,8 @@ object SharedLayout {
         ),
 
         div(cls:="row g-2",
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[shield]"), h6("Muro"), small("Bonus por Porteria a Cero"))),
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("[guantes]"), h6("Manos de Oro"), small("Bonus por Paradas")))
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🛡"), h6("Muro"), small("Bonus por Porteria a Cero"))),
+          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🧤"), h6("Manos de Oro"), small("Bonus por Paradas")))
         ),
 
         div(cls:="alert alert-dark border-info mt-4 text-center",
