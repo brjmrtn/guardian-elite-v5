@@ -357,7 +357,7 @@ object SharedLayout {
   }
 
   // --- Helpers de respuesta HTTP ---
-  def renderHtml(content: scalatags.Text.TypedTag[String]): cask.Response[Array[Byte]] = {
+  def renderHtml(content: String): cask.Response[Array[Byte]] = {
     val html = doctype("html")(content).render
     cask.Response(html.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
