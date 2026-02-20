@@ -20,12 +20,26 @@ case class RivalInfo(nombre: String, estilo: String, claves: String, notas: Stri
 case class PenaltyStat(zona: String, total: Int, goles: Int)
 case class RPGStatus(nivel: Int, xp: Int, nextLevelXp: Int, titulo: String, cinturonJudo: String)
 case class TechReview(id: Int, fecha: String, blocaje: Int, pies: Int, aereo: Int, valentia: Int, concentracion: Int, coordinacion: Int, notas: String)
+// Academic notes
+case class AcademicNote(id: Int, fecha: String, asignatura: String, nota: Double, tipo: String)
+// Vault Médico
+case class MedicalReport(id: Int, fecha: String, tipo: String, diagnostico: String, recomendaciones: String, esPrevio: Boolean)
 
 object DatabaseManager {
-  val url = "jdbc:postgresql://ep-fancy-cherry-abkfneqp-pooler.eu-west-2.aws.neon.tech/neondb?user=neondb_owner&password=npg_5VxYysTm8vQa&sslmode=require&options=-c%20client_encoding=UTF8"
+  private val dbHost = sys.env.getOrElse("DB_HOST", "ep-fancy-cherry-abkfneqp-pooler.eu-west-2.aws.neon.tech")
+  private val dbName = sys.env.getOrElse("DB_NAME", "neondb")
+  private val dbUser = sys.env.getOrElse("DB_USER", "neondb_owner")
+  private val dbPass = sys.env.getOrElse("DB_PASS", "")
+
+  val url = s"jdbc:postgresql://$dbHost/$dbName?sslmode=require&options=-c%20client_encoding=UTF8"
 
   def getConnection(): Connection = {
-    val props = new Properties(); props.setProperty("user","neondb_owner"); props.setProperty("password","npg_5VxYysTm8vQa"); props.setProperty("ssl","true"); DriverManager.getConnection(url, props)
+    if (dbPass.isEmpty) throw new IllegalStateException("DB_PASS no configurada. Añádela como variable de entorno.")
+    val props = new Properties()
+    props.setProperty("user", dbUser)
+    props.setProperty("password", dbPass)
+    props.setProperty("ssl", "true")
+    DriverManager.getConnection(url, props)
   }
 
   def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("Ã")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
@@ -97,49 +111,127 @@ object DatabaseManager {
   }
 
   // --- IA CONFIG ---
-  val modelList = Seq("gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash-latest")
-  def callGeminiAI(prompt: String): String = { val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim; if (envKey.isEmpty) return "⚠️ Error Config: Falta GEMINI_API_KEY"; attemptNextModel(prompt, envKey, 0) }
-  def attemptNextModel(prompt: String, apiKey: String, index: Int): String = { if (index >= modelList.length) return "❌ Error IA"; try { val r = requests.post(s"https://generativelanguage.googleapis.com/v1beta/models/${modelList(index)}:generateContent?key=$apiKey", data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 15000); if (r.statusCode == 200) ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str else attemptNextModel(prompt, apiKey, index + 1) } catch { case _: Exception => attemptNextModel(prompt, apiKey, index + 1) } }
-  def analyzeAudioLog(matchId: Int, audioBase64: String): String = {
-    val prompt = "Eres un Psicólogo Deportivo experto en niños. Analiza este audio post-partido de un portero de 5 años. 1) Transcribe. 2) Estado emocional. 3) Consejo breve para el padre. Texto plano."
-    val cleanBase64 = if(audioBase64.contains(",")) audioBase64.split(",")(1) else audioBase64
-    val envKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
-    try {
-      val r = requests.post(s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$envKey", data = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> prompt), ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> "audio/webm", "data" -> cleanBase64)))))).toString(), headers = Map("Content-Type" -> "application/json"), check = false, readTimeout = 30000)
-      if (r.statusCode == 200) { val an = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str; val conn = getConnection(); try { val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?"); ps.setString(1, fixEncoding(an)); ps.setInt(2, matchId); ps.executeUpdate() } finally { conn.close() }; an } else s"Error IA (${r.statusCode})"
-    } catch { case e: Exception => s"Error: ${e.getMessage}" }
+  val modelList = Seq("gemini-2.5-flash", "gemini-flash-latest")
+  object AIProvider {
+    import java.security.MessageDigest
+
+    private def getHash(s: String): String =
+      MessageDigest.getInstance("MD5").digest(s.getBytes).map("%02x".format(_)).mkString
+
+    // Función principal: intenta caché, si no, llama a Gemini
+    def ask(prompt: String, media: Option[(String, String)] = None, bypassCache: Boolean = false): String = {
+      val conn = DatabaseManager.getConnection()
+      // Creamos un hash único combinando el prompt y los primeros bytes del archivo (si existe)
+      val combinedKey = prompt + media.map(_._2.take(100)).getOrElse("")
+      val hash = getHash(combinedKey)
+
+      try {
+        if (!bypassCache) {
+          val ps = conn.prepareStatement("SELECT respuesta FROM ai_cache WHERE prompt_hash = ?")
+          ps.setString(1, hash)
+          val rs = ps.executeQuery()
+          if (rs.next()) return rs.getString("respuesta")
+        }
+
+        // Llamada real a la API (Unificada)
+        val response = callGeminiUnified(prompt, media)
+
+        // Guardar en caché para la próxima vez
+        val save = conn.prepareStatement(
+          "INSERT INTO ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta"
+        )
+        save.setString(1, hash)
+        save.setString(2, response)
+        save.executeUpdate()
+
+        response
+      } finally { conn.close() }
+    }
+
+    private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
+      val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+
+      val keySeg = apiKey
+      // Lista de variantes de URL para asegurar compatibilidad en Europa
+      val urls = Seq(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$keySeg",
+        s"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=$keySeg"
+      )
+
+      if (apiKey.nonEmpty) {
+        println(s"DEBUG: Usando Key [${keySeg.take(4)}...${keySeg.takeRight(4)}]")
+      } else {
+        println("DEBUG: ⚠️ GEMINI_API_KEY está VACÍA")
+      }
+      val parts = ujson.Arr(ujson.Obj("text" -> prompt))
+      media.foreach { case (mime, data) =>
+        val cleanData = if(data.contains(",")) data.split(",")(1) else data
+        parts.value.append(ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> mime, "data" -> cleanData)))
+      }
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> parts)))
+
+      // Intenta cada URL hasta que una funcione
+      var lastError = ""
+      for (url <- urls) {
+        try {
+          val r = requests.post(url, data = ujson.write(payload), headers = Map("Content-Type" -> "application/json"), readTimeout = 30000)
+          if (r.statusCode == 200) return ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+          else lastError = s"Status ${r.statusCode}: ${r.text()}"
+        } catch { case e: Exception => lastError = e.getMessage }
+      }
+      s"Error tras agotar variantes: $lastError"
+    }
   }
+
   // --- EN: DatabaseManager.scala ---
 
   def generateTrainingSession(mode: String, focus: String): String = {
     var ctx = ""
     val conn = getConnection()
     try {
-      // 1. Contexto del último PARTIDO (Ya lo tenías)
-      val rsMatch = conn.createStatement().executeQuery("SELECT notas_partido, reaccion_goles FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 1")
-      if(rsMatch.next()) ctx += s"Último Partido: ${rsMatch.getString(1)}. Fallos/Reacción: ${rsMatch.getString(2)}. "
-
-      // 2. NUEVO: Contexto del último ENTRENO (Carga Crónica)
-      val rsTrain = conn.createStatement().executeQuery("SELECT tipo, rpe, foco, fecha FROM trainings ORDER BY id DESC LIMIT 1")
-      if (rsTrain.next()) {
-        val (tipo, rpe, foco) = (rsTrain.getString("tipo"), rsTrain.getInt("rpe"), rsTrain.getString("foco"))
-        ctx += s"AYER entrenó: Tipo $tipo, Foco $foco, Carga RPE $rpe/10. "
-
-        // Lógica de "Director Deportivo" inyectada en el prompt
-        if (rpe >= 8) ctx += "IMPORTANTE: Ayer fue carga muy alta. La sesión de HOY debe ser RECUPERACIÓN o LÚDICA, baja carga física. "
-        else if (tipo == "Academia") ctx += "IMPORTANTE: Viene de Academia (técnica analítica). HOY priorizar TOMA DE DECISIÓN o JUEGO REAL. "
+      // 1. Contexto Académico (Fase 2: Detector de Fatiga Mental)
+      val rsAcad = conn.createStatement().executeQuery(
+        "SELECT nota FROM academic_performance ORDER BY fecha DESC LIMIT 1"
+      )
+      if(rsAcad.next()) {
+        val ultimaNota = rsAcad.getDouble("nota")
+        // Lógica de fatiga cognitiva inyectada al prompt
+        if(ultimaNota < 6.0) ctx += "ESTADO COGNITIVO: Carga académica alta o estrés detectado. Priorizar sesión lúdica y de baja frustración. "
+        else ctx += "ESTADO COGNITIVO: Óptimo. Se puede exigir alta concentración táctica. "
       }
+
+      // 2. Dojo Synergy (Fase 2: Judo Integration)
+      val rsJudo = conn.createStatement().executeQuery("SELECT judo_belt FROM seasons ORDER BY id DESC LIMIT 1")
+      if(rsJudo.next()) {
+        val belt = rsJudo.getString("judo_belt")
+        ctx += s"CONOCIMIENTO DOJO: Cinturón $belt. Incorporar dinámicas de caídas y agilidad de judo a la portería. "
+      }
+
+      // 3. Alertas Técnicas y Clima (Lo que ya teníamos de Fase 1)
+      val alerts = getTechnicalAlerts()
+      if(alerts.nonEmpty) ctx += s"ALERTAS TÉCNICAS: ${alerts.mkString(", ")}. "
     } finally {
       conn.close()
     }
 
     val card = getLatestCardData()
     val edad = calcularEdadExacta(card.fechaNacimiento)
-    val role = if(mode.contains("Jugador")) s"JUGADOR ($edad años)" else s"PORTERO ($edad años)"
 
-    // Prompt enriquecido
-    callGeminiAI(s"Eres Entrenador Elite de Fútbol Base. Crea sesión 45min (Padre/Hijo). ROL: $role. OBJETIVO USUARIO: $focus. CONTEXTO REAL: $ctx. Estructura: 1. Calentamiento (Ludico), 2. Bloque Principal (Adaptado al contexto), 3. Reto Final. SOLO TEXTO PLANO.")
-      .replace("```html","").replace("```","").trim
+    // Prompt enriquecido con Fatiga Mental y Dojo Synergy
+    val prompt = s"""
+    Eres Entrenador Elite. Crea una sesión de 45min (Padre/Hijo).
+    ROL: PORTERO ($edad años).
+    OBJETIVO: $focus.
+    CONTEXTO MULTI-DISCIPLINA: $ctx.
+
+    ESTRUCTURA:
+    1. Calentamiento (Ludico + Caídas tipo Judo).
+    2. Bloque Principal (Ajustar dificultad según ESTADO COGNITIVO).
+    3. Reto Final.
+    SOLO TEXTO PLANO.
+  """
+
+    AIProvider.ask(prompt).replace("```html","").replace("```","").trim
   }
   // --- NUEVO: CENTRO DE PREDICCIÓN BIOMÉTRICA (EL ORÁCULO) ---
   def getOracleInsights(): String = {
@@ -379,7 +471,22 @@ object DatabaseManager {
   def updateRFFMSettings(url: String, teamName: String): Unit = { val conn=getConnection(); try{ val ps=conn.prepareStatement("UPDATE seasons SET rffm_url=?, rffm_team_name=? WHERE id=(SELECT MAX(id) FROM seasons)"); ps.setString(1,url); ps.setString(2,teamName); ps.executeUpdate() } finally { conn.close() } }
   def updateSeasonSettings(f: String, c: String, n: String, fecha: String): String = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club), fecha_nacimiento=? WHERE id=(SELECT MAX(id) FROM seasons)"); s.setString(1,f); s.setString(2,c); s.setString(3,fixEncoding(n)); s.setDate(4, Date.valueOf(fecha)); s.executeUpdate(); "DATOS ACTUALIZADOS" } finally { conn.close() } }
   def getLatestCardData(): PlayerCardData = { var conn: Connection=null; try { conn=getConnection(); val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1"); if(rs.next()){ val fecha=Option(rs.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19"); PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), "", Option(rs.getString("nombre_club")).getOrElse(""), rs.getDouble("stat_div").toInt, rs.getDouble("stat_han").toInt, rs.getDouble("stat_kic").toInt, rs.getDouble("stat_ref").toInt, rs.getDouble("stat_spd").toInt, rs.getDouble("stat_pos").toInt, rs.getDouble("stat_div"), rs.getDouble("stat_han"), rs.getDouble("stat_kic"), rs.getDouble("stat_ref"), rs.getDouble("stat_spd"), rs.getDouble("stat_pos"), fecha, Option(rs.getString("rffm_url")).getOrElse(""), Option(rs.getString("rffm_team_name")).getOrElse("")) } else { PlayerCardData("HECTOR", 59, "GK", "", "", "", "", 80, 60, 55, 60, 62, 58, 80, 60, 55, 60, 62, 58, "2020-06-19", "", "") } } finally { if(conn!=null) conn.close() } }
-  def getDeepAnalysis(): String = { var conn:Connection=null; try { conn=getConnection(); val sb=new StringBuilder(); val card=getLatestCardData(); val edad=calcularEdadExacta(card.fechaNacimiento); sb.append(s"Analista Elite ($edad años). Tendencias:\n"); val rs=conn.createStatement().executeQuery("SELECT fecha, rival, nota FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"); var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString(1)}|${rs.getString(2)}|${rs.getDouble(3)}\n") }; if(c<2) return "Pocos datos."; callGeminiAI(sb.toString()+"\nDame HTML limpio: <h4>ANALISIS</h4>...").replace("```html","").replace("```","").trim } catch { case e:Exception=>"Error" } finally { if(conn!=null) conn.close() } }
+  def getDeepAnalysis(): String = {
+    var conn:Connection=null;
+    try {
+      conn=getConnection(); val sb=new StringBuilder(); val card=getLatestCardData(); val edad=calcularEdadExacta(card.fechaNacimiento);
+      sb.append(s"Analista Elite ($edad años). Tendencias:\n");
+      val rs=conn.createStatement().executeQuery("SELECT fecha, rival, nota FROM matches WHERE status='PLAYED' ORDER BY fecha ASC");
+      var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString(1)}|${rs.getString(2)}|${rs.getDouble(3)}\n") };
+      if(c<2) return "Pocos datos.";
+      // Cambio aquí: Llamamos a AIProvider.ask
+      AIProvider.ask(sb.toString()+"\nDame HTML limpio: <h4>ANALISIS</h4>...").replace("```html","").replace("```","").trim
+    } catch {
+      case e:Exception =>
+        e.printStackTrace() // Esto hará que el error aparezca en el log de Render/Consola
+        "Error: " + e.getMessage
+    }
+  }
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches WHERE status='PLAYED' ORDER BY fecha ASC LIMIT 15"); while(rs.next()){ l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally {conn.close()}; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
   def getAchievements(): List[Achievement] = { var l=List[Achievement](); val conn=getConnection(); try { val s=conn.createStatement(); val r1=s.executeQuery("SELECT COUNT(*) FROM matches WHERE goles_contra=0 AND status='PLAYED'"); if(r1.next()&&r1.getInt(1)>=5) l=l:+Achievement("(M)","El Muro",r1.getInt(1)/5,""); val r2=s.executeQuery("SELECT COUNT(*) FROM matches WHERE nota>=9 AND status='PLAYED'"); if(r2.next()&&r2.getInt(1)>0) l=l:+Achievement("(E)","MVP",r2.getInt(1),"") } finally { conn.close() }; l }
   def getSeasonObjectives(): List[Objective] = { var l=List[Objective](); val conn=getConnection(); try { val rsObj=conn.createStatement().executeQuery("SELECT id, tipo, objetivo, descripcion FROM objectives"); val objs=new scala.collection.mutable.ListBuffer[(Int,String,Int,String)](); while(rsObj.next()) objs+=((rsObj.getInt("id"),rsObj.getString("tipo"),rsObj.getInt("objetivo"),rsObj.getString("descripcion"))); val rsStats=conn.createStatement().executeQuery("SELECT COUNT(*) as pj, COUNT(CASE WHEN goles_contra=0 THEN 1 END) as cs, AVG(nota) as media FROM matches WHERE status='PLAYED'"); var (cs,pj,md)=(0,0,0.0); if(rsStats.next()){cs=rsStats.getInt("cs");pj=rsStats.getInt("pj");md=rsStats.getDouble("media")}; objs.foreach { case (id,t,m,d) => val act=t match { case "CleanSheets"=>cs.toDouble case "MediaNota"=>md case "PartidosJugados"=>pj.toDouble case _=>0.0 }; l=l:+Objective(id,t,act,m,d) } } finally { conn.close() }; l }
@@ -563,4 +670,226 @@ object DatabaseManager {
       ps.setString(1, nuevoCinturon); ps.executeUpdate()
     } finally { conn.close() }
   }
+
+  def getWeatherPerformance(): Map[String, (Double, Double)] = {
+    val conn = getConnection()
+    val stats = scala.collection.mutable.Map[String, (Double, Double)]()
+    try {
+      val query = """
+      SELECT clima, AVG(nota) as media_nota, AVG(goles_contra) as media_gc
+      FROM matches
+      WHERE status='PLAYED'
+      GROUP BY clima
+    """
+      val rs = conn.createStatement().executeQuery(query)
+      while(rs.next()) {
+        stats(rs.getString("clima")) = (rs.getDouble("media_nota"), rs.getDouble("media_gc"))
+      }
+    } finally { conn.close() }
+    stats.toMap
+  }
+
+  def getTechnicalAlerts(): List[String] = {
+    val reviews = getTechnicalReviews().takeRight(3) // Analizamos las últimas 3
+    if (reviews.size < 2) return Nil
+
+    var alerts = List[String]()
+
+    // Ejemplo: Lógica para detectar bajada en blocaje
+    val blocajes = reviews.map(_.blocaje)
+    if (blocajes.last < blocajes.head) {
+      alerts = alerts :+ "⚠️ Tendencia a la baja en BLOCAJE. Se recomienda sesión técnica analítica."
+    }
+
+    // Ejemplo: Lógica para detectar valentía baja
+    if (reviews.last.valentia < 5) {
+      alerts = alerts :+ "🔥 Alerta de VALENTÍA: Héctor necesita refuerzo en salidas 1v1."
+    }
+
+    alerts
+  }
+
+  def saveAcademicNote(asig: String, nota: Double, tipo: String, notas: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("INSERT INTO academic_performance (asignatura, nota, tipo_evaluacion, comentarios) VALUES (?, ?, ?, ?)")
+      ps.setString(1, fixEncoding(asig))
+      ps.setDouble(2, nota)
+      ps.setString(3, tipo)
+      ps.setString(4, fixEncoding(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getCognitiveInsight(): String = {
+    val conn = getConnection()
+    try {
+      // Buscamos la media de notas de los últimos 30 días
+      val rsAcad = conn.createStatement().executeQuery("SELECT AVG(nota) FROM academic_performance WHERE fecha > CURRENT_DATE - 30")
+      val avgAcad = if(rsAcad.next()) rsAcad.getDouble(1) else 0.0
+
+      // Buscamos la media de 'atencion' en los entrenamientos de los últimos 30 días
+      val rsTrain = conn.createStatement().executeQuery("SELECT AVG(atencion) FROM trainings WHERE fecha > CURRENT_DATE - 30")
+      val avgAtt = if(rsTrain.next()) rsTrain.getDouble(1) else 0.0
+
+      if (avgAcad > 0 && avgAtt > 0) {
+        if (avgAcad < 6.0 && avgAtt < 7.0)
+          "🧠 **ALERTA COGNITIVA**: Baja concentración detectada en ambos entornos. Posible fatiga mental general."
+        else if (avgAcad > 8.0 && avgAtt < 6.0)
+          "⚽ **DESCONEXIÓN**: Alto rendimiento académico pero baja atención en campo. ¿Falta de motivación deportiva?"
+        else
+          "✅ **SINERGIA ÓPTIMA**: Equilibrio detectado entre estudios y deporte."
+      } else "Faltan datos para análisis cognitivo."
+    } finally { conn.close() }
+  }
+
+  def saveMedicalReport(fecha: String, tipo: String, fileBase64: String, esPrevio: Boolean): String = {
+    val conn = getConnection()
+    try {
+      val prompt = """
+      Analiza este informe médico de un niño deportista.
+      Extrae: 1) Diagnóstico claro. 2) Impacto en el deporte (ej: limitar saltos, reposo).
+      3) Si es una analítica, destaca valores fuera de rango.
+      Responde en formato: DIAGNÓSTICO: ... | RECOMENDACIÓN: ...
+    """
+
+      // Detectamos el formato para el AIProvider
+      val mime = if (fileBase64.contains("pdf")) "application/pdf" else "image/jpeg"
+
+      // La magia: AIProvider.ask devolverá el análisis de la caché si ya se subió este mismo archivo
+      val analisisIA = AIProvider.ask(prompt, Some((mime, fileBase64)))
+
+      val partes = analisisIA.split("\\|")
+      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNÓSTICO:", "").trim
+      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACIÓN:", "").trim
+
+      val ps = conn.prepareStatement("INSERT INTO medical_vault (fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol) VALUES (?, ?, ?, ?, ?)")
+      ps.setDate(1, java.sql.Date.valueOf(fecha))
+      ps.setString(2, tipo)
+      ps.setString(3, fixEncoding(diag))
+      ps.setString(4, fixEncoding(rec))
+      ps.setBoolean(5, esPrevio)
+      ps.executeUpdate()
+
+      s"Informe procesado: $diag"
+    } catch { case e: Exception => s"Error médico: ${e.getMessage}" } finally { conn.close() }
+  }
+
+  def getLatestMedicalInsight(): String = {
+    val conn = getConnection()
+    try {
+      // Buscamos el último informe que no sea un simple 'Baseline' previo
+      val query = """
+      SELECT diagnostico_ia, recomendaciones_ia
+      FROM medical_vault
+      WHERE es_previo_futbol = FALSE
+      ORDER BY fecha_informe DESC LIMIT 1
+    """
+      val rs = conn.createStatement().executeQuery(query)
+      if (rs.next()) {
+        val diag = rs.getString("diagnostico_ia")
+        val rec = rs.getString("recomendaciones_ia")
+        // Retornamos un string combinado para el widget
+        s"$diag. RECOMENDACIÓN: $rec"
+      } else ""
+    } catch {
+      case _: Exception => ""
+    } finally {
+      conn.close()
+    }
+  }
+
+  def saveMedicalRecordFull(fecha: String, tipo: String, diag: String, rec: String, esPrevio: Boolean): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO medical_vault (fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol) VALUES (?, ?, ?, ?, ?)"
+      )
+      ps.setDate(1, java.sql.Date.valueOf(fecha))
+      ps.setString(2, tipo)
+      ps.setString(3, fixEncoding(diag))
+      ps.setString(4, fixEncoding(rec))
+      ps.setBoolean(5, esPrevio)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getMedicalReports(): List[MedicalReport] = {
+    val conn = getConnection()
+    val reports = scala.collection.mutable.ListBuffer[MedicalReport]()
+    try {
+      // Consultamos los informes ordenados por fecha, los más recientes primero
+      val query = """
+      SELECT id, fecha_informe, tipo_informe, diagnostico_ia, recomendaciones_ia, es_previo_futbol
+      FROM medical_vault
+      ORDER BY fecha_informe DESC
+    """
+      val rs = conn.createStatement().executeQuery(query)
+      while (rs.next()) {
+        reports += MedicalReport(
+          id = rs.getInt("id"),
+          fecha = rs.getString("fecha_informe"),
+          tipo = rs.getString("tipo_informe"),
+          diagnostico = rs.getString("diagnostico_ia"),
+          recomendaciones = rs.getString("recomendaciones_ia"),
+          esPrevio = rs.getBoolean("es_previo_futbol")
+        )
+      }
+    } catch {
+      case e: Exception => println(s"Error recuperando informes médicos: ${e.getMessage}")
+    } finally {
+      conn.close()
+    }
+    reports.toList
+  }
+  def getCoachAdvice(): String = {
+    val card = getLatestCardData()
+    val matches = getMatchesList().take(3) // Últimos 3 partidos
+    val cog = getCognitiveInsight() // Datos de estudios/atención
+    val wellness = getOracleInsights() // Datos físicos/crecimiento
+
+    val prompt = s"""
+    Actúa como un Coach de Élite para un portero de ${calcularEdadExacta(card.fechaNacimiento)} años.
+    CONTEXTO TÉCNICO: Media ${card.media}, Reflejos ${card.ref}.
+    ESTADO FÍSICO: $wellness
+    ESTADO COGNITIVO: $cog
+    ÚLTIMOS PARTIDOS: ${matches.map(m => m.rival + " nota:" + m.nota).mkString(", ")}
+
+    Dame 3 consejos breves y motivadores. Si detectas fatiga o baja atención académica, prioriza el descanso psicológico.
+  """
+
+    // Usamos el AIProvider centralizado con caché (se refresca una vez al día o tras cambios)
+    AIProvider.ask(prompt)
+  }
+  def analyzeAudioLog(matchId: Int, audioBase64: String): String = {
+    // Prompt personalizado para Héctor (5 años) y su gestión emocional
+    val prompt = """
+      Eres un Psicólogo Deportivo experto en formación base.
+      Analiza este audio post-partido de Héctor, un portero de 5 años.
+      1) Transcribe lo que dice (ignora ruidos de fondo).
+      2) Evalúa su estado emocional: ¿frustración, alegría, timidez, cansancio?
+      3) Da un consejo breve y práctico al padre para reforzar la autoestima de Héctor hoy.
+      Responde en texto plano, sin formato Markdown complejo.
+    """
+
+    // Llamada al motor unificado con soporte para audio
+    val res = AIProvider.ask(prompt, Some(("audio/webm", audioBase64)))
+
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?")
+      ps.setString(1, fixEncoding(res))
+      ps.setInt(2, matchId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+    res
+  }
+  def testAIConnection(): String = {
+    try {
+      AIProvider.ask("Responde solo con la palabra OK si me escuchas.", None, bypassCache = true)
+    } catch {
+      case e: Exception => s"Fallo total: ${e.getMessage}"
+    }
+  }
+
 }
