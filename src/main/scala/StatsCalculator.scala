@@ -19,8 +19,12 @@ object StatsCalculator {
                      ): PlayerCardData = {
 
     // 1. XP BASE
-    val xpMinutos = Math.min(minutos * 0.002, 0.1)
-    val xpRendimiento = (valoracion / 10.0) * 0.15
+    // Umbral de rendimiento: el trinquete "frena" si la valoracion no llega a 5.0.
+    // El jugador no baja (esa es la garantia del trinquete), pero tampoco sube
+    // simplemente por haber jugado — necesita un minimo de calidad en el partido.
+    val notaSuficiente = valoracion >= 5.0
+    val xpMinutos = if (notaSuficiente) Math.min(minutos * 0.002, 0.1) else 0.0
+    val xpRendimiento = (valoracion / 10.0) * 0.15   // Puede ser pequeño pero nunca negativo
 
     // 2. CÁLCULO DE XP POR DISTRIBUCIÓN (EL "MODULO EDERSON")
     var xpKic = 0.0
