@@ -21,12 +21,12 @@ object StatsCalculator {
     // 1. XP BASE
     // Umbral de rendimiento: el trinquete "frena" si la valoracion no llega a 5.0.
     // El jugador no baja (esa es la garantia del trinquete), pero tampoco sube
-    // simplemente por haber jugado — necesita un minimo de calidad en el partido.
+    // simplemente por haber jugado -- necesita un minimo de calidad en el partido.
     val notaSuficiente = valoracion >= 5.0
     val xpMinutos = if (notaSuficiente) Math.min(minutos * 0.002, 0.1) else 0.0
-    val xpRendimiento = (valoracion / 10.0) * 0.15   // Puede ser pequeño pero nunca negativo
+    val xpRendimiento = (valoracion / 10.0) * 0.15   // Puede ser pequeno pero nunca negativo
 
-    // 2. CÁLCULO DE XP POR DISTRIBUCIÓN (EL "MODULO EDERSON")
+    // 2. CALCULO DE XP POR DISTRIBUCION (EL "MODULO EDERSON")
     var xpKic = 0.0
 
     // Pases Cortos: Premia consistencia.
@@ -36,20 +36,20 @@ object StatsCalculator {
       xpKic += (pctCorto * 0.1) + (pcOk * 0.01)
     }
 
-    // Pases Largos: Premia riesgo y visión. Valen el doble.
+    // Pases Largos: Premia riesgo y vision. Valen el doble.
     if (plTot > 0) {
       val pctLargo = plOk.toDouble / plTot.toDouble
-      // El pase largo es difícil. Un 50% de acierto ya es bueno.
+      // El pase largo es dificil. Un 50% de acierto ya es bueno.
       xpKic += (pctLargo * 0.2) + (plOk * 0.02)
     }
 
-    // Bonus por portería a cero en KIC (confianza)
+    // Bonus por porteria a cero en KIC (confianza)
     if (golesContra == 0 && minutos > 20) xpKic += 0.1
 
-    // 3. CÁLCULO DE PARADAS (REFLEJOS/MANOS)
+    // 3. CALCULO DE PARADAS (REFLEJOS/MANOS)
     val xpParadas = Math.min(paradas * 0.05, 0.5)
 
-    // 4. ACTUALIZACIÓN DE STATS
+    // 4. ACTUALIZACION DE STATS
     val newDiv = currentStats.divRaw + xpMinutos + xpRendimiento + (xpParadas * 0.5)
     val newHan = currentStats.hanRaw + xpMinutos + (if(golesContra==0) 0.1 else 0) + (xpParadas * 0.8)
 
@@ -86,10 +86,10 @@ object StatsCalculator {
     if (chronicAvg > 0) acuteAvg / chronicAvg else 0.0
   }
 
-  // --- BONUS JUDO: Mejora Agilidad y Valentía ---
+  // --- BONUS JUDO: Mejora Agilidad y Valentia ---
   def applyJudoBonus(currentStats: PlayerCardData): PlayerCardData = {
-    val bonusRef = 0.08 // El judo mejora los reflejos por las caídas
-    val bonusPos = 0.05 // Mejora el posicionamiento y la valentía
+    val bonusRef = 0.08 // El judo mejora los reflejos por las caidas
+    val bonusPos = 0.05 // Mejora el posicionamiento y la valentia
 
     val finalRef = currentStats.refRaw + bonusRef
     val finalPos = currentStats.posRaw + bonusPos

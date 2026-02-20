@@ -23,7 +23,7 @@ object MatchController extends cask.Routes {
       }
     }
 
-    // Celdas de la portería
+    // Celdas de la porteria
     val gridCells = for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield {
       val zoneId = r + c
       div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", ""))
@@ -41,9 +41,9 @@ object MatchController extends cask.Routes {
                 input(tpe:="hidden", name:="scheduleId", value:=scheduleId.toString),
                 div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "TIPO DE PARTIDO"),
                   if(isScheduled) {
-                    div(input(tpe:="hidden", name:="tipo", value:="LIGA"), input(tpe:="text", cls:="form-control bg-dark text-white border-primary fw-bold", value:="🏆 LIGA (OFICIAL RFFM)", readonly:=true))
+                    div(input(tpe:="hidden", name:="tipo", value:="LIGA"), input(tpe:="text", cls:="form-control bg-dark text-white border-primary fw-bold", value:="[trofeo] LIGA (OFICIAL RFFM)", readonly:=true))
                   } else {
-                    div(cls:="d-flex", select(name:="tipo", cls:="form-select bg-dark text-white fw-bold flex-grow-1", option(value:="AMISTOSO", "🤝 AMISTOSO"), option(value:="TORNEO", "🏅 TORNEO"), option(value:="LIGA", "🏆 LIGA (Manual)")), a(href:="/tournament/new", cls:="btn btn-sm btn-outline-warning ms-2 d-flex align-items-center fw-bold", "➕ CREAR TORNEO"))
+                    div(cls:="d-flex", select(name:="tipo", cls:="form-select bg-dark text-white fw-bold flex-grow-1", option(value:="AMISTOSO", "[vs] AMISTOSO"), option(value:="TORNEO", "[medalla] TORNEO"), option(value:="LIGA", "[trofeo] LIGA (Manual)")), a(href:="/tournament/new", cls:="btn btn-sm btn-outline-warning ms-2 d-flex align-items-center fw-bold", "+ CREAR TORNEO"))
                   }
                 ),
                 div(cls := "mb-3",
@@ -56,7 +56,7 @@ object MatchController extends cask.Routes {
                     value := (if (preRival.nonEmpty) fixEncoding(preRival) else ""),
                     placeholder := "Ej: Rayo Vallecano",
                     required := true,
-                    // CAMBIO CLAVE: Si scheduleId es 0, no se renderiza ningún atributo readonly
+                    // CAMBIO CLAVE: Si scheduleId es 0, no se renderiza ningun atributo readonly
                     if (scheduleId > 0) readonly := true else ()
                   )
                 ),
@@ -70,14 +70,14 @@ object MatchController extends cask.Routes {
                   div(cls := "col-4 text-center", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))
                 ),
 
-                // 3. DISTRIBUCIÓN (EDERSON)
-                div(cls:="mb-4 p-2 border border-info rounded bg-info bg-opacity-10", label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCIÓN"),
-                  div(cls:="row mb-2 align-items-center", div(cls:="col-4 text-end small fw-bold", "CORTO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pc', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pc', false)", "❌"), input(tpe:="text", id:="display_pc", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)))),
-                  div(cls:="row align-items-center", div(cls:="col-4 text-end small fw-bold", "LARGO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pl', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pl', false)", "❌"), input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true))))
+                // 3. DISTRIBUCION (EDERSON)
+                div(cls:="mb-4 p-2 border border-info rounded bg-info bg-opacity-10", label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCION"),
+                  div(cls:="row mb-2 align-items-center", div(cls:="col-4 text-end small fw-bold", "CORTO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pc', true)", "[OK]"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pc', false)", "X"), input(tpe:="text", id:="display_pc", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)))),
+                  div(cls:="row align-items-center", div(cls:="col-4 text-end small fw-bold", "LARGO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pl', true)", "[OK]"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pl', false)", "X"), input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true))))
                 ),
                 input(tpe:="hidden", name:="passData", id:="passData", value:="0,0,0,0"), input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"), input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0"),
 
-                // 4. PORTERÍA (REJILLA 3x3)
+                // 4. PORTERIA (REJILLA 3x3)
                 div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
                   div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success fw-bold", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger fw-bold", attr("for"):="modeGoal", "MODO GOL"))),
                   div(cls:="goal-grid-3x3", gridCells),
@@ -96,7 +96,7 @@ object MatchController extends cask.Routes {
                   div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))
                 ),
 
-                // 5. NUEVO: MAPA DE CALOR DE CAMPO (AQUÍ ESTÁ LA INTEGRACIÓN)
+                // 5. NUEVO: MAPA DE CALOR DE CAMPO (AQUI ESTA LA INTEGRACION)
                 div(cls:="mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
                   label(cls:="form-label text-success small fw-bold w-100 text-center", "MAPA DE CALOR (INTERVENCIONES)"),
                   div(cls:="position-relative mx-auto shadow", style:="width: 280px; height: 380px; background-color: #2e7d32; border: 2px solid white; border-radius: 4px;",
@@ -132,7 +132,7 @@ object MatchController extends cask.Routes {
             script(raw("""
               var currentMode='save';var goals=[];var saves=[];var origins=[];
               function setMode(mode){currentMode=mode;}
-              function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">●</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">●</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
+              function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
               function incCounter(key){var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val; document.getElementById('disp_'+key).value=val; updateActionData();}
               function updateActionData(){var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value]; document.getElementById('actionData').value = d.join(',');}
               function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
@@ -163,7 +163,7 @@ object MatchController extends cask.Routes {
 
   @cask.post("/match-center/save")
   def saveMatch(request: cask.Request) = withAuth(request) {
-    // CORRECCIÓN: Usamos request.data para leer los bytes del cuerpo
+    // CORRECCION: Usamos request.data para leer los bytes del cuerpo
     val bodyBytes = request.data.readAllBytes()
     val bodyString = new String(bodyBytes, "UTF-8")
 
@@ -175,12 +175,12 @@ object MatchController extends cask.Routes {
       key -> value
     }.toMap
 
-    // Funciones auxiliares de extracción
+    // Funciones auxiliares de extraccion
     def getStr(key: String): String = formData.getOrElse(key, "")
     def getInt(key: String): Int = try { getStr(key).toInt } catch { case _: Exception => 0 }
     def getDouble(key: String): Double = try { getStr(key).toDouble } catch { case _: Exception => 0.0 }
 
-    // Los 23 parámetros (Extraídos manualmente del mapa)
+    // Los 23 parametros (Extraidos manualmente del mapa)
     val scheduleId = getInt("scheduleId")
     val rival = getStr("rival")
     val gf = getInt("gf")
@@ -204,7 +204,7 @@ object MatchController extends cask.Routes {
     val tipo = getStr("tipo")
     val mapaCampo = getStr("mapaCampo")
 
-    // --- LÓGICA DE PROCESAMIENTO (Base de datos y cálculos) ---
+    // --- LOGICA DE PROCESAMIENTO (Base de datos y calculos) ---
     val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
     val (pcTot, pcOk, plTot, plOk) = if(pArr.length >= 4) (pArr(0), pArr(1), pArr(2), pArr(3)) else (0,0,0,0)
     val aArr = actionData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
@@ -233,7 +233,7 @@ object MatchController extends cask.Routes {
         head(tags2.style(raw(getCss()))),
         body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';",
           h1("OK"),
-          h2(style := "color: #d4af37;", "ANÁLISIS GUARDADO"),
+          h2(style := "color: #d4af37;", "ANALISIS GUARDADO"),
           div(style := "margin: 30px auto; width: 300px; background: #333; padding: 20px; border-radius: 10px;",
             h3("Media Global"),
             div(style := "font-size: 50px; font-weight: bold;", s"${c.media.toInt} -> ${n.media}"),
@@ -250,7 +250,7 @@ object MatchController extends cask.Routes {
       div(cls := "row justify-content-center",
         div(cls := "col-md-8",
           div(cls := "card bg-dark text-white border-warning shadow",
-            div(cls := "card-header bg-warning text-dark fw-bold text-center", "🏆 NUEVO TORNEO"),
+            div(cls := "card-header bg-warning text-dark fw-bold text-center", "[trofeo] NUEVO TORNEO"),
             div(cls := "card-body",
               form(action := "/tournament/create", method := "post",
                 div(cls := "mb-3",
@@ -353,7 +353,7 @@ object MatchController extends cask.Routes {
           div(cls := "list-group", tItems)
         )
       } else {
-        div(cls := "alert alert-secondary small", "Añade URL de video para usar tags.")
+        div(cls := "alert alert-secondary small", "Anade URL de video para usar tags.")
       }
 
       val content = basePage("history",
@@ -396,13 +396,13 @@ object MatchController extends cask.Routes {
 
               // --- Footer: Diario de voz ---
               div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary mt-3",
-                h6(cls := "text-info small fw-bold mb-2", "🎙️ DIARIO DE VOZ (POST-PARTIDO)"),
+                h6(cls := "text-info small fw-bold mb-2", "[mic] DIARIO DE VOZ (POST-PARTIDO)"),
                 div(cls := "mb-2 small text-muted", "Graba a Hector contando como se sintio o sube un audio."),
                 div(cls := "d-flex gap-2 mb-3",
                   button(id := "btnRecord", cls := "btn btn-sm btn-outline-danger",
-                    onclick := "toggleRecording()", "⏺ Grabar"),
+                    onclick := "toggleRecording()", "[rec] Grabar"),
                   button(id := "btnStop", cls := "btn btn-sm btn-danger",
-                    style := "display:none;", onclick := "stopRecording()", "⏹ Parar"),
+                    style := "display:none;", onclick := "stopRecording()", "[stop] Parar"),
                   input(tpe := "file", id := "fileUpload", accept := "audio/*",
                     cls := "form-control form-control-sm bg-dark text-white",
                     onchange := "handleFileUpload(this)")
@@ -413,7 +413,7 @@ object MatchController extends cask.Routes {
                   input(tpe := "hidden", name := "matchId",    value := matchId.toString),
                   input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
                   button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
-                    onclick := "submitAudio()", disabled := true, "🧠 Analizar Emociones con IA")
+                    onclick := "submitAudio()", disabled := true, "[IA] Analizar Emociones con IA")
                 ),
                 if (matchData.analisisVoz.nonEmpty)
                   div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
@@ -430,8 +430,8 @@ object MatchController extends cask.Routes {
               )
             ),
 
-            // Script grabación de audio
-            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
+            // Script grabacion de audio
+            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "[IA] Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "[IA] Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "[wait] Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
           )
         )
       )
@@ -440,7 +440,7 @@ object MatchController extends cask.Routes {
   }
   @cask.postForm("/match/analyze_audio")
   def analyzeAudioAction(matchId: Int, audioData: String) = {
-    // La lógica de IA y la actualización de la DB ahora ocurren dentro de analyzeAudioLog
+    // La logica de IA y la actualizacion de la DB ahora ocurren dentro de analyzeAudioLog
     // audioData ya viene como Base64 desde el script del navegador
     DatabaseManager.analyzeAudioLog(matchId, audioData)
 
