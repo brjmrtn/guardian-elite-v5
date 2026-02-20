@@ -285,7 +285,7 @@ object DatabaseManager {
     else s.replace("&", "&amp;")
           .replace("<", "&lt;")
           .replace(">", "&gt;")
-          .replace(""", "&quot;")
+          .replace("\"", "&quot;")
           .replace("'", "&#x27;")
   }
   def calcularEdadExacta(fechaStr: String): Int = { try { Period.between(LocalDate.parse(fechaStr), LocalDate.now()).getYears } catch { case _: Exception => 5 } }
