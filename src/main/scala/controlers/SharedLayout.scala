@@ -2,6 +2,8 @@ import cask._
 import scalatags.Text.all._
 import scalatags.Text.tags2
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+
 object SharedLayout {
 
   // --- Configuracion de seguridad (desde variables de entorno) ---
@@ -358,13 +360,10 @@ object SharedLayout {
   }
 
   // --- Helpers de respuesta HTTP ---
-  def renderHtml(content: String): cask.Response[Array[Byte]] = {
-    val html = doctype("html")(content).render
-    cask.Response(html.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
+  def renderHtml(content: String): cask.Response[String] =
+    cask.Response(content, headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
 
-  def renderRedirect(url: String): cask.Response[Array[Byte]] = {
-    cask.Response(Array.emptyByteArray, statusCode = 302, headers = Seq("Location" -> url))
-  }
+  def renderRedirect(url: String): cask.Response[String] =
+    cask.Response("", statusCode = 302, headers = Seq("Location" -> url))
 
 }
