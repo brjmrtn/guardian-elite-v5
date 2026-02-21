@@ -767,5 +767,135 @@ object BioController extends cask.Routes {
     renderHtml(content)
   }
 
+  // ── TERMOMETRO DE GUANTES ───────────────────────────────────────────────────
+  @cask.get("/bio/guantes")
+  def guantesPage(request: cask.Request) = withAuth(request) {
+    val (latex, motivo, guanteActual) = DatabaseManager.getGloveThermostat()
+    val gear = DatabaseManager.getActiveGear().filter(_.tipo == "Guantes")
+    val recentMatches = DatabaseManager.getMatchesList().take(10)
+    val avgTemp = if (recentMatches.nonEmpty) {
+      val temps = recentMatches.map(m => {
+        // Extraer temperatura de notas o usar 15 por defecto
+        15  // placeholder — la temp se guarda en tabla matches
+      })
+      temps.sum / temps.size
+    } else 15
+
+    // Datos climaticos de partidos recientes
+    val climaStats = recentMatches.groupBy(_.clima).map { case (c, ms) => c -> ms.size }
+    val latexColor = latex match {
+      case s if s.contains("Frio")   => "info"
+      case s if s.contains("Aqua")   => "primary"
+      case s if s.contains("Soft")   => "warning"
+      case s if s.contains("Duo")    => "danger"
+      case _                         => "success"
+    }
+
+    val content = basePage("bio",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-10 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h2(cls := "text-warning mb-0", "TERMOMETRO DE GUANTES"),
+            a(href := "/bio", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Bio")
+          ),
+
+          // Recomendacion principal
+          div(cls := s"card bg-dark border-$latexColor shadow mb-4",
+            div(cls := s"card-header bg-$latexColor bg-opacity-10 border-$latexColor d-flex justify-content-between align-items-center",
+              span(cls := s"text-$latexColor fw-bold", "RECOMENDACION PARA EL PROXIMO PARTIDO"),
+              span(cls := s"badge bg-$latexColor fw-bold", "IA")
+            ),
+            div(cls := "card-body",
+              div(cls := "d-flex align-items-center gap-4",
+                div(style := "font-size:52px;", "🧤"),
+                div(
+                  div(cls := s"text-$latexColor fw-bold fs-5 mb-1", latex),
+                  div(cls := "text-light small", motivo),
+                  if (guanteActual.nonEmpty && guanteActual != "Sin guantes registrados")
+                    div(cls := "mt-2",
+                      span(cls := "xx-small text-muted fw-bold", "GUANTE EN USO: "),
+                      span(cls := "text-warning fw-bold small", guanteActual)
+                    )
+                  else div()
+                )
+              )
+            )
+          ),
+
+          div(cls := "row g-3",
+            // Guia de latex
+            div(cls := "col-md-6",
+              div(cls := "card bg-dark border-secondary shadow",
+                div(cls := "card-header text-white fw-bold small", "GUIA DE LATEX POR CONDICION"),
+                div(cls := "card-body p-2",
+                  Seq(
+                    ("❄️ Frio (< 5C)", "Latex Hibrido Frio", "Mantiene agarre y flexibilidad en bajas temperaturas", "info"),
+                    ("🌡️ Fresco (5-12C)", "Latex Soft Grip", "Optimo agarre en frio moderado", "primary"),
+                    ("🌧️ Lluvia / Humedad", "Latex Aqua", "Tratado para condiciones mojadas, agarre superior", "primary"),
+                    ("☀️ Calor (> 25C)", "Latex Duo Soft", "Transpirable, evita sudor excesivo en el guante", "danger"),
+                    ("🌤️ Condiciones ideales", "Latex Contact", "El latex estandar de referencia para dia normal", "success")
+                  ).map { case (cond, rec, desc, c) =>
+                    div(cls := s"d-flex gap-2 p-2 mb-1 rounded border-start border-$c border-2",
+                      style := "background:rgba(255,255,255,0.03);",
+                      div(
+                        div(cls := "xx-small text-muted fw-bold", cond),
+                        div(cls := s"text-$c fw-bold small", rec),
+                        div(cls := "xx-small text-muted", desc)
+                      )
+                    )
+                  }
+                )
+              )
+            ),
+
+            // Historial clima partidos + inventario
+            div(cls := "col-md-6",
+              div(cls := "card bg-dark border-secondary shadow mb-3",
+                div(cls := "card-header text-white fw-bold small", "CONDICIONES ULTIMOS PARTIDOS"),
+                div(cls := "card-body p-2",
+                  if (climaStats.isEmpty)
+                    div(cls := "text-muted text-center small py-2", "Sin partidos registrados")
+                  else div(
+                    climaStats.toList.sortBy(-_._2).map { case (clima, count) =>
+                      val icon = clima match {
+                        case s if s.contains("Lluvia") => "🌧️"
+                        case s if s.contains("Nublado") => "☁️"
+                        case s if s.contains("Viento") => "💨"
+                        case _ => "☀️"
+                      }
+                      div(cls := "d-flex justify-content-between align-items-center p-1 mb-1",
+                        span(cls := "small", s"$icon $clima"),
+                        span(cls := "badge bg-secondary fw-bold", s"$count partidos")
+                      )
+                    }
+                  )
+                )
+              ),
+              if (gear.nonEmpty) div(cls := "card bg-dark border-warning shadow",
+                div(cls := "card-header text-warning fw-bold small", "INVENTARIO DE GUANTES"),
+                div(cls := "card-body p-2",
+                  gear.map { g =>
+                    val pct = if (g.maxUsos > 0) (g.usos * 100 / g.maxUsos).min(100) else 0
+                    val barColor = if (pct >= 90) "danger" else if (pct >= 70) "warning" else "success"
+                    div(cls := "mb-2",
+                      div(cls := "d-flex justify-content-between xx-small mb-1",
+                        span(cls := "fw-bold text-white", g.nombre),
+                        span(cls := s"text-$barColor fw-bold", s"${g.usos}/${g.maxUsos} usos")
+                      ),
+                      div(cls := "progress", style := "height:6px;",
+                        div(cls := s"progress-bar bg-$barColor", style := s"width:$pct%;")
+                      )
+                    )
+                  }
+                )
+              ) else div()
+            )
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
   initialize()
 }

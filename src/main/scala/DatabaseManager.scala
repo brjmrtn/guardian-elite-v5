@@ -198,6 +198,18 @@ object DatabaseManager {
         imagen_url           TEXT
       )""")
 
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS injuries (
+        id              SERIAL PRIMARY KEY,
+        fecha_inicio    DATE DEFAULT CURRENT_DATE,
+        fecha_alta      DATE,
+        zona            TEXT,
+        tipo            TEXT,
+        gravedad        TEXT DEFAULT 'LEVE',
+        descripcion     TEXT,
+        dias_baja       INT DEFAULT 0,
+        activa          BOOLEAN DEFAULT TRUE
+      )""")
+
       // Scouting y rivales
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS rivals (
         id              SERIAL PRIMARY KEY,
@@ -878,6 +890,146 @@ object DatabaseManager {
       )
     } finally { conn.close() }
     l
+  }
+
+  case class InjuryRecord(id: Int, fechaInicio: String, fechaAlta: String, zona: String, tipo: String, gravedad: String, descripcion: String, diasBaja: Int, activa: Boolean)
+
+  def logInjury(zona: String, tipo: String, gravedad: String, desc: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("INSERT INTO injuries (zona, tipo, gravedad, descripcion, activa) VALUES (?,?,?,?,true)")
+      ps.setString(1, fixEncoding(zona)); ps.setString(2, fixEncoding(tipo))
+      ps.setString(3, gravedad); ps.setString(4, fixEncoding(desc))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def closeInjury(id: Int, fechaAlta: String, diasBaja: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE injuries SET activa=false, fecha_alta=?, dias_baja=? WHERE id=?")
+      ps.setDate(1, java.sql.Date.valueOf(fechaAlta))
+      ps.setInt(2, diasBaja); ps.setInt(3, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getInjuries(): List[InjuryRecord] = {
+    var l = List[InjuryRecord]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT * FROM injuries ORDER BY fecha_inicio DESC")
+      while (rs.next()) l = l :+ InjuryRecord(
+        rs.getInt("id"),
+        rs.getDate("fecha_inicio").toString,
+        Option(rs.getDate("fecha_alta")).map(_.toString).getOrElse(""),
+        Option(rs.getString("zona")).getOrElse(""),
+        Option(rs.getString("tipo")).getOrElse(""),
+        Option(rs.getString("gravedad")).getOrElse("LEVE"),
+        Option(rs.getString("descripcion")).getOrElse(""),
+        rs.getInt("dias_baja"),
+        rs.getBoolean("activa")
+      )
+    } finally { conn.close() }
+    l
+  }
+
+  def getCleanSheetPredictor(rival: String): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Historial vs rival
+      val psR = conn.prepareStatement("SELECT COUNT(*) as pj, SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END) as pcs, AVG(nota) as avg_nota FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED'")
+      psR.setString(1, s"%$rival%")
+      val rsR = psR.executeQuery()
+      val (pj, pcs, avgNota) = if (rsR.next()) (rsR.getInt("pj"), rsR.getInt("pcs"), rsR.getDouble("avg_nota")) else (0, 0, 0.0)
+
+      // Forma reciente (ultimos 5 partidos)
+      val rsF = conn.createStatement().executeQuery("SELECT AVG(nota) as avg, SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END) as pcs, COUNT(*) as pj FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 5")
+      val (formaAvg, formaPcs, formaPj) = if (rsF.next()) (rsF.getDouble("avg"), rsF.getInt("pcs"), rsF.getInt("pj")) else (0.0, 0, 5)
+
+      // Sueno ultima noche
+      val rsS = conn.createStatement().executeQuery("SELECT horas_sueno FROM wellness ORDER BY fecha DESC LIMIT 1")
+      val horasSueno = if (rsS.next()) rsS.getDouble("horas_sueno") else 0.0
+
+      // ACWR inline
+      val rsAc = conn.prepareStatement("SELECT COALESCE(SUM(rpe*60),0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsAc.setInt(1, 7); val rsAcR = rsAc.executeQuery()
+      val acuteLoad = if (rsAcR.next()) rsAcR.getDouble(1) else 0.0
+      val rsCh = conn.prepareStatement("SELECT COALESCE(SUM(rpe*60),0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsCh.setInt(1, 28); val rsChR = rsCh.executeQuery()
+      val chronicLoad = if (rsChR.next()) rsChR.getDouble(1) else 0.0
+      val acwr = if (chronicLoad > 0) (acuteLoad / 7.0) / (chronicLoad / 28.0) else 1.0
+
+      // Calcular probabilidad (heuristica)
+      var score = 50.0
+      if (pj > 0)       score += (pcs.toDouble / pj) * 20
+      if (formaPj > 0)  score += (formaPcs.toDouble / formaPj) * 15
+      if (formaAvg > 7) score += 10 else if (formaAvg > 5) score += 5
+      if (horasSueno >= 8) score += 8 else if (horasSueno < 6 && horasSueno > 0) score -= 8
+      if (acwr > 1.5)   score -= 10 else if (acwr < 0.8) score -= 5
+      val prob = math.min(95, math.max(5, score.toInt))
+
+      Map("prob" -> prob, "pj" -> pj, "pcs" -> pcs, "avgNota" -> avgNota,
+        "formaAvg" -> formaAvg, "horasSueno" -> horasSueno, "acwr" -> acwr)
+    } finally { conn.close() }
+  }
+
+  def getGloveThermostat(): (String, String, String) = {
+    // (recomendacion, motivo, latex_type)
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT clima, temperatura FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 5"
+      )
+      var temps = List[Int](); var climas = List[String]()
+      while (rs.next()) {
+        temps = temps :+ rs.getInt("temperatura")
+        climas = climas :+ Option(rs.getString("clima")).getOrElse("Sol")
+      }
+      val avgTemp = if (temps.nonEmpty) temps.sum / temps.size else 15
+      val hasRain = climas.count(c => c.contains("Lluvia") || c.contains("lluvia")) > 0
+      val (latex, motivo) = if (avgTemp <= 5) ("Latex Hibrido Frio", s"Temperatura media ${avgTemp}C — latex hibrido mantiene agarre")
+      else if (avgTemp <= 12) ("Latex Soft Grip", s"Temperatura fresca ${avgTemp}C — latex blando optimo")
+      else if (hasRain) ("Latex Aqua", "Condiciones humedas recientes — latex aqua recomendado")
+      else if (avgTemp >= 25) ("Latex Duo Soft", s"Temperatura alta ${avgTemp}C — latex suave con respiro")
+      else ("Latex Contact", s"Condiciones ideales ${avgTemp}C — latex contact estandar")
+      val gloves = conn.createStatement().executeQuery("SELECT nombre FROM gear WHERE tipo='Guantes' AND activo=TRUE LIMIT 1")
+      val gloveName = if (gloves.next()) gloves.getString("nombre") else "Sin guantes registrados"
+      (latex, motivo, gloveName)
+    } finally { conn.close() }
+  }
+
+  def getFlashCardData(rival: String): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Historial vs rival
+      val ps = conn.prepareStatement("SELECT resultado, nota, fecha, zona_goles, notas_partido FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED' ORDER BY fecha DESC LIMIT 5")
+      ps.setString(1, s"%$rival%")
+      val rs = ps.executeQuery()
+      var partidos = List[(String,Double,String,String,String)]()
+      while (rs.next()) partidos = partidos :+ (rs.getString(1), rs.getDouble(2), rs.getString(3),
+        Option(rs.getString(4)).getOrElse(""), Option(rs.getString(5)).getOrElse(""))
+
+      // Zona mas vulnerable vs ese rival
+      val zonasCombinadas = partidos.flatMap(_._4.split(",").filter(_.nonEmpty))
+      val zonaMasVulnerable = if (zonasCombinadas.nonEmpty) zonasCombinadas.groupBy(identity).maxBy(_._2.size)._1 else "—"
+
+      // Clips de paradas recientes
+      val rsV = conn.createStatement().executeQuery(
+        "SELECT vt.minuto, vt.segundo, vt.tipo, m.rival, m.video_url FROM video_tags vt JOIN matches m ON vt.match_id=m.id WHERE vt.tipo='PARADA' AND m.video_url IS NOT NULL ORDER BY m.fecha DESC LIMIT 3"
+      )
+      var clips = List[(Int,Int,String,String,String)]()
+      while (rsV.next()) clips = clips :+ (rsV.getInt(1), rsV.getInt(2), rsV.getString(3), rsV.getString(4), rsV.getString(5))
+
+      // Rival info
+      val rsRi = conn.prepareStatement("SELECT estilo, claves FROM rivals WHERE LOWER(nombre) LIKE LOWER(?)")
+      rsRi.setString(1, s"%$rival%")
+      val rsRiR = rsRi.executeQuery()
+      val (estilo, claves) = if (rsRiR.next()) (Option(rsRiR.getString("estilo")).getOrElse(""), Option(rsRiR.getString("claves")).getOrElse("")) else ("", "")
+
+      Map("partidos" -> partidos, "zonaMasVulnerable" -> zonaMasVulnerable,
+        "clips" -> clips, "estilo" -> estilo, "claves" -> claves)
+    } finally { conn.close() }
   }
 
   def getTacticalStats(): Map[String, Int] = { var stats = scala.collection.mutable.Map("g_tot"->0, "g_alt"->0, "g_med"->0, "g_ras"->0, "g_izq"->0, "g_cen"->0, "g_der"->0, "p_tot"->0, "p_alt"->0, "p_med"->0, "p_ras"->0, "p_izq"->0, "p_cen"->0, "p_der"->0); val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT zona_goles, zona_paradas FROM matches WHERE status='PLAYED' ORDER BY id DESC LIMIT 20"); while(rs.next()) { val zG = Option(rs.getString("zona_goles")).getOrElse(""); val zP = Option(rs.getString("zona_paradas")).getOrElse(""); zG.split(",").filter(_.nonEmpty).foreach { z => stats("g_tot")+=1; if(z.contains("T")) stats("g_alt")+=1 else if(z.contains("M")) stats("g_med")+=1 else stats("g_ras")+=1; if(z.contains("L")) stats("g_izq")+=1 else if(z.contains("C")) stats("g_cen")+=1 else stats("g_der")+=1 }; zP.split(",").filter(_.nonEmpty).foreach { z => stats("p_tot")+=1; if(z.contains("T")) stats("p_alt")+=1 else if(z.contains("M")) stats("p_med")+=1 else stats("p_ras")+=1; if(z.contains("L")) stats("p_izq")+=1 else if(z.contains("C")) stats("p_cen")+=1 else stats("p_der")+=1 } } } finally { conn.close() }; stats.toMap }
