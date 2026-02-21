@@ -11,6 +11,25 @@ object AdminController extends cask.Routes {
       form(action := "/settings/save_base64", method := "post",
         div(cls := "mb-4", label(cls := "form-label text-info fw-bold", "Nombre Visual (Carta)"), input(tpe := "text", name := "nombreClub", cls := "form-control fw-bold", value:=card.clubNombre, placeholder := "Ej: Rayo (Corto)")),
         div(cls := "mb-4", label(cls := "form-label text-success fw-bold", "Fecha de Nacimiento"), input(tpe := "date", name := "fechaNac", cls := "form-control fw-bold", value:=card.fechaNacimiento)),
+        div(cls := "mb-4 border-top border-secondary pt-3", h5(cls:="text-warning", "Perfil Jugador"),
+          div(cls:="row g-3",
+            div(cls:="col-6",
+              label(cls:="form-label text-info fw-bold small", "Posicion"),
+              select(name:="posicion", cls:="form-select fw-bold",
+                option(value:="POR", if(card.posicion=="POR") attr("selected"):="true" else attr(""), "Portero (POR)"),
+                option(value:="GK",  if(card.posicion=="GK")  attr("selected"):="true" else attr(""), "Goalkeeper (GK)")
+              )
+            ),
+            div(cls:="col-6",
+              label(cls:="form-label text-info fw-bold small", "Pie Dominante"),
+              select(name:="pieDominante", cls:="form-select fw-bold",
+                option(value:="Derecho", "Derecho"),
+                option(value:="Izquierdo", "Izquierdo"),
+                option(value:="Ambidiestro", "Ambidiestro")
+              )
+            )
+          )
+        ),
         div(cls := "mb-4 border-top border-secondary pt-3", h5(cls:="text-info", "Scouting 2.0 (RFFM)"), div(cls:="mb-3", label(cls:="small text-muted fw-bold", "URL Grupo RFFM"), input(tpe:="text", name:="rffmUrl", cls:="form-control fw-bold", value:=Option(card.rffmUrl).getOrElse(""), placeholder:="https://www.rffm.es/competicion/...")), div(cls:="mb-3", label(cls:="small text-muted fw-bold", "Nombre Oficial (Federacion)"), input(tpe:="text", name:="rffmName", cls:="form-control fw-bold", value:=Option(card.rffmName).getOrElse(""), placeholder:="Ej: RAYO VALLECANO DE MADRID 'B'"))),
         div(cls := "mb-4", label(cls := "form-label text-info fw-bold", "Foto Jugador"), input(tpe := "file", cls := "form-control fw-bold", accept := "image/*", onchange := "convertToBase64(this, 'hidden_foto')"), input(tpe := "hidden", name := "fotoBase64", id := "hidden_foto")),
         div(cls := "mb-4", label(cls := "form-label text-warning fw-bold", "Escudo Club"), input(tpe := "file", cls := "form-control fw-bold", accept := "image/*", onchange := "convertToBase64(this, 'hidden_club')"), input(tpe := "hidden", name := "clubBase64", id := "hidden_club")),
@@ -23,7 +42,8 @@ object AdminController extends cask.Routes {
   }
   @cask.postForm("/settings/save_base64")
   def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String,
-                         fechaNac: String, rffmUrl: String, rffmName: String) = {
+                         fechaNac: String, rffmUrl: String, rffmName: String,
+                         posicion: String = "GK", pieDominante: String = "Derecho") = {
     val fechaFinal = if (fechaNac != null && fechaNac.nonEmpty) fechaNac else "2020-06-19"
     DatabaseManager.updateRFFMSettings(
       if (rffmUrl   != null) rffmUrl   else "",
@@ -123,35 +143,145 @@ object AdminController extends cask.Routes {
   def printReport() = {
     val card    = DatabaseManager.getLatestCardData()
     val matches = DatabaseManager.getMatchesList()
-    val htmlStr = doctype("html")(html(
-      head(
-        meta(charset := "utf-8"),
-        tags2.title("Informe Temporada"),
-        tags2.style("""body{font-family:sans-serif;color:black;background:white;padding:20px;}h1,h2{text-align:center;color:#333;}table{width:100%;border-collapse:collapse;margin-top:20px;font-size:12px;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background-color:#f2f2f2;}.header{text-align:center;margin-bottom:30px;border-bottom:2px solid #333;padding-bottom:20px;}@media print{.no-print{display:none;}}""")
-      ),
-      body(
-        div(cls := "no-print", style := "text-align:center;margin-bottom:20px;",
-          button(onclick := "window.print()", style := "padding:10px 20px;font-size:16px;cursor:pointer;",
-            "IMPRIMIR / GUARDAR PDF")
-        ),
-        div(cls := "header",
-          h1(s"INFORME DE TEMPORADA - ${card.nombre}"),
-          div(s"Media: ${card.media} | Posicion: ${card.posicion}"),
-          div(s"Estirada: ${card.div} | Manos: ${card.han} | Saque: ${card.kic}"),
-          div(s"Reflejos: ${card.ref} | Velocidad: ${card.spd} | Posicion: ${card.pos}")
-        ),
-        h2("Historial de Partidos"),
-        table(
-          thead(tr(th("Fecha"), th("Rival"), th("Resultado"), th("Min"), th("Nota"), th("Clima"))),
-          tbody(
-            (for (m <- matches) yield tr(
-              td(m.fecha), td(m.rival), td(m.resultado),
-              td(m.minutos), td(m.nota), td(m.clima)
-            )).toSeq
-          )
-        )
-      )
-    )).render
+    val evolution = DatabaseManager.getSeasonEvolution()
+
+    val totalPj = matches.size
+    val totalGc = matches.map(m => m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(0)).sum
+    val avgNota = if (matches.nonEmpty) f"${matches.map(_.nota).sum / matches.size}%.1f" else "—"
+    val pcs     = matches.count(m => m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).contains(0))
+    val totalPar = matches.map(_.paradas).sum
+
+    val aniosJs  = evolution.map(e => s""""${e._1}"""").mkString("[",",","]")
+    val mediasJs = evolution.map(e => f"${e._2}%.1f").mkString("[",",","]")
+    val gcsJs    = evolution.map(_._4.toString).mkString("[",",","]")
+
+    val matchRows = matches.take(30).map { m =>
+      val gcMatch = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(0)
+      val notaColor = if(m.nota >= 7) "#27ae60" else if(m.nota >= 5) "#e67e22" else "#c0392b"
+      s"""<tr>
+        <td>${m.fecha}</td>
+        <td><b>${m.rival}</b></td>
+        <td style="text-align:center;">${m.resultado}</td>
+        <td style="text-align:center;">${m.paradas}</td>
+        <td style="text-align:center; color:$notaColor; font-weight:bold;">${m.nota}</td>
+        <td style="text-align:center;">${if(gcMatch==0)"✓" else ""}</td>
+      </tr>"""
+    }.mkString("")
+
+    val htmlStr = s"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>Informe Guardian Elite - ${card.nombre}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Oswald', sans-serif; color: #1a1a1a; background: #fff; padding: 20px; }
+  .no-print { text-align:center; margin-bottom:24px; }
+  .print-btn { background:#d4af37; color:#000; border:none; padding:12px 32px; font-size:16px; font-weight:700; border-radius:6px; cursor:pointer; letter-spacing:1px; }
+  .header { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #d4af37; padding-bottom:16px; margin-bottom:24px; }
+  .header-title h1 { font-size:28px; color:#1a1a1a; letter-spacing:2px; }
+  .header-title p { color:#666; font-size:13px; margin-top:4px; }
+  .stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:24px; }
+  .stat-card { border:2px solid #e0e0e0; border-radius:8px; text-align:center; padding:12px; }
+  .stat-card .value { font-size:28px; font-weight:700; color:#d4af37; }
+  .stat-card .label { font-size:11px; color:#888; margin-top:4px; text-transform:uppercase; letter-spacing:0.5px; }
+  .attrs-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:24px; }
+  .attr-box { border:1px solid #ddd; border-radius:6px; text-align:center; padding:10px 6px; }
+  .attr-box .av { font-size:24px; font-weight:700; }
+  .attr-box .al { font-size:10px; color:#888; }
+  .charts-row { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:24px; }
+  .chart-box { border:1px solid #e0e0e0; border-radius:8px; padding:16px; }
+  .chart-box h3 { font-size:13px; color:#666; margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  thead tr { background:#1a1a1a; color:white; }
+  th,td { border:1px solid #e0e0e0; padding:7px 10px; }
+  tbody tr:nth-child(even) { background:#f9f9f9; }
+  .section-title { font-size:16px; font-weight:700; color:#1a1a1a; border-left:4px solid #d4af37; padding-left:10px; margin-bottom:12px; }
+  .footer { margin-top:24px; text-align:center; color:#aaa; font-size:11px; border-top:1px solid #eee; padding-top:12px; }
+  @media print {
+    .no-print { display:none; }
+    body { padding:10px; }
+    .charts-row canvas { max-height:200px; }
+  }
+</style>
+</head>
+<body>
+<div class="no-print">
+  <button class="print-btn" onclick="window.print()">IMPRIMIR / GUARDAR PDF</button>
+</div>
+
+<div class="header">
+  <div class="header-title">
+    <h1>GUARDIAN ELITE — INFORME</h1>
+    <p>${card.nombre} | ${card.posicion} | Generado: ${java.time.LocalDate.now()}</p>
+  </div>
+  <div style="text-align:right;">
+    <div style="font-size:40px; font-weight:700; color:#d4af37;">${card.media}</div>
+    <div style="font-size:12px; color:#666;">MEDIA GLOBAL</div>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card"><div class="value">$totalPj</div><div class="label">Partidos</div></div>
+  <div class="stat-card"><div class="value">$totalPar</div><div class="label">Paradas</div></div>
+  <div class="stat-card"><div class="value" style="color:#27ae60;">$pcs</div><div class="label">Port. a 0</div></div>
+  <div class="stat-card"><div class="value" style="color:#c0392b;">$totalGc</div><div class="label">Goles enc.</div></div>
+  <div class="stat-card"><div class="value">$avgNota</div><div class="label">Nota media</div></div>
+</div>
+
+<p class="section-title">ATRIBUTOS</p>
+<div class="attrs-grid">
+  <div class="attr-box"><div class="av" style="color:#3498db;">${card.div}</div><div class="al">DIV</div></div>
+  <div class="attr-box"><div class="av" style="color:#9b59b6;">${card.han}</div><div class="al">HAN</div></div>
+  <div class="attr-box"><div class="av" style="color:#e67e22;">${card.kic}</div><div class="al">KIC</div></div>
+  <div class="attr-box"><div class="av" style="color:#e74c3c;">${card.ref}</div><div class="al">REF</div></div>
+  <div class="attr-box"><div class="av" style="color:#2ecc71;">${card.spd}</div><div class="al">SPD</div></div>
+  <div class="attr-box"><div class="av" style="color:#f1c40f;">${card.pos}</div><div class="al">POS</div></div>
+</div>
+
+<div class="charts-row">
+  <div class="chart-box">
+    <h3>Evolucion de nota media</h3>
+    <canvas id="chartNota" height="180"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>Goles encajados por temporada</h3>
+    <canvas id="chartGc" height="180"></canvas>
+  </div>
+</div>
+
+<p class="section-title">HISTORIAL DE PARTIDOS (ULTIMOS 30)</p>
+<table>
+  <thead><tr><th>Fecha</th><th>Rival</th><th>Res.</th><th>Par.</th><th>Nota</th><th>P0</th></tr></thead>
+  <tbody>$matchRows</tbody>
+</table>
+
+<div class="footer">
+  Guardian Elite v6.0 — Borja Martin R&D Edition — "No buscamos porteros que paren. Buscamos atletas que piensen, lideren y dominen."
+</div>
+
+<script>
+  const anios = $aniosJs;
+  const medias = $mediasJs;
+  const gcs = $gcsJs;
+  if (anios.length > 0) {
+    new Chart(document.getElementById('chartNota'), {
+      type: 'line',
+      data: { labels: anios, datasets: [{ label: 'Nota', data: medias, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, fill:true, tension:0.3 }] },
+      options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:100 } } }
+    });
+    new Chart(document.getElementById('chartGc'), {
+      type: 'bar',
+      data: { labels: anios, datasets: [{ label: 'Goles enc.', data: gcs, backgroundColor: 'rgba(220,53,69,0.7)', borderRadius:3 }] },
+      options: { responsive:true, plugins:{ legend:{ display:false } } }
+    });
+  }
+</script>
+</body>
+</html>"""
+
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.get("/admin/importer")
