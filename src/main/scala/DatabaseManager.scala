@@ -43,7 +43,7 @@ object DatabaseManager {
     config.setJdbcUrl(url)
     config.setUsername(dbUser)
     config.setPassword(dbPass)
-    config.setMaximumPoolSize(5)
+    config.setMaximumPoolSize(10)
     config.setMinimumIdle(1)
     config.setConnectionTimeout(10000)   // 10s esperando conexion libre del pool
     config.setIdleTimeout(300000)        // Cierra idle tras 5 min
@@ -538,9 +538,13 @@ object DatabaseManager {
         sb.append("Es probable que este algo mas impreciso. Trabajar <b>propiocepcion</b>.</div>")
       }
 
-      // 4. Calculo de Cargas (ACWR)
-      val acuteLoads = getWorkloads(7)
-      val chronicLoads = getWorkloads(28)
+      // 4. Calculo de Cargas (ACWR) — inline para no abrir segunda conexion
+      val rsAc = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsAc.setInt(1, 7); val rsAcR = rsAc.executeQuery()
+      val acuteLoads = Seq(if (rsAcR.next()) rsAcR.getDouble(1) else 0.0)
+      val rsCh = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsCh.setInt(1, 28); val rsChR = rsCh.executeQuery()
+      val chronicLoads = Seq(if (rsChR.next()) rsChR.getDouble(1) else 0.0)
       val acuteAvg = if (acuteLoads.nonEmpty) acuteLoads.sum / 7.0 else 0.0
       val chronicAvg = if (chronicLoads.nonEmpty) chronicLoads.sum / 28.0 else 1.0
       val acwr = if (chronicAvg > 0) acuteAvg / chronicAvg else 0.0
@@ -1226,14 +1230,23 @@ object DatabaseManager {
   }
 
   def getNotificationAlerts(): List[(String, String, String)] = {
-    // Lista de alertas activas: (tipo, titulo, mensaje)
     val alerts = scala.collection.mutable.ListBuffer[(String, String, String)]()
     val conn = getConnection()
     try {
-      // 1. ACWR riesgo
-      val acute = getWorkloads(7)
-      val chronic = getWorkloads(28)
-      val acwr = StatsCalculator.calculateACWR(acute, chronic)
+      // 1. ACWR riesgo — calculado directo sin sub-conexion
+      val rsAcute = conn.prepareStatement(
+        "SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?"
+      )
+      rsAcute.setInt(1, 7); val rsA = rsAcute.executeQuery()
+      val acuteLoad = if (rsA.next()) rsA.getDouble(1) else 0.0
+
+      val rsChronic = conn.prepareStatement(
+        "SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?"
+      )
+      rsChronic.setInt(1, 28); val rsC = rsChronic.executeQuery()
+      val chronicLoad = if (rsC.next()) rsC.getDouble(1) else 0.0
+
+      val acwr = if (chronicLoad > 0) (acuteLoad / 7.0) / (chronicLoad / 28.0) else 0.0
       if (acwr > 1.5) alerts += (("danger", "ACWR ALTO", s"Ratio carga: ${f"$acwr%.2f"} — Riesgo de lesion"))
 
       // 2. Sin registrar wellness hoy
@@ -1252,14 +1265,14 @@ object DatabaseManager {
           alerts += (("info", s"PARTIDO EN ${diasRestantes}D", s"vs ${fixEncoding(rsM.getString("rival"))} — ${rsM.getDate("fecha")}"))
       }
 
-      // 4. Baja atencion sostenida (3 sesiones con atencion < 6)
-      val rsA = conn.createStatement().executeQuery(
+      // 4. Baja atencion sostenida
+      val rsAtt = conn.createStatement().executeQuery(
         "SELECT COUNT(*) FROM trainings WHERE fecha >= CURRENT_DATE - 7 AND atencion < 6"
       )
-      if (rsA.next() && rsA.getInt(1) >= 3)
+      if (rsAtt.next() && rsAtt.getInt(1) >= 3)
         alerts += (("warning", "FATIGA MENTAL", "3+ sesiones con baja atencion esta semana"))
 
-    } finally { conn.close() }
+    } catch { case _: Exception => } finally { conn.close() }
     alerts.toList
   }
 
