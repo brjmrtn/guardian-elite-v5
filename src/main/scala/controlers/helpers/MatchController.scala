@@ -228,22 +228,49 @@ object MatchController extends cask.Routes {
     val d = n.media - c.media
     val msg = if(d > 0) s"SUBIDA DE NIVEL! +$d" else "Experiencia acumulada..."
 
+    val mediaAntes = c.media.toInt
+    val mediaDespues = n.media
+    cask.Response(
+      "".getBytes("UTF-8"),
+      statusCode = 302,
+      headers = Seq("Location" -> s"/match-center/saved?antes=$mediaAntes&despues=$mediaDespues&msg=${java.net.URLEncoder.encode(msg, "UTF-8")}")
+    )
+  }
+  @cask.get("/match-center/saved")
+  def matchSavedPage(request: cask.Request, antes: Int = 0, despues: Int = 0, msg: String = "") = withAuth(request) {
+    val diff = despues - antes
+    val (arrowColor, arrowSymbol) = if (diff > 0) ("success", "+") else if (diff == 0) ("warning", "=") else ("danger", "")
     renderHtml(doctype("html")(
       html(
-        head(tags2.style(raw(getCss()))),
-        body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';",
-          h1("OK"),
-          h2(style := "color: #d4af37;", "ANALISIS GUARDADO"),
-          div(style := "margin: 30px auto; width: 300px; background: #333; padding: 20px; border-radius: 10px;",
-            h3("Media Global"),
-            div(style := "font-size: 50px; font-weight: bold;", s"${c.media.toInt} -> ${n.media}"),
-            p(style := "color: #ffc107;", msg)
+        head(
+          meta(charset := "utf-8"),
+          tags2.title("Guardado"),
+          tags2.style(raw(getCss())),
+          meta(attr("http-equiv") := "refresh", content := "4; url=/")
+        ),
+        body(style := "background:#1a1a1a; color:white; text-align:center; padding-top:60px; font-family:'Oswald';",
+          div(style := "font-size:52px; margin-bottom:10px;", "✅"),
+          h2(style := "color:#d4af37; letter-spacing:2px;", "ANALISIS GUARDADO"),
+          div(style := "margin:30px auto; width:320px; background:#242424; padding:24px; border-radius:12px; border:1px solid #444;",
+            div(style := "font-size:13px; color:#aaa; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;", "Media Global"),
+            div(style := "font-size:52px; font-weight:700;",
+              span(style := "color:#888;", s"$antes"),
+              span(style := "color:#555; margin:0 10px;", "→"),
+              span(style := s"color:${if(diff>0)"#28a745"else if(diff==0)"#ffc107"else"#dc3545"};", s"$despues")
+            ),
+            if (diff != 0)
+              p(style := s"color:${if(diff>0)"#28a745"else"#dc3545"}; font-size:20px; font-weight:700; margin-top:8px;",
+                s"$arrowSymbol$diff puntos")
+            else p(),
+            p(style := "color:#ffc107; font-size:14px; margin-top:10px;", java.net.URLDecoder.decode(msg, "UTF-8"))
           ),
-          a(href := "/", style := "color: white; text-decoration: none; border: 1px solid white; padding: 10px 20px;", "Volver a Inicio")
+          p(style := "color:#555; font-size:13px; margin-top:20px;", "Redirigiendo al inicio en 4 segundos..."),
+          a(href := "/", style := "color:white; text-decoration:none; border:1px solid #555; padding:10px 24px; border-radius:6px; font-size:14px; letter-spacing:1px;", "INICIO")
         )
       )
     ).render)
   }
+
   @cask.get("/tournament/new")
   def newTournamentPage() = {
     val content = basePage("match-center",
