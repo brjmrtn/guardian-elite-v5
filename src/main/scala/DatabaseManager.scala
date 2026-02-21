@@ -283,10 +283,10 @@ object DatabaseManager {
   def escHtml(s: String): String = {
     if (s == null) ""
     else s.replace("&", "&amp;")
-          .replace("<", "&lt;")
-          .replace(">", "&gt;")
-          .replace("\"", "&quot;")
-          .replace("'", "&#x27;")
+      .replace("<", "&lt;")
+      .replace(">", "&gt;")
+      .replace("\"", "&quot;")
+      .replace("'", "&#x27;")
   }
   def calcularEdadExacta(fechaStr: String): Int = { try { Period.between(LocalDate.parse(fechaStr), LocalDate.now()).getYears } catch { case _: Exception => 5 } }
 
@@ -332,6 +332,12 @@ object DatabaseManager {
     val conn = getConnection(); try {
       val stmt = conn.createStatement()
       stmt.executeUpdate("DELETE FROM legends_milestones")
+      // Corregir nombres corruptos que puedan existir en DB de versiones anteriores
+      val fixStmt = conn.createStatement()
+      fixStmt.execute("UPDATE legends_milestones SET nombre = 'Marc-Andre ter Stegen' WHERE nombre LIKE 'Marc-Andr%ter Stegen'")
+      fixStmt.execute("UPDATE legends_milestones SET hito = REPLACE(hito, 'a\u00f1os', 'anos') WHERE hito LIKE '%a_os%'")
+      fixStmt.close()
+
       val ps = conn.prepareStatement("INSERT INTO legends_milestones (nombre, edad, hito) VALUES (?,?,?)")
       val data = Seq(("Marc-Andre ter Stegen", 5, "Jugaba de DELANTERO. No se puso de portero hasta los 10 anos."), ("Thibaut Courtois", 5, "Su deporte principal era el VOLEIBOL."), ("Iker Casillas", 6, "Jugaba en el patio del colegio El Recuerdo sobre cemento."), ("Gianluigi Buffon", 6, "Jugaba de centrocampista. Le gustaba correr y marcar goles."), ("Manuel Neuer", 5, "Llevaba un osito de peluche a la porteria."))
       data.foreach { case (n, e, h) => ps.setString(1, n); ps.setInt(2, e); ps.setString(3, fixEncoding(h)); ps.executeUpdate() }
@@ -351,10 +357,10 @@ object DatabaseManager {
         val safeNombre = escHtml(fixEncoding(rsLegend.getString("nombre")))
         val safeHito   = escHtml(fixEncoding(rsLegend.getString("hito")))
         "<div class='mb-3'>" +
-        "<h6 class='text-warning text-uppercase mb-1'>A TU EDAD (" + edad + " A\u00d1OS)...</h6>" +
-        "<h4 class='text-white fw-bold mb-1'>" + safeNombre + "</h4>" +
-        "<p class='text-light small fst-italic'>&quot;" + safeHito + "&quot;</p>" +
-        "</div>"
+          "<h6 class='text-warning text-uppercase mb-1'>A TU EDAD (" + edad + " A\u00d1OS)...</h6>" +
+          "<h4 class='text-white fw-bold mb-1'>" + safeNombre + "</h4>" +
+          "<p class='text-light small fst-italic'>&quot;" + safeHito + "&quot;</p>" +
+          "</div>"
       } else ""
       val diff = mediaLiga - miMedia; val color = if(diff >= 0) "text-success" else "text-danger"
       f"""<div class="card bg-secondary bg-opacity-10 border-warning shadow mb-4"><div class="card-header bg-dark text-warning fw-bold text-center small">CONTEXTO & LEYENDAS</div><div class="card-body">$legendHtml<hr class="border-secondary"><h6 class="text-info text-uppercase text-center mb-2 small fw-bold">COMPARATIVA RFFM</h6><div class="row text-center align-items-center"><div class="col-6 border-end border-secondary"><div class="small text-muted fw-bold">TU MEDIA</div><div class="display-6 fw-bold $color">${f"$miMedia%1.1f"}</div></div><div class="col-6"><div class="small text-muted fw-bold">MEDIA LIGA</div><div class="display-6 fw-bold text-white">${f"$mediaLiga%1.1f"}</div></div></div></div></div>"""
