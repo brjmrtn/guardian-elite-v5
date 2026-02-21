@@ -1133,6 +1133,136 @@ object DatabaseManager {
     } finally { conn.close() }
   }
 
+  // ── FASE 2: FUNCIONES COGNITIVAS Y CARGA ─────────────────────────────────
+
+  def getRPEHistory(days: Int = 60): List[(String, Int, Int, Int)] = {
+    // (fecha, rpe, calidad, atencion)
+    var l = List[(String, Int, Int, Int)]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        s"SELECT fecha::TEXT, rpe, calidad, atencion FROM trainings WHERE fecha >= CURRENT_DATE - $days ORDER BY fecha ASC"
+      )
+      while (rs.next()) l = l :+ (rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getInt(4))
+    } finally { conn.close() }
+    l
+  }
+
+  def getWeeklyLoad(weeks: Int = 12): List[(String, Int, Int)] = {
+    // (semana, carga_total=minutos*rpe, num_sesiones)
+    var l = List[(String, Int, Int)]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT
+          TO_CHAR(DATE_TRUNC('week', fecha), 'YYYY-MM-DD') as semana,
+          SUM(rpe * 60) as carga,
+          COUNT(*) as sesiones
+        FROM trainings
+        WHERE fecha >= CURRENT_DATE - ${weeks * 7}
+        GROUP BY DATE_TRUNC('week', fecha)
+        ORDER BY semana ASC
+      """)
+      while (rs.next()) l = l :+ (rs.getString(1), rs.getInt(2), rs.getInt(3))
+    } finally { conn.close() }
+    l
+  }
+
+  def getSleepMatchCorrelation(): List[(String, Double, Double, String)] = {
+    // Para cada partido: (fecha, horas_sueno_noche_anterior, nota_partido, rival)
+    var l = List[(String, Double, Double, String)]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          m.fecha::TEXT,
+          COALESCE(w.horas_sueno, 0) as horas,
+          m.nota,
+          m.rival
+        FROM matches m
+        LEFT JOIN wellness w ON w.fecha = m.fecha - INTERVAL '1 day'
+        WHERE m.status = 'PLAYED' AND m.nota > 0
+        ORDER BY m.fecha DESC
+        LIMIT 30
+      """)
+      while (rs.next()) l = l :+ (rs.getString(1), rs.getDouble(2), rs.getDouble(3), rs.getString(4))
+    } finally { conn.close() }
+    l
+  }
+
+  def getSleepHistory(days: Int = 60): List[(String, Double, Int, Int)] = {
+    // (fecha, horas_sueno, calidad_sueno(1-5), animo)
+    var l = List[(String, Double, Int, Int)]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        s"SELECT fecha::TEXT, horas_sueno, sueno, animo FROM wellness WHERE fecha >= CURRENT_DATE - $days ORDER BY fecha ASC"
+      )
+      while (rs.next()) l = l :+ (rs.getString(1), rs.getDouble(2), rs.getInt(3), rs.getInt(4))
+    } finally { conn.close() }
+    l
+  }
+
+  def getFatigaDetector(days: Int = 30): List[(String, Int, Double, Int)] = {
+    // (fecha, atencion_entreno, nota_academica, animo_wellness)
+    var l = List[(String, Int, Double, Int)]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT
+          t.fecha::TEXT,
+          t.atencion,
+          COALESCE(a.nota, 0) as nota_acad,
+          COALESCE(w.animo, 3) as animo
+        FROM trainings t
+        LEFT JOIN academic_performance a ON a.fecha = t.fecha
+        LEFT JOIN wellness w ON w.fecha = t.fecha
+        WHERE t.fecha >= CURRENT_DATE - $days
+        ORDER BY t.fecha ASC
+      """)
+      while (rs.next()) l = l :+ (rs.getString(1), rs.getInt(2), rs.getDouble(3), rs.getInt(4))
+    } finally { conn.close() }
+    l
+  }
+
+  def getNotificationAlerts(): List[(String, String, String)] = {
+    // Lista de alertas activas: (tipo, titulo, mensaje)
+    val alerts = scala.collection.mutable.ListBuffer[(String, String, String)]()
+    val conn = getConnection()
+    try {
+      // 1. ACWR riesgo
+      val acute = getWorkloads(7)
+      val chronic = getWorkloads(28)
+      val acwr = StatsCalculator.calculateACWR(acute, chronic)
+      if (acwr > 1.5) alerts += (("danger", "ACWR ALTO", s"Ratio carga: ${f"$acwr%.2f"} — Riesgo de lesion"))
+
+      // 2. Sin registrar wellness hoy
+      val rsW = conn.createStatement().executeQuery("SELECT COUNT(*) FROM wellness WHERE fecha = CURRENT_DATE")
+      if (rsW.next() && rsW.getInt(1) == 0)
+        alerts += (("warning", "SIN WELLNESS", "No has registrado tu estado fisico hoy"))
+
+      // 3. Proximo partido en menos de 3 dias
+      val rsM = conn.createStatement().executeQuery(
+        "SELECT rival, fecha FROM matches WHERE status='SCHEDULED' ORDER BY fecha ASC LIMIT 1"
+      )
+      if (rsM.next()) {
+        val fechaPartido = rsM.getDate("fecha").toLocalDate
+        val diasRestantes = java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), fechaPartido)
+        if (diasRestantes <= 3 && diasRestantes >= 0)
+          alerts += (("info", s"PARTIDO EN ${diasRestantes}D", s"vs ${fixEncoding(rsM.getString("rival"))} — ${rsM.getDate("fecha")}"))
+      }
+
+      // 4. Baja atencion sostenida (3 sesiones con atencion < 6)
+      val rsA = conn.createStatement().executeQuery(
+        "SELECT COUNT(*) FROM trainings WHERE fecha >= CURRENT_DATE - 7 AND atencion < 6"
+      )
+      if (rsA.next() && rsA.getInt(1) >= 3)
+        alerts += (("warning", "FATIGA MENTAL", "3+ sesiones con baja atencion esta semana"))
+
+    } finally { conn.close() }
+    alerts.toList
+  }
+
   def getCognitiveInsight(): String = {
     val conn = getConnection()
     try {

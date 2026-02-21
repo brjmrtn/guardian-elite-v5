@@ -73,6 +73,33 @@ object BioController extends cask.Routes {
       )
     )
 
+    // --- FASE 2: PANEL ACCESOS RAPIDOS ---
+    val fase2Panel = div(cls := "card bg-dark border-warning shadow mb-3",
+      div(cls := "card-header text-warning fw-bold small text-center", "ANALITICA AVANZADA"),
+      div(cls := "card-body p-2",
+        div(cls := "row g-2",
+          div(cls := "col-4",
+            a(href := "/bio/carga", cls := "btn btn-outline-warning w-100 fw-bold d-flex flex-column align-items-center py-2",
+              div(style := "font-size:22px;", "📉"),
+              div(cls := "xx-small mt-1", "CARGA RPE")
+            )
+          ),
+          div(cls := "col-4",
+            a(href := "/bio/sueno", cls := "btn btn-outline-info w-100 fw-bold d-flex flex-column align-items-center py-2",
+              div(style := "font-size:22px;", "🌙"),
+              div(cls := "xx-small mt-1", "SUENO")
+            )
+          ),
+          div(cls := "col-4",
+            a(href := "/bio/fatiga", cls := "btn btn-outline-danger w-100 fw-bold d-flex flex-column align-items-center py-2",
+              div(style := "font-size:22px;", "🧠"),
+              div(cls := "xx-small mt-1", "FATIGA")
+            )
+          )
+        )
+      )
+    )
+
     // --- FASE 4: MEDICAL VAULT SECTION ---
     val medicalVault = div(cls := "card bg-dark text-white border-danger shadow mb-3",
       div(cls := "card-header bg-danger text-white fw-bold text-center small", "🏥 MEDICAL VAULT & PASAPORTE BIOLOGICO"),
@@ -165,6 +192,7 @@ object BioController extends cask.Routes {
             )
           )
         ),
+        fase2Panel,
         medicalVault,
         academicForm, // Entrada de datos escolares
 
@@ -300,6 +328,444 @@ object BioController extends cask.Routes {
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
   }
   // --- 3. MODO LEGADO (RPG) ---
+
+  // ── FASE 2: PAGINA GRAFICO DE CARGA ───────────────────────────────────────
+  @cask.get("/bio/carga")
+  def cargaPage(request: cask.Request) = withAuth(request) {
+    val weekly   = DatabaseManager.getWeeklyLoad(12)
+    val rpeHist  = DatabaseManager.getRPEHistory(60)
+    val acute    = DatabaseManager.getWorkloads(7)
+    val chronic  = DatabaseManager.getWorkloads(28)
+    val acwr     = StatsCalculator.calculateACWR(acute, chronic)
+    val (acwrColor, acwrLabel) = if (acwr > 2.0) ("danger","RIESGO ALTO")
+    else if (acwr > 1.5) ("warning","SOBRECARGA")
+    else if (acwr < 0.8) ("info","BAJA CARGA")
+    else ("success","OPTIMO")
+
+    val semanasJs  = weekly.map(s => s""""${s._1}"""").mkString("[",",","]")
+    val cargasJs   = weekly.map(_._2.toString).mkString("[",",","]")
+    val sesionesJs = weekly.map(_._3.toString).mkString("[",",","]")
+
+    val fechasRPEJs  = rpeHist.map(r => s""""${r._1}"""").mkString("[",",","]")
+    val rpeJs        = rpeHist.map(_._2.toString).mkString("[",",","]")
+    val calidadJs    = rpeHist.map(_._3.toString).mkString("[",",","]")
+    val atencionJs   = rpeHist.map(_._4.toString).mkString("[",",","]")
+
+    val avgRpe  = if (rpeHist.nonEmpty) f"${rpeHist.map(_._2).sum.toDouble / rpeHist.size}%.1f" else "—"
+    val avgCal  = if (rpeHist.nonEmpty) f"${rpeHist.map(_._3).sum.toDouble / rpeHist.size}%.1f" else "—"
+    val avgAtt  = if (rpeHist.nonEmpty) f"${rpeHist.map(_._4).sum.toDouble / rpeHist.size}%.1f" else "—"
+
+    val content = basePage("bio",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h2(cls := "text-warning mb-0", "GRAFICO DE CARGA"),
+            a(href := "/bio", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Bio")
+          ),
+
+          // ACWR + KPIs
+          div(cls := "row g-2 mb-4",
+            div(cls := "col-3",
+              div(cls := s"card bg-dark border-$acwrColor text-center py-3",
+                div(cls := s"text-$acwrColor fw-bold", style := "font-size:28px;", f"$acwr%.2f"),
+                div(cls := "xx-small text-muted mt-1", "ACWR"),
+                div(cls := s"badge bg-$acwrColor mt-1", acwrLabel)
+              )
+            ),
+            Seq(("RPE Medio", avgRpe, "warning"), ("Calidad Media", avgCal, "success"), ("Atencion Media", avgAtt, "info")).map {
+              case (lbl, v, c) =>
+                div(cls := "col-3",
+                  div(cls := s"card bg-dark border-$c text-center py-3",
+                    div(cls := s"text-$c fw-bold fs-4", v),
+                    div(cls := "xx-small text-muted mt-1", lbl)
+                  )
+                )
+            }
+          ),
+
+          if (weekly.isEmpty && rpeHist.isEmpty) {
+            div(cls := "alert alert-secondary text-center py-5",
+              div(style := "font-size:40px; opacity:0.3;", "📉"),
+              div(cls := "fw-bold mt-2", "Sin sesiones de entrenamiento registradas"),
+              div(cls := "small text-muted mt-1", "Registra sesiones en Bio para ver tu carga")
+            )
+          } else div(
+            // Carga semanal
+            div(cls := "card bg-dark border-warning shadow mb-4",
+              div(cls := "card-header text-warning fw-bold small d-flex justify-content-between",
+                span("CARGA SEMANAL (RPE x Minutos)"),
+                span(cls := "text-muted xx-small fw-bold", "Ultimas 12 semanas")
+              ),
+              div(cls := "card-body",
+                div(style := "position:relative; height:220px;",
+                  tag("canvas")(id := "chartCargaSemanal")
+                )
+              )
+            ),
+            // RPE + atencion por sesion
+            div(cls := "card bg-dark border-secondary shadow mb-4",
+              div(cls := "card-header text-white fw-bold small", "RPE / CALIDAD / ATENCION POR SESION"),
+              div(cls := "card-body",
+                div(style := "position:relative; height:220px;",
+                  tag("canvas")(id := "chartRPE")
+                )
+              )
+            ),
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
+              const semanas  = $semanasJs;
+              const cargas   = $cargasJs;
+              const sesiones = $sesionesJs;
+              const fechasRPE = $fechasRPEJs;
+              const rpes     = $rpeJs;
+              const calidad  = $calidadJs;
+              const atencion = $atencionJs;
+
+              new Chart(document.getElementById('chartCargaSemanal'), {
+                type: 'bar',
+                data: {
+                  labels: semanas,
+                  datasets: [
+                    { label: 'Carga (RPE x min)', data: cargas, backgroundColor: 'rgba(212,175,55,0.7)', borderRadius: 4, yAxisID: 'y' },
+                    { label: 'Sesiones', data: sesiones, type: 'line', borderColor: '#17a2b8', backgroundColor: 'rgba(23,162,184,0.15)', borderWidth: 2, pointRadius: 4, yAxisID: 'y1' }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { ticks: { color: '#d4af37' }, grid: { color: 'rgba(255,255,255,0.05)' }, title: { display: true, text: 'Carga', color: '#888' } },
+                    y1: { position: 'right', ticks: { color: '#17a2b8' }, grid: { display: false }, title: { display: true, text: 'Sesiones', color: '#888' } }
+                  }
+                }
+              });
+
+              new Chart(document.getElementById('chartRPE'), {
+                type: 'line',
+                data: {
+                  labels: fechasRPE,
+                  datasets: [
+                    { label: 'RPE', data: rpes, borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.1)', borderWidth: 2, pointRadius: 3, tension: 0.3 },
+                    { label: 'Calidad', data: calidad, borderColor: '#28a745', backgroundColor: 'rgba(40,167,69,0.1)', borderWidth: 2, pointRadius: 3, tension: 0.3 },
+                    { label: 'Atencion', data: atencion, borderColor: '#17a2b8', backgroundColor: 'rgba(23,162,184,0.1)', borderWidth: 2, pointRadius: 3, tension: 0.3 }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x: { ticks: { color: '#888', maxTicksLimit: 10, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { min: 0, max: 10, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                  }
+                }
+              });
+            """))
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  // ── FASE 2: CORRELACION SUENO-RENDIMIENTO ─────────────────────────────────
+  @cask.get("/bio/sueno")
+  def suenoPage(request: cask.Request) = withAuth(request) {
+    val correlation = DatabaseManager.getSleepMatchCorrelation()
+    val sleepHist   = DatabaseManager.getSleepHistory(60)
+
+    val avgHoras = if (sleepHist.nonEmpty) f"${sleepHist.map(_._2).sum / sleepHist.size}%.1f" else "—"
+    val avgCalidad = if (sleepHist.nonEmpty) f"${sleepHist.map(_._3).sum.toDouble / sleepHist.size}%.1f" else "—"
+
+    // Calcular correlacion: partidos con buen sueno (>=8h) vs mal sueno (<7h)
+    val buenSueno = correlation.filter(_._2 >= 8.0)
+    val malSueno  = correlation.filter(c => c._2 > 0 && c._2 < 7.0)
+    val avgNotaBueno = if (buenSueno.nonEmpty) f"${buenSueno.map(_._3).sum / buenSueno.size}%.1f" else "—"
+    val avgNotaMalo  = if (malSueno.nonEmpty)  f"${malSueno.map(_._3).sum / malSueno.size}%.1f" else "—"
+
+    val fechasJs  = sleepHist.map(s => s""""${s._1}"""").mkString("[",",","]")
+    val horasJs   = sleepHist.map(_._2.toString).mkString("[",",","]")
+    val calidadJs = sleepHist.map(_._3.toString).mkString("[",",","]")
+
+    val corrFechasJs = correlation.map(c => s""""${c._1}"""").mkString("[",",","]")
+    val corrHorasJs  = correlation.map(_._2.toString).mkString("[",",","]")
+    val corrNotasJs  = correlation.map(_._3.toString).mkString("[",",","]")
+
+    val corrRows = correlation.map { case (fecha, horas, nota, rival) =>
+      val horasCls = if (horas >= 8) "text-success" else if (horas >= 7) "text-warning" else if (horas > 0) "text-danger" else "text-muted"
+      val notaCls  = if (nota >= 7) "text-success" else if (nota >= 5) "text-warning" else "text-danger"
+      tr(
+        td(fecha),
+        td(cls := "fw-bold text-white", fixEncoding(rival)),
+        td(cls := s"text-center fw-bold $horasCls", if (horas > 0) f"${horas}%.1fh" else "—"),
+        td(cls := s"text-center fw-bold $notaCls", nota.toString)
+      )
+    }
+
+    val content = basePage("bio",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h2(cls := "text-info mb-0", "SUENO & RENDIMIENTO"),
+            a(href := "/bio", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Bio")
+          ),
+
+          // KPIs
+          div(cls := "row g-2 mb-4",
+            Seq(
+              ("Media Horas", avgHoras + "h", "info"),
+              ("Calidad Media", avgCalidad + "/5", "warning"),
+              ("Nota c/buen sueno", avgNotaBueno, "success"),
+              ("Nota c/mal sueno", avgNotaMalo, "danger")
+            ).map { case (lbl, v, c) =>
+              div(cls := "col-3",
+                div(cls := s"card bg-dark border-$c text-center py-3",
+                  div(cls := s"text-$c fw-bold fs-4", v),
+                  div(cls := "xx-small text-muted mt-1", lbl)
+                )
+              )
+            }
+          ),
+
+          if (sleepHist.isEmpty) {
+            div(cls := "alert alert-secondary text-center py-5",
+              div(style := "font-size:40px; opacity:0.3;", "🌙"),
+              div(cls := "fw-bold mt-2", "Sin datos de sueno registrados"),
+              div(cls := "small text-muted mt-1", "Registra el sueno diario en Bio")
+            )
+          } else div(
+            // Grafico sueno historico
+            div(cls := "card bg-dark border-info shadow mb-4",
+              div(cls := "card-header text-info fw-bold small", "HORAS DE SUENO — Ultimos 60 dias"),
+              div(cls := "card-body",
+                div(style := "position:relative; height:200px;",
+                  tag("canvas")(id := "chartSueno")
+                )
+              )
+            ),
+            div(cls := "row g-3",
+              // Scatter correlacion
+              div(cls := "col-md-6",
+                div(cls := "card bg-dark border-success shadow",
+                  div(cls := "card-header text-success fw-bold small", "CORRELACION: SUENO → NOTA PARTIDO"),
+                  div(cls := "card-body",
+                    div(style := "position:relative; height:220px;",
+                      tag("canvas")(id := "chartCorr")
+                    )
+                  )
+                )
+              ),
+              // Tabla
+              div(cls := "col-md-6",
+                div(cls := "card bg-dark border-secondary shadow",
+                  div(cls := "card-header text-white fw-bold small", "HISTORIAL SUENO - PARTIDO"),
+                  div(cls := "card-body p-0",
+                    div(cls := "table-responsive", style := "max-height:240px; overflow-y:auto;",
+                      table(cls := "table table-dark table-sm mb-0 small",
+                        thead(tr(th("Fecha"), th("Rival"), th(cls:="text-center","Sueno"), th(cls:="text-center","Nota"))),
+                        tbody(corrRows)
+                      )
+                    )
+                  )
+                )
+              )
+            ),
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
+              const fechas  = $fechasJs;
+              const horas   = $horasJs;
+              const calidad = $calidadJs;
+              const corrFechas = $corrFechasJs;
+              const corrHoras  = $corrHorasJs;
+              const corrNotas  = $corrNotasJs;
+
+              new Chart(document.getElementById('chartSueno'), {
+                type: 'bar',
+                data: {
+                  labels: fechas,
+                  datasets: [
+                    { label: 'Horas dormidas', data: horas, backgroundColor: 'rgba(23,162,184,0.6)', borderRadius: 3, yAxisID: 'y' },
+                    { label: 'Calidad (1-5)', data: calidad, type: 'line', borderColor: '#ffc107', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3, yAxisID: 'y1' }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x: { ticks: { color: '#888', maxTicksLimit: 12, font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                    y: { min: 0, max: 12, ticks: { color: '#17a2b8' }, title: { display: true, text: 'Horas', color: '#888' } },
+                    y1: { position: 'right', min: 0, max: 5, ticks: { color: '#ffc107' }, grid: { display: false } }
+                  }
+                }
+              });
+
+              // Scatter: horas sueno vs nota partido
+              const scatterData = corrHoras.map((h, i) => ({x: parseFloat(h), y: parseFloat(corrNotas[i])})).filter(p => p.x > 0);
+              new Chart(document.getElementById('chartCorr'), {
+                type: 'scatter',
+                data: {
+                  datasets: [{
+                    label: 'Partido (horas → nota)',
+                    data: scatterData,
+                    backgroundColor: 'rgba(40,167,69,0.7)',
+                    pointRadius: 7,
+                    pointHoverRadius: 9
+                  }]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc' } }, tooltip: {
+                    callbacks: { label: ctx => corrFechas[ctx.dataIndex] + ' — ' + ctx.parsed.x + 'h → nota ' + ctx.parsed.y }
+                  }},
+                  scales: {
+                    x: { min: 4, max: 12, title: { display: true, text: 'Horas sueno', color: '#888' }, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { min: 0, max: 10, title: { display: true, text: 'Nota partido', color: '#888' }, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                  }
+                }
+              });
+            """))
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  // ── FASE 2: DETECTOR DE FATIGA MENTAL ─────────────────────────────────────
+  @cask.get("/bio/fatiga")
+  def fatigaPage(request: cask.Request) = withAuth(request) {
+    val datos    = DatabaseManager.getFatigaDetector(45)
+    val cogInsight = DatabaseManager.getCognitiveInsight()
+
+    val fechasJs   = datos.map(d => s""""${d._1}"""").mkString("[",",","]")
+    val atencionJs = datos.map(_._2.toString).mkString("[",",","]")
+    val acadJs     = datos.map(_._3.toString).mkString("[",",","]")
+    val animoJs    = datos.map(_._4.toString).mkString("[",",","]")
+
+    // Alertas de fatiga
+    val sesionesLowAtt = datos.filter(_._2 < 6).size
+    val avgAtt7 = { val last7 = datos.takeRight(7); if (last7.nonEmpty) last7.map(_._2).sum.toDouble / last7.size else 0.0 }
+    val avgAttAll = if (datos.nonEmpty) datos.map(_._2).sum.toDouble / datos.size else 0.0
+    val tendencia = avgAtt7 - avgAttAll
+    val (tendLabel, tendColor) = if (tendencia < -1.5) ("BAJANDO", "danger")
+    else if (tendencia > 1.0) ("SUBIENDO", "success")
+    else ("ESTABLE", "secondary")
+
+    val alertaWidget = if (sesionesLowAtt >= 5 || avgAtt7 < 6.0) {
+      div(cls := "alert alert-danger border-danger d-flex align-items-start gap-3 mb-4",
+        div(style := "font-size:28px;", "⚠️"),
+        div(
+          div(cls := "fw-bold", "ALERTA FATIGA MENTAL DETECTADA"),
+          div(cls := "small mt-1", s"$sesionesLowAtt sesiones con atencion < 6 en los ultimos 45 dias."),
+          div(cls := "small", s"Media de atencion ultimos 7 dias: ${f"$avgAtt7%.1f"}/10"),
+          div(cls := "small fst-italic mt-1 text-warning", "Recomendacion: Reducir intensidad cognitiva y aumentar recuperacion activa.")
+        )
+      )
+    } else if (tendencia < -0.8) {
+      div(cls := "alert alert-warning border-warning d-flex align-items-start gap-3 mb-4",
+        div(style := "font-size:28px;", "📉"),
+        div(
+          div(cls := "fw-bold", "TENDENCIA A LA BAJA"),
+          div(cls := "small mt-1", "La atencion en los entrenamientos recientes esta por debajo de tu media."),
+          div(cls := "small fst-italic text-warning", "Considera revisar carga academica o descanso.")
+        )
+      )
+    } else {
+      div(cls := "alert alert-success border-success d-flex align-items-start gap-3 mb-4",
+        div(style := "font-size:24px;", "✅"),
+        div(
+          div(cls := "fw-bold", "ESTADO COGNITIVO OPTIMO"),
+          div(cls := "small mt-1", "Atencion en niveles normales. Sin senales de fatiga mental.")
+        )
+      )
+    }
+
+    val content = basePage("bio",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h2(cls := "text-warning mb-0", "DETECTOR FATIGA MENTAL"),
+            a(href := "/bio", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Bio")
+          ),
+
+          // KPIs
+          div(cls := "row g-2 mb-3",
+            Seq(
+              ("Media Atencion", f"$avgAttAll%.1f/10", "info"),
+              ("Ultimos 7 dias", f"$avgAtt7%.1f/10", if(avgAtt7 >= 7)"success" else "danger"),
+              ("Sesiones bajo 6", sesionesLowAtt.toString, if(sesionesLowAtt >= 5)"danger" else "secondary"),
+              ("Tendencia", tendLabel, tendColor)
+            ).map { case (lbl, v, c) =>
+              div(cls := "col-3",
+                div(cls := s"card bg-dark border-$c text-center py-2",
+                  div(cls := s"text-$c fw-bold fs-5", v),
+                  div(cls := "xx-small text-muted", lbl)
+                )
+              )
+            }
+          ),
+
+          alertaWidget,
+
+          // Insight IA
+          div(cls := "card bg-dark border-info shadow mb-4",
+            div(cls := "card-header text-info fw-bold small", "ANALISIS IA — SINCRONIZACION COGNITIVA"),
+            div(cls := "card-body small text-light", raw(cogInsight))
+          ),
+
+          if (datos.isEmpty) {
+            div(cls := "alert alert-secondary text-center py-4",
+              div(cls := "fw-bold", "Sin datos de entrenamiento suficientes"),
+              div(cls := "small text-muted mt-1", "Registra sesiones con campo de atencion en Bio")
+            )
+          } else {
+            div(cls := "card bg-dark border-secondary shadow",
+              div(cls := "card-header text-white fw-bold small", "ATENCION vs RENDIMIENTO ACADEMICO — Ultimos 45 dias"),
+              div(cls := "card-body",
+                div(style := "position:relative; height:280px;",
+                  tag("canvas")(id := "chartFatiga")
+                )
+              )
+            )
+          },
+
+          script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+          script(raw(s"""
+            const fechas   = $fechasJs;
+            const atencion = $atencionJs;
+            const acad     = $acadJs;
+            const animo    = $animoJs;
+
+            if (fechas.length > 0) {
+              new Chart(document.getElementById('chartFatiga'), {
+                type: 'line',
+                data: {
+                  labels: fechas,
+                  datasets: [
+                    { label: 'Atencion entreno', data: atencion, borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.1)', borderWidth: 2, pointRadius: 4, tension: 0.3, yAxisID: 'y' },
+                    { label: 'Nota academica', data: acad.map(v => v > 0 ? v : null), borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.1)', borderWidth: 2, pointRadius: 4, tension: 0.3, yAxisID: 'y', spanGaps: true },
+                    { label: 'Animo (x2)', data: animo.map(v => v * 2), borderColor: '#17a2b8', backgroundColor: 'transparent', borderWidth: 1, borderDash: [4,4], pointRadius: 2, tension: 0.3, yAxisID: 'y' }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: {
+                    legend: { labels: { color: '#ccc', font: { size: 11 } } },
+                    annotation: {}
+                  },
+                  scales: {
+                    x: { ticks: { color: '#888', maxTicksLimit: 12, font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                    y: { min: 0, max: 10, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+                  }
+                }
+              });
+            }
+          """))
+        )
+      )
+    )
+    renderHtml(content)
+  }
 
   initialize()
 }
