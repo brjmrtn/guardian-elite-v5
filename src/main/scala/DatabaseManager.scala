@@ -748,6 +748,134 @@ object DatabaseManager {
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches WHERE status='PLAYED' ORDER BY fecha ASC LIMIT 15"); while(rs.next()){ l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally {conn.close()}; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
   def getAchievements(): List[Achievement] = { var l=List[Achievement](); val conn=getConnection(); try { val s=conn.createStatement(); val r1=s.executeQuery("SELECT COUNT(*) FROM matches WHERE goles_contra=0 AND status='PLAYED'"); if(r1.next()&&r1.getInt(1)>=5) l=l:+Achievement("(M)","El Muro",r1.getInt(1)/5,""); val r2=s.executeQuery("SELECT COUNT(*) FROM matches WHERE nota>=9 AND status='PLAYED'"); if(r2.next()&&r2.getInt(1)>0) l=l:+Achievement("(E)","MVP",r2.getInt(1),"") } finally { conn.close() }; l }
   def getSeasonObjectives(): List[Objective] = { var l=List[Objective](); val conn=getConnection(); try { val rsObj=conn.createStatement().executeQuery("SELECT id, tipo, objetivo, descripcion FROM objectives"); val objs=new scala.collection.mutable.ListBuffer[(Int,String,Int,String)](); while(rsObj.next()) objs+=((rsObj.getInt("id"),rsObj.getString("tipo"),rsObj.getInt("objetivo"),rsObj.getString("descripcion"))); val rsStats=conn.createStatement().executeQuery("SELECT COUNT(*) as pj, COUNT(CASE WHEN goles_contra=0 THEN 1 END) as cs, AVG(nota) as media FROM matches WHERE status='PLAYED'"); var (cs,pj,md)=(0,0,0.0); if(rsStats.next()){cs=rsStats.getInt("cs");pj=rsStats.getInt("pj");md=rsStats.getDouble("media")}; objs.foreach { case (id,t,m,d) => val act=t match { case "CleanSheets"=>cs.toDouble case "MediaNota"=>md case "PartidosJugados"=>pj.toDouble case _=>0.0 }; l=l:+Objective(id,t,act,m,d) } } finally { conn.close() }; l }
+  def getGoalHeatmap(temporada: String = ""): Map[String, Int] = {
+    val zones = Seq("TL","TC","TR","ML","MC","MR","BL","BC","BR")
+    val counts = scala.collection.mutable.Map(zones.map(_ -> 0): _*)
+    val conn = getConnection()
+    try {
+      val where = if (temporada.nonEmpty) s"AND fecha >= '$temporada-01-01' AND fecha <= '$temporada-12-31'" else ""
+      val rs = conn.createStatement().executeQuery(
+        s"SELECT zona_goles FROM matches WHERE status='PLAYED' AND zona_goles IS NOT NULL AND zona_goles != '' $where"
+      )
+      while (rs.next()) {
+        val zg = rs.getString("zona_goles")
+        zg.split(",").filter(_.nonEmpty).foreach { z =>
+          val key = z.trim.toUpperCase
+          if (counts.contains(key)) counts(key) += 1
+        }
+      }
+    } finally { conn.close() }
+    counts.toMap
+  }
+
+  def getGoalHeatmapByRival(rival: String): Map[String, Int] = {
+    val zones = Seq("TL","TC","TR","ML","MC","MR","BL","BC","BR")
+    val counts = scala.collection.mutable.Map(zones.map(_ -> 0): _*)
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT zona_goles FROM matches WHERE status='PLAYED' AND LOWER(rival) LIKE LOWER(?) AND zona_goles IS NOT NULL AND zona_goles != ''"
+      )
+      ps.setString(1, s"%$rival%")
+      val rs = ps.executeQuery()
+      while (rs.next()) {
+        rs.getString("zona_goles").split(",").filter(_.nonEmpty).foreach { z =>
+          val key = z.trim.toUpperCase
+          if (counts.contains(key)) counts(key) += 1
+        }
+      }
+    } finally { conn.close() }
+    counts.toMap
+  }
+
+  def getPenaltyDetailedStats(): (Map[String, (Int,Int)], List[(String,Int,Int)]) = {
+    // (zona -> (total, parados)), List[(rival, total, goles)]
+    val byZone  = scala.collection.mutable.Map[String,(Int,Int)]()
+    val byRival = scala.collection.mutable.ListBuffer[(String,Int,Int)]()
+    val conn = getConnection()
+    try {
+      val rs1 = conn.createStatement().executeQuery(
+        "SELECT zona_tiro, COUNT(*) as total, SUM(CASE WHEN es_gol THEN 0 ELSE 1 END) as parados FROM penalties GROUP BY zona_tiro ORDER BY total DESC"
+      )
+      while (rs1.next()) byZone(rs1.getString("zona_tiro")) = (rs1.getInt("total"), rs1.getInt("parados"))
+      val rs2 = conn.createStatement().executeQuery(
+        "SELECT rival, COUNT(*) as total, SUM(CASE WHEN es_gol THEN 1 ELSE 0 END) as goles FROM penalties WHERE rival IS NOT NULL AND rival != '' GROUP BY rival ORDER BY total DESC LIMIT 10"
+      )
+      while (rs2.next()) byRival += ((rs2.getString("rival"), rs2.getInt("total"), rs2.getInt("goles")))
+    } finally { conn.close() }
+    (byZone.toMap, byRival.toList)
+  }
+
+  def getTournamentMatches(nombre: String): List[MatchLog] = {
+    var l = List[MatchLog]()
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT * FROM matches WHERE LOWER(torneo_nombre)=LOWER(?) ORDER BY id ASC")
+      ps.setString(1, fixEncoding(nombre))
+      val rs = ps.executeQuery()
+      while (rs.next()) l = l :+ MatchLog(
+        rs.getInt("id"), rs.getString("rival"),
+        s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}",
+        rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString,
+        Option(rs.getString("clima")).getOrElse(""),
+        Option(rs.getString("estadio")).getOrElse(""),
+        Option(rs.getString("notas_partido")).getOrElse(""),
+        Option(rs.getString("video_url")).getOrElse(""),
+        Option(rs.getString("reaccion_goles")).getOrElse(""),
+        rs.getString("status"),
+        Option(rs.getString("tipo_partido")).getOrElse("TORNEO"),
+        rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"),
+        Option(rs.getString("analisis_voz")).getOrElse(""),
+        Option(rs.getString("torneo_nombre")).getOrElse(""),
+        Option(rs.getString("fase")).getOrElse(""),
+        rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"),
+        rs.getInt("acciones_pie"),
+        Option(rs.getString("zona_tiros")).getOrElse(""),
+        Option(rs.getString("zona_goles")).getOrElse("")
+      )
+    } finally { conn.close() }
+    l
+  }
+
+  def getTournamentNames(): List[String] = {
+    var l = List[String]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT DISTINCT torneo_nombre FROM matches WHERE torneo_nombre IS NOT NULL AND torneo_nombre != '' ORDER BY torneo_nombre"
+      )
+      while (rs.next()) l = l :+ rs.getString("torneo_nombre")
+    } finally { conn.close() }
+    l
+  }
+
+  def getSeasonEvolution(): List[(String, Double, Int, Int, Int)] = {
+    // (anio, mediaPartidos, pj, gc, porteriasCero)
+    var l = List[(String, Double, Int, Int, Int)]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          EXTRACT(YEAR FROM fecha)::TEXT as anio,
+          AVG(nota) as media,
+          COUNT(*) as pj,
+          SUM(goles_contra) as gc,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as pcs
+        FROM matches WHERE status='PLAYED'
+        GROUP BY EXTRACT(YEAR FROM fecha)
+        ORDER BY anio ASC
+      """)
+      while (rs.next()) l = l :+ (
+        rs.getString("anio"),
+        rs.getDouble("media"),
+        rs.getInt("pj"),
+        rs.getInt("gc"),
+        rs.getInt("pcs")
+      )
+    } finally { conn.close() }
+    l
+  }
+
   def getTacticalStats(): Map[String, Int] = { var stats = scala.collection.mutable.Map("g_tot"->0, "g_alt"->0, "g_med"->0, "g_ras"->0, "g_izq"->0, "g_cen"->0, "g_der"->0, "p_tot"->0, "p_alt"->0, "p_med"->0, "p_ras"->0, "p_izq"->0, "p_cen"->0, "p_der"->0); val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT zona_goles, zona_paradas FROM matches WHERE status='PLAYED' ORDER BY id DESC LIMIT 20"); while(rs.next()) { val zG = Option(rs.getString("zona_goles")).getOrElse(""); val zP = Option(rs.getString("zona_paradas")).getOrElse(""); zG.split(",").filter(_.nonEmpty).foreach { z => stats("g_tot")+=1; if(z.contains("T")) stats("g_alt")+=1 else if(z.contains("M")) stats("g_med")+=1 else stats("g_ras")+=1; if(z.contains("L")) stats("g_izq")+=1 else if(z.contains("C")) stats("g_cen")+=1 else stats("g_der")+=1 }; zP.split(",").filter(_.nonEmpty).foreach { z => stats("p_tot")+=1; if(z.contains("T")) stats("p_alt")+=1 else if(z.contains("M")) stats("p_med")+=1 else stats("p_ras")+=1; if(z.contains("L")) stats("p_izq")+=1 else if(z.contains("C")) stats("p_cen")+=1 else stats("p_der")+=1 } } } finally { conn.close() }; stats.toMap }
   def updateStats(s: PlayerCardData): Unit = { val conn=getConnection(); try { val st=conn.prepareStatement("UPDATE seasons SET media=?, stat_div=?, stat_han=?, stat_kic=?, stat_ref=?, stat_spd=?, stat_pos=? WHERE id=(SELECT MAX(id) FROM seasons)"); st.setDouble(1,s.media); st.setDouble(2,s.divRaw); st.setDouble(3,s.hanRaw); st.setDouble(4,s.kicRaw); st.setDouble(5,s.refRaw); st.setDouble(6,s.spdRaw); st.setDouble(7,s.posRaw); st.executeUpdate() } finally { conn.close() } }
   def getBackupCSV(): String = { val sb=new StringBuilder(); sb.append("RIVAL,GF,GC,MIN,NOTA,PARADAS,CLIMA,ESTADIO,NOTAS,REACCION,FECHA\n"); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"); while(rs.next()){ sb.append(s"${rs.getString("rival")},${rs.getInt("goles_favor")},${rs.getInt("goles_contra")},${rs.getInt("minutos")},${rs.getDouble("nota")},${rs.getInt("paradas")},${Option(rs.getString("clima")).getOrElse("Sol")},${Option(rs.getString("estadio")).getOrElse("-")},${Option(rs.getString("notas_partido")).getOrElse("")},${Option(rs.getString("reaccion_goles")).getOrElse("")},${rs.getDate("fecha")}\n") } } finally {conn.close()}; sb.toString() }

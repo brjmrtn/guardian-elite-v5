@@ -66,15 +66,51 @@ object SharedLayout {
             div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"),
             div(cls:="d-flex align-items-center gap-3",
               a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
+              span(id:="themeToggle", onclick:="toggleTheme()", style:="cursor:pointer; font-size:20px; user-select:none;", "☀️"),
               a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
             )
           ),
-          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "ℹ️"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
+          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "ℹ️"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/tournament/bracket", cls:=s"nav-item ${if(activeLink=="bracket") "active" else ""}", div(cls:="nav-icon", "🏆"), span(cls:="nav-label", "Torneo")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
+        ,script(raw("""
+        (function(){
+          var t=localStorage.getItem('guardian_theme')||'dark';
+          if(t==='light'){document.body.classList.add('light-mode');var btn=document.getElementById('themeToggle');if(btn)btn.textContent='🌙';}
+        })();
+        function toggleTheme(){
+          var isLight=document.body.classList.toggle('light-mode');
+          localStorage.setItem('guardian_theme', isLight?'light':'dark');
+          var btn=document.getElementById('themeToggle');
+          if(btn)btn.textContent=isLight?'🌙':'☀️';
+        }
+      """))
       ).render
   }
 
   def getCss() = """
-    body { background-color: #121212; color: #f0f0f0; font-family: 'Oswald', sans-serif; padding-bottom: 80px; margin: 0; font-weight: 500; }
+    :root {
+      --bg-main: #121212; --bg-card: #1e1e1e; --bg-nav: #1a1a1a;
+      --text-main: #f0f0f0; --text-muted: #aaa; --border-col: #333;
+      --input-bg: #2b2b2b; --input-color: #fff;
+    }
+    body.light-mode {
+      --bg-main: #f5f5f5; --bg-card: #ffffff; --bg-nav: #ffffff;
+      --text-main: #111; --text-muted: #666; --border-col: #ddd;
+      --input-bg: #fff; --input-color: #111;
+    }
+    body { background-color: var(--bg-main); color: var(--text-main); font-family: 'Oswald', sans-serif; padding-bottom: 80px; margin: 0; font-weight: 500; transition: background 0.3s, color 0.3s; }
+    body.light-mode .card, body.light-mode .bg-dark { background-color: #ffffff !important; color: #111 !important; }
+    body.light-mode .text-muted { color: #666 !important; }
+    body.light-mode .app-header, body.light-mode .bottom-nav { background: #ffffff !important; border-color: #ddd !important; }
+    body.light-mode .nav-item { color: #555 !important; }
+    body.light-mode .nav-item.active { color: #d4af37 !important; }
+    body.light-mode .tm-table { background-color: #f9f9f9; }
+    body.light-mode table.table-dark { --bs-table-bg: #f9f9f9; --bs-table-color: #111; }
+    body.light-mode input, body.light-mode select, body.light-mode textarea,
+    body.light-mode .form-control, body.light-mode .form-select {
+      background-color: #fff !important; color: #111 !important; border-color: #ccc !important;
+    }
+    .theme-toggle-btn { position:fixed; top:12px; right:12px; z-index:2000; background:rgba(0,0,0,0.3); border:1px solid #444; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:18px; transition:all 0.2s; }
+    .theme-toggle-btn:hover { background:rgba(212,175,55,0.3); }
 
     /* MODO OSCURO FORZADO PARA INPUTS Y SELECTS */
     input, select, textarea, .form-control, .form-select {
@@ -116,6 +152,27 @@ object SharedLayout {
 .playlist-item { cursor: pointer; border: 1px solid transparent; transition: all 0.2s; background: rgba(255,255,255,0.03); }
 .playlist-item:hover { background: rgba(212,175,55,0.1); border-color: rgba(212,175,55,0.3); }
 .playlist-item.active { background: rgba(212,175,55,0.15); border-color: #d4af37 !important; }
+
+/* PENALTIS HEATMAP */
+.pen-heatmap-cell { min-height:60px; border-radius:3px; transition:transform 0.15s, box-shadow 0.15s; }
+.pen-heatmap-cell:hover { transform:scale(1.08); box-shadow:0 0 10px rgba(220,53,69,0.6); z-index:2; position:relative; }
+
+/* BRACKET TORNEO */
+.bracket-match { transition: transform 0.15s; }
+.bracket-match:hover { transform: translateX(3px); }
+
+/* MAPA DE GOLES */
+.goal-heatmap-cell {
+  min-height: 70px;
+  border-radius: 4px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.goal-heatmap-cell:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 12px rgba(220,53,69,0.5);
+  z-index: 2;
+  position: relative;
+}
     .field-container { width: 100%; height: 60vh; background-color: #2e7d32; border-radius: 8px; overflow: hidden; touch-action: none; }
     #rivalInput {
       position: relative !important;

@@ -685,5 +685,124 @@ object MatchController extends cask.Routes {
     renderHtml(content)
   }
 
+  @cask.get("/tournament/bracket")
+  def tournamentBracket(request: cask.Request, nombre: String = "") = withAuth(request) {
+    val torneos = DatabaseManager.getTournamentNames()
+    val matches = if (nombre.nonEmpty) DatabaseManager.getTournamentMatches(nombre) else List.empty
+
+    // Agrupar por fase
+    val byFase = matches.groupBy(_.fase)
+    val fasesOrden = Seq("Grupos","Cuartos","Semifinal","Final","Octavos","Ronda 1","Ronda 2","Ronda 3")
+    val fases = (fasesOrden.filter(byFase.contains) ++ byFase.keys.filterNot(fasesOrden.contains)).distinct
+
+    def matchCard(m: MatchLog) = {
+      val (gf, gc) = m.resultado.split("-") match {
+        case Array(a,b) => (a.trim, b.trim); case _ => ("-","-")
+      }
+      val statusCls = if (m.status == "PLAYED") {
+        if (gf.toIntOption.getOrElse(0) > gc.toIntOption.getOrElse(0)) "border-success"
+        else if (gf == gc) "border-warning"
+        else "border-danger"
+      } else "border-secondary"
+      val resultBadge = if (m.status == "PLAYED")
+        span(cls := s"badge ${if(gf.toIntOption.getOrElse(0) > gc.toIntOption.getOrElse(0)) "bg-success" else "bg-danger"} fw-bold ms-2",
+          s"$gf - $gc")
+      else span(cls := "badge bg-secondary ms-2", "Pendiente")
+
+      div(cls := s"card bg-dark $statusCls shadow bracket-match mb-2",
+        div(cls := "card-body p-2",
+          div(cls := "d-flex justify-content-between align-items-center",
+            div(
+              div(cls := "fw-bold text-white small", fixEncoding(m.rival)),
+              div(cls := "xx-small text-muted", m.fecha)
+            ),
+            resultBadge
+          ),
+          if (m.status == "PLAYED" && m.nota > 0)
+            div(cls := "xx-small text-muted mt-1", s"Nota: ${m.nota} | Paradas: ${m.paradas}")
+          else span()
+        )
+      )
+    }
+
+    val bracketContent = if (nombre.isEmpty || matches.isEmpty) {
+      div(cls := "alert alert-secondary text-center py-4",
+        div(style:="font-size:36px; opacity:0.3;","🏆"),
+        div(cls:="fw-bold mt-2", if(nombre.isEmpty)"Selecciona un torneo" else s"Sin partidos en '$nombre'")
+      )
+    } else {
+      div(cls := "bracket-container",
+        div(cls := "d-flex gap-3 overflow-auto pb-3",
+          fases.map { fase =>
+            val ms = byFase.getOrElse(fase, List.empty)
+            div(style := "min-width: 220px;",
+              div(cls := "text-center mb-2",
+                span(cls := "badge bg-warning text-dark fw-bold px-3 py-2", style:="font-size:13px;", fase.toUpperCase)
+              ),
+              div(ms.map(matchCard))
+            )
+          }
+        ),
+        // Stats del torneo
+        if (matches.exists(_.status == "PLAYED")) {
+          val played = matches.filter(_.status == "PLAYED")
+          val wins = played.count(m => { val p = m.resultado.split("-"); p(0).trim.toIntOption.getOrElse(0) > p(1).trim.toIntOption.getOrElse(0) })
+          val gc = played.flatMap(m => m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption)).sum
+          val avgNota = if (played.nonEmpty) played.map(_.nota).sum / played.size else 0.0
+          div(cls := "row g-2 mt-3",
+            Seq(
+              ("Partidos", played.size.toString, "secondary"),
+              ("Victorias", wins.toString, "success"),
+              ("Goles Enc.", gc.toString, "danger"),
+              ("Nota Media", f"$avgNota%.1f", "warning")
+            ).map { case (lbl, v, c) =>
+              div(cls := "col-3",
+                div(cls := s"card bg-dark border-$c text-center py-2",
+                  div(cls := s"text-$c fw-bold fs-5", v),
+                  div(cls := "xx-small text-muted", lbl)
+                )
+              )
+            }
+          )
+        } else div()
+      )
+    }
+
+    val content = basePage("match-center",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+          h2(cls := "text-center text-warning mb-1", "BRACKET TORNEO"),
+          p(cls := "text-center text-muted small mb-4", "Visualizacion de fases y resultados"),
+
+          // Selector de torneo
+          div(cls := "card bg-dark border-secondary shadow mb-4",
+            div(cls := "card-body d-flex gap-2 flex-wrap align-items-center",
+              span(cls := "text-muted small fw-bold me-2", "Torneo:"),
+              if (torneos.isEmpty)
+                span(cls := "text-muted small", "Sin torneos registrados. Crea uno desde Match Center.")
+              else
+                div(cls := "d-flex gap-2 flex-wrap",
+                  a(href := "/tournament/bracket",
+                    cls := s"btn btn-sm fw-bold ${if(nombre.isEmpty)"btn-warning"else"btn-outline-secondary"}",
+                    "Seleccionar"),
+                  torneos.map { t =>
+                    a(href := s"/tournament/bracket?nombre=${java.net.URLEncoder.encode(t, "UTF-8")}",
+                      cls := s"btn btn-sm fw-bold ${if(nombre == t)"btn-warning"else"btn-outline-secondary"}",
+                      fixEncoding(t))
+                  }
+                ),
+              div(cls := "ms-auto",
+                a(href := "/tournament/new", cls := "btn btn-sm btn-outline-warning fw-bold", "+ Nuevo Torneo")
+              )
+            )
+          ),
+
+          bracketContent
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
   initialize()
 }
