@@ -95,8 +95,12 @@ object AdminController extends cask.Routes {
           div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
             h5(cls := "text-white", "Informe PDF"),
             p(cls := "small text-muted fw-bold", "Genera un informe limpio para imprimir o guardar como PDF."),
-            a(href := "/admin/print_report", target := "_blank", cls := "btn btn-info w-100 fw-bold",
-              "Generar Informe")
+            div(cls := "d-grid gap-2",
+              a(href := "/admin/print_report", target := "_blank", cls := "btn btn-info w-100 fw-bold",
+                "Generar Informe PDF"),
+              a(href := "/admin/captacion", target := "_blank", cls := "btn btn-outline-warning w-100 fw-bold",
+                "🎭 Dossier Captacion Anonimo")
+            )
           ),
           div(cls := "card bg-dark border-info shadow p-3",
             h5(cls := "text-info", "Gestionar Objetivos"),
@@ -565,6 +569,137 @@ object AdminController extends cask.Routes {
   // ==========================================
 
   // --- 1. EL ORACULO (Prediccion de Altura) ---
+
+  // ── INFORME DE CAPTACION ANONIMO ────────────────────────────────────────────
+  @cask.get("/admin/captacion")
+  def captacionReport(request: cask.Request) = withAuth(request) {
+    val card   = DatabaseManager.getLatestCardData()
+    val career = DatabaseManager.getCareerSummary()
+    val matches = DatabaseManager.getMatchesList().take(20)
+    val avgNota = if (matches.nonEmpty) f"${matches.map(_.nota).sum / matches.size}%.1f" else "—"
+    val totalPJ = matches.size
+    val totalCS = matches.count(m => { val p = m.resultado.split("-"); p.lastOption.flatMap(_.trim.toIntOption).getOrElse(1) == 0 })
+    val totalGC = matches.map(m => m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(0)).sum
+    val csRate  = if (totalPJ > 0) f"${totalCS * 100 / totalPJ}%%" else "—"
+
+    renderHtml(doctype("html")(html(
+      head(
+        meta(charset := "utf-8"),
+        tags2.title("Dossier Captacion"),
+        tags2.style(raw("""
+          @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Roboto:wght@300;400;500&display=swap');
+          * { margin:0; padding:0; box-sizing:border-box; }
+          body { font-family:'Roboto',sans-serif; background:#fff; color:#222; }
+          .cover { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#fff; padding:60px 40px; text-align:center; }
+          .cover h1 { font-family:'Oswald',sans-serif; font-size:42px; letter-spacing:4px; color:#d4af37; }
+          .cover .subtitle { font-size:14px; color:#aaa; letter-spacing:3px; margin-top:8px; text-transform:uppercase; }
+          .cover .anon-badge { display:inline-block; margin-top:16px; background:rgba(212,175,55,0.2); border:1px solid #d4af37; padding:4px 16px; border-radius:20px; font-size:11px; color:#d4af37; letter-spacing:2px; }
+          .section { padding:32px 40px; }
+          .section h2 { font-family:'Oswald',sans-serif; font-size:18px; letter-spacing:2px; color:#0f3460; border-bottom:2px solid #d4af37; padding-bottom:6px; margin-bottom:20px; text-transform:uppercase; }
+          .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+          .kpi { text-align:center; padding:16px; background:#f8f9fa; border-radius:8px; border-top:3px solid #d4af37; }
+          .kpi .val { font-family:'Oswald',sans-serif; font-size:32px; font-weight:700; color:#0f3460; }
+          .kpi .lbl { font-size:10px; color:#888; text-transform:uppercase; letter-spacing:1px; margin-top:4px; }
+          .attr-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:24px; }
+          .attr { text-align:center; padding:12px 6px; background:#0f3460; border-radius:6px; }
+          .attr .val { font-family:'Oswald',sans-serif; font-size:26px; font-weight:700; color:#d4af37; }
+          .attr .lbl { font-size:9px; color:#aaa; text-transform:uppercase; letter-spacing:1px; }
+          .season-row { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid #eee; font-size:13px; }
+          .match-row { display:grid; grid-template-columns:80px 1fr 60px 60px; gap:8px; padding:6px 0; border-bottom:1px solid #eee; font-size:12px; align-items:center; }
+          .nota-badge { text-align:center; padding:2px 8px; border-radius:12px; font-weight:700; font-size:11px; }
+          .nota-good { background:#d4edda; color:#155724; }
+          .nota-med  { background:#fff3cd; color:#856404; }
+          .nota-bad  { background:#f8d7da; color:#721c24; }
+          .footer { background:#1a1a2e; color:#aaa; text-align:center; padding:20px; font-size:11px; letter-spacing:1px; }
+          @media print { body { -webkit-print-color-adjust:exact; } }
+        """))
+      ),
+      body(
+        // Portada
+        div(cls := "cover",
+          div(style := "font-size:64px; margin-bottom:16px;", "🛡️"),
+          div(cls := "subtitle", "DOSSIER TECNICO DE CAPTACION"),
+          h1("PORTERO — GK"),
+          div(cls := "anon-badge", "DATOS PERSONALES ANONIMIZADOS"),
+          div(style := "margin-top:24px; color:#888; font-size:12px;",
+            s"Generado: ${java.time.LocalDate.now()} | Guardian Elite v6.0")
+        ),
+
+        // KPIs globales
+        div(cls := "section",
+          tags2.h2("Estadisticas Globales"),
+          div(cls := "kpi-grid",
+            Seq(
+              ("Partidos jugados", totalPJ.toString),
+              ("Media global", avgNota),
+              ("Porterias a 0", s"$totalCS ($csRate)"),
+              ("Goles encajados", totalGC.toString)
+            ).map { case (lbl, v) =>
+              div(cls := "kpi",
+                div(cls := "val", v),
+                div(cls := "lbl", lbl)
+              )
+            }
+          ),
+
+          // Atributos
+          tags2.h2("Perfil Tecnico"),
+          div(cls := "attr-grid",
+            Seq(("DIV", card.div), ("HAN", card.han), ("KIC", card.kic),
+              ("REF", card.ref), ("SPD", card.spd), ("POS", card.pos)).map { case (lbl, v) =>
+              div(cls := "attr",
+                div(cls := "val", v.toString),
+                div(cls := "lbl", lbl)
+              )
+            }
+          ),
+
+          // Trayectoria por temporadas
+          if (career.nonEmpty) div(
+            tags2.h2("Trayectoria por Temporada"),
+            career.map { s =>
+              div(cls := "season-row",
+                span(style := "font-weight:600; color:#0f3460;", s.categoria),
+                span(s"${s.pj} partidos jugados"),
+                span(s"${s.gc} goles encajados"),
+                span(style := "font-weight:700; color:#d4af37;", s"Media: ${s.media}")
+              )
+            }
+          ) else div(),
+
+          // Ultimos 20 partidos (sin nombre del rival)
+          tags2.h2("Ultimos Partidos (datos tecnicos)"),
+          div(
+            div(cls := "match-row",
+              span(style:="font-weight:700; font-size:10px; color:#888;", "FECHA"),
+              span(style:="font-weight:700; font-size:10px; color:#888;", "RESULTADO"),
+              span(style:="font-weight:700; font-size:10px; color:#888; text-align:center;", "PARADAS"),
+              span(style:="font-weight:700; font-size:10px; color:#888; text-align:center;", "NOTA")
+            ),
+            matches.map { m =>
+              val notaCls = if (m.nota >= 7) "nota-good" else if (m.nota >= 5) "nota-med" else "nota-bad"
+              div(cls := "match-row",
+                span(style:="color:#888;", m.fecha.take(10)),
+                span(style:="font-weight:500;", m.resultado),
+                span(style:="text-align:center;", m.paradas.toString),
+                span(cls := s"nota-badge $notaCls", m.nota.toString)
+              )
+            }
+          )
+        ),
+
+        // Footer
+        div(cls := "footer",
+          "GUARDIAN ELITE v6.0 — Dossier generado automaticamente | Datos personales anonimizados para proceso de captacion",
+          div(style := "margin-top:6px;",
+            a(href := "javascript:window.print()",
+              style := "color:#d4af37; font-weight:700; font-size:13px; letter-spacing:2px; text-decoration:none; cursor:pointer;",
+              "IMPRIMIR / GUARDAR PDF")
+          )
+        )
+      )
+    ).render)
+  }
 
   initialize()
 }
