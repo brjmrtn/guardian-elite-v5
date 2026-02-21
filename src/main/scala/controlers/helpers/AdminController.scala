@@ -698,7 +698,7 @@ object AdminController extends cask.Routes {
           )
         )
       )
-    ).render)
+    ).render))
   }
 
   initialize()
