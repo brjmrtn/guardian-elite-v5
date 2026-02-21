@@ -290,13 +290,25 @@ object BioController extends cask.Routes {
   }
 
   @cask.postForm("/bio/medical/upload")
-  def uploadMedical(fecha: String,
+  def uploadMedical(request: cask.Request,
+                    fecha: String,
                     tipo: String,
-                    esPrevio: String = "false",
-                    archivo: cask.FormFile) = {
+                    esPrevio: String = "false") = {
     val isPrevio = esPrevio == "on"
-    val fileBytes = archivo.bytes
-    val fileName  = if (archivo.fileName.nonEmpty) archivo.fileName else "documento.pdf"
+    // Extraer el archivo del multipart sin depender de la API de FormFile
+    val formData = request.multiParams
+    val archivoOpt = formData.get("archivo").flatMap(_.headOption)
+    val fileBytes: Array[Byte] = archivoOpt.map { fv =>
+      try { fv.getClass.getMethod("bytes").invoke(fv).asInstanceOf[Array[Byte]] }
+      catch { case _: Exception =>
+        try { fv.getClass.getMethod("data").invoke(fv).asInstanceOf[Array[Byte]] }
+        catch { case _: Exception => Array.empty[Byte] }
+      }
+    }.getOrElse(Array.empty[Byte])
+    val fileName: String = archivoOpt.map { fv =>
+      try { fv.getClass.getMethod("fileName").invoke(fv).asInstanceOf[String] }
+      catch { case _: Exception => "documento.pdf" }
+    }.getOrElse("documento.pdf")
 
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini
