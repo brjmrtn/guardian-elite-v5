@@ -16,6 +16,7 @@ case class GearItem(id: Int, nombre: String, tipo: String, usos: Int, maxUsos: I
 case class Objective(id: Int, tipo: String, actual: Double, meta: Int, descripcion: String)
 case class Drill(id: Int, nombre: String, desc: String, actual: Int, objetivo: Int)
 case class VideoTag(id: Int, matchId: Int, minuto: Int, segundo: Int, tipo: String, desc: String)
+case class VideoClip(tagId: Int, matchId: Int, rival: String, fecha: String, videoUrl: String, minuto: Int, segundo: Int, tipo: String)
 case class RivalInfo(nombre: String, estilo: String, claves: String, notas: String)
 case class PenaltyStat(zona: String, total: Int, goles: Int)
 case class RPGStatus(nivel: Int, xp: Int, nextLevelXp: Int, titulo: String, cinturonJudo: String)
@@ -841,6 +842,33 @@ object DatabaseManager {
   def addVideoTag(matchId: Int, min: Int, sec: Int, tipo: String, desc: String): Unit = { val conn=getConnection(); try{ val ps=conn.prepareStatement("INSERT INTO video_tags (match_id, minuto, segundo, tipo, descripcion) VALUES (?,?,?,?,?)"); ps.setInt(1, matchId); ps.setInt(2, min); ps.setInt(3, sec); ps.setString(4, tipo); ps.setString(5, fixEncoding(desc)); ps.executeUpdate() } finally {conn.close()} }
   def getVideoTags(matchId: Int): List[VideoTag] = { var l=List[VideoTag](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery(s"SELECT * FROM video_tags WHERE match_id=$matchId ORDER BY minuto ASC, segundo ASC"); while(rs.next()) l=l:+VideoTag(rs.getInt("id"), rs.getInt("match_id"), rs.getInt("minuto"), rs.getInt("segundo"), rs.getString("tipo"), rs.getString("descripcion")) } finally {conn.close()}; l }
   def deleteVideoTag(id: Int): Unit = { val conn=getConnection(); try{ conn.createStatement().executeUpdate(s"DELETE FROM video_tags WHERE id=$id") } finally {conn.close()} }
+
+  def getVideotecaClips(tipoFiltro: String = ""): List[VideoClip] = {
+    var clips = List[VideoClip]()
+    val conn = getConnection()
+    try {
+      val where = if (tipoFiltro.nonEmpty) s"AND vt.tipo = '$tipoFiltro'" else ""
+      val sql = s"""
+        SELECT vt.id, vt.match_id, m.rival, m.fecha, m.video,
+               vt.minuto, vt.segundo, vt.tipo
+        FROM video_tags vt
+        JOIN match_logs m ON vt.match_id = m.id
+        WHERE m.video IS NOT NULL AND m.video != '' $where
+        ORDER BY m.fecha DESC, vt.minuto ASC, vt.segundo ASC
+      """
+      val rs = conn.createStatement().executeQuery(sql)
+      while (rs.next()) {
+        clips = clips :+ VideoClip(
+          rs.getInt("id"), rs.getInt("match_id"),
+          rs.getString("rival"), rs.getString("fecha"),
+          rs.getString("video"),
+          rs.getInt("minuto"), rs.getInt("segundo"),
+          rs.getString("tipo")
+        )
+      }
+    } finally { conn.close() }
+    clips
+  }
   def logPenalty(rival: String, zTiro: String, zSalto: String, esGol: Boolean): Unit = { val conn = getConnection(); try { val ps = conn.prepareStatement("INSERT INTO penalties (rival, zona_tiro, zona_salto, es_gol) VALUES (?, ?, ?, ?)"); ps.setString(1, fixEncoding(rival)); ps.setString(2, zTiro); ps.setString(3, zSalto); ps.setBoolean(4, esGol); ps.executeUpdate() } finally { conn.close() } }
   def getPenaltyStats(): List[PenaltyStat] = { val l = scala.collection.mutable.ListBuffer[PenaltyStat](); val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT zona_tiro, COUNT(*) as total, SUM(CASE WHEN es_gol THEN 1 ELSE 0 END) as goles FROM penalties GROUP BY zona_tiro"); while(rs.next()) l += PenaltyStat(rs.getString("zona_tiro"), rs.getInt("total"), rs.getInt("goles")) } finally { conn.close() }; l.toList }
   def addNewGear(nombre: String, tipo: String, vida: Int, img: String): Unit = { val conn=getConnection(); try { val r=conn.prepareStatement("UPDATE gear SET activo=FALSE WHERE tipo=? AND activo=TRUE"); r.setString(1,tipo); r.executeUpdate(); val a=conn.prepareStatement("INSERT INTO gear (nombre, tipo, vida_util_estimada, usos_actuales, activo, imagen_url) VALUES (?,?,?,0,TRUE, ?)"); a.setString(1,fixEncoding(nombre)); a.setString(2,tipo); a.setInt(3,vida); a.setString(4, img); a.executeUpdate() } finally { conn.close() } }

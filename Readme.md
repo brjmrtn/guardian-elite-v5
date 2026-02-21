@@ -29,29 +29,62 @@
 
 # 🟡 PARTE II: ROADMAP EVOLUTIVO (PRÓXIMOS PASOS)
 
-## FASE 1: OPTIMIZACIÓN TÁCTICA (Corto Plazo)
+## FASE 1: OPTIMIZACIÓN TÁCTICA & UX (Corto Plazo)
+*Mejoras implementables con el stack actual (Scala + Gemini + Bootstrap)*
+
 * **📹 Videoteca MVP:** Botón "Motívame" para bucles de vídeo de paradas etiquetadas.
+* **⏰ Widget Próximo Partido Mejorado:** Cuenta atrás en tiempo real en el dashboard con datos del rival y clima esperado.
+* **🥅 Mapa de Goles Encajados:** Heatmap de portería que muestra zona exacta de cada gol recibido por temporada.
+* **📊 Estadísticas de Penaltis Mejoradas:** % de éxito por zona con histórico detallado de rivales y tendencias.
+* **🏆 Modo Torneo Visual:** Cuadro bracket interactivo para torneos con avance automático de rondas.
+* **📈 Comparativa Histórica de Rendimiento:** Gráfico de evolución de nota media por temporada y categoría.
+* **🎨 Modo Oscuro/Claro:** Toggle de tema persistente en Settings.
+* **📄 Exportar Informe PDF Real:** Informe con gráficos Chart.js embebidos, no solo tabla de texto.
+* **👤 Perfil Editable desde App:** Foto, posición, equipo actual y datos personales editables sin tocar la BD directamente.
+
+---
 
 ## FASE 2: COGNITIVE & ACADEMIC SYNERGY (Medio Plazo)
+*Cruce de datos biométricos, cognitivos y académicos*
+
 * **🧠 Detector de Fatiga Mental:** Identificación de periodos de baja concentración en el campo asociados a picos de carga académica (exámenes/estudio).
 * **🥋 Dojo Synergy:** Análisis de cómo el progreso en Judo impacta en la velocidad de incorporación tras parada.
+* **📉 Gráfico de Carga (RPE x Sesiones):** Visualización de carga acumulada por semana para detectar sobreentrenamiento antes de que se manifieste.
+* **🌙 Correlación Sueño-Rendimiento:** Widget que cruza automáticamente horas/calidad de sueño con la nota del partido siguiente.
+* **🔔 Notificaciones Push:** Alertas de partido próximo, recordatorio de registro de wellness y avisos de ACWR en zona de riesgo.
+
+---
 
 ## FASE 3: COMPUTER VISION & VIDEO ANALYSIS (Alto Impacto)
+*Requiere integración Python/OpenCV*
+
 * **🕵️ Pose-Estimation Analyst:** IA que analiza clips de video para detectar el "Paso Negativo" o errores en la base de sustentación.
 * **🥅 Goal Coverage Mapping:** Superposición de gráficos en video para calcular los metros cuadrados cubiertos según la posición.
 * **⏱️ Reaction Time Tracker:** Medición de milisegundos exactos desde el disparo hasta la estirada.
+* **🎬 Análisis de Video Automático:** Etiquetado automático de timestamps con tipo de acción (parada, saque, error, salida) usando Gemini Vision.
+* **📴 Modo Offline (PWA):** La app funciona sin conexión y sincroniza los registros al recuperar señal.
+
+---
 
 ## FASE 4: MACHINE LEARNING & ESTRATEGIA PRO (Alto Rendimiento)
+
 * **📉 Predictor de Clean Sheet:** Modelo de ML que estima la probabilidad de portería a cero basándose en ACWR, sueño y rival.
 * **🧤 Análisis de Biomecánica Posicional:** Correlación avanzada entre el `mapa_campo` y la `zona_goles` para corregir la toma de decisiones.
 * **👔 Pasaporte Biológico (Vault Médico):** Repositorio blindado con procesamiento OCR para gestionar historiales médicos.
 * **🧠 Digital Twin (Héctor 2035):** Simulación basada en datos actuales para proyectar su biotipo final.
+* **🔮 Predictor de Titular:** IA que estima probabilidad de jugar basándose en forma reciente, historial vs ese rival y estado físico registrado.
+* **🩹 Seguimiento de Lesiones:** Registro de zona anatómica, días de baja y curva de recuperación vinculada al Pasaporte Biológico.
+
+---
 
 ## FASE 5: INTELIGENCIA PROACTIVA (Vision & Prediction)
+
 * **🧠 Emotional Intelligence Engine:** Correlación automática entre bienestar psicológico (NLP) y probabilidad de error técnico.
 * **⚽ GK Influence Analytics:** Algoritmos de grafos para medir el impacto de la distribución en la generación de ocasiones de gol.
 * **🎭 Módulo de Anonimización:** Generación de informes "Ciegos" para procesos de captación profesional.
 * **🧬 Bio-Banding Pro:** Monitorización del **PHV (Peak Height Velocity)** para ajustar cargas durante picos de crecimiento.
+
+---
 
 ## 🔵 FASE 6: INNOVACIÓN EXCLUSIVA & OPTIMIZACIÓN (Propuestas)
 
@@ -60,6 +93,8 @@
 * **🧠 Flash-Cards de Decisión:** Briefing visual pre-partido con los 3 mejores clips recientes y recordatorios de posicionamiento basados en los puntos ciegos detectados en **Moneyball**.
 * **🎤 Analizador de Liderazgo Acústico:** Módulo de procesamiento de audio para medir la "Voz de Mando" de Héctor, puntuando su capacidad para organizar la defensa durante el juego.
 
+---
+
 ## 🏆 FASE 7: EL OLIMPO (Gestión de Alto Rendimiento)
 
 * **🧬 Digital Twin Proyectivo:** Simulación del alcance físico en portería basado en el historial de crecimiento (velocidad y altura) y proyección del Oráculo para ajustar el entrenamiento de posicionamiento a largo plazo.
@@ -67,12 +102,16 @@
 * **🛡️ Scouting Proactivo Automático:** Generación de planes de contingencia táctica al detectar un rival en el calendario de la RFFM, analizando debilidades previas y patrones de tiro detectados en enfrentamientos anteriores.
 * **🥋 Correlación Dojo-Portería:** Análisis de transferencia de habilidades motoras desde el Judo (caídas y propiocepción) hacia la velocidad de reincorporación y valentía en el área.
 
+---
+
 ## 🌌 FASE 8: GESTIÓN DE CANTERA PRO (Alto Impacto)
 
 * **🔄 Tracking de Segunda Acción:** Medición de la velocidad de reincorporación tras parada, vinculando la agilidad del Judo con la técnica de portería.
 * **🥅 Goal Coverage Mapping:** Visualización dinámica de la superficie de portería cubierta según el biotipo actual vs. dimensiones de la portería reglamentaria.
 * **📢 Liderazgo Acústico (Voice Command):** Análisis de audios de partido para puntuar la capacidad de Héctor para organizar y mandar sobre su línea defensiva.
 * **⚠️ Alerta de Fatiga Silenciosa:** Algoritmo predictivo que cruza ACWR, calidad de sueño y carga académica para identificar riesgos de lesión antes de que se manifiesten físicamente.
+
+---
 
 ## 🚀 FASE 9: INTELIGENCIA PREDICTIVA & NETWORKING (Nivel Pro-Scout)
 
@@ -82,13 +121,17 @@
 * **📂 Exportación de "Dossier de Captación":** Botón de un solo clic para generar un PDF profesional que incluya: trayectoria, biometría, evolución técnica y enlaces a clips de vídeo, diseñado específicamente para procesos de captación en clubes profesionales.
 * **🤖 Bot de Estrategia Personalizado:** Un chat de IA entrenado con TODO el historial de Héctor que le permita preguntarle: "¿Cómo me fue contra equipos que juegan al contraataque?" o "¿En qué debo centrarme en el entrenamiento de hoy según mis últimos errores?".
 
+---
+
 ## 🌌 FASE 10: BIO-INGENIERÍA & ENTRENAMIENTO COGNITIVO (The Final Frontier)
 
 * **🧠 Neuro-Feedback en Tiempo Real:** Integración con dispositivos wearables (tipo bandas EEG) para medir la concentración y el estado de "Flow" durante los entrenamientos, permitiendo saber exactamente qué ejercicios optimizan su foco mental.
-* **🕶️ Pizarra Táctica en Realidad Aumentada (AR):** Visualización de las "Flash-Cards" y jugadas ensayadas proyectadas sobre el campo real mediante el móvil, permitiendo que Héctor vea las líneas de pase y ángulos de tiro mientras se posiciona.
+* **🔭 Pizarra Táctica en Realidad Aumentada (AR):** Visualización de las "Flash-Cards" y jugadas ensayadas proyectadas sobre el campo real mediante el móvil, permitiendo que Héctor vea las líneas de pase y ángulos de tiro mientras se posiciona.
 * **🧬 Análisis de Bio-Banding Pro:** Algoritmo avanzado que ajusta las estadísticas de la Carta FUT no por edad cronológica, sino por maduración biológica (PHV - Peak Height Velocity), asegurando que su evaluación sea justa durante los picos de crecimiento.
 * **🤖 Asistente de IA "Coach Personal":** Un agente autónomo que analiza la base de datos completa de Neon y RFFM para enviar mensajes motivadores o correcciones técnicas personalizadas a Héctor antes de cada entreno, actuando como un mentor 24/7.
 * **🔒 Guardian Vault (Blockchain Identity):** Encriptación de todo el historial médico y deportivo para crear un "Pasaporte de Portero" inmutable, garantizando la propiedad de sus datos de cara a futuras negociaciones profesionales.
+
+---
 
 ## 🌐 FASE 11: ECOSISTEMA GLOBAL & IA PRESCRIPTIVA (The Professional Agent)
 

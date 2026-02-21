@@ -111,6 +111,11 @@ object SharedLayout {
     .action-marker { font-size: 20px; display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; width: 100%; }
     .shot-btn.active { background-color: #ffc107; color: black; border-color: #ffc107; font-weight: bold; }
     .xx-small { font-size: 10px; display: block; }
+
+/* VIDEOTECA */
+.playlist-item { cursor: pointer; border: 1px solid transparent; transition: all 0.2s; background: rgba(255,255,255,0.03); }
+.playlist-item:hover { background: rgba(212,175,55,0.1); border-color: rgba(212,175,55,0.3); }
+.playlist-item.active { background: rgba(212,175,55,0.15); border-color: #d4af37 !important; }
     .field-container { width: 100%; height: 60vh; background-color: #2e7d32; border-radius: 8px; overflow: hidden; touch-action: none; }
     #rivalInput {
       position: relative !important;

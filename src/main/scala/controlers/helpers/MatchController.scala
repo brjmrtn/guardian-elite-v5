@@ -470,5 +470,220 @@ object MatchController extends cask.Routes {
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
   }
 
+  @cask.get("/videoteca")
+  def videotecaPage(request: cask.Request, tipo: String = "") = withAuth(request) {
+    val clips = DatabaseManager.getVideotecaClips(tipo)
+    val tipos = List("", "PARADA", "GOL", "PASE", "ERROR")
+
+    // Extraer YouTube video ID de la URL
+    def extractYoutubeId(url: String): String = {
+      if (url.contains("youtu.be/")) url.split("youtu.be/").last.split("[?&]").head
+      else if (url.contains("v=")) url.split("v=").last.split("&").head
+      else ""
+    }
+
+    val ytClips = clips.filter(c => extractYoutubeId(c.videoUrl).nonEmpty)
+    val clipsJson = ytClips.map { c =>
+      val vid = extractYoutubeId(c.videoUrl)
+      val secs = c.minuto * 60 + c.segundo
+      s"""{"videoId":"$vid","start":$secs,"rival":"${c.rival}","fecha":"${c.fecha}","tipo":"${c.tipo}","matchId":${c.matchId}}"""
+    }.mkString("[", ",", "]")
+
+    val tipoLabel = if (tipo.isEmpty) "TODOS" else tipo
+
+    val filterTabs = div(cls := "d-flex gap-2 mb-4 flex-wrap",
+      tipos.map { t =>
+        val label = if (t.isEmpty) "TODOS" else t
+        val active = if (t == tipo) "btn-warning" else "btn-outline-secondary"
+        a(href := s"/videoteca${if (t.nonEmpty) s"?tipo=$t" else ""}",
+          cls := s"btn btn-sm fw-bold $active", label)
+      }
+    )
+
+    val playlistItems = if (ytClips.isEmpty) {
+      div(cls := "alert alert-secondary text-center fw-bold",
+        "Sin clips con video de YouTube disponibles. Anade URL de YouTube y tags en los partidos.")
+    } else {
+      div(cls := "playlist-list", id := "playlist",
+        ytClips.zipWithIndex.map { case (c, i) =>
+          val icon = c.tipo match {
+            case "PARADA" => "🧤"; case "GOL" => "🥅"; case "PASE" => "⚽"; case _ => "📍"
+          }
+          val activeCls = if (i == 0) " active" else ""
+          div(cls := s"playlist-item d-flex align-items-center p-2 mb-1 rounded$activeCls",
+            id := s"clip-$i",
+            attr("onclick") := s"loadClip($i)",
+            div(cls := "me-3 fs-4", icon),
+            div(cls := "flex-grow-1",
+              div(cls := "fw-bold text-white small", s"${c.rival} — ${c.fecha}"),
+              div(cls := "text-muted small", s"${c.minuto}:${"%02d".format(c.segundo)} • ${c.tipo}")
+            ),
+            span(cls := "badge bg-secondary ms-2", s"${i + 1}")
+          )
+        }
+      )
+    }
+
+    val playerSection = if (ytClips.nonEmpty) {
+      div(cls := "video-player-section",
+        // Player
+        div(cls := "ratio ratio-16x9 mb-3 rounded overflow-hidden",
+          id := "player-container",
+          div(id := "yt-player")
+        ),
+        // Info del clip actual
+        div(cls := "d-flex align-items-center justify-content-between mb-3",
+          div(id := "clip-info",
+            div(cls := "fw-bold text-warning", id := "clip-title", ytClips.head.rival + " — " + ytClips.head.fecha),
+            div(cls := "small text-muted", id := "clip-sub",
+              s"${ytClips.head.minuto}:${"%02d".format(ytClips.head.segundo)} • ${ytClips.head.tipo}")
+          ),
+          div(cls := "badge bg-dark border border-warning text-warning px-3 py-2",
+            span(id := "clip-counter", s"1 / ${ytClips.size}")
+          )
+        ),
+        // Controles
+        div(cls := "d-flex gap-2 mb-3",
+          button(id := "btn-prev", cls := "btn btn-outline-secondary fw-bold", onclick := "prevClip()", "◀ Ant"),
+          button(id := "btn-motivame", cls := "btn btn-warning fw-bold flex-grow-1", onclick := "toggleMotivame()",
+            "🔥 MOTIVAME"),
+          button(id := "btn-next", cls := "btn btn-outline-secondary fw-bold", onclick := "nextClip()", "Sig ▶")
+        ),
+        // Auto-advance toggle
+        div(cls := "d-flex align-items-center gap-2 small text-muted",
+          input(tpe := "range", id := "clip-duration", cls := "form-range", attr("min") := "10", attr("max") := "60", attr("value") := "25", style := "width: 120px;"),
+          span("Duracion clip: "),
+          span(id := "dur-label", "25s"),
+          span(cls := "ms-3", "🔁"),
+          div(cls := "form-check form-switch mb-0 ms-1",
+            input(cls := "form-check-input", tpe := "checkbox", id := "loop-toggle"),
+            label(cls := "form-check-label text-muted", attr("for") := "loop-toggle", "Bucle")
+          )
+        )
+      )
+    } else div()
+
+    val content = basePage("match-center",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-10 col-12",
+          h2(cls := "text-center text-warning mb-1", "🎬 VIDEOTECA"),
+          p(cls := "text-center text-muted small mb-4", s"${clips.size} clips totales • Filtro: $tipoLabel"),
+          filterTabs,
+          if (ytClips.isEmpty) playlistItems
+          else div(cls := "row g-3",
+            div(cls := "col-md-7", playerSection),
+            div(cls := "col-md-5",
+              div(cls := "card bg-dark border-secondary shadow h-100",
+                div(cls := "card-header text-warning fw-bold small", s"📋 PLAYLIST — ${ytClips.size} clips"),
+                div(cls := "card-body p-2 overflow-auto", style := "max-height: 420px;",
+                  playlistItems
+                )
+              )
+            )
+          ),
+          if (clips.size != ytClips.size) {
+            val sinYt = clips.size - ytClips.size
+            div(cls := "alert alert-secondary small mt-3 text-muted",
+              s"ℹ️ $sinYt clip(s) con URL no-YouTube no se muestran en el player (Drive, etc.)")
+          } else div(),
+          script(raw(s"""
+            const clips = $clipsJson;
+            let current = 0;
+            let player;
+            let motivameTimer = null;
+            let isMotivame = false;
+            let clipDuration = 25;
+
+            // Duracion slider
+            document.getElementById('clip-duration').addEventListener('input', function() {
+              clipDuration = parseInt(this.value);
+              document.getElementById('dur-label').textContent = clipDuration + 's';
+            });
+
+            // Cargar YouTube API
+            var tag = document.createElement('script');
+            tag.src = "https://www.youtube.com/iframe_api";
+            document.head.appendChild(tag);
+
+            function onYouTubeIframeAPIReady() {
+              if (clips.length === 0) return;
+              player = new YT.Player('yt-player', {
+                height: '100%', width: '100%',
+                videoId: clips[0].videoId,
+                playerVars: { start: clips[0].start, autoplay: 0, rel: 0, modestbranding: 1 },
+                events: { onStateChange: onPlayerStateChange }
+              });
+            }
+
+            function onPlayerStateChange(event) {
+              // Si termina el video y esta en modo motivame, siguiente
+              if (event.data === YT.PlayerState.ENDED && isMotivame) {
+                nextClip();
+              }
+            }
+
+            function loadClip(idx) {
+              if (!player || clips.length === 0) return;
+              current = idx;
+              const c = clips[idx];
+              player.loadVideoById({ videoId: c.videoId, startSeconds: c.start });
+              // Actualizar info
+              document.getElementById('clip-title').textContent = c.rival + ' — ' + c.fecha;
+              document.getElementById('clip-sub').textContent = c.start + 's • ' + c.tipo;
+              document.getElementById('clip-counter').textContent = (idx+1) + ' / ' + clips.length;
+              // Resaltar playlist
+              document.querySelectorAll('.playlist-item').forEach((el, i) => {
+                el.classList.toggle('active', i === idx);
+              });
+              // Scroll en playlist
+              const el = document.getElementById('clip-' + idx);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              // Si modo motivame, programar siguiente clip tras clipDuration segundos
+              if (isMotivame) {
+                clearTimeout(motivameTimer);
+                motivameTimer = setTimeout(() => {
+                  const doLoop = document.getElementById('loop-toggle').checked;
+                  const next = (current + 1) % clips.length;
+                  if (!doLoop && next === 0) { stopMotivame(); return; }
+                  nextClip();
+                }, clipDuration * 1000);
+              }
+            }
+
+            function nextClip() {
+              const doLoop = document.getElementById('loop-toggle').checked;
+              const next = (current + 1) % clips.length;
+              if (!doLoop && next === 0 && current === clips.length - 1) { stopMotivame(); return; }
+              loadClip(next);
+            }
+
+            function prevClip() {
+              loadClip((current - 1 + clips.length) % clips.length);
+            }
+
+            function toggleMotivame() {
+              if (isMotivame) { stopMotivame(); } else { startMotivame(); }
+            }
+
+            function startMotivame() {
+              isMotivame = true;
+              document.getElementById('btn-motivame').className = 'btn btn-danger fw-bold flex-grow-1';
+              document.getElementById('btn-motivame').textContent = '⏹ DETENER';
+              loadClip(0);
+            }
+
+            function stopMotivame() {
+              isMotivame = false;
+              clearTimeout(motivameTimer);
+              document.getElementById('btn-motivame').className = 'btn btn-warning fw-bold flex-grow-1';
+              document.getElementById('btn-motivame').textContent = '🔥 MOTIVAME';
+            }
+          """))
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
   initialize()
 }
