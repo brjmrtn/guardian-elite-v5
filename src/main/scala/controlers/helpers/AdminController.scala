@@ -657,14 +657,14 @@ object AdminController extends cask.Routes {
           // Trayectoria por temporadas
           if (career.nonEmpty) div(
             h2("Trayectoria por Temporada"),
-            career.toSeq.map { s =>
+            frag(career.toSeq.map { s =>
               div(cls := "season-row",
                 span(style := "font-weight:600; color:#0f3460;", s.categoria),
                 span(s"${s.partidosJugados} partidos jugados"),
                 span(s"${s.golesContra} goles encajados"),
-                span(style := "font-weight:700; color:#d4af37;", s"Media: ${s.media}")
+                span(style := "font-weight:700; color:#d4af37;", s"Media: ${s.mediaFinal}")
               )
-            }
+            }: _*)
           ) else div(),
 
           // Ultimos 20 partidos (sin nombre del rival)
