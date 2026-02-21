@@ -62,8 +62,111 @@ object DashboardController extends cask.Routes {
     // --- WIDGETS DINAMICOS ---
 
     val nextMatchWidget = upcoming match {
-      case Some(m) => div(cls:="alert alert-dark border-warning shadow p-3 mb-3", div(cls:="d-flex justify-content-between align-items-center", div(h6(cls:="text-muted mb-0 small", "PROXIMO PARTIDO"), h4(cls:="text-white fw-bold mb-0", fixEncoding(m.rival))), div(cls:="text-end", span(cls:="badge bg-warning text-dark", m.fecha), a(href:=s"/match-center?scheduleId=${m.id}", cls:="btn btn-sm btn-outline-light ms-2", "JUGAR"))))
-      case None => div(cls:="alert alert-dark border-secondary p-2 mb-3 text-center text-muted small", "Sin partidos programados.")
+      case None =>
+        div(cls:="card bg-dark border-secondary shadow mb-3",
+          div(cls:="card-body text-center py-4",
+            div(style:="font-size:32px; opacity:0.3;", "📅"),
+            div(cls:="text-muted small mt-2 fw-bold", "Sin partidos programados"),
+            div(cls:="xx-small text-muted mt-1", "El calendario se cargara al inicio de la temporada")
+          )
+        )
+      case Some(m) =>
+        // Datos del rival del scouting
+        val rivalInfo = DatabaseManager.getRivalInfo(m.rival)
+        val (rivalMatches, rivalStats) = DatabaseManager.getRivalScouting(m.rival)
+        val historial = if (rivalStats.getOrElse("pj", 0) > 0) {
+          val pj = rivalStats("pj")
+          val g  = rivalStats.getOrElse("ganados", 0)
+          val p  = pj - g - rivalStats.getOrElse("empatados", 0)
+          val e  = rivalStats.getOrElse("empatados", 0)
+          s"$pj PJ | ${g}G ${e}E ${p}P"
+        } else "Sin historial vs este rival"
+
+        val tipoIcon = m.tipo match {
+          case "TORNEO"  => "🏆"; case "COPA" => "🥇"; case _ => "⚽"
+        }
+        val tipoLabel = if (m.torneoNombre.nonEmpty) m.torneoNombre else m.tipo
+        val faseLabel = if (m.fase.nonEmpty) s" | ${m.fase}" else ""
+        val estadioLabel = if (m.estadio.nonEmpty) s"📍 ${fixEncoding(m.estadio)}" else "📍 Por confirmar"
+        val estiloLabel = rivalInfo.map(r => s"Estilo: ${r.estilo}").getOrElse("")
+        val clavesLabel = rivalInfo.map(r => fixEncoding(r.claves)).getOrElse("")
+
+        div(cls:="card bg-dark border-warning shadow mb-3 overflow-hidden",
+          // Header con tipo de partido
+          div(cls:="card-header bg-warning bg-opacity-10 border-warning d-flex justify-content-between align-items-center py-2",
+            span(cls:="text-warning fw-bold small", s"$tipoIcon PROXIMO PARTIDO — $tipoLabel$faseLabel"),
+            span(cls:="badge bg-warning text-dark fw-bold", m.fecha)
+          ),
+          div(cls:="card-body p-3",
+            // Rival + vs
+            div(cls:="text-center mb-3",
+              div(cls:="text-muted xx-small fw-bold mb-1", "RIVAL"),
+              div(cls:="text-white fw-bold", style:="font-size:22px; letter-spacing:1px;", fixEncoding(m.rival).toUpperCase),
+              div(cls:="text-muted small mt-1", estadioLabel)
+            ),
+            // Cuenta atras
+            div(cls:="row g-2 mb-3 text-center",
+              div(cls:="col-3", div(cls:="bg-secondary bg-opacity-25 rounded p-2",
+                div(cls:="fw-bold text-warning fs-4", id:="cd-days", "—"),
+                div(cls:="xx-small text-muted", "DIAS"))),
+              div(cls:="col-3", div(cls:="bg-secondary bg-opacity-25 rounded p-2",
+                div(cls:="fw-bold text-white fs-4", id:="cd-hours", "—"),
+                div(cls:="xx-small text-muted", "HORAS"))),
+              div(cls:="col-3", div(cls:="bg-secondary bg-opacity-25 rounded p-2",
+                div(cls:="fw-bold text-white fs-4", id:="cd-mins", "—"),
+                div(cls:="xx-small text-muted", "MIN"))),
+              div(cls:="col-3", div(cls:="bg-secondary bg-opacity-25 rounded p-2",
+                div(cls:="fw-bold text-white fs-4", id:="cd-secs", "—"),
+                div(cls:="xx-small text-muted", "SEG")))
+            ),
+            // Scouting rapido si hay datos
+            if (rivalInfo.isDefined || rivalStats.getOrElse("pj",0) > 0) {
+              div(cls:="border-top border-secondary pt-2 mt-2",
+                div(cls:="d-flex justify-content-between small",
+                  div(cls:="text-muted fw-bold", historial),
+                  if (estiloLabel.nonEmpty) div(cls:="badge bg-secondary", estiloLabel) else span()
+                ),
+                if (clavesLabel.nonEmpty)
+                  div(cls:="xx-small text-muted mt-1 fst-italic", s"Claves: $clavesLabel")
+                else span()
+              )
+            } else {
+              div(cls:="xx-small text-muted text-center border-top border-secondary pt-2 mt-1 fst-italic",
+                "Sin scouting previo — registralo en Historial > Scouting")
+            },
+            // Boton jugar
+            div(cls:="d-grid mt-3",
+              a(href:=s"/match-center?scheduleId=${m.id}", cls:="btn btn-warning fw-bold", "REGISTRAR PARTIDO →")
+            )
+          ),
+          // Script cuenta atras
+          script(raw(s"""
+            (function() {
+              var target = new Date("${m.fecha}T10:00:00");
+              function tick() {
+                var now = new Date();
+                var diff = target - now;
+                if (diff <= 0) {
+                  document.getElementById('cd-days').textContent  = '0';
+                  document.getElementById('cd-hours').textContent = '0';
+                  document.getElementById('cd-mins').textContent  = '0';
+                  document.getElementById('cd-secs').textContent  = '0';
+                  return;
+                }
+                var d = Math.floor(diff / 86400000);
+                var h = Math.floor((diff % 86400000) / 3600000);
+                var m = Math.floor((diff % 3600000) / 60000);
+                var s = Math.floor((diff % 60000) / 1000);
+                document.getElementById('cd-days').textContent  = d;
+                document.getElementById('cd-hours').textContent = String(h).padStart(2,'0');
+                document.getElementById('cd-mins').textContent  = String(m).padStart(2,'0');
+                document.getElementById('cd-secs').textContent  = String(s).padStart(2,'0');
+              }
+              tick();
+              setInterval(tick, 1000);
+            })();
+          """))
+        )
     }
 
     val techAuditorWidget = div(cls:="card bg-dark border-warning mb-3 shadow",
@@ -145,6 +248,21 @@ object DashboardController extends cask.Routes {
         cognitiveWidget,
         div(cls := "alert alert-dark border-info shadow p-3 mb-3", div(cls:="d-flex align-items-center mb-2", span(style:="font-size: 24px; margin-right: 10px;", "🧠"), strong(cls:="text-info", "IA NEURO-SCOUT")), div(cls:="text-light small fst-italic lh-sm fw-bold", raw(aiMessage))),
 
+        // Widget alertas + notificaciones
+        div(cls := "card bg-dark border-warning shadow mb-3",
+          div(cls := "card-header text-warning fw-bold small d-flex justify-content-between align-items-center",
+            span("🔔 ALERTAS GUARDIAN"),
+            button(id := "btnActivarNotif", cls := "btn btn-outline-warning btn-sm fw-bold xx-small",
+              style := "font-size:10px; padding:2px 8px;",
+              "ACTIVAR PUSH")
+          ),
+          div(cls := "card-body p-2",
+            div(id := "alertasContainer",
+              div(cls := "text-muted small text-center py-1 fw-bold", "Cargando alertas...")
+            )
+          )
+        ),
+
         weatherPerformanceWidget,
 
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header border-secondary text-warning fw-bold py-1 text-center small", "SCOUTING RADAR"), div(cls := "card-body p-1 d-flex justify-content-center", div(style:="width: 200px; height: 200px;", canvas(id := "radarChart")))),
@@ -155,11 +273,81 @@ object DashboardController extends cask.Routes {
           div(cls:="col-6 pe-1", div(cls:="card bg-dark border-danger shadow p-1", h6(cls:="text-center text-danger mb-1 xx-small fw-bold", "GOLES RECIBIDOS"), div(cls:="d-flex mb-1", tactCell("A", ga, "bg-danger bg-opacity-75"), tactCell("M", gm, "bg-warning bg-opacity-75"), tactCell("B", gr, "bg-light bg-opacity-75")), div(cls:="d-flex", tactCell("I", gl, "bg-danger bg-opacity-75"), tactCell("C", gc_tact, "bg-warning bg-opacity-75"), tactCell("D", gd, "bg-danger bg-opacity-75")))),
           div(cls:="col-6 ps-1", div(cls:="card bg-dark border-success shadow p-1", h6(cls:="text-center text-success mb-1 xx-small fw-bold", "PARADAS"), div(cls:="d-flex mb-1", tactCell("A", pa, "bg-success bg-opacity-75"), tactCell("M", pm, "bg-info bg-opacity-75"), tactCell("B", pr, "bg-light bg-opacity-75")), div(cls:="d-flex", tactCell("I", pl, "bg-success bg-opacity-75"), tactCell("C", pc_tact, "bg-info bg-opacity-75"), tactCell("D", pd, "bg-success bg-opacity-75"))))))
     )
+      , script(raw("""
+      // ── NOTIFICACIONES PUSH GUARDIAN ELITE ──
+      (function() {
+        if (!('Notification' in window)) return;
+
+        function solicitarPermiso() {
+          Notification.requestPermission();
+        }
+
+        function lanzarNotif(titulo, cuerpo, tipo) {
+          if (Notification.permission !== 'granted') return;
+          var icono = tipo === 'danger' ? '🚨' : tipo === 'warning' ? '⚠️' : 'ℹ️';
+          new Notification('GUARDIAN ELITE — ' + titulo, {
+            body: icono + ' ' + cuerpo,
+            icon: '/favicon.ico',
+            tag: titulo
+          });
+        }
+
+        // Solicitar permiso si aun no concedido
+        if (Notification.permission === 'default') {
+          setTimeout(solicitarPermiso, 2000);
+        }
+
+        // Mostrar boton de activar notifs si no hay permiso
+        var btnNotif = document.getElementById('btnActivarNotif');
+        if (btnNotif) {
+          if (Notification.permission === 'granted') {
+            btnNotif.style.display = 'none';
+          } else {
+            btnNotif.addEventListener('click', function() {
+              Notification.requestPermission().then(function(p) {
+                if (p === 'granted') btnNotif.style.display = 'none';
+              });
+            });
+          }
+        }
+
+        // Lanzar alertas desde el servidor
+        fetch('/api/alertas').then(function(r) { return r.json(); }).then(function(alertas) {
+          var container = document.getElementById('alertasContainer');
+          if (!container) return;
+          if (alertas.length === 0) {
+            container.innerHTML = '<div class="text-muted small text-center py-2 fw-bold">Sin alertas activas</div>';
+            return;
+          }
+          alertas.forEach(function(a) {
+            // Notif push
+            lanzarNotif(a.titulo, a.mensaje, a.tipo);
+            // Badge en pantalla
+            var color = a.tipo === 'danger' ? '#dc3545' : a.tipo === 'warning' ? '#ffc107' : '#17a2b8';
+            var textColor = a.tipo === 'warning' ? '#000' : '#fff';
+            var icono = a.tipo === 'danger' ? '🚨' : a.tipo === 'warning' ? '⚠️' : '🔔';
+            container.innerHTML += '<div style="background:' + color + '20; border-left:3px solid ' + color + '; padding:8px 10px; margin-bottom:6px; border-radius:4px;">' +
+              '<div style="font-size:11px; font-weight:700; color:' + color + ';">' + icono + ' ' + a.titulo + '</div>' +
+              '<div style="font-size:11px; color:#ccc; margin-top:2px;">' + a.mensaje + '</div>' +
+              '</div>';
+          });
+        }).catch(function() {});
+      })();
+    """))
       , script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""const ctxRadar=document.getElementById('radarChart');if(ctxRadar){new Chart(ctxRadar,{type:'radar',data:{labels:['DIV','HAN','KIC','REF','SPD','POS'],datasets:[{data:$radarData,backgroundColor:'rgba(212,175,55,0.4)',borderColor:'#d4af37',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{r:{angleLines:{color:'#444'},grid:{color:'#444'},pointLabels:{color:'#fff',font:{size:10}},ticks:{display:false},suggestedMin:40,suggestedMax:90}}}});""")))
     renderHtml(content)
   }
 
   // --- 2. MATCH CENTER (JUGAR) - VERSION CORREGIDA 4.1 ---
+
+  @cask.get("/api/alertas")
+  def apiAlertas(request: cask.Request) = withAuth(request) {
+    val alerts = DatabaseManager.getNotificationAlerts()
+    val json = alerts.map { case (tipo, titulo, mensaje) =>
+      s"""{"tipo":"$tipo","titulo":"${titulo.replace(""","")}","mensaje":"${mensaje.replace(""","")}"}"""
+    }.mkString("[", ",", "]")
+    cask.Response(json.getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json; charset=utf-8"))
+  }
 
   initialize()
 }
