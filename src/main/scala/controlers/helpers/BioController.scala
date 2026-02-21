@@ -292,23 +292,11 @@ object BioController extends cask.Routes {
   @cask.postForm("/bio/medical/upload")
   def uploadMedical(fecha: String,
                     tipo: String,
-                    esPrevio: String = "false", // Cambiado a String
-                    archivo: cask.FormValue) = {
+                    esPrevio: String = "false",
+                    archivo: cask.FormFile) = {
     val isPrevio = esPrevio == "on"
-
-    // 1. Extraemos los bytes directamente usando la interfaz de datos de Cask
-    // Intentamos obtener los bytes y el nombre sin llamar a la clase interna .File
-    val fileBytes = try {
-      archivo.getClass.getMethod("data").invoke(archivo).asInstanceOf[Array[Byte]]
-    } catch {
-      case _: Exception => Array.empty[Byte]
-    }
-
-    val fileName = try {
-      archivo.getClass.getMethod("name").invoke(archivo).asInstanceOf[String]
-    } catch {
-      case _: Exception => "documento.pdf"
-    }
+    val fileBytes = archivo.data
+    val fileName  = archivo.fileName.getOrElse("documento.pdf")
 
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini
