@@ -295,8 +295,8 @@ object BioController extends cask.Routes {
                     esPrevio: String = "false",
                     archivo: cask.FormFile) = {
     val isPrevio = esPrevio == "on"
-    val fileBytes = archivo.data
-    val fileName  = archivo.fileName.getOrElse("documento.pdf")
+    val fileBytes = archivo.bytes
+    val fileName  = if (archivo.fileName.nonEmpty) archivo.fileName else "documento.pdf"
 
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini
