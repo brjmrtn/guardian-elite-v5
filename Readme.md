@@ -4,7 +4,7 @@
 
 **Guardian Elite** es un ecosistema de alto rendimiento diseñado para la monitorización longitudinal (de los 5 a los 20 años) del desarrollo de **Héctor**. Esta plataforma integra Big Data, Machine Learning e IA Generativa para transformar el crecimiento biológico, técnico y cognitivo en un activo estratégico.
 
-![Version](https://img.shields.io/badge/Version-6.0_Cognitive_Data_Ready-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_Pro_1.5-orange?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-6.0_Cognitive_Data_Ready-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_Pro_1.5-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge)
 
 ---
 
@@ -14,33 +14,36 @@
 * **Carta FUT Dinámica:** Visualización gamificada basada en la media ponderada de rendimiento real.
 * **Algoritmo de Trinquete (Ratchet):** Mecánica estadística que impide el retroceso de la media global.
 * **IA Neuro-Scout:** Análisis de tendencias mediante Gemini para generar consejos técnicos y refuerzo psicológico.
+* **⏰ Widget Próximo Partido:** Cuenta atrás en tiempo real con datos del rival del scouting, estadio e historial vs ese equipo. Se activa automáticamente al cargar el calendario de la nueva temporada.
 
 ## 2. ⚽ MATCH CENTER (Data Ingestion)
 * **Módulo Ederson:** Seguimiento de precisión en pases cortos y largos (Atributo **KIC**).
 * **Heatmap de Intervenciones:** Registro de coordenadas de paradas y acciones tácticas.
 * **Audio-Diario IA:** Procesamiento de voz para detectar el estado emocional y gestionar la frustración.
+* **🏆 Bracket Torneo Visual:** Cuadro de fases interactivo por torneo con resultados y KPIs. URL: `/tournament/bracket`.
 
 ## 3. 🔮 EL ORÁCULO (Biometría & Salud)
 * **Ratio ACWR (Acute:Chronic):** Monitorización de carga de trabajo para prevenir lesiones.
 * **Evolución Biométrica:** Gráfico dinámico de Altura (cm) vs. Peso (kg).
 * **Referencia OMS Pro:** Tabla de percentiles (P15, P50, P85) actualizada por edad.
 
+## 4. 🎬 VIDEOTECA
+* **Videoteca MVP:** Player de YouTube con playlist automática de clips etiquetados por tipo (PARADA, GOL, PASE, ERROR) con filtros. URL: `/videoteca`.
+* **Botón MOTIVAME:** Modo automático que cicla clips con duración ajustable (10–60s) y opción de bucle infinito.
+
+## 5. 📊 ANALÍTICA AVANZADA
+* **🥅 Mapa de Goles Encajados:** Heatmap de portería 3×3 con intensidad por zona, filtros por temporada y rival, y % por altura y lado. URL: `/mapa-goles`.
+* **⚔️ Laboratorio de Penaltis:** Heatmap de tiros rivales + % parado por zona + historial completo por rival con barras de progreso.
+* **📈 Evolución Histórica:** Gráfico de línea de nota media por temporada + barras de goles encajados con Chart.js. URL: `/career/evolucion`.
+* **📄 Informe PDF Profesional:** Gráficos embebidos, KPIs globales, tabla de los últimos 30 partidos y atributos. URL: `/admin/print_report`.
+
+## 6. ⚙️ CONFIGURACIÓN & UX
+* **🎨 Modo Oscuro/Claro:** Toggle ☀️/🌙 persistente en `localStorage`. Activo en toda la app al instante.
+* **👤 Perfil Editable:** Posición, pie dominante, foto, escudo y fecha de nacimiento editables desde Settings.
+
 ---
 
 # 🟡 PARTE II: ROADMAP EVOLUTIVO (PRÓXIMOS PASOS)
-
-## FASE 1: OPTIMIZACIÓN TÁCTICA & UX (Corto Plazo)
-*Mejoras implementables con el stack actual (Scala + Gemini + Bootstrap)*
-
-* **📹 Videoteca MVP:** Botón "Motívame" para bucles de vídeo de paradas etiquetadas.
-* **⏰ Widget Próximo Partido Mejorado:** Cuenta atrás en tiempo real en el dashboard con datos del rival y clima esperado.
-* **🥅 Mapa de Goles Encajados:** Heatmap de portería que muestra zona exacta de cada gol recibido por temporada.
-* **📊 Estadísticas de Penaltis Mejoradas:** % de éxito por zona con histórico detallado de rivales y tendencias.
-* **🏆 Modo Torneo Visual:** Cuadro bracket interactivo para torneos con avance automático de rondas.
-* **📈 Comparativa Histórica de Rendimiento:** Gráfico de evolución de nota media por temporada y categoría.
-* **🎨 Modo Oscuro/Claro:** Toggle de tema persistente en Settings.
-* **📄 Exportar Informe PDF Real:** Informe con gráficos Chart.js embebidos, no solo tabla de texto.
-* **👤 Perfil Editable desde App:** Foto, posición, equipo actual y datos personales editables sin tocar la BD directamente.
 
 ---
 
