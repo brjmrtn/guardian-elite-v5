@@ -980,7 +980,7 @@ object DatabaseManager {
         SELECT vt.id, vt.match_id, m.rival, m.fecha, m.video,
                vt.minuto, vt.segundo, vt.tipo
         FROM video_tags vt
-        JOIN match_logs m ON vt.match_id = m.id
+        JOIN matches m ON vt.match_id = m.id
         WHERE m.video IS NOT NULL AND m.video != '' $where
         ORDER BY m.fecha DESC, vt.minuto ASC, vt.segundo ASC
       """
