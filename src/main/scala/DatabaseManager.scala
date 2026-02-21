@@ -977,11 +977,11 @@ object DatabaseManager {
     try {
       val where = if (tipoFiltro.nonEmpty) s"AND vt.tipo = '$tipoFiltro'" else ""
       val sql = s"""
-        SELECT vt.id, vt.match_id, m.rival, m.fecha, m.video,
+        SELECT vt.id, vt.match_id, m.rival, m.fecha, m.video_url AS video,
                vt.minuto, vt.segundo, vt.tipo
         FROM video_tags vt
         JOIN matches m ON vt.match_id = m.id
-        WHERE m.video IS NOT NULL AND m.video != '' $where
+        WHERE m.video_url IS NOT NULL AND m.video_url != '' $where
         ORDER BY m.fecha DESC, vt.minuto ASC, vt.segundo ASC
       """
       val rs = conn.createStatement().executeQuery(sql)
