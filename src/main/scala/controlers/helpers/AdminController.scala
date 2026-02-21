@@ -16,8 +16,8 @@ object AdminController extends cask.Routes {
             div(cls:="col-6",
               label(cls:="form-label text-info fw-bold small", "Posicion"),
               select(name:="posicion", cls:="form-select fw-bold",
-                option(value:="POR", if(card.posicion=="POR") attr("selected"):="true" else attr(""), "Portero (POR)"),
-                option(value:="GK",  if(card.posicion=="GK")  attr("selected"):="true" else attr(""), "Goalkeeper (GK)")
+                option(value:="POR", if(card.posicion=="POR") Seq(selected:=true) else Seq(), "Portero (POR)"),
+                option(value:="GK",  if(card.posicion=="GK")  Seq(selected:=true) else Seq(), "Goalkeeper (GK)")
               )
             ),
             div(cls:="col-6",

@@ -670,7 +670,7 @@ object CareerController extends cask.Routes {
         div(cls := "card-header text-warning fw-bold small", "EVOLUCION DE NOTA MEDIA POR TEMPORADA"),
         div(cls := "card-body",
           div(style := "position:relative; height:280px;",
-            tags2.canvas(id := "chartEvolucion")
+            tag("canvas")(id := "chartEvolucion")
           )
         )
       ),
@@ -682,7 +682,7 @@ object CareerController extends cask.Routes {
             div(cls := "card-header text-danger fw-bold small", "GOLES ENCAJADOS POR TEMPORADA"),
             div(cls := "card-body",
               div(style := "position:relative; height:200px;",
-                tags2.canvas(id := "chartGoles")
+                tag("canvas")(id := "chartGoles")
               )
             )
           )
