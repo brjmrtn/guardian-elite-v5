@@ -582,7 +582,7 @@ object AdminController extends cask.Routes {
     val totalGC = matches.map(m => m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(0)).sum
     val csRate  = if (totalPJ > 0) f"${totalCS * 100 / totalPJ}%%" else "—"
 
-    renderHtml(doctype("html")(html(
+    val htmlContent = "<!DOCTYPE html>" + html(
       head(
         meta(charset := "utf-8"),
         tags2.title("Dossier Captacion"),
@@ -627,7 +627,7 @@ object AdminController extends cask.Routes {
 
         // KPIs globales
         div(cls := "section",
-          tags2.h2("Estadisticas Globales"),
+          h2("Estadisticas Globales"),
           div(cls := "kpi-grid",
             Seq(
               ("Partidos jugados", totalPJ.toString),
@@ -643,7 +643,7 @@ object AdminController extends cask.Routes {
           ),
 
           // Atributos
-          tags2.h2("Perfil Tecnico"),
+          h2("Perfil Tecnico"),
           div(cls := "attr-grid",
             Seq(("DIV", card.div), ("HAN", card.han), ("KIC", card.kic),
               ("REF", card.ref), ("SPD", card.spd), ("POS", card.pos)).map { case (lbl, v) =>
@@ -656,19 +656,19 @@ object AdminController extends cask.Routes {
 
           // Trayectoria por temporadas
           if (career.nonEmpty) div(
-            tags2.h2("Trayectoria por Temporada"),
-            career.map { s =>
+            h2("Trayectoria por Temporada"),
+            career.toSeq.map { s =>
               div(cls := "season-row",
                 span(style := "font-weight:600; color:#0f3460;", s.categoria),
-                span(s"${s.pj} partidos jugados"),
-                span(s"${s.gc} goles encajados"),
+                span(s"${s.partidosJugados} partidos jugados"),
+                span(s"${s.golesContra} goles encajados"),
                 span(style := "font-weight:700; color:#d4af37;", s"Media: ${s.media}")
               )
             }
           ) else div(),
 
           // Ultimos 20 partidos (sin nombre del rival)
-          tags2.h2("Ultimos Partidos (datos tecnicos)"),
+          h2("Ultimos Partidos (datos tecnicos)"),
           div(
             div(cls := "match-row",
               span(style:="font-weight:700; font-size:10px; color:#888;", "FECHA"),
@@ -698,7 +698,8 @@ object AdminController extends cask.Routes {
           )
         )
       )
-    ).render))
+    ).render
+    renderHtml(htmlContent)
   }
 
   initialize()
