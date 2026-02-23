@@ -751,7 +751,7 @@ object HistoryController extends cask.Routes {
     else if (influenceScore >= 50) ("warning","MEDIO")
     else ("danger","BAJO")
 
-    val serieLabels = serie.reverse.map(_._1.take(5)).mkString("["","","",""]")
+    val serieLabels = serie.reverse.map(_._1.take(5)).map(s => "\"" + s + "\"").mkString("[", ",", "]")
     val seriePie    = serie.reverse.map(_._2.toString).mkString("[",",","]")
     val serieNota   = serie.reverse.map(_._3.toString).mkString("[",",","]")
 
@@ -940,8 +940,8 @@ object HistoryController extends cask.Routes {
               val t = tiros.getOrElse(z, 0)
               val e = efic.getOrElse(z, -1)
               val (mainVal, mainColor) = showMode match {
-                case "goles"   => (if(g>0) g.toString else "·", if(g>=2)"#dc3545"else if(g==1)"#ffc107"else"#555")
-                case "paradas" => (if(p>0) p.toString else "·", if(p>=3)"#28a745"else if(p>=1)"#0dcaf0"else"#555")
+                case "goles"   => (if(g>0) g.toString else "-", if(g>=2)"#dc3545"else if(g==1)"#ffc107"else"#555")
+                case "paradas" => (if(p>0) p.toString else "-", if(p>=3)"#28a745"else if(p>=1)"#0dcaf0"else"#555")
                 case _ =>
                   val label = if(e == -1) "—" else s"$e%%"
                   val c = if(e == -1)"#555" else if(e>=70)"#28a745" else if(e>=50)"#ffc107" else "#dc3545"
