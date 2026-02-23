@@ -295,9 +295,39 @@ object BioController extends cask.Routes {
                     esPrevio: String = "false",
                     archivo: cask.FormFile) = {
     val isPrevio = esPrevio == "on"
-    // cask 0.9.2: FormFile.content = Array[Byte], FormFile.fileName = String
-    val fileBytes: Array[Byte] = archivo.content
-    val fileName:  String      = archivo.fileName
+    // cask 0.9.2: FormFile guarda el archivo en disco. toString = FormFile(name, /tmp/path, headers)
+    // Los campos son: fileName (String) y path (java.nio.file.Path o String)
+    val fileName: String = try {
+      archivo.getClass.getDeclaredFields
+        .find(f => f.getName == "fileName" || f.getName == "name")
+        .map { f => f.setAccessible(true); f.get(archivo).asInstanceOf[String] }
+        .getOrElse("documento.pdf")
+    } catch { case _: Exception => "documento.pdf" }
+
+    val fileBytes: Array[Byte] = try {
+      // Buscar el campo path (puede ser Path o String)
+      val pathField = archivo.getClass.getDeclaredFields
+        .find(f => f.getName == "path" || f.getName == "filePath" || f.getName == "tmpFile")
+      pathField match {
+        case Some(f) =>
+          f.setAccessible(true)
+          val v = f.get(archivo)
+          v match {
+            case p: java.nio.file.Path => java.nio.file.Files.readAllBytes(p)
+            case s: String             => java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(s))
+            case _                     => Array.empty[Byte]
+          }
+        case None =>
+          // Fallback: parsear el toString "FormFile(name, /tmp/path, ...)"
+          val str = archivo.toString
+          val parts = str.stripPrefix("FormFile(").split(",")
+          if (parts.length >= 2) {
+            val p = java.nio.file.Paths.get(parts(1).trim)
+            if (java.nio.file.Files.exists(p)) java.nio.file.Files.readAllBytes(p)
+            else Array.empty[Byte]
+          } else Array.empty[Byte]
+      }
+    } catch { case _: Exception => Array.empty[Byte] }
 
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini
