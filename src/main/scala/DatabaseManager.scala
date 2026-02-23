@@ -420,36 +420,60 @@ object DatabaseManager {
 
     private def callGeminiUnified(prompt: String, media: Option[(String, String)]): String = {
       val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+      if (apiKey.isEmpty) return "Error: GEMINI_API_KEY no configurada"
 
-      val keySeg = apiKey
-      // Lista de variantes de URL para asegurar compatibilidad en Europa
+      val isPdf = media.exists(_._1 == "application/pdf")
+
+      // gemini-1.5-flash soporta PDF inline; gemini-2.0-flash para texto/imagenes
+      val model = if (isPdf) "gemini-1.5-flash" else "gemini-2.0-flash"
+
       val urls = Seq(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$keySeg",
-        s"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=$keySeg"
+        s"https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1/models/$model:generateContent?key=$apiKey"
       )
 
-      if (apiKey.nonEmpty) {
-        println(s"DEBUG: Usando Key [${keySeg.take(4)}...${keySeg.takeRight(4)}]")
-      } else {
-        println("DEBUG: [!] GEMINI_API_KEY esta VACIA")
-      }
+      println(s"DEBUG: modelo=$model isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
+
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
+
       media.foreach { case (mime, data) =>
-        val cleanData = if(data.contains(",")) data.split(",")(1) else data
-        parts.value.append(ujson.Obj("inlineData" -> ujson.Obj("mimeType" -> mime, "data" -> cleanData)))
+        val cleanData = if (data.contains(",")) data.split(",")(1) else data
+        if (mime == "application/pdf") {
+          // PDFs: inlineData con mime correcto — funciona en gemini-1.5-flash
+          parts.value.append(ujson.Obj(
+            "inlineData" -> ujson.Obj("mimeType" -> "application/pdf", "data" -> cleanData)
+          ))
+        } else {
+          // Imagenes: inlineData normal
+          parts.value.append(ujson.Obj(
+            "inlineData" -> ujson.Obj("mimeType" -> mime, "data" -> cleanData)
+          ))
+        }
       }
+
       val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj("parts" -> parts)))
 
-      // Intenta cada URL hasta que una funcione
       var lastError = ""
       for (url <- urls) {
         try {
-          val r = requests.post(url, data = ujson.write(payload), headers = Map("Content-Type" -> "application/json"), readTimeout = 30000)
-          if (r.statusCode == 200) return ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
-          else lastError = s"Status ${r.statusCode}: ${r.text()}"
-        } catch { case e: Exception => lastError = e.getMessage }
+          val r = requests.post(
+            url,
+            data = ujson.write(payload),
+            headers = Map("Content-Type" -> "application/json"),
+            readTimeout = 60000  // PDF necesita mas tiempo
+          )
+          if (r.statusCode == 200)
+            return ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+          else {
+            lastError = s"Status ${r.statusCode}: ${r.text().take(300)}"
+            println(s"DEBUG URL fallida: $url -> $lastError")
+          }
+        } catch { case e: Exception =>
+          lastError = e.getMessage
+          println(s"DEBUG excepcion: $lastError")
+        }
       }
-      s"Error tras agotar variantes: $lastError"
+      s"Error: $lastError"
     }
   }
 
