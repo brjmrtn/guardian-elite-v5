@@ -364,15 +364,14 @@ object DashboardController extends cask.Routes {
             return;
           }
           alertas.forEach(function(a) {
-            // Notif push
             lanzarNotif(a.titulo, a.mensaje, a.tipo);
-            // Badge en pantalla
-            var color = a.tipo === 'danger' ? '#dc3545' : a.tipo === 'warning' ? '#ffc107' : '#17a2b8';
-            var textColor = a.tipo === 'warning' ? '#000' : '#fff';
+            var color = a.tipo === 'danger' ? '#dc3545' : a.tipo === 'warning' ? '#ffc107' : '#0dcaf0';
             var icono = a.tipo === 'danger' ? '🚨' : a.tipo === 'warning' ? '⚠️' : '🔔';
-            container.innerHTML += '<div style="background:' + color + '20; border-left:3px solid ' + color + '; padding:8px 10px; margin-bottom:6px; border-radius:4px;">' +
-              '<div style="font-size:11px; font-weight:700; color:' + color + ';">' + icono + ' ' + a.titulo + '</div>' +
-              '<div style="font-size:11px; color:#ccc; margin-top:2px;">' + a.mensaje + '</div>' +
+            var titulo = (a.titulo !== undefined && a.titulo !== null) ? a.titulo : '';
+            var mensaje = (a.mensaje !== undefined && a.mensaje !== null) ? a.mensaje : '';
+            container.innerHTML += '<div style="background:' + color + '18; border-left:3px solid ' + color + '; padding:10px 12px; margin-bottom:8px; border-radius:6px;">' +
+              '<div style="font-size:12px; font-weight:700; color:' + color + '; letter-spacing:0.5px;">' + icono + ' ' + titulo + '</div>' +
+              (mensaje ? '<div style="font-size:11px; color:#bbb; margin-top:3px;">' + mensaje + '</div>' : '') +
               '</div>';
           });
         }).catch(function() {});
@@ -387,11 +386,20 @@ object DashboardController extends cask.Routes {
   @cask.get("/api/alertas")
   def apiAlertas(request: cask.Request) = withAuth(request) {
     val alerts = DatabaseManager.getNotificationAlerts()
+    // Escapar correctamente para JSON valido
+    def esc(s: String): String = s
+      .replace("\", "\\")
+        .replace(""", "'")
+      .replace("
+", " ")
+      .replace("
+", "")
+      .replace("	", " ")
     val json = alerts.map { case (tipo, titulo, mensaje) =>
-      s"""{"tipo":"$tipo","titulo":"${titulo.replace(""","")}","mensaje":"${mensaje.replace(""","")}"}"""
-    }.mkString("[", ",", "]")
-    cask.Response(json.getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json; charset=utf-8"))
-  }
+      s"""{"tipo":"${esc(tipo)}","titulo":"${esc(titulo)}","mensaje":"${esc(mensaje)}"}"""
+  }.mkString("[", ",", "]")
+  cask.Response(json.getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json; charset=utf-8"))
+}
 
-  initialize()
+initialize()
 }
