@@ -1246,14 +1246,16 @@ object HistoryController extends cask.Routes {
                 th(cls:="text-center","Nota partido"), th("Notas conducta")
               )),
               tbody(frag(conNotas.map { e =>
-                val animoC = if(e.animo>=4)"success"else if(e.animo>=3)"warning"else"danger"
-                val energC = if(e.energia>=4)"success"else if(e.energia>=3)"warning"else"danger"
+                val animoC: String = if(e.animo>=4)"success"else if(e.animo>=3)"warning"else"danger"
+                val energC: String = if(e.energia>=4)"success"else if(e.energia>=3)"warning"else"danger"
+                val notaStr: String = e.notaPartido match { case Some(n) => "%.1f".format(n); case None => "--" }
+                val notasStr: String = if(e.notas.length>80) e.notas.take(80)+"..." else e.notas
                 tr(
                   td(cls:="text-muted", e.fecha.drop(5)),
-                  td(cls:="text-center", span(cls:=s"badge bg-$animoC", s"${animoEmoji(e.animo)} ${e.animo}")),
-                  td(cls:="text-center", span(cls:=s"badge bg-$energC", s"${energiaEmoji(e.energia)} ${e.energia}")),
-                  td(cls:="text-center fw-bold", e.notaPartido.map(n => f"$n%.1f").getOrElse("--")),
-                  td(cls:="text-muted small", e.notas.take(80) + (if(e.notas.length>80)"..."else""))
+                  td(cls:="text-center", span(cls:=s"badge bg-$animoC", animoEmoji(e.animo)+" "+e.animo.toString)),
+                  td(cls:="text-center", span(cls:=s"badge bg-$energC", energiaEmoji(e.energia)+" "+e.energia.toString)),
+                  td(cls:="text-center fw-bold", notaStr),
+                  td(cls:="text-muted small", notasStr)
                 )
               }: _*))
             )
