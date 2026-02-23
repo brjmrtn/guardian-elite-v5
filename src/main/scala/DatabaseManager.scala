@@ -406,13 +406,20 @@ object DatabaseManager {
         // Llamada real a la API (Unificada)
         val response = callGeminiUnified(prompt, media)
 
-        // Guardar en cache para la proxima vez
-        val save = conn.prepareStatement(
-          "INSERT INTO ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta"
-        )
-        save.setString(1, hash)
-        save.setString(2, response)
-        save.executeUpdate()
+        // Guardar en cache solo si la respuesta es valida (no un error)
+        if (!response.startsWith("Error:") && !response.contains("status code") && !response.contains("NOT_FOUND")) {
+          val save = conn.prepareStatement(
+            "INSERT INTO ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta"
+          )
+          save.setString(1, hash)
+          save.setString(2, response)
+          save.executeUpdate()
+        } else {
+          // Limpiar cualquier error cacheado anteriormente para este hash
+          val del = conn.prepareStatement("DELETE FROM ai_cache WHERE prompt_hash = ?")
+          del.setString(1, hash)
+          del.executeUpdate()
+        }
 
         response
       } finally { conn.close() }
@@ -424,14 +431,11 @@ object DatabaseManager {
 
       val isPdf = media.exists(_._1 == "application/pdf")
 
-      // gemini-1.5-flash solo en v1beta; gemini-2.0-flash en ambas
-      val urls = if (isPdf) Seq(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$apiKey"
-      ) else Seq(
+      // Usar siempre v1beta — soporta PDF y es compatible con cualquier API key de Google AI Studio
+      val urls = Seq(
         s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=$apiKey"
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
       )
 
       println(s"DEBUG: isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
