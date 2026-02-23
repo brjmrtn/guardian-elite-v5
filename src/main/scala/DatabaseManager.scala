@@ -1189,6 +1189,109 @@ object DatabaseManager {
     } finally { conn.close() }
   }
 
+
+  // ── EMOTIONAL INTELLIGENCE ENGINE ─────────────────────────────────────────
+  case class EmotionalEntry(fecha: String, animo: Int, energia: Int, notas: String,
+                            notaPartido: Option[Double], reaccionGoles: String)
+
+  def getEmotionalData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Serie de 45 dias: animo + energia + notas conducta + nota partido ese dia
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          w.fecha::TEXT,
+          COALESCE(w.animo, 3)    as animo,
+          COALESCE(w.energia, 3)  as energia,
+          COALESCE(w.notas_conducta, '') as notas,
+          m.nota                  as nota_partido,
+          COALESCE(m.reaccion_goles, '') as reaccion
+        FROM wellness w
+        LEFT JOIN matches m ON m.fecha = w.fecha AND m.status = 'PLAYED'
+        WHERE w.fecha >= CURRENT_DATE - 45
+        ORDER BY w.fecha ASC
+      """)
+      var entries = List[EmotionalEntry]()
+      while (rs.next()) {
+        val notaOpt = { val v = rs.getDouble("nota_partido"); if (rs.wasNull()) None else Some(v) }
+        entries = entries :+ EmotionalEntry(
+          rs.getString("fecha"), rs.getInt("animo"), rs.getInt("energia"),
+          Option(rs.getString("notas")).getOrElse(""), notaOpt,
+          Option(rs.getString("reaccion")).getOrElse("")
+        )
+      }
+
+      // Correlacion animo -> nota partido
+      val conPartido = entries.filter(_.notaPartido.isDefined)
+      val correlacion: Double = if (conPartido.size >= 3) {
+        val animoAlto  = conPartido.filter(_.animo >= 4).flatMap(_.notaPartido)
+        val animoBajo  = conPartido.filter(_.animo <= 2).flatMap(_.notaPartido)
+        val diffCorr = (if (animoAlto.nonEmpty) animoAlto.sum / animoAlto.size else 0.0) -
+          (if (animoBajo.nonEmpty) animoBajo.sum / animoBajo.size else 0.0)
+        diffCorr
+      } else 0.0
+
+      // Patron emocional: dias bajos consecutivos (riesgo burnout)
+      val diasBajosConsecutivos = {
+        var maxRacha = 0; var racha = 0
+        entries.foreach { e =>
+          if (e.animo <= 2 || e.energia <= 2) { racha += 1; maxRacha = math.max(maxRacha, racha) }
+          else racha = 0
+        }
+        maxRacha
+      }
+
+      // Estado emocional actual (ultimos 7 dias)
+      val recientes = entries.takeRight(7)
+      val avgAnimoReciente  = if (recientes.nonEmpty) recientes.map(_.animo.toDouble).sum / recientes.size else 3.0
+      val avgEnergiaReciente= if (recientes.nonEmpty) recientes.map(_.energia.toDouble).sum / recientes.size else 3.0
+
+      // Notas de conducta recientes para analisis IA
+      val notasParaIA = entries.takeRight(14)
+        .filter(_.notas.nonEmpty)
+        .map(e => s"${e.fecha}: ${e.notas}")
+        .mkString(" | ")
+
+      // Reacciones a goles encajados
+      val reacciones = entries.filter(_.reaccionGoles.nonEmpty).map(_.reaccionGoles).take(5)
+
+      // Score de resiliencia emocional (0-100)
+      val resilienciaScore = {
+        var s = 50.0
+        if (correlacion > 1.0) s += 15 else if (correlacion > 0.5) s += 8
+        if (diasBajosConsecutivos == 0) s += 15 else if (diasBajosConsecutivos <= 2) s += 5 else s -= 10
+        if (avgAnimoReciente >= 4) s += 10 else if (avgAnimoReciente <= 2) s -= 10
+        if (avgEnergiaReciente >= 4) s += 10 else if (avgEnergiaReciente <= 2) s -= 5
+        math.min(99, math.max(1, s.toInt))
+      }
+
+      // Analisis IA de las notas emocionales (bypassCache para siempre tener fresco)
+      val analisisIA: String = if (notasParaIA.nonEmpty) {
+        val prompt = s"""Eres un psicopedagogo deportivo analizando el diario emocional de Hector, portero de 9 anos.
+Entradas recientes (fecha: nota): $notasParaIA
+Reacciones a goles encajados: ${reacciones.mkString(" | ")}
+Proporciona un analisis BREVE en 3 partes:
+PATRON: [patron emocional detectado en 1 frase]
+FORTALEZA: [principal fortaleza mental en 1 frase]
+CONSEJO: [1 consejo practico concreto para esta semana]
+Responde en espanol, tono positivo y motivador para un nino."""
+        AIProvider.ask(prompt, None, bypassCache = true)
+      } else "Sin suficientes notas de conducta para el analisis. Registra tu estado diario para activar este modulo."
+
+      Map(
+        "entries"     -> entries,
+        "correlacion" -> correlacion,
+        "diasBajosConsecutivos" -> diasBajosConsecutivos,
+        "avgAnimoReciente"  -> avgAnimoReciente,
+        "avgEnergiaReciente"-> avgEnergiaReciente,
+        "resilienciaScore"  -> resilienciaScore,
+        "analisisIA"        -> analisisIA,
+        "notasCount"        -> entries.count(_.notas.nonEmpty),
+        "totalEntries"      -> entries.size
+      )
+    } finally { conn.close() }
+  }
+
   def getTacticalStats(): Map[String, Int] = { var stats = scala.collection.mutable.Map("g_tot"->0, "g_alt"->0, "g_med"->0, "g_ras"->0, "g_izq"->0, "g_cen"->0, "g_der"->0, "p_tot"->0, "p_alt"->0, "p_med"->0, "p_ras"->0, "p_izq"->0, "p_cen"->0, "p_der"->0); val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT zona_goles, zona_paradas FROM matches WHERE status='PLAYED' ORDER BY id DESC LIMIT 20"); while(rs.next()) { val zG = Option(rs.getString("zona_goles")).getOrElse(""); val zP = Option(rs.getString("zona_paradas")).getOrElse(""); zG.split(",").filter(_.nonEmpty).foreach { z => stats("g_tot")+=1; if(z.contains("T")) stats("g_alt")+=1 else if(z.contains("M")) stats("g_med")+=1 else stats("g_ras")+=1; if(z.contains("L")) stats("g_izq")+=1 else if(z.contains("C")) stats("g_cen")+=1 else stats("g_der")+=1 }; zP.split(",").filter(_.nonEmpty).foreach { z => stats("p_tot")+=1; if(z.contains("T")) stats("p_alt")+=1 else if(z.contains("M")) stats("p_med")+=1 else stats("p_ras")+=1; if(z.contains("L")) stats("p_izq")+=1 else if(z.contains("C")) stats("p_cen")+=1 else stats("p_der")+=1 } } } finally { conn.close() }; stats.toMap }
   def updateStats(s: PlayerCardData): Unit = { val conn=getConnection(); try { val st=conn.prepareStatement("UPDATE seasons SET media=?, stat_div=?, stat_han=?, stat_kic=?, stat_ref=?, stat_spd=?, stat_pos=? WHERE id=(SELECT MAX(id) FROM seasons)"); st.setDouble(1,s.media); st.setDouble(2,s.divRaw); st.setDouble(3,s.hanRaw); st.setDouble(4,s.kicRaw); st.setDouble(5,s.refRaw); st.setDouble(6,s.spdRaw); st.setDouble(7,s.posRaw); st.executeUpdate() } finally { conn.close() } }
   def getBackupCSV(): String = { val sb=new StringBuilder(); sb.append("RIVAL,GF,GC,MIN,NOTA,PARADAS,CLIMA,ESTADIO,NOTAS,REACCION,FECHA\n"); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"); while(rs.next()){ sb.append(s"${rs.getString("rival")},${rs.getInt("goles_favor")},${rs.getInt("goles_contra")},${rs.getInt("minutos")},${rs.getDouble("nota")},${rs.getInt("paradas")},${Option(rs.getString("clima")).getOrElse("Sol")},${Option(rs.getString("estadio")).getOrElse("-")},${Option(rs.getString("notas_partido")).getOrElse("")},${Option(rs.getString("reaccion_goles")).getOrElse("")},${rs.getDate("fecha")}\n") } } finally {conn.close()}; sb.toString() }
