@@ -850,6 +850,16 @@ object HistoryController extends cask.Routes {
         )
       ),
 
+      // Pre-computed chart data (evita interpolaciones complejas en s""")
+      val chartHistData: String = {
+        val pairs = growthRows.map(r => "{x:\"" + r._1 + "\",y:" + r._2.toString + "}")
+        "[" + pairs.mkString(",") + "]"
+      }
+      val chartProyData: String = {
+        val pairs = curvaProy.map(r => "{x:\"" + r._1.toString + "a\",y:" + r._2.formatted("%.1f") + "}")
+        "[" + pairs.mkString(",") + "]"
+      }
+
       script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
       script(raw(s"""
             const ctx = document.getElementById('chartInfluence');
@@ -1542,58 +1552,41 @@ object HistoryController extends cask.Routes {
           ),
 
           script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
-          script(raw(s"""
-      function recalcular() {
-      var p = document.getElementById('hPadreInput').value;
-      var m = document.getElementById('hMadreInput').value;
-      window.location.href = '/digital-twin?hPadre=' + p + '&hMadre=' + m;
+          script(raw(
+            s"""<script>
+      function recalcular(){
+      var p=document.getElementById('hPadreInput').value;
+      var m=document.getElementById('hMadreInput').value;
+      window.location.href='/digital-twin?hPadre='+p+'&hMadre='+m;
     }
-    // Grafico crecimiento
-    var ctxC = document.getElementById('chartCrecimiento');
-    if (ctxC) {
-      new Chart(ctxC, {
-        type: 'line',
-        data: {
-          datasets: [
-        { label: 'Historico real', data: ${histAltura}.map(function(v,i){ return {x: ${histFechas}[i], y: v}; }),
-          borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.1)', borderWidth: 2, pointRadius: 4, fill: true },
-        { label: 'Proyeccion adulta', data: ${proyAlturas}.map(function(v,i){ return {x: ${proyEdades}[i], y: parseFloat(v)}; }),
-          borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.05)', borderWidth: 2, borderDash: [6,3], pointRadius: 3 }
+    var ctxC=document.getElementById('chartCrecimiento');
+    if(ctxC){
+      new Chart(ctxC,{
+        type:'line',
+        data:{
+          labels:$histFechas,
+          datasets:[
+        {label:'Historico real',data:$histAltura,borderColor:'#0dcaf0',backgroundColor:'rgba(13,202,240,0.1)',borderWidth:2,pointRadius:4,fill:true},
+        {label:'Proyeccion adulta',data:$proyAlturas,borderColor:'#ffc107',borderDash:[6,3],borderWidth:2,pointRadius:3}
           ]
         },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          scales: {
-          x: { type: 'category', ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: '#333' } },
-          y: { ticks: { color: '#aaa' }, grid: { color: '#333' }, title: { display: true, text: 'cm', color: '#888' } }
-        },
-          plugins: { legend: { labels: { color: '#fff', font: { size: 10 } } } }
-        }
+        options:{responsive:true,maintainAspectRatio:false,
+          scales:{x:{ticks:{color:'#888',maxTicksLimit:8},grid:{color:'#333'}},y:{ticks:{color:'#aaa'},grid:{color:'#333'}}},
+          plugins:{legend:{labels:{color:'#fff',font:{size:10}}}}}
       });
     }
-    // Grafico rendimiento
-    var ctxR = document.getElementById('chartRendimiento');
-    if (ctxR) {
-      new Chart(ctxR, {
-        type: 'bar',
-        data: {
-          labels: $tempLabels,
-          datasets: [{
-          label: 'Nota media temporada', data: $tempNotas,
-          backgroundColor: 'rgba(255,193,7,0.7)', borderColor: '#ffc107', borderWidth: 1
-        }]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          scales: {
-          y: { min: 0, max: 100, ticks: { color: '#aaa' }, grid: { color: '#333' } },
-          x: { ticks: { color: '#888' }, grid: { display: false } }
-        },
-          plugins: { legend: { labels: { color: '#fff', font: { size: 10 } } } }
-        }
+    var ctxR=document.getElementById('chartRendimiento');
+    if(ctxR){
+      new Chart(ctxR,{
+        type:'bar',
+        data:{labels:$tempLabels,datasets:[{label:'Nota media',data:$tempNotas,backgroundColor:'rgba(255,193,7,0.7)',borderColor:'#ffc107',borderWidth:1}]},
+        options:{responsive:true,maintainAspectRatio:false,
+          scales:{y:{min:0,max:100,ticks:{color:'#aaa'},grid:{color:'#333'}},x:{ticks:{color:'#888'},grid:{display:false}}},
+          plugins:{legend:{labels:{color:'#fff',font:{size:10}}}}}
       });
     }
-    """))
+    </script>"""
+    ))
     )
     )
     ))
