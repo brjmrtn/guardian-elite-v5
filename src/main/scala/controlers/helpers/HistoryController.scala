@@ -1092,5 +1092,210 @@ object HistoryController extends cask.Routes {
     } // end else
   }
 
+  // ── EMOTIONAL INTELLIGENCE ENGINE ───────────────────────────────────────
+  @cask.get("/emocional")
+  def emocionalPage(request: cask.Request) = withAuth(request) {
+    val stats = DatabaseManager.getEmotionalData()
+
+    val entries    = stats("entries").asInstanceOf[List[DatabaseManager.EmotionalEntry]]
+    val correlacion= stats("correlacion").asInstanceOf[Double]
+    val diasBajos  = stats("diasBajosConsecutivos").asInstanceOf[Int]
+    val avgAnimo   = stats("avgAnimoReciente").asInstanceOf[Double]
+    val avgEnergia = stats("avgEnergiaReciente").asInstanceOf[Double]
+    val score      = stats("resilienciaScore").asInstanceOf[Int]
+    val analisisIA = stats("analisisIA").asInstanceOf[String]
+    val notasCount = stats("notasCount").asInstanceOf[Int]
+    val total      = stats("totalEntries").asInstanceOf[Int]
+
+    val (scoreColor, scoreLabel) =
+      if (score >= 75) ("success","ALTA") else if (score >= 50) ("warning","MEDIA") else ("danger","BAJA")
+
+    // Parsear las 3 partes del analisis IA
+    def extractIA(tag: String): String = {
+      val idx = analisisIA.indexOf(tag + ":")
+      if (idx == -1) ""
+      else {
+        val start = idx + tag.length + 1
+        val nextTag = Seq("PATRON:", "FORTALEZA:", "CONSEJO:").filter(_ != tag + ":").flatMap { t =>
+          val i = analisisIA.indexOf(t, start); if (i > 0) Some(i) else None
+        }
+        val end = if (nextTag.nonEmpty) nextTag.min else analisisIA.length
+        analisisIA.substring(start, end).trim
+      }
+    }
+    val patron    = extractIA("PATRON")
+    val fortaleza = extractIA("FORTALEZA")
+    val consejo   = extractIA("CONSEJO")
+
+    // Datos para graficos
+    val ultimos = entries.takeRight(30)
+    val fechas  = ultimos.map(e => """ + e.fecha.drop(5) + """).mkString("[", ",", "]")
+    val animos  = ultimos.map(_.animo.toString).mkString("[", ",", "]")
+    val energias= ultimos.map(_.energia.toString).mkString("[", ",", "]")
+    val notasPartido = ultimos.map(e => e.notaPartido.map(_.toString).getOrElse("null")).mkString("[",",","]")
+
+    // Tabla de entradas recientes con notas
+    val conNotas = entries.filter(_.notas.nonEmpty).takeRight(10).reverse
+
+    // Emojis por nivel
+    def animoEmoji(n: Int) = n match { case 5=>"😄"; case 4=>"🙂"; case 3=>"😐"; case 2=>"😕"; case _=>"😞" }
+    def energiaEmoji(n: Int) = n match { case 5=>"⚡"; case 4=>"🔋"; case 3=>"➖"; case 2=>"🪫"; case _=>"😴" }
+
+    if (total == 0) {
+      renderHtml(basePage("bio",
+        div(cls:="text-center py-5",
+          div(style:="font-size:48px;","🧠"),
+          h4(cls:="text-info mt-3","Motor Emocional"),
+          p(cls:="text-muted","Registra tu estado fisico diario para activar este modulo."),
+          a(href:="/bio", cls:="btn btn-outline-info mt-2 fw-bold","Ir a Bio")
+        )
+      ))
+    } else {
+      val pageContent = basePage("bio",
+        div(cls:="row justify-content-center",
+          div(cls:="col-md-10 col-12",
+            div(cls:="d-flex justify-content-between align-items-center mb-3",
+              h2(cls:="text-info mb-0","🧠 MOTOR EMOCIONAL"),
+              a(href:="/bio", cls:="btn btn-outline-secondary btn-sm fw-bold","Bio")
+            ),
+
+            // Score resiliencia + KPIs
+            div(cls:="row g-2 mb-3",
+              div(cls:="col-md-4",
+                div(cls:=s"card bg-dark border-$scoreColor shadow h-100",
+                  div(cls:=s"card-header bg-$scoreColor bg-opacity-10 text-$scoreColor fw-bold small text-center",
+                    "RESILIENCIA MENTAL"
+                  ),
+                  div(cls:="card-body text-center py-3",
+                    div(style:=s"font-size:52px; font-weight:900; color:${if(scoreColor=="success")"#28a745"else if(scoreColor=="warning")"#ffc107"else"#dc3545"};",
+                      score.toString
+                    ),
+                    div(cls:=s"badge bg-$scoreColor fw-bold mt-1", scoreLabel),
+                    div(cls:="text-muted xx-small mt-2", "Basado en patron emocional, correlacion con rendimiento y estabilidad de animo")
+                  )
+                )
+              ),
+              div(cls:="col-md-8",
+                div(cls:="row g-2 h-100",
+                  Seq(
+                    ("Animo medio (7d)", f"$avgAnimo%.1f/5", animoEmoji(avgAnimo.round.toInt), if(avgAnimo>=4)"success"else if(avgAnimo>=3)"warning"else"danger"),
+      ("Energia media (7d)", f"$avgEnergia%.1f/5", energiaEmoji(avgEnergia.round.toInt), if(avgEnergia>=4)"success"else if(avgEnergia>=3)"warning"else"danger"),
+      ("Correlacion animo-nota", if(correlacion>0.3) f"+$correlacion%.1f pts" else if(correlacion < -0.3) f"$correlacion%.1f pts" else "Neutro", if(correlacion>0.3)"📈"else if(correlacion < -0.3)"📉"else"➖", if(correlacion>0.3)"success"else if(correlacion < -0.3)"warning"else"secondary"),
+      ("Dias bajos consecutivos", if(diasBajos==0)"Ninguno"else s"$diasBajos dias", if(diasBajos==0)"✅"else if(diasBajos<=2)"⚠️"else"🚨", if(diasBajos==0)"success"else if(diasBajos<=2)"warning"else"danger"),
+      ("Registros con notas", s"$notasCount / $total", "📝", "info"),
+      ("Dias analizados", total.toString, "📅", "secondary")
+      ).map { case (lbl, v, ico, c) =>
+        div(cls:="col-4",
+          div(cls:=s"card bg-dark border-$c h-100",
+            div(cls:="card-body p-2 text-center",
+              div(style:="font-size:20px;", ico),
+              div(cls:=s"fw-bold text-$c small", v),
+              div(cls:="xx-small text-muted", lbl)
+            )
+          )
+        )
+      }
+      )
+      )
+      ),
+
+      // Analisis IA
+      if (patron.nonEmpty || fortaleza.nonEmpty || consejo.nonEmpty) {
+        div(cls:="card bg-dark border-info shadow mb-3",
+          div(cls:="card-header text-info fw-bold small", "🤖 ANALISIS PSICOPEDAGOGICO (IA)"),
+          div(cls:="card-body p-3",
+            div(cls:="row g-3",
+              Seq(
+                ("PATRON EMOCIONAL", patron, "info", "🔍"),
+                ("FORTALEZA MENTAL", fortaleza, "success", "💪"),
+                ("CONSEJO DE LA SEMANA", consejo, "warning", "🎯")
+              ).filter(_._2.nonEmpty).map { case (titulo, texto, c, ico) =>
+                div(cls:="col-md-4",
+                  div(cls:=s"p-3 rounded h-100",
+                    style:=s"background:rgba(${if(c=="info")"13,202,240"else if(c=="success")"40,167,69"else"255,193,7"},0.1); border-left:3px solid ${if(c=="info")"#0dcaf0"else if(c=="success")"#28a745"else"#ffc107"};",
+                    div(cls:=s"text-$c fw-bold xx-small mb-2", s"$ico $titulo"),
+                    div(cls:="text-white small", texto)
+                  )
+                )
+              }
+            )
+          )
+        )
+      } else div(cls:="card bg-dark border-secondary shadow mb-3",
+        div(cls:="card-body p-3 text-muted small text-center",
+          "Escribe notas de conducta en tu registro diario para activar el analisis IA"
+        )
+      ),
+
+      // Grafico animo + energia + nota
+      div(cls:="card bg-dark border-secondary shadow mb-3",
+        div(cls:="card-header text-white fw-bold small", "EVOLUCION EMOCIONAL (ultimos 30 dias)"),
+        div(cls:="card-body p-2",
+          tag("canvas")(id:="chartEmocional", style:="max-height:220px;")
+        )
+      ),
+
+      // Tabla diario emocional con notas
+      if (conNotas.nonEmpty) div(cls:="card bg-dark border-secondary shadow",
+        div(cls:="card-header text-white fw-bold small", "DIARIO EMOCIONAL -- Ultimas entradas con notas"),
+        div(cls:="card-body p-0",
+          div(cls:="table-responsive",
+            table(cls:="table table-dark table-sm small mb-0",
+              thead(tr(
+                th("Fecha"), th(cls:="text-center","Animo"), th(cls:="text-center","Energia"),
+                th(cls:="text-center","Nota partido"), th("Notas conducta")
+              )),
+              tbody(frag(conNotas.map { e =>
+                val animoC = if(e.animo>=4)"success"else if(e.animo>=3)"warning"else"danger"
+                val energC = if(e.energia>=4)"success"else if(e.energia>=3)"warning"else"danger"
+                tr(
+                  td(cls:="text-muted", e.fecha.drop(5)),
+                  td(cls:="text-center", span(cls:=s"badge bg-$animoC", s"${animoEmoji(e.animo)} ${e.animo}")),
+                  td(cls:="text-center", span(cls:=s"badge bg-$energC", s"${energiaEmoji(e.energia)} ${e.energia}")),
+                  td(cls:="text-center fw-bold", e.notaPartido.map(n => f"$n%.1f").getOrElse("--")),
+                  td(cls:="text-muted small", e.notas.take(80) + (if(e.notas.length>80)"..."else""))
+                )
+              }: _*))
+            )
+          )
+        )
+      ) else div(),
+
+      script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
+      script(raw(s"""
+              const ctxE = document.getElementById('chartEmocional');
+              if (ctxE) {
+                new Chart(ctxE, {
+                  type: 'line',
+                  data: {
+                    labels: $fechas,
+                    datasets: [
+                      { label: 'Animo', data: $animos, borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.1)', borderWidth: 2, tension: 0.4, pointRadius: 3, fill: true },
+                      { label: 'Energia', data: $energias, borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.05)', borderWidth: 2, tension: 0.4, pointRadius: 3 },
+                      { label: 'Nota partido', data: $notasPartido, borderColor: '#28a745', borderWidth: 2, tension: 0.4, pointRadius: 5, pointBackgroundColor: '#28a745', spanGaps: true, yAxisID: 'y1' }
+                    ]
+                  },
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                      y:  { min: 0, max: 5, ticks: { color: '#aaa', stepSize: 1 }, grid: { color: '#333' } },
+                      y1: { position: 'right', min: 0, max: 10, ticks: { color: '#28a745' }, grid: { display: false } },
+                      x:  { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } }
+                    },
+                    plugins: {
+                      legend: { labels: { color: '#fff', font: { size: 11 } } },
+                      tooltip: { mode: 'index', intersect: false }
+                    }
+                  }
+                });
+              }
+            """))
+      )
+      )
+      )
+      renderHtml(pageContent)
+    }
+  }
+
   initialize()
 }
