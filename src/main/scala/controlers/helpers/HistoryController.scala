@@ -1177,13 +1177,13 @@ object HistoryController extends cask.Routes {
               ),
               div(cls:="col-md-8",
                 div(cls:="row g-2 h-100",
-                  Seq(
+                  frag(Seq(
                     ("Animo medio (7d)", f"$avgAnimo%.1f/5", animoEmoji(avgAnimo.round.toInt), if(avgAnimo>=4)"success"else if(avgAnimo>=3)"warning"else"danger"),
       ("Energia media (7d)", f"$avgEnergia%.1f/5", energiaEmoji(avgEnergia.round.toInt), if(avgEnergia>=4)"success"else if(avgEnergia>=3)"warning"else"danger"),
-      ("Correlacion animo-nota", if(correlacion>0.3) f"+$correlacion%.1f pts" else if(correlacion < -0.3) f"$correlacion%.1f pts" else "Neutro", if(correlacion>0.3)"📈"else if(correlacion < -0.3)"📉"else"➖", if(correlacion>0.3)"success"else if(correlacion < -0.3)"warning"else"secondary"),
-      ("Dias bajos consecutivos", if(diasBajos==0)"Ninguno"else s"$diasBajos dias", if(diasBajos==0)"✅"else if(diasBajos<=2)"⚠️"else"🚨", if(diasBajos==0)"success"else if(diasBajos<=2)"warning"else"danger"),
-      ("Registros con notas", s"$notasCount / $total", "📝", "info"),
-      ("Dias analizados", total.toString, "📅", "secondary")
+      ("Correlacion animo-nota", if(correlacion>0.3) f"+$correlacion%.1f pts" else if(correlacion < -0.3) f"$correlacion%.1f pts" else "Neutro", if(correlacion>0.3)":"+"📈"else if(correlacion < -0.3)":"+"📉"else":-", if(correlacion>0.3)"success"else if(correlacion < -0.3)"warning"else"secondary"),
+      ("Dias bajos consecutivos", if(diasBajos==0)"Ninguno"else s"$diasBajos dias", if(diasBajos==0)":)"else if(diasBajos<=2)"(!)"else"[!]", if(diasBajos==0)"success"else if(diasBajos<=2)"warning"else"danger"),
+      ("Registros con notas", s"$notasCount / $total", ":memo:", "info"),
+      ("Dias analizados", total.toString, ":cal:", "secondary")
       ).map { case (lbl, v, ico, c) =>
         div(cls:="col-4",
           div(cls:=s"card bg-dark border-$c h-100",
@@ -1194,7 +1194,7 @@ object HistoryController extends cask.Routes {
             )
           )
         )
-      }
+      }: _*)
       )
       )
       ),
@@ -1205,10 +1205,10 @@ object HistoryController extends cask.Routes {
           div(cls:="card-header text-info fw-bold small", "🤖 ANALISIS PSICOPEDAGOGICO (IA)"),
           div(cls:="card-body p-3",
             div(cls:="row g-3",
-              Seq(
-                ("PATRON EMOCIONAL", patron, "info", "🔍"),
-                ("FORTALEZA MENTAL", fortaleza, "success", "💪"),
-                ("CONSEJO DE LA SEMANA", consejo, "warning", "🎯")
+              frag(Seq(
+                ("PATRON EMOCIONAL", patron, "info", "?"),
+                ("FORTALEZA MENTAL", fortaleza, "success", "*"),
+                ("CONSEJO DE LA SEMANA", consejo, "warning", ">")
               ).filter(_._2.nonEmpty).map { case (titulo, texto, c, ico) =>
                 div(cls:="col-md-4",
                   div(cls:=s"p-3 rounded h-100",
@@ -1217,7 +1217,7 @@ object HistoryController extends cask.Routes {
                     div(cls:="text-white small", texto)
                   )
                 )
-              }
+              }: _*)
             )
           )
         )
