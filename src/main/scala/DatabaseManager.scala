@@ -1070,6 +1070,122 @@ object DatabaseManager {
     } finally { conn.close() }
   }
 
+  // ── GK INFLUENCE ANALYTICS ────────────────────────────────────────────────
+  def getGKInfluenceStats(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Distribuciones con pie (acciones_pie) y resultado posterior
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          AVG(acciones_pie) as avg_pie,
+          SUM(acciones_pie) as total_pie,
+          AVG(CASE WHEN acciones_pie > 5 THEN nota ELSE NULL END) as nota_alta_pie,
+          AVG(CASE WHEN acciones_pie <= 5 THEN nota ELSE NULL END) as nota_baja_pie,
+          AVG(CASE WHEN pc_t > 0 THEN CAST(pc_ok AS FLOAT)/pc_t ELSE NULL END) as pct_centros,
+          AVG(CASE WHEN pl_t > 0 THEN CAST(pl_ok AS FLOAT)/pl_t ELSE NULL END) as pct_largos,
+          COUNT(*) as pj,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as pcs,
+          AVG(nota) as avg_nota
+        FROM matches WHERE status='PLAYED'
+      """)
+      if (!rs.next()) return Map.empty
+
+      val avgPie      = rs.getDouble("avg_pie")
+      val totalPie    = rs.getInt("total_pie")
+      val notaAltaPie = rs.getDouble("nota_alta_pie")
+      val notaBajaPie = rs.getDouble("nota_baja_pie")
+      val pctCentros  = rs.getDouble("pct_centros")
+      val pctLargos   = rs.getDouble("pct_largos")
+      val pj          = rs.getInt("pj")
+      val pcs         = rs.getInt("pcs")
+      val avgNota     = rs.getDouble("avg_nota")
+
+      // Serie temporal: acciones_pie + nota por partido (ultimos 20)
+      val rsSerie = conn.createStatement().executeQuery(
+        "SELECT fecha::TEXT, acciones_pie, nota, rival FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 20"
+      )
+      var serie = List[(String, Int, Double, String)]()
+      while (rsSerie.next()) serie = serie :+ (
+        rsSerie.getString(1), rsSerie.getInt(2), rsSerie.getDouble(3), rsSerie.getString(4)
+      )
+
+      // Distribucion por tipo de balon parado
+      val rsTipo = conn.createStatement().executeQuery("""
+        SELECT
+          SUM(pc_t) as cent_total, SUM(pc_ok) as cent_ok,
+          SUM(pl_t) as larg_total, SUM(pl_ok) as larg_ok
+        FROM matches WHERE status='PLAYED'
+      """)
+      val (centTotal, centOk, largTotal, largOk) = if (rsTipo.next())
+        (rsTipo.getInt(1), rsTipo.getInt(2), rsTipo.getInt(3), rsTipo.getInt(4))
+      else (0, 0, 0, 0)
+
+      Map(
+        "avgPie" -> avgPie, "totalPie" -> totalPie,
+        "notaAltaPie" -> notaAltaPie, "notaBajaPie" -> notaBajaPie,
+        "pctCentros" -> pctCentros, "pctLargos" -> pctLargos,
+        "pj" -> pj, "pcs" -> pcs, "avgNota" -> avgNota,
+        "serie" -> serie,
+        "centTotal" -> centTotal, "centOk" -> centOk,
+        "largTotal" -> largTotal, "largOk" -> largOk
+      )
+    } finally { conn.close() }
+  }
+
+  // ── BIOMECANICA POSICIONAL ─────────────────────────────────────────────────
+  def getBiomecPosicional(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Zonas de gol encajado vs zonas de parada (9 zonas: TL,TC,TR,ML,MC,MR,BL,BC,BR)
+      val zones = Seq("TL","TC","TR","ML","MC","MR","BL","BC","BR")
+      val golesMap  = scala.collection.mutable.Map(zones.map(_ -> 0): _*)
+      val paradasMap= scala.collection.mutable.Map(zones.map(_ -> 0): _*)
+      val tirosMap  = scala.collection.mutable.Map(zones.map(_ -> 0): _*)
+
+      val rs = conn.createStatement().executeQuery(
+        "SELECT zona_goles, zona_paradas, zona_tiros FROM matches WHERE status='PLAYED'"
+      )
+      while (rs.next()) {
+        Option(rs.getString("zona_goles")).getOrElse("").split(",").filter(_.nonEmpty).foreach { z =>
+          val k = z.trim.toUpperCase; if (golesMap.contains(k)) golesMap(k) += 1
+        }
+        Option(rs.getString("zona_paradas")).getOrElse("").split(",").filter(_.nonEmpty).foreach { z =>
+          val k = z.trim.toUpperCase; if (paradasMap.contains(k)) paradasMap(k) += 1
+        }
+        Option(rs.getString("zona_tiros")).getOrElse("").split(",").filter(_.nonEmpty).foreach { z =>
+          val k = z.trim.toUpperCase; if (tirosMap.contains(k)) tirosMap(k) += 1
+        }
+      }
+
+      // Puntos ciegos: zonas donde goles > paradas (vulnerables)
+      val puntosCiegos = zones.filter(z => golesMap(z) > paradasMap(z)).sortBy(-golesMap(_))
+
+      // Zonas fuertes: zonas donde paradas > goles
+      val zonasFuertes = zones.filter(z => paradasMap(z) > golesMap(z)).sortBy(-paradasMap(_))
+
+      // Eficiencia por zona: paradas / (paradas + goles)
+      val eficiencia = zones.map { z =>
+        val total = paradasMap(z) + golesMap(z)
+        val pct = if (total > 0) (paradasMap(z).toDouble / total * 100).toInt else -1
+        z -> pct
+      }.toMap
+
+      // Porcentaje de stop por zona de tiro
+      val stopRate = zones.map { z =>
+        val goles = golesMap(z); val paradas = paradasMap(z)
+        val total = goles + paradas
+        z -> (if (total > 0) f"${paradas.toDouble/total*100}%.0f%%" else "—")
+      }.toMap
+
+      Map(
+        "goles" -> golesMap.toMap, "paradas" -> paradasMap.toMap,
+        "tiros" -> tirosMap.toMap, "eficiencia" -> eficiencia,
+        "puntosCiegos" -> puntosCiegos, "zonasFuertes" -> zonasFuertes,
+        "stopRate" -> stopRate, "zones" -> zones
+      )
+    } finally { conn.close() }
+  }
+
   def getTacticalStats(): Map[String, Int] = { var stats = scala.collection.mutable.Map("g_tot"->0, "g_alt"->0, "g_med"->0, "g_ras"->0, "g_izq"->0, "g_cen"->0, "g_der"->0, "p_tot"->0, "p_alt"->0, "p_med"->0, "p_ras"->0, "p_izq"->0, "p_cen"->0, "p_der"->0); val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT zona_goles, zona_paradas FROM matches WHERE status='PLAYED' ORDER BY id DESC LIMIT 20"); while(rs.next()) { val zG = Option(rs.getString("zona_goles")).getOrElse(""); val zP = Option(rs.getString("zona_paradas")).getOrElse(""); zG.split(",").filter(_.nonEmpty).foreach { z => stats("g_tot")+=1; if(z.contains("T")) stats("g_alt")+=1 else if(z.contains("M")) stats("g_med")+=1 else stats("g_ras")+=1; if(z.contains("L")) stats("g_izq")+=1 else if(z.contains("C")) stats("g_cen")+=1 else stats("g_der")+=1 }; zP.split(",").filter(_.nonEmpty).foreach { z => stats("p_tot")+=1; if(z.contains("T")) stats("p_alt")+=1 else if(z.contains("M")) stats("p_med")+=1 else stats("p_ras")+=1; if(z.contains("L")) stats("p_izq")+=1 else if(z.contains("C")) stats("p_cen")+=1 else stats("p_der")+=1 } } } finally { conn.close() }; stats.toMap }
   def updateStats(s: PlayerCardData): Unit = { val conn=getConnection(); try { val st=conn.prepareStatement("UPDATE seasons SET media=?, stat_div=?, stat_han=?, stat_kic=?, stat_ref=?, stat_spd=?, stat_pos=? WHERE id=(SELECT MAX(id) FROM seasons)"); st.setDouble(1,s.media); st.setDouble(2,s.divRaw); st.setDouble(3,s.hanRaw); st.setDouble(4,s.kicRaw); st.setDouble(5,s.refRaw); st.setDouble(6,s.spdRaw); st.setDouble(7,s.posRaw); st.executeUpdate() } finally { conn.close() } }
   def getBackupCSV(): String = { val sb=new StringBuilder(); sb.append("RIVAL,GF,GC,MIN,NOTA,PARADAS,CLIMA,ESTADIO,NOTAS,REACCION,FECHA\n"); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"); while(rs.next()){ sb.append(s"${rs.getString("rival")},${rs.getInt("goles_favor")},${rs.getInt("goles_contra")},${rs.getInt("minutos")},${rs.getDouble("nota")},${rs.getInt("paradas")},${Option(rs.getString("clima")).getOrElse("Sol")},${Option(rs.getString("estadio")).getOrElse("-")},${Option(rs.getString("notas_partido")).getOrElse("")},${Option(rs.getString("reaccion_goles")).getOrElse("")},${rs.getDate("fecha")}\n") } } finally {conn.close()}; sb.toString() }
