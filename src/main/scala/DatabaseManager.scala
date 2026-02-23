@@ -1041,12 +1041,15 @@ object DatabaseManager {
     val conn = getConnection()
     try {
       // Historial vs rival
-      val ps = conn.prepareStatement("SELECT resultado, nota, fecha, zona_goles, notas_partido FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED' ORDER BY fecha DESC LIMIT 5")
+      val ps = conn.prepareStatement("SELECT goles_favor, goles_contra, nota, fecha, zona_goles, notas_partido FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED' ORDER BY fecha DESC LIMIT 5")
       ps.setString(1, s"%$rival%")
       val rs = ps.executeQuery()
       var partidos = List[(String,Double,String,String,String)]()
-      while (rs.next()) partidos = partidos :+ (rs.getString(1), rs.getDouble(2), rs.getString(3),
-        Option(rs.getString(4)).getOrElse(""), Option(rs.getString(5)).getOrElse(""))
+      while (rs.next()) {
+        val res = s"${rs.getInt(1)}-${rs.getInt(2)}"
+        partidos = partidos :+ (res, rs.getDouble(3), rs.getString(4),
+          Option(rs.getString(5)).getOrElse(""), Option(rs.getString(6)).getOrElse(""))
+      }
 
       // Zona mas vulnerable vs ese rival
       val zonasCombinadas = partidos.flatMap(_._4.split(",").filter(_.nonEmpty))
