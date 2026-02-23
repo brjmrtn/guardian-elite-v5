@@ -293,35 +293,11 @@ object BioController extends cask.Routes {
   def uploadMedical(fecha: String,
                     tipo: String,
                     esPrevio: String = "false",
-                    archivo: cask.FormValue) = {
+                    archivo: cask.FormFile) = {
     val isPrevio = esPrevio == "on"
-    // En cask 0.9.x, FormValue internamente es FormFile cuando viene de multipart/form-data
-    // Usamos reflection para leer los bytes sea cual sea la version exacta
-    val (fileBytes, fileName) = {
-      val cls = archivo.getClass
-      val allMethods = cls.getMethods.map(_.getName)
-      // Buscar campo de bytes
-      val bytes: Array[Byte] = allMethods.find(_ == "bytes").map { _ =>
-        try cls.getMethod("bytes").invoke(archivo).asInstanceOf[Array[Byte]]
-        catch { case _: Exception => Array.empty[Byte] }
-      }.orElse(allMethods.find(_ == "value").map { _ =>
-        try cls.getMethod("value").invoke(archivo).asInstanceOf[Array[Byte]]
-        catch { case _: Exception => Array.empty[Byte] }
-      }).getOrElse {
-        // Ultimo recurso: leer el campo privado
-        try {
-          val f = cls.getDeclaredFields.find(f => f.getType == classOf[Array[Byte]])
-          f.map { field => field.setAccessible(true); field.get(archivo).asInstanceOf[Array[Byte]] }
-            .getOrElse(Array.empty[Byte])
-        } catch { case _: Exception => Array.empty[Byte] }
-      }
-      // Buscar nombre del archivo
-      val name: String = allMethods.find(m => m == "fileName" || m == "name").map { mn =>
-        try cls.getMethod(mn).invoke(archivo).asInstanceOf[String]
-        catch { case _: Exception => "documento.pdf" }
-      }.getOrElse("documento.pdf")
-      (bytes, name)
-    }
+    // cask 0.9.2: FormFile.content = Array[Byte], FormFile.fileName = String
+    val fileBytes: Array[Byte] = archivo.content
+    val fileName:  String      = archivo.fileName
 
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini
