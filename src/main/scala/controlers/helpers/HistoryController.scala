@@ -899,7 +899,7 @@ object HistoryController extends cask.Routes {
       val efic      = stats("eficiencia").asInstanceOf[Map[String,Int]]
       val puntosCiegos  = stats("puntosCiegos").asInstanceOf[Seq[String]]
       val zonasFuertes  = stats("zonasFuertes").asInstanceOf[Seq[String]]
-      val stopRate  = stats("stopRate").asInstanceOf[Map[String,String]]
+      val stopRate: Map[String,String] = stats("stopRate").asInstanceOf[Map[String,String]]
       val zones     = stats("zones").asInstanceOf[Seq[String]]
 
       def zoneLabel(z: String) = z match {
@@ -1066,7 +1066,7 @@ object HistoryController extends cask.Routes {
                             td(cls:="text-center", tiros.getOrElse(z, 0).toString),
                             td(cls:="text-center fw-bold text-danger", goles.getOrElse(z, 0).toString),
                             td(cls:="text-center fw-bold text-success", paradas.getOrElse(z, 0).toString),
-                            td(cls:="text-center fw-bold", stopRate.getOrElse(z, "--"))
+                            td(cls:="text-center fw-bold", stopRate.getOrElse(z, "--").asInstanceOf[String])
                           )
                         }: _*))
                       )
