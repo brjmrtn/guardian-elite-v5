@@ -203,7 +203,7 @@ object HistoryController extends cask.Routes {
           div(cls := "fw-bold text-white", style := "font-size:20px;", count.toString),
           div(cls := "xx-small text-light opacity-75", s"$pct%")
         ) else Seq(
-          div(cls := "text-muted", style := "font-size:18px; opacity:0.3;", "—")
+          div(cls := "text-muted", style := "font-size:18px; opacity:0.3;", "--")
         )
       )
     }
@@ -228,7 +228,7 @@ object HistoryController extends cask.Routes {
 
           // Header
           h2(cls := "text-center text-danger mb-1", "MAPA DE GOLES ENCAJADOS"),
-          p(cls  := "text-center text-muted small mb-4", s"$tituloFiltro — $totalGoles goles en total"),
+          p(cls  := "text-center text-muted small mb-4", s"$tituloFiltro -- $totalGoles goles en total"),
 
           // Filtros
           div(cls := "card bg-dark border-secondary shadow mb-4",
@@ -278,7 +278,7 @@ object HistoryController extends cask.Routes {
               div(cls := "col-md-7",
                 div(cls := "card bg-dark border-danger shadow h-100",
                   div(cls := "card-header bg-danger bg-opacity-10 border-danger text-center",
-                    span(cls := "text-danger fw-bold", "PORTERIA — Vista frontal"),
+                    span(cls := "text-danger fw-bold", "PORTERIA -- Vista frontal"),
                     span(cls := "text-muted small ms-2", "(zona mas caliente = mas goles)")
                   ),
                   div(cls := "card-body d-flex flex-column justify-content-center",
@@ -433,7 +433,7 @@ object HistoryController extends cask.Routes {
             div(cls:="alert alert-danger border-danger d-flex align-items-center gap-3 mb-4",
               div(style:="font-size:32px;", zonaIcon(inj.zona)),
               div(
-                div(cls:="fw-bold fs-6", s"LESION ACTIVA — ${inj.zona.toUpperCase}"),
+                div(cls:="fw-bold fs-6", s"LESION ACTIVA -- ${inj.zona.toUpperCase}"),
                 div(cls:="small", s"${inj.tipo} | Desde: ${inj.fechaInicio}"),
                 div(cls:="small text-warning", inj.descripcion),
                 form(action:="/lesiones/alta", method:="post", cls:="d-flex gap-2 mt-2 align-items-center",
@@ -544,7 +544,7 @@ object HistoryController extends cask.Routes {
     else Map.empty[String, Any]
 
     val partidos = data.getOrElse("partidos", List.empty).asInstanceOf[List[(String,Double,String,String,String)]]
-    val zonaMasVulnerable = data.getOrElse("zonaMasVulnerable", "—").toString
+    val zonaMasVulnerable = data.getOrElse("zonaMasVulnerable", "--").toString
     val clips = data.getOrElse("clips", List.empty).asInstanceOf[List[(Int,Int,String,String,String)]]
     val estilo = data.getOrElse("estilo", "").toString
     val claves = data.getOrElse("claves", "").toString
@@ -555,10 +555,10 @@ object HistoryController extends cask.Routes {
         p.lastOption.flatMap(_.trim.toIntOption).getOrElse(0)
       }
       s"${(wins * 100 / partidos.size)}%"
-    } else "—"
+    } else "--"
 
     val avgNotaVsRival = if (partidos.nonEmpty)
-      f"${partidos.map(_._2).sum / partidos.size}%.1f" else "—"
+      f"${partidos.map(_._2).sum / partidos.size}%.1f" else "--"
 
     def zoneLabel(z: String) = z match {
       case "TL"=>"Arr Izq"; case "TC"=>"Arr Cen"; case "TR"=>"Arr Der"
@@ -611,7 +611,7 @@ object HistoryController extends cask.Routes {
               div(cls:="fw-bold mt-2", "Introduce el nombre del rival para generar el briefing")
             )
           } else div(
-            // CARD PRINCIPAL — resumen rival
+            // CARD PRINCIPAL -- resumen rival
             div(cls:="card border-warning shadow mb-4", style:="background: linear-gradient(135deg, #1a1a1a 0%, #2a2000 100%);",
               div(cls:="card-body",
                 div(cls:="d-flex justify-content-between align-items-start mb-3",
@@ -684,7 +684,7 @@ object HistoryController extends cask.Routes {
               // Clips de paradas
               if (clips.nonEmpty) div(cls:="col-md-7",
                 div(cls:="card bg-dark border-warning shadow",
-                  div(cls:="card-header text-warning fw-bold small", "CLIPS DE MOTIVACION — Tus mejores paradas"),
+                  div(cls:="card-header text-warning fw-bold small", "CLIPS DE MOTIVACION -- Tus mejores paradas"),
                   div(cls:="card-body p-2",
                     div(cls:="row g-2",
                       clips.map { case (min, seg, tipo, rivalClip, url) =>
@@ -698,7 +698,7 @@ object HistoryController extends cask.Routes {
                                 style:="border-radius:6px;")
                             ),
                             div(cls:="d-flex justify-content-between xx-small text-muted",
-                              span(s"$tipo — ${min}m${seg}s"),
+                              span(s"$tipo -- ${min}m${seg}s"),
                               span(fixEncoding(rivalClip))
                             )
                           ) else div()
@@ -783,10 +783,10 @@ object HistoryController extends cask.Routes {
                   Seq(
                     ("Acc. con pie / partido", f"$avgPie%.1f", if(avgPie>6)"success"else"secondary"),
       ("Total distribuciones", totalPie.toString, "info"),
-      ("% Centros controlados", if(centTotal>0) f"${pctCentros*100}%.0f%%" else "—", if(pctCentros>0.6)"success"else"warning"),
-      ("% Balones largos OK", if(largTotal>0) f"${pctLargos*100}%.0f%%" else "—", if(pctLargos>0.6)"success"else"warning"),
-      ("Nota con +pie", if(notaAltaPie>0) f"$notaAltaPie%.1f" else "—", if(notaAltaPie>7)"success"else"secondary"),
-      ("Nota con -pie", if(notaBajaPie>0) f"$notaBajaPie%.1f" else "—", if(notaBajaPie>7)"success"else"secondary")
+      ("% Centros controlados", if(centTotal>0) f"${pctCentros*100}%.0f%%" else "--", if(pctCentros>0.6)"success"else"warning"),
+      ("% Balones largos OK", if(largTotal>0) f"${pctLargos*100}%.0f%%" else "--", if(pctLargos>0.6)"success"else"warning"),
+      ("Nota con +pie", if(notaAltaPie>0) f"$notaAltaPie%.1f" else "--", if(notaAltaPie>7)"success"else"secondary"),
+      ("Nota con -pie", if(notaBajaPie>0) f"$notaBajaPie%.1f" else "--", if(notaBajaPie>7)"success"else"secondary")
       ).map { case (lbl, v, c) =>
         div(cls:="col-4",
           div(cls:=s"text-center p-2 rounded border border-$c bg-dark",
@@ -944,7 +944,7 @@ object HistoryController extends cask.Routes {
                   case "goles"   => (if(g>0) g.toString else "-", if(g>=2)"#dc3545"else if(g==1)"#ffc107"else"#555")
                   case "paradas" => (if(p>0) p.toString else "-", if(p>=3)"#28a745"else if(p>=1)"#0dcaf0"else"#555")
                   case _ =>
-                    val label = if(e == -1) "—" else s"$e%%"
+                    val label = if(e == -1) "--" else s"$e%%"
                     val c = if(e == -1)"#555" else if(e>=70)"#28a745" else if(e>=50)"#ffc107" else "#dc3545"
                     (label, c)
                 }
@@ -971,7 +971,7 @@ object HistoryController extends cask.Routes {
             div(cls:="row g-2 mb-4",
               div(cls:="col-md-6",
                 div(cls:="card bg-dark border-danger shadow h-100",
-                  div(cls:="card-header text-danger fw-bold small", "PUNTOS CIEGOS — Zonas vulnerables"),
+                  div(cls:="card-header text-danger fw-bold small", "PUNTOS CIEGOS -- Zonas vulnerables"),
                   div(cls:="card-body p-2",
                     if (puntosCiegos.isEmpty)
                       div(cls:="text-muted text-center small py-2", "Sin puntos ciegos detectados")
@@ -998,7 +998,7 @@ object HistoryController extends cask.Routes {
               ),
               div(cls:="col-md-6",
                 div(cls:="card bg-dark border-success shadow h-100",
-                  div(cls:="card-header text-success fw-bold small", "ZONAS FUERTES — Mayor dominio"),
+                  div(cls:="card-header text-success fw-bold small", "ZONAS FUERTES -- Mayor dominio"),
                   div(cls:="card-body p-2",
                     if (zonasFuertes.isEmpty)
                       div(cls:="text-muted text-center small py-2", "Sin datos suficientes")
@@ -1025,7 +1025,7 @@ object HistoryController extends cask.Routes {
               )
             ),
 
-            // Grid porteria — 3 vistas
+            // Grid porteria -- 3 vistas
             div(cls:="card bg-dark border-secondary shadow mb-4",
               div(cls:="card-header text-white fw-bold small d-flex justify-content-between align-items-center",
                 span("MAPA DE PORTERIA INTERACTIVO"),
@@ -1066,7 +1066,7 @@ object HistoryController extends cask.Routes {
                             td(cls:="text-center", tiros.getOrElse(z, 0).toString),
                             td(cls:="text-center fw-bold text-danger", goles.getOrElse(z, 0).toString),
                             td(cls:="text-center fw-bold text-success", paradas.getOrElse(z, 0).toString),
-                            td(cls:="text-center fw-bold", stopRate.getOrElse(z, "—"))
+                            td(cls:="text-center fw-bold", stopRate.getOrElse(z, "--"))
                           )
                         }: _*))
                       )
