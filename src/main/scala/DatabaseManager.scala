@@ -270,6 +270,14 @@ object DatabaseManager {
         respuesta   TEXT,
         creado_en   TIMESTAMP DEFAULT NOW()
       )""")
+      // Limpiar errores cacheados de versiones anteriores en cada arranque
+      stmt.executeUpdate("""DELETE FROM ai_cache WHERE
+        respuesta LIKE 'Error:%' OR
+        respuesta LIKE '%status code%' OR
+        respuesta LIKE '%NOT_FOUND%' OR
+        respuesta LIKE '%INVALID_ARGUMENT%' OR
+        respuesta LIKE '%Error tras agotar%'
+      """)
 
       // Columnas opcionales anadidas en versiones posteriores (ALTER IF NOT EXISTS es idempotente)
       stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS judo_belt TEXT DEFAULT 'Blanco'")
