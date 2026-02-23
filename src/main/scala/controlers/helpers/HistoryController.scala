@@ -1299,5 +1299,305 @@ object HistoryController extends cask.Routes {
     }
   }
 
+
+  // == DIGITAL TWIN ============================================================
+  @cask.get("/digital-twin")
+  def digitalTwinPage(request: cask.Request, hPadre: Double = 0.0, hMadre: Double = 0.0) = withAuth(request) {
+    val usePadre: Double = if (hPadre > 0) hPadre else 180.0
+    val useMadre: Double = if (hMadre > 0) hMadre else 168.0
+    val d = DatabaseManager.getDigitalTwinData(usePadre, useMadre)
+
+    // Pre-computar todo con tipos explicitos
+    val edadAnios: Int         = d("edadAnios").asInstanceOf[Int]
+    val alturaActual: Double   = d("alturaActual").asInstanceOf[Double]
+    val pesoActual: Double     = d("pesoActual").asInstanceOf[Double]
+    val alturaProy: Double     = d("alturaProyectada").asInstanceOf[Double]
+    val alturaMin: Double      = d("alturaMin").asInstanceOf[Double]
+    val alturaMax: Double      = d("alturaMax").asInstanceOf[Double]
+    val enverActual: Double    = d("envergaduraActual").asInstanceOf[Double]
+    val enverAdulta: Double    = d("envergaduraAdulta").asInstanceOf[Double]
+    val alcanceActual: Double  = d("alcanceActual").asInstanceOf[Double]
+    val alcanceAdulto: Double  = d("alcanceAdulto").asInstanceOf[Double]
+    val cobActual: Double      = d("coberturaActual").asInstanceOf[Double]
+    val cobAdulta: Double      = d("coberturaAdulta").asInstanceOf[Double]
+    val pctAltura: Int         = d("pctAltura").asInstanceOf[Int]
+    val phvVel: Double         = d("phvVelocidad").asInstanceOf[Double]
+    val fasePhv: String        = d("fasePhv").asInstanceOf[String]
+    val notaActual: Double     = d("notaActual").asInstanceOf[Double]
+    val notaProy: Double       = d("notaProyectada").asInstanceOf[Double]
+    val analisisIA: String     = d("analisisIA").asInstanceOf[String]
+    val hPadreFmt: String      = f"$usePadre%.0f"
+    val hMadreFmt: String      = f"$useMadre%.0f"
+
+    val alturaProyStr: String  = alturaProy.toInt.toString
+    val alturaMinStr: String   = alturaMin.toInt.toString
+    val alturaMaxStr: String   = alturaMax.toInt.toString
+    val enverAdultaStr: String = enverAdulta.toInt.toString
+    val alcanceAdultoStr: String = alcanceAdulto.toInt.toString
+    val cobActualStr: String   = f"$cobActual%.1f"
+    val cobAdultaStr: String   = f"$cobAdulta%.1f"
+    val cobActualPct: Int      = cobActual.toInt
+    val cobAdultaPct: Int      = cobAdulta.toInt
+    val alturaActualStr: String = alturaActual.toInt.toString
+    val enverActualStr: String = enverActual.toInt.toString
+    val alcanceActualStr: String = alcanceActual.toInt.toString
+    val notaActualStr: String  = notaActual.toInt.toString
+    val notaPrStr: String      = notaProy.toInt.toString
+    val phvStr: String         = if (phvVel > 0) f"$phvVel%.1f cm/anio" else "Sin datos suficientes"
+
+    val phvColor: String = fasePhv match {
+      case "PICO ACTIVO" => "warning"
+      case "PRE-PICO"    => "info"
+      case _             => "success"
+    }
+    val notaDiff: String = {
+      val d2 = notaProy - notaActual
+      if (d2 > 0) "+" + d2.toInt.toString else d2.toInt.toString
+    }
+
+    // Parsear bloques IA
+    def extractIA(tag: String): String = {
+      val idx = analisisIA.indexOf(tag + ":")
+      if (idx == -1) ""
+      else {
+        val start = idx + tag.length + 1
+        val nexts = Seq("BIOTIPO:", "VENTAJA:", "RIESGO:", "PROYECCION:").filter(_ != tag + ":").flatMap { t =>
+          val i = analisisIA.indexOf(t, start); if (i > 0) Some(i) else None
+        }
+        val end = if (nexts.nonEmpty) nexts.min else analisisIA.length
+        analisisIA.substring(start, end).trim
+      }
+    }
+    val iaBiotipo: String    = extractIA("BIOTIPO")
+    val iaVentaja: String    = extractIA("VENTAJA")
+    val iaRiesgo: String     = extractIA("RIESGO")
+    val iaProyeccion: String = extractIA("PROYECCION")
+
+    // Datos para graficos (JSON)
+    val growthRows = d("growthRows").asInstanceOf[List[(String, Double, Double, Double)]]
+    val curvaProy  = d("curvaProyeccion").asInstanceOf[List[(Int, Double)]]
+    val notaTemps  = d("notaTemps").asInstanceOf[List[(String, Double)]]
+
+    val histFechas: String  = growthRows.map(r => """ + r._1 + """).mkString("[", ",", "]")
+    val histAltura: String  = growthRows.map(_._2.toString).mkString("[", ",", "]")
+    val proyEdades: String  = curvaProy.map(r => """ + r._1.toString + "a"").mkString("[", ",", "]")
+    val proyAlturas: String = curvaProy.map(_._2.formatted("%.1f")).mkString("[", ",", "]")
+    val tempLabels: String  = notaTemps.map(r => """ + r._1 + """).mkString("[", ",", "]")
+    val tempNotas: String   = notaTemps.map(_._2.toString).mkString("[", ",", "]")
+
+    // Comparativa porteros elite
+    val referencia189: String = "189"
+    val referenciaEnv: String = "200"
+    val referenciaAlc: String = "251"
+
+    renderHtml(basePage("bio",
+      div(cls:="row justify-content-center",
+        div(cls:="col-md-10 col-12",
+
+          div(cls:="d-flex justify-content-between align-items-center mb-3",
+            h2(cls:="text-warning mb-0", "HECTOR 2035 | Digital Twin"),
+            a(href:="/bio", cls:="btn btn-outline-secondary btn-sm fw-bold", "Bio")
+          ),
+
+          // Formulario alturas padres
+          div(cls:="card bg-dark border-secondary shadow mb-3",
+            div(cls:="card-header text-secondary fw-bold small", "Calibrar proyeccion (alturas parentales)"),
+            div(cls:="card-body p-2",
+              div(cls:="row g-2 align-items-end",
+                div(cls:="col-4",
+                  tag("label")(cls:="xx-small text-muted", "Padre (cm)"),
+                  tag("input")(id:="hPadreInput", tpe:="number", cls:="form-control form-control-sm bg-dark text-white border-secondary",
+                    value:=hPadreFmt, style:="max-width:100px;")
+                ),
+                div(cls:="col-4",
+                  tag("label")(cls:="xx-small text-muted", "Madre (cm)"),
+                  tag("input")(id:="hMadreInput", tpe:="number", cls:="form-control form-control-sm bg-dark text-white border-secondary",
+                    value:=hMadreFmt, style:="max-width:100px;")
+                ),
+                div(cls:="col-4",
+                  tag("button")(onclick:="recalcular()", cls:="btn btn-warning btn-sm fw-bold", "Recalcular")
+                )
+              )
+            )
+          ),
+
+          // HERO: Carta del Twin
+          div(cls:="card shadow mb-3",
+            style:="background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0d2b0d 100%); border: 2px solid #ffc107;",
+            div(cls:="card-body p-3",
+              div(cls:="row align-items-center",
+                div(cls:="col-md-4 text-center border-end border-secondary",
+                  div(style:="font-size:14px; color:#888; letter-spacing:3px;", "PROYECCION ADULTA"),
+                  div(style:="font-size:72px; font-weight:900; color:#ffc107; line-height:1;",
+                    alturaProyStr),
+                  div(style:="font-size:18px; color:#aaa;", "cm"),
+                  div(cls:="mt-2",
+                    span(cls:="badge bg-dark border border-warning text-warning me-1", s"Min $alturaMinStr"),
+                    span(cls:="badge bg-dark border border-warning text-warning", s"Max $alturaMaxStr")
+                  ),
+                  div(cls:="mt-2 small text-muted", s"$pctAltura percentil porteros elite")
+                ),
+                div(cls:="col-md-8",
+                  div(cls:="row g-2",
+                    frag(Seq(
+                      ("Envergadura adulta", enverAdultaStr + " cm", enverActualStr + " cm", "success"),
+                      ("Alcance de parada", alcanceAdultoStr + " cm", alcanceActualStr + " cm", "info"),
+                      ("Cobertura porteria", cobAdultaStr + "%", cobActualStr + "%", "warning"),
+                      ("Nota proyectada (18a)", notaPrStr, notaActualStr, "primary"),
+                      ("Fase PHV", fasePhv, phvStr, phvColor),
+                      ("Diferencial nota", notaDiff + " pts", "tendencia", "secondary")
+                    ).map { case (lbl, vProy, vActual, c) =>
+                      div(cls:="col-6",
+                        div(cls:=s"card bg-dark border-$c h-100",
+                          div(cls:="card-body p-2",
+                            div(cls:="xx-small text-muted", lbl),
+                            div(cls:=s"fw-bold text-$c", vProy),
+                            div(cls:="xx-small text-secondary", "Ahora: " + vActual)
+                          )
+                        )
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ),
+
+          // Barras de comparativa con elite
+          div(cls:="card bg-dark border-secondary shadow mb-3",
+            div(cls:="card-header text-white fw-bold small", "Comparativa vs Porteros de Elite (Media Profesional)"),
+            div(cls:="card-body p-3",
+              div(cls:="row g-3",
+                frag(Seq(
+                  ("Altura", alturaActualStr + " cm actual", alturaProyStr + " cm adulto", referencia189 + " cm pro", alturaActual.toInt, alturaProy.toInt, 189, 210),
+                  ("Envergadura", enverActualStr + " cm actual", enverAdultaStr + " cm adulto", referenciaEnv + " cm pro", enverActual.toInt, enverAdulta.toInt, 200, 220),
+                  ("Alcance", alcanceActualStr + " cm actual", alcanceAdultoStr + " cm adulto", referenciaAlc + " cm pro", alcanceActual.toInt, alcanceAdulto.toInt, 251, 280)
+                ).map { case (lbl, vActL, vPrL, vRefL, vAct, vPr, vRef, vMax) =>
+                  val pctAct: Int = math.min(100, (vAct * 100 / vMax))
+                  val pctPr: Int  = math.min(100, (vPr  * 100 / vMax))
+                  val pctRef: Int = math.min(100, (vRef * 100 / vMax))
+                  val pctActStr: String = pctAct.toString
+                  val pctPrStr: String  = pctPr.toString
+                  val pctRefStr: String = pctRef.toString
+                  div(cls:="col-md-4",
+                    div(cls:="fw-bold text-white small mb-2", lbl),
+                    div(cls:="xx-small text-info mb-1", vActL),
+                    div(cls:="progress mb-1", style:="height:8px;",
+                      div(cls:="progress-bar bg-info", style:=s"width:$pctActStr%;")),
+                    div(cls:="xx-small text-warning mb-1", vPrL),
+                    div(cls:="progress mb-1", style:="height:8px;",
+                      div(cls:="progress-bar bg-warning", style:=s"width:$pctPrStr%;")),
+                    div(cls:="xx-small text-success mb-1", vRefL),
+                    div(cls:="progress", style:="height:8px;",
+                      div(cls:="progress-bar bg-success", style:=s"width:$pctRefStr%;"))
+                  )
+                }: _*)
+              )
+            )
+          ),
+
+          // Analisis IA
+          if (iaBiotipo.nonEmpty || iaVentaja.nonEmpty) {
+            div(cls:="card bg-dark border-warning shadow mb-3",
+              div(cls:="card-header text-warning fw-bold small", "Informe de Ojeador IA | Proyeccion 2035"),
+              div(cls:="card-body p-3",
+                div(cls:="row g-3",
+                  frag(Seq(
+                    ("BIOTIPO", iaBiotipo, "info", "Perfil fisico"),
+                    ("VENTAJA", iaVentaja, "success", "Punto fuerte"),
+                    ("RIESGO", iaRiesgo, "danger", "Area de mejora"),
+                    ("PROYECCION", iaProyeccion, "warning", "Alcance potencial")
+                  ).filter(_._2.nonEmpty).map { case (titulo, texto, c, sub) =>
+                    div(cls:="col-md-6",
+                      div(cls:=s"p-3 rounded h-100",
+                        style:=s"border-left: 3px solid ${if(c=="info")"#0dcaf0"else if(c=="success")"#28a745"else if(c=="danger")"#dc3545"else"#ffc107"}; background: rgba(255,255,255,0.03);",
+                        div(cls:=s"text-$c fw-bold xx-small mb-1", titulo + " | " + sub),
+                        div(cls:="text-white small", texto)
+                      )
+                    )
+                  }: _*)
+                )
+              )
+            )
+          } else div(),
+
+          // Graficos
+          div(cls:="row g-3 mb-3",
+            div(cls:="col-md-6",
+              div(cls:="card bg-dark border-secondary shadow h-100",
+                div(cls:="card-header text-white fw-bold small", "Curva de Crecimiento | Historico + Proyeccion"),
+                div(cls:="card-body p-2",
+                  tag("canvas")(id:="chartCrecimiento", style:="max-height:220px;")
+                )
+              )
+            ),
+            div(cls:="col-md-6",
+              div(cls:="card bg-dark border-secondary shadow h-100",
+                div(cls:="card-header text-white fw-bold small", "Evolucion de Rendimiento por Temporada"),
+                div(cls:="card-body p-2",
+                  tag("canvas")(id:="chartRendimiento", style:="max-height:220px;")
+                )
+              )
+            )
+          ),
+
+          script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
+          script(raw(s"""
+      function recalcular() {
+      var p = document.getElementById('hPadreInput').value;
+      var m = document.getElementById('hMadreInput').value;
+      window.location.href = '/digital-twin?hPadre=' + p + '&hMadre=' + m;
+    }
+    // Grafico crecimiento
+    var ctxC = document.getElementById('chartCrecimiento');
+    if (ctxC) {
+      new Chart(ctxC, {
+        type: 'line',
+        data: {
+          datasets: [
+        { label: 'Historico real', data: ${histAltura}.map(function(v,i){ return {x: ${histFechas}[i], y: v}; }),
+          borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.1)', borderWidth: 2, pointRadius: 4, fill: true },
+        { label: 'Proyeccion adulta', data: ${proyAlturas}.map(function(v,i){ return {x: ${proyEdades}[i], y: parseFloat(v)}; }),
+          borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.05)', borderWidth: 2, borderDash: [6,3], pointRadius: 3 }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+          x: { type: 'category', ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: '#333' } },
+          y: { ticks: { color: '#aaa' }, grid: { color: '#333' }, title: { display: true, text: 'cm', color: '#888' } }
+        },
+          plugins: { legend: { labels: { color: '#fff', font: { size: 10 } } } }
+        }
+      });
+    }
+    // Grafico rendimiento
+    var ctxR = document.getElementById('chartRendimiento');
+    if (ctxR) {
+      new Chart(ctxR, {
+        type: 'bar',
+        data: {
+          labels: $tempLabels,
+          datasets: [{
+          label: 'Nota media temporada', data: $tempNotas,
+          backgroundColor: 'rgba(255,193,7,0.7)', borderColor: '#ffc107', borderWidth: 1
+        }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+          y: { min: 0, max: 100, ticks: { color: '#aaa' }, grid: { color: '#333' } },
+          x: { ticks: { color: '#888' }, grid: { display: false } }
+        },
+          plugins: { legend: { labels: { color: '#fff', font: { size: 10 } } } }
+        }
+      });
+    }
+    """))
+    )
+    )
+    ))
+  }
+
   initialize()
 }

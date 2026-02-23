@@ -1292,6 +1292,143 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+
+  // == DIGITAL TWIN HECTOR 2035 ==============================================
+  def getDigitalTwinData(hPadre: Double, hMadre: Double): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // 1. Fecha de nacimiento y edad actual
+      val rsP = conn.createStatement().executeQuery(
+        "SELECT fecha_nacimiento FROM seasons ORDER BY id DESC LIMIT 1")
+      val fechaNac = if (rsP.next())
+        Option(rsP.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2015-06-19")
+      else "2015-06-19"
+      val hoy = java.time.LocalDate.now()
+      val nac = java.time.LocalDate.parse(fechaNac)
+      val edadAnios  = java.time.Period.between(nac, hoy).getYears
+      val edadMeses  = java.time.Period.between(nac, hoy).getYears * 12 +
+        java.time.Period.between(nac, hoy).getMonths
+
+      // 2. Historial de crecimiento completo
+      val rsG = conn.createStatement().executeQuery(
+        "SELECT TO_CHAR(fecha,'YYYY-MM') as mes, altura, peso, velocidad_crecimiento FROM physical_growth ORDER BY fecha ASC")
+      var growthRows = List[(String, Double, Double, Double)]()
+      while (rsG.next()) growthRows = growthRows :+ (
+        rsG.getString("mes"),
+        rsG.getDouble("altura"),
+        rsG.getDouble("peso"),
+        rsG.getDouble("velocidad_crecimiento"))
+
+      val alturaActual: Double = if (growthRows.nonEmpty) growthRows.last._2 else 120.0
+      val pesoActual: Double   = if (growthRows.nonEmpty) growthRows.last._3 else 30.0
+
+      // 3. Velocidad de crecimiento maxima = PHV detector
+      val velocidades = growthRows.map(_._4).filter(_ > 0)
+      val phvVelocidad: Double = if (velocidades.nonEmpty) velocidades.max else 0.0
+      val phvDetectado: Boolean = phvVelocidad >= 6.0  // >6cm/anio = pleno pico
+      val fasePhv: String = if (phvDetectado) "PICO ACTIVO" else if (edadAnios < 12) "PRE-PICO" else "POST-PICO"
+
+      // 4. Proyeccion de altura adulta
+      // Metodo midparent (Tanner): chico = (hPadre + hMadre + 13) / 2
+      val midParent: Double = if (hPadre > 0 && hMadre > 0) (hPadre + hMadre + 13.0) / 2.0 else 183.0
+      // Ajuste por altura actual vs percentil esperado a la edad
+      // Referencia OMS: nino 9 anios aprox 135cm, adulto ~178cm => factor residual
+      val factorCrecimiento: Double = if (edadAnios > 0 && alturaActual > 80) {
+        // Tabla simplificada: porcentaje de altura adulta alcanzado por edad
+        val pctPorEdad = Map(7->77.0, 8->80.0, 9->82.0, 10->84.0, 11->86.5, 12->89.0,
+          13->93.0, 14->97.0, 15->99.0, 16->100.0)
+        val pct = pctPorEdad.getOrElse(edadAnios, if(edadAnios < 7) 75.0 else 100.0)
+        alturaActual / (pct / 100.0)
+      } else midParent
+      val alturaProyectada: Double = (factorCrecimiento * 0.6 + midParent * 0.4)
+      val alturaMin: Double = alturaProyectada - 4.0
+      val alturaMax: Double = alturaProyectada + 4.0
+
+      // 5. Metricas de portero proyectadas
+      val envergaduraActual: Double  = alturaActual  * 1.065
+      val envergaduraAdulta: Double  = alturaProyectada * 1.065
+      val alcanceActual: Double      = alturaActual  * 1.33
+      val alcanceAdulto: Double      = alturaProyectada * 1.33
+      // Cobertura porteria 7.32m x 2.44m = 17.86m2
+      // Portero cubre aprox (envergadura * 2.5) m2 efectivos
+      val coberturaActual: Double    = math.min(100.0, (envergaduraActual * 2.5 / 17.86) * 100)
+      val coberturaAdulta: Double    = math.min(100.0, (envergaduraAdulta * 2.5 / 17.86) * 100)
+
+      // 6. Comparativa con percentiles de porteros profesionales
+      val pctAltura: Int = if (alturaProyectada >= 190) 90 else if (alturaProyectada >= 185) 75
+      else if (alturaProyectada >= 180) 50 else if (alturaProyectada >= 175) 25 else 10
+
+      // 7. Evolucion de nota media por temporada para proyeccion de rendimiento
+      val rsN = conn.createStatement().executeQuery(
+        "SELECT temporada, media FROM seasons ORDER BY id ASC")
+      var notaTemps = List[(String, Double)]()
+      while (rsN.next()) notaTemps = notaTemps :+ (rsN.getString("temporada"), rsN.getDouble("media"))
+      val tendenciaNota: Double = if (notaTemps.size >= 2) {
+        val mejora = notaTemps.last._2 - notaTemps.head._2
+        val aniosTranscurridos = notaTemps.size.toDouble
+        mejora / aniosTranscurridos
+      } else 0.5
+      val notaActual: Double   = if (notaTemps.nonEmpty) notaTemps.last._2 else 60.0
+      val aniosHasta18: Int    = math.max(0, 18 - edadAnios)
+      val notaProyectada: Double = math.min(95.0, notaActual + tendenciaNota * aniosHasta18)
+
+      // 8. Curva de crecimiento proyectada (puntos para el grafico)
+      // Genera puntos desde edad actual hasta 18 anios
+      val curvaProyeccion: List[(Int, Double)] = {
+        val pctPorEdad2 = Map(7->77.0, 8->80.0, 9->82.0, 10->84.0, 11->86.5, 12->89.0,
+          13->93.0, 14->97.0, 15->99.0, 16->100.0, 17->100.0, 18->100.0)
+        (edadAnios to 18).toList.map { edad =>
+          val pct = pctPorEdad2.getOrElse(edad, 100.0)
+          edad -> (alturaProyectada * pct / 100.0)
+        }
+      }
+
+      // 9. Analisis IA del Digital Twin
+      val analisisIA: String = {
+        val prompt = s"""Eres un ojeador de elite y analista de rendimiento. Analiza el perfil proyectado de Hector, portero de $edadAnios anos:
+Altura actual: ${alturaActual.toInt} cm | Proyeccion adulta: ${alturaProyectada.toInt} cm (rango ${alturaMin.toInt}-${alturaMax.toInt} cm)
+Envergadura proyectada adulta: ${envergaduraAdulta.toInt} cm | Alcance de parada: ${alcanceAdulto.toInt} cm
+Fase PHV: $fasePhv | Velocidad crecimiento maxima detectada: ${phvVelocidad.toInt} cm/anio
+Nota media actual: ${notaActual.toInt} | Proyeccion nota a los 18 anos: ${notaProyectada.toInt}
+Trayectoria: ${notaTemps.map(t => t._1+":"+t._2.toInt).mkString(", ")}
+Responde en 4 partes exactas, en espanol, conciso y directo:
+BIOTIPO: [descripcion del perfil fisico proyectado en 1-2 frases]
+VENTAJA: [principal ventaja competitiva de su biotipo para ser portero en 1 frase]
+RIESGO: [1 riesgo o area de mejora fisica concreta]
+PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivadora]"""
+        AIProvider.ask(prompt, None, bypassCache = true)
+      }
+
+      Map(
+        "edadAnios"         -> edadAnios,
+        "alturaActual"      -> alturaActual,
+        "pesoActual"        -> pesoActual,
+        "alturaProyectada"  -> alturaProyectada,
+        "alturaMin"         -> alturaMin,
+        "alturaMax"         -> alturaMax,
+        "envergaduraActual" -> envergaduraActual,
+        "envergaduraAdulta" -> envergaduraAdulta,
+        "alcanceActual"     -> alcanceActual,
+        "alcanceAdulto"     -> alcanceAdulto,
+        "coberturaActual"   -> coberturaActual,
+        "coberturaAdulta"   -> coberturaAdulta,
+        "pctAltura"         -> pctAltura,
+        "phvVelocidad"      -> phvVelocidad,
+        "fasePhv"           -> fasePhv,
+        "notaActual"        -> notaActual,
+        "notaProyectada"    -> notaProyectada,
+        "tendenciaNota"     -> tendenciaNota,
+        "growthRows"        -> growthRows,
+        "curvaProyeccion"   -> curvaProyeccion,
+        "notaTemps"         -> notaTemps,
+        "analisisIA"        -> analisisIA,
+        "hPadre"            -> hPadre,
+        "hMadre"            -> hMadre,
+        "midParent"         -> midParent
+      )
+    } finally { conn.close() }
+  }
+
   def getTacticalStats(): Map[String, Int] = { var stats = scala.collection.mutable.Map("g_tot"->0, "g_alt"->0, "g_med"->0, "g_ras"->0, "g_izq"->0, "g_cen"->0, "g_der"->0, "p_tot"->0, "p_alt"->0, "p_med"->0, "p_ras"->0, "p_izq"->0, "p_cen"->0, "p_der"->0); val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT zona_goles, zona_paradas FROM matches WHERE status='PLAYED' ORDER BY id DESC LIMIT 20"); while(rs.next()) { val zG = Option(rs.getString("zona_goles")).getOrElse(""); val zP = Option(rs.getString("zona_paradas")).getOrElse(""); zG.split(",").filter(_.nonEmpty).foreach { z => stats("g_tot")+=1; if(z.contains("T")) stats("g_alt")+=1 else if(z.contains("M")) stats("g_med")+=1 else stats("g_ras")+=1; if(z.contains("L")) stats("g_izq")+=1 else if(z.contains("C")) stats("g_cen")+=1 else stats("g_der")+=1 }; zP.split(",").filter(_.nonEmpty).foreach { z => stats("p_tot")+=1; if(z.contains("T")) stats("p_alt")+=1 else if(z.contains("M")) stats("p_med")+=1 else stats("p_ras")+=1; if(z.contains("L")) stats("p_izq")+=1 else if(z.contains("C")) stats("p_cen")+=1 else stats("p_der")+=1 } } } finally { conn.close() }; stats.toMap }
   def updateStats(s: PlayerCardData): Unit = { val conn=getConnection(); try { val st=conn.prepareStatement("UPDATE seasons SET media=?, stat_div=?, stat_han=?, stat_kic=?, stat_ref=?, stat_spd=?, stat_pos=? WHERE id=(SELECT MAX(id) FROM seasons)"); st.setDouble(1,s.media); st.setDouble(2,s.divRaw); st.setDouble(3,s.hanRaw); st.setDouble(4,s.kicRaw); st.setDouble(5,s.refRaw); st.setDouble(6,s.spdRaw); st.setDouble(7,s.posRaw); st.executeUpdate() } finally { conn.close() } }
   def getBackupCSV(): String = { val sb=new StringBuilder(); sb.append("RIVAL,GF,GC,MIN,NOTA,PARADAS,CLIMA,ESTADIO,NOTAS,REACCION,FECHA\n"); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"); while(rs.next()){ sb.append(s"${rs.getString("rival")},${rs.getInt("goles_favor")},${rs.getInt("goles_contra")},${rs.getInt("minutos")},${rs.getDouble("nota")},${rs.getInt("paradas")},${Option(rs.getString("clima")).getOrElse("Sol")},${Option(rs.getString("estadio")).getOrElse("-")},${Option(rs.getString("notas_partido")).getOrElse("")},${Option(rs.getString("reaccion_goles")).getOrElse("")},${rs.getDate("fecha")}\n") } } finally {conn.close()}; sb.toString() }
