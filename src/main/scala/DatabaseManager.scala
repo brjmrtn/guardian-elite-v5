@@ -424,15 +424,17 @@ object DatabaseManager {
 
       val isPdf = media.exists(_._1 == "application/pdf")
 
-      // gemini-1.5-flash soporta PDF inline; gemini-2.0-flash para texto/imagenes
-      val model = if (isPdf) "gemini-1.5-flash" else "gemini-2.0-flash"
-
-      val urls = Seq(
-        s"https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1/models/$model:generateContent?key=$apiKey"
+      // gemini-1.5-flash solo en v1beta; gemini-2.0-flash en ambas
+      val urls = if (isPdf) Seq(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$apiKey"
+      ) else Seq(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=$apiKey"
       )
 
-      println(s"DEBUG: modelo=$model isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
+      println(s"DEBUG: isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
 
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
 
