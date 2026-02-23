@@ -290,25 +290,38 @@ object BioController extends cask.Routes {
   }
 
   @cask.postForm("/bio/medical/upload")
-  def uploadMedical(request: cask.Request,
-                    fecha: String,
+  def uploadMedical(fecha: String,
                     tipo: String,
-                    esPrevio: String = "false") = {
+                    esPrevio: String = "false",
+                    archivo: cask.FormValue) = {
     val isPrevio = esPrevio == "on"
-    // Extraer el archivo del multipart sin depender de la API de FormFile
-    val formData = request.multiParams
-    val archivoOpt = formData.get("archivo").flatMap(_.headOption)
-    val fileBytes: Array[Byte] = archivoOpt.map { fv =>
-      try { fv.getClass.getMethod("bytes").invoke(fv).asInstanceOf[Array[Byte]] }
-      catch { case _: Exception =>
-        try { fv.getClass.getMethod("data").invoke(fv).asInstanceOf[Array[Byte]] }
+    // En cask 0.9.x, FormValue internamente es FormFile cuando viene de multipart/form-data
+    // Usamos reflection para leer los bytes sea cual sea la version exacta
+    val (fileBytes, fileName) = {
+      val cls = archivo.getClass
+      val allMethods = cls.getMethods.map(_.getName)
+      // Buscar campo de bytes
+      val bytes: Array[Byte] = allMethods.find(_ == "bytes").map { _ =>
+        try cls.getMethod("bytes").invoke(archivo).asInstanceOf[Array[Byte]]
         catch { case _: Exception => Array.empty[Byte] }
+      }.orElse(allMethods.find(_ == "value").map { _ =>
+        try cls.getMethod("value").invoke(archivo).asInstanceOf[Array[Byte]]
+        catch { case _: Exception => Array.empty[Byte] }
+      }).getOrElse {
+        // Ultimo recurso: leer el campo privado
+        try {
+          val f = cls.getDeclaredFields.find(f => f.getType == classOf[Array[Byte]])
+          f.map { field => field.setAccessible(true); field.get(archivo).asInstanceOf[Array[Byte]] }
+            .getOrElse(Array.empty[Byte])
+        } catch { case _: Exception => Array.empty[Byte] }
       }
-    }.getOrElse(Array.empty[Byte])
-    val fileName: String = archivoOpt.map { fv =>
-      try { fv.getClass.getMethod("fileName").invoke(fv).asInstanceOf[String] }
-      catch { case _: Exception => "documento.pdf" }
-    }.getOrElse("documento.pdf")
+      // Buscar nombre del archivo
+      val name: String = allMethods.find(m => m == "fileName" || m == "name").map { mn =>
+        try cls.getMethod(mn).invoke(archivo).asInstanceOf[String]
+        catch { case _: Exception => "documento.pdf" }
+      }.getOrElse("documento.pdf")
+      (bytes, name)
+    }
 
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini
