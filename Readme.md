@@ -4,153 +4,146 @@
 
 **Guardian Elite** es un ecosistema de alto rendimiento diseñado para la monitorización longitudinal (de los 5 a los 20 años) del desarrollo de **Héctor**. Esta plataforma integra Big Data, Machine Learning e IA Generativa para transformar el crecimiento biológico, técnico y cognitivo en un activo estratégico.
 
-![Version](https://img.shields.io/badge/Version-6.0_Cognitive_Data_Ready-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_Pro_1.5-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-6.0_Cognitive_Data_Ready-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4_Parcial-COMPLETADA-blue?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5_Parcial-COMPLETADA-blue?style=for-the-badge)
 
 ---
 
-# 🟢 PARTE I: ECOSISTEMA ACTUAL (OPERATIVO)
+# PARTE I: ECOSISTEMA DESPLEGADO EN PRODUCCION
 
-## 1. 🏠 DASHBOARD (Inteligencia Central)
-* **Carta FUT Dinámica:** Visualización gamificada basada en la media ponderada de rendimiento real.
-* **Algoritmo de Trinquete (Ratchet):** Mecánica estadística que impide el retroceso de la media global.
-* **IA Neuro-Scout:** Análisis de tendencias mediante Gemini para generar consejos técnicos y refuerzo psicológico.
-* **⏰ Widget Próximo Partido:** Cuenta atrás en tiempo real con datos del rival del scouting, estadio e historial vs ese equipo. Se activa automáticamente al cargar el calendario de la nueva temporada.
+## 1. DASHBOARD (Inteligencia Central)
+* **Carta FUT Dinamica:** Visualizacion gamificada basada en la media ponderada de rendimiento real con algoritmo de Trinquete (Ratchet).
+* **IA Neuro-Scout:** Analisis de tendencias con Gemini 2.0 Flash — consejos tecnicos y refuerzo psicologico.
+* **Widget Proximo Partido:** Cuenta atras en tiempo real con datos de scouting del rival, historial H2H y estadio.
+* **Widget de Alertas:** Panel de alertas inteligentes con deteccion de ACWR en zona de riesgo, rachas sin registro y anomalias de rendimiento.
+* **Correlacion Sueno-Rendimiento:** Widget que cruza horas/calidad de sueno con nota del partido siguiente.
+* **Grafico RPE por Sesion:** Visualizacion de carga acumulada semanal para detectar sobreentrenamiento.
+* **Detector de Fatiga Mental:** Identificacion de periodos de baja concentracion asociados a picos de carga academica.
 
-## 2. ⚽ MATCH CENTER (Data Ingestion)
-* **Módulo Ederson:** Seguimiento de precisión en pases cortos y largos (Atributo **KIC**).
-* **Heatmap de Intervenciones:** Registro de coordenadas de paradas y acciones tácticas.
-* **Audio-Diario IA:** Procesamiento de voz para detectar el estado emocional y gestionar la frustración.
-* **🏆 Bracket Torneo Visual:** Cuadro de fases interactivo por torneo con resultados y KPIs. URL: `/tournament/bracket`.
+## 2. MATCH CENTER (Data Ingestion)
+* **Modulo Ederson:** Seguimiento de precision en pases cortos y largos (Atributo KIC).
+* **Heatmap de Intervenciones:** Registro de coordenadas de paradas y acciones tacticas.
+* **Audio-Diario:** Registro de voz y notas de conducta del partido.
+* **Bracket Torneo Visual:** Cuadro de fases interactivo por torneo con resultados y KPIs. URL: `/tournament/bracket`.
 
-## 3. 🔮 EL ORÁCULO (Biometría & Salud)
-* **Ratio ACWR (Acute:Chronic):** Monitorización de carga de trabajo para prevenir lesiones.
-* **Evolución Biométrica:** Gráfico dinámico de Altura (cm) vs. Peso (kg).
-* **Referencia OMS Pro:** Tabla de percentiles (P15, P50, P85) actualizada por edad.
+## 3. EL ORACULO (Biometria y Salud)
+* **Ratio ACWR:** Monitorizacion de carga de trabajo aguda/cronica para prevencion de lesiones con alertas automaticas.
+* **Evolucion Biometrica:** Grafico dinamico Altura vs. Peso con referencia OMS (P15, P50, P85) por edad.
+* **Seguimiento de Lesiones:** Registro de zona anatomica, dias de baja y curva de recuperacion.
 
-## 4. 🎬 VIDEOTECA
-* **Videoteca MVP:** Player de YouTube con playlist automática de clips etiquetados por tipo (PARADA, GOL, PASE, ERROR) con filtros. URL: `/videoteca`.
-* **Botón MOTIVAME:** Modo automático que cicla clips con duración ajustable (10–60s) y opción de bucle infinito.
+## 4. VIDEOTECA
+* **Player YouTube:** Playlist automatica de clips etiquetados por tipo (PARADA, GOL, PASE, ERROR) con filtros.
+* **Boton MOTIVAME:** Modo automatico que cicla clips con duracion ajustable (10-60s) y bucle infinito.
 
-## 5. 📊 ANALÍTICA AVANZADA
-* **🥅 Mapa de Goles Encajados:** Heatmap de portería 3×3 con intensidad por zona, filtros por temporada y rival, y % por altura y lado. URL: `/mapa-goles`.
-* **⚔️ Laboratorio de Penaltis:** Heatmap de tiros rivales + % parado por zona + historial completo por rival con barras de progreso.
-* **📈 Evolución Histórica:** Gráfico de línea de nota media por temporada + barras de goles encajados con Chart.js. URL: `/career/evolucion`.
-* **📄 Informe PDF Profesional:** Gráficos embebidos, KPIs globales, tabla de los últimos 30 partidos y atributos. URL: `/admin/print_report`.
+## 5. ANALITICA AVANZADA
+* **Mapa de Goles Encajados:** Heatmap de porteria 3x3 con intensidad por zona, filtros por temporada y rival. URL: `/mapa-goles`.
+* **Laboratorio de Penaltis:** Heatmap de tiros rivales + % parado por zona + historial por rival.
+* **Evolucion Historica:** Grafico de linea de nota media por temporada + barras de goles encajados. URL: `/career/evolucion`.
+* **Informe PDF Profesional:** Graficos embebidos, KPIs globales, tabla de ultimos 30 partidos y atributos. URL: `/admin/print_report`.
 
-## 6. ⚙️ CONFIGURACIÓN & UX
-* **🎨 Modo Oscuro/Claro:** Toggle ☀️/🌙 persistente en `localStorage`. Activo en toda la app al instante.
-* **👤 Perfil Editable:** Posición, pie dominante, foto, escudo y fecha de nacimiento editables desde Settings.
+## 6. GK INFLUENCE ANALYTICS (Nuevo - Fase 5)
+* **Score de Influencia 0-100:** Algoritmo ponderado que mide el impacto real de la distribucion con el pie en la generacion de juego.
+* **Grafico dual:** Barras de acciones con pie + linea de nota de partido (doble eje Y).
+* **Control de Saques Estructurados:** % de centros y balones largos completados con exito.
+* **Correlacion Influencia-Rendimiento:** Deteccion automatica de si jugar mas con el pie mejora la nota final. URL: `/gk-influence`.
 
----
+## 7. BIOMECANICA POSICIONAL (Nuevo - Fase 4)
+* **Grid 3x3 Interactivo:** Visualizacion de la porteria en 9 zonas con 3 modos: Goles / Paradas / Eficiencia.
+* **Deteccion de Puntos Ciegos:** Zonas donde se encajan mas goles que paradas, ordenadas por criticidad.
+* **Zonas Fuertes:** Sectores de dominio con barras de progreso comparativas.
+* **Tabla de Eficiencia Completa:** Tiros, goles, paradas y % de parada por zona. URL: `/biomecanica`.
 
-# 🟡 PARTE II: ROADMAP EVOLUTIVO (PRÓXIMOS PASOS)
+## 8. MOTOR EMOCIONAL (Nuevo - Fase 5)
+* **Score de Resiliencia Mental 0-100:** Calculado a partir del patron emocional, correlacion con rendimiento y estabilidad de animo en los ultimos 45 dias.
+* **Analisis Psicopedagogico IA:** Gemini actua como psicopedagogo deportivo y genera 3 bloques: Patron Detectado / Fortaleza Mental / Consejo de la Semana.
+* **Correlacion Animo-Nota:** Cuantifica cuantos puntos mejora la nota cuando el animo es alto vs. bajo.
+* **Detector de Burnout:** Alerta automatica si hay rachas de dias consecutivos con animo/energia bajos.
+* **Grafico Triple 30 dias:** Animo + Energia (eje izq. 0-5) + Nota de partido (eje der. 0-10).
+* **Diario Emocional:** Tabla con las ultimas entradas con notas de conducta. URL: `/emocional`.
 
----
+## 9. MODULO MEDICO (Vault)
+* **Medical Vault con OCR:** Procesamiento de PDFs medicos con Gemini Vision + extraccion de datos estructurados.
+* **Historial de lesiones:** Vinculado al calendario de partidos y carga fisica.
 
-## FASE 2: COGNITIVE & ACADEMIC SYNERGY (Medio Plazo)
-*Cruce de datos biométricos, cognitivos y académicos*
+## 10. MODULO DE GUANTES (Smart Gear)
+* **Inventario de Guantes:** Registro de modelos, tipo de latex y condiciones de uso.
+* **Recomendacion Meteorologica:** Sugerencia del par optimo cruzando datos del tiempo con el inventario.
 
-* **🧠 Detector de Fatiga Mental:** Identificación de periodos de baja concentración en el campo asociados a picos de carga académica (exámenes/estudio).
-* **🥋 Dojo Synergy:** Análisis de cómo el progreso en Judo impacta en la velocidad de incorporación tras parada.
-* **📉 Gráfico de Carga (RPE x Sesiones):** Visualización de carga acumulada por semana para detectar sobreentrenamiento antes de que se manifieste.
-* **🌙 Correlación Sueño-Rendimiento:** Widget que cruza automáticamente horas/calidad de sueño con la nota del partido siguiente.
-* **🔔 Notificaciones Push:** Alertas de partido próximo, recordatorio de registro de wellness y avisos de ACWR en zona de riesgo.
+## 11. FLASH-CARDS DE DECISION
+* **Briefing Pre-Partido:** 3 clips recientes del rival + puntos ciegos detectados en biomecanica + estadisticas H2H.
+* **Modo Quiz:** Tarjetas de repaso de posicionamiento y decisiones tacticas. URL: `/flash-cards`.
 
----
+## 12. DOSSIER DE CAPTACION (Anonimizado)
+* **Informe Ciego:** PDF profesional con metricas clave sin datos identificativos, listo para ojeadores. URL: `/scouting-report`.
 
-## FASE 3: COMPUTER VISION & VIDEO ANALYSIS (Alto Impacto)
-*Requiere integración Python/OpenCV*
-
-* **🕵️ Pose-Estimation Analyst:** IA que analiza clips de video para detectar el "Paso Negativo" o errores en la base de sustentación.
-* **🥅 Goal Coverage Mapping:** Superposición de gráficos en video para calcular los metros cuadrados cubiertos según la posición.
-* **⏱️ Reaction Time Tracker:** Medición de milisegundos exactos desde el disparo hasta la estirada.
-* **🎬 Análisis de Video Automático:** Etiquetado automático de timestamps con tipo de acción (parada, saque, error, salida) usando Gemini Vision.
-* **📴 Modo Offline (PWA):** La app funciona sin conexión y sincroniza los registros al recuperar señal.
-
----
-
-## FASE 4: MACHINE LEARNING & ESTRATEGIA PRO (Alto Rendimiento)
-
-* **📉 Predictor de Clean Sheet:** Modelo de ML que estima la probabilidad de portería a cero basándose en ACWR, sueño y rival.
-* **🧤 Análisis de Biomecánica Posicional:** Correlación avanzada entre el `mapa_campo` y la `zona_goles` para corregir la toma de decisiones.
-* **👔 Pasaporte Biológico (Vault Médico):** Repositorio blindado con procesamiento OCR para gestionar historiales médicos.
-* **🧠 Digital Twin (Héctor 2035):** Simulación basada en datos actuales para proyectar su biotipo final.
-* **🔮 Predictor de Titular:** IA que estima probabilidad de jugar basándose en forma reciente, historial vs ese rival y estado físico registrado.
-* **🩹 Seguimiento de Lesiones:** Registro de zona anatómica, días de baja y curva de recuperación vinculada al Pasaporte Biológico.
-
----
-
-## FASE 5: INTELIGENCIA PROACTIVA (Vision & Prediction)
-
-* **🧠 Emotional Intelligence Engine:** Correlación automática entre bienestar psicológico (NLP) y probabilidad de error técnico.
-* **⚽ GK Influence Analytics:** Algoritmos de grafos para medir el impacto de la distribución en la generación de ocasiones de gol.
-* **🎭 Módulo de Anonimización:** Generación de informes "Ciegos" para procesos de captación profesional.
-* **🧬 Bio-Banding Pro:** Monitorización del **PHV (Peak Height Velocity)** para ajustar cargas durante picos de crecimiento.
+## 13. CONFIGURACION Y UX
+* **Modo Oscuro/Claro:** Toggle persistente en toda la app.
+* **Perfil Editable:** Posicion, pie dominante, foto, escudo y fecha de nacimiento editables.
+* **Notificaciones Push:** Alertas de partido proximo, recordatorio wellness y avisos ACWR.
+* **Predictor de Clean Sheet:** Probabilidad de porteria a cero basada en ACWR, sueno y rival.
 
 ---
 
-## 🔵 FASE 6: INNOVACIÓN EXCLUSIVA & OPTIMIZACIÓN (Propuestas)
+# PARTE II: ROADMAP — LO QUE QUEDA
 
-* **🧤 Termómetro de Guantes (Smart Gear):** Sistema de recomendación que sugiere el par de guantes ideal (tipo de látex) cruzando los datos meteorológicos de la **RFFM** con el inventario de `GearItem`.
-* **🛡️ Escudo "Clean Sheet" Predictivo:** Algoritmo de confianza que calcula la probabilidad de mantener la portería a cero, analizando el ratio **ACWR**, el historial contra el rival y el estado anímico del **Audio-Diario**.
-* **🧠 Flash-Cards de Decisión:** Briefing visual pre-partido con los 3 mejores clips recientes y recordatorios de posicionamiento basados en los puntos ciegos detectados en **Moneyball**.
-* **🎤 Analizador de Liderazgo Acústico:** Módulo de procesamiento de audio para medir la "Voz de Mando" de Héctor, puntuando su capacidad para organizar la defensa durante el juego.
+## FASE 3: COMPUTER VISION & VIDEO ANALYSIS
+*Requiere integracion Python/OpenCV — Fuera del stack actual Scala*
 
----
+* Pose-Estimation Analyst — deteccion de errores de sustentacion y Paso Negativo en video
+* Goal Coverage Mapping — superficie de porteria cubierta segun biotipo vs. dimensiones reglamentarias
+* Reaction Time Tracker — milisegundos exactos desde el disparo hasta la estirada
+* Analisis de Video Automatico — etiquetado de timestamps (parada, saque, error) con Gemini Vision
+* Modo Offline PWA — sincronizacion al recuperar senal
 
-## 🏆 FASE 7: EL OLIMPO (Gestión de Alto Rendimiento)
+## FASE 5 (Pendiente)
 
-* **🧬 Digital Twin Proyectivo:** Simulación del alcance físico en portería basado en el historial de crecimiento (velocidad y altura) y proyección del Oráculo para ajustar el entrenamiento de posicionamiento a largo plazo.
-* **📉 Clutch Factor Analytics:** Algoritmo que mide la eficiencia técnica en función de la importancia del partido (Torneo vs. Amistoso) y el estado cognitivo/emocional previo.
-* **🛡️ Scouting Proactivo Automático:** Generación de planes de contingencia táctica al detectar un rival en el calendario de la RFFM, analizando debilidades previas y patrones de tiro detectados en enfrentamientos anteriores.
-* **🥋 Correlación Dojo-Portería:** Análisis de transferencia de habilidades motoras desde el Judo (caídas y propiocepción) hacia la velocidad de reincorporación y valentía en el área.
+* **Dojo Synergy:** Analisis de como el progreso en Judo impacta en la velocidad de incorporacion tras parada.
+* **Bio-Banding Pro:** Monitorizacion del PHV (Peak Height Velocity) para ajustar cargas en picos de crecimiento.
 
----
+## FASES 7-11: EL OLIMPO
+*Requieren infraestructura externa, hardware especializado o APIs de terceros*
 
-## 🌌 FASE 8: GESTIÓN DE CANTERA PRO (Alto Impacto)
-
-* **🔄 Tracking de Segunda Acción:** Medición de la velocidad de reincorporación tras parada, vinculando la agilidad del Judo con la técnica de portería.
-* **🥅 Goal Coverage Mapping:** Visualización dinámica de la superficie de portería cubierta según el biotipo actual vs. dimensiones de la portería reglamentaria.
-* **📢 Liderazgo Acústico (Voice Command):** Análisis de audios de partido para puntuar la capacidad de Héctor para organizar y mandar sobre su línea defensiva.
-* **⚠️ Alerta de Fatiga Silenciosa:** Algoritmo predictivo que cruza ACWR, calidad de sueño y carga académica para identificar riesgos de lesión antes de que se manifiesten físicamente.
-
----
-
-## 🚀 FASE 9: INTELIGENCIA PREDICTIVA & NETWORKING (Nivel Pro-Scout)
-
-* **🎥 Deep-Video Highlights IA:** Generación automática de "Mini-Movies" de los mejores momentos de la temporada, con música y efectos, lista para enviar a ojeadores o compartir, utilizando Gemini para seleccionar las paradas más estéticamente espectaculares.
-* **📉 Benchmarking de Élite:** Comparativa en tiempo real de las estadísticas de Héctor (nota media, paradas por partido, precisión de pase) con las medias de las mejores canteras de España por categoría (Real Madrid, Atlético, Barça).
-* **🧠 Simulador de Escenarios Tácticos:** Mini-juegos dentro de la app que presentan situaciones reales capturadas en sus partidos ("El delantero viene por aquí, ¿qué haces?") para entrenar la toma de decisiones sin desgaste físico.
-* **📂 Exportación de "Dossier de Captación":** Botón de un solo clic para generar un PDF profesional que incluya: trayectoria, biometría, evolución técnica y enlaces a clips de vídeo, diseñado específicamente para procesos de captación en clubes profesionales.
-* **🤖 Bot de Estrategia Personalizado:** Un chat de IA entrenado con TODO el historial de Héctor que le permita preguntarle: "¿Cómo me fue contra equipos que juegan al contraataque?" o "¿En qué debo centrarme en el entrenamiento de hoy según mis últimos errores?".
+| Fase | Feature | Bloqueante |
+|------|---------|------------|
+| 7 | Digital Twin Proyectivo | Stack ML avanzado |
+| 7 | Clutch Factor Analytics | Volumen de datos suficiente |
+| 8 | Liderazgo Acustico (Voice Command) | Procesamiento de audio en tiempo real |
+| 9 | Deep-Video Highlights IA | Integracion FFmpeg + Gemini Vision |
+| 9 | Benchmarking de Elite | API externa de canteras |
+| 9 | Bot de Estrategia Personalizado | Fine-tuning sobre historial completo |
+| 10 | Neuro-Feedback EEG | Hardware wearable |
+| 10 | Pizarra Tactica AR | App nativa movil |
+| 11 | Market Value Estimator | Base de datos de traspasos base |
+| 11 | Entrenamiento VR | Dispositivo VR + exportacion de datos |
+| 11 | Guardian Vault Blockchain | Infraestructura blockchain |
 
 ---
 
-## 🌌 FASE 10: BIO-INGENIERÍA & ENTRENAMIENTO COGNITIVO (The Final Frontier)
+## Stack Tecnologico
 
-* **🧠 Neuro-Feedback en Tiempo Real:** Integración con dispositivos wearables (tipo bandas EEG) para medir la concentración y el estado de "Flow" durante los entrenamientos, permitiendo saber exactamente qué ejercicios optimizan su foco mental.
-* **🔭 Pizarra Táctica en Realidad Aumentada (AR):** Visualización de las "Flash-Cards" y jugadas ensayadas proyectadas sobre el campo real mediante el móvil, permitiendo que Héctor vea las líneas de pase y ángulos de tiro mientras se posiciona.
-* **🧬 Análisis de Bio-Banding Pro:** Algoritmo avanzado que ajusta las estadísticas de la Carta FUT no por edad cronológica, sino por maduración biológica (PHV - Peak Height Velocity), asegurando que su evaluación sea justa durante los picos de crecimiento.
-* **🤖 Asistente de IA "Coach Personal":** Un agente autónomo que analiza la base de datos completa de Neon y RFFM para enviar mensajes motivadores o correcciones técnicas personalizadas a Héctor antes de cada entreno, actuando como un mentor 24/7.
-* **🔒 Guardian Vault (Blockchain Identity):** Encriptación de todo el historial médico y deportivo para crear un "Pasaporte de Portero" inmutable, garantizando la propiedad de sus datos de cara a futuras negociaciones profesionales.
-
----
-
-## 🌐 FASE 11: ECOSISTEMA GLOBAL & IA PRESCRIPTIVA (The Professional Agent)
-
-* **📈 Market Value Estimator:** Algoritmo que genera una valoración de mercado estimada basada en el rendimiento longitudinal, biometría y comparativa con el histórico de traspasos en categorías base de élite.
-* **🛡️ Guardian Network (P2P Scouting):** Sistema de compartición selectiva de datos que permite a ojeadores autorizados acceder a un "Streaming de Datos" en tiempo real del progreso de Héctor, con permisos granulares de privacidad.
-* **🧠 IA Prescriptiva de Cargas:** El sistema deja de ser descriptivo (qué pasó) para ser prescriptivo (qué hacer), diseñando micro-ciclos de entrenamiento de 7 días que se auto-ajustan cada noche según el sueño, la fatiga académica y el rendimiento en el campo.
-* **🌍 Global Benchmarking:** Comparativa automatizada contra bases de datos globales de porteros de la misma edad cronológica y biológica en las 5 grandes ligas europeas.
-* **🤖 Entrenamiento en Realidad Virtual (VR Sync):** Exportación de los patrones de tiro de los rivales (registrados en el Match Center) a un entorno de VR para que Héctor pueda entrenar la lectura de esos disparos específicos en casa, sin impacto físico.
+| Capa | Tecnologia |
+|------|-----------|
+| Backend | Scala (Cask, Requests) |
+| Database | PostgreSQL (Neon Serverless) + HikariCP connection pool |
+| AI Engine | Google Gemini 2.0 Flash (v1beta) con cache inteligente |
+| Frontend | HTML5, Bootstrap 5, Chart.js |
+| PDF/OCR | Gemini Vision para extraccion de documentos medicos |
+| Hosting | Render.com (Docker) |
+| Future Stack | Python (TensorFlow/OpenCV) para Video Analysis y ML |
 
 ---
 
-## 🏗️ Stack Tecnológico
-* **Backend:** Scala (Cask, Requests).
-* **Database:** PostgreSQL (Neon Serverless).
-* **AI Engine:** Google Gemini 1.5 Flash.
-* **Frontend:** HTML5, Bootstrap 5 & Chart.js.
-* **Future Stack:** Python (TensorFlow/OpenCV) para módulos de Video Analysis y ML.
+## Estado de Implementacion
 
-> *"No buscamos porteros que paren. Buscamos atletas que piensen, lideren y dominen."* — **Borja Martín**
+```
+FASE 1 — Core Platform          ██████████ 100%
+FASE 2 — Cognitive Synergy      ██████████ 100%
+FASE 3 — Computer Vision        ░░░░░░░░░░   0%  (requiere Python/OpenCV)
+FASE 4 — ML & Estrategia Pro    ████████░░  80%  (falta Digital Twin)
+FASE 5 — Inteligencia Proactiva ████████░░  80%  (falta Dojo + Bio-Banding)
+FASE 6 — Innovacion Exclusiva   ██████████ 100%
+FASES 7-11 — El Olimpo          ░░░░░░░░░░   0%  (out of scope stack actual)
+```
+
+---
+
+> *"No buscamos porteros que paren. Buscamos atletas que piensen, lideren y dominen."* — **Borja Martin**
