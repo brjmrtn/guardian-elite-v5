@@ -720,138 +720,138 @@ object HistoryController extends cask.Routes {
   @cask.get("/gk-influence")
   def gkInfluencePage(request: cask.Request) = withAuth(request) {
     val stats = DatabaseManager.getGKInfluenceStats()
-    if (stats.isEmpty) return renderHtml(basePage("history",
+    if (stats.isEmpty) renderHtml(basePage("history",
       div(cls:="text-center text-muted py-5", "Sin partidos jugados aun")
-    ))
+    )) else {
 
-    val avgPie      = stats("avgPie").asInstanceOf[Double]
-    val totalPie    = stats("totalPie").asInstanceOf[Int]
-    val notaAltaPie = stats("notaAltaPie").asInstanceOf[Double]
-    val notaBajaPie = stats("notaBajaPie").asInstanceOf[Double]
-    val pctCentros  = stats("pctCentros").asInstanceOf[Double]
-    val pctLargos   = stats("pctLargos").asInstanceOf[Double]
-    val pj          = stats("pj").asInstanceOf[Int]
-    val pcs         = stats("pcs").asInstanceOf[Int]
-    val centTotal   = stats("centTotal").asInstanceOf[Int]
-    val centOk      = stats("centOk").asInstanceOf[Int]
-    val largTotal   = stats("largTotal").asInstanceOf[Int]
-    val largOk      = stats("largOk").asInstanceOf[Int]
-    val serie       = stats("serie").asInstanceOf[List[(String,Int,Double,String)]]
+      val avgPie      = stats("avgPie").asInstanceOf[Double]
+      val totalPie    = stats("totalPie").asInstanceOf[Int]
+      val notaAltaPie = stats("notaAltaPie").asInstanceOf[Double]
+      val notaBajaPie = stats("notaBajaPie").asInstanceOf[Double]
+      val pctCentros  = stats("pctCentros").asInstanceOf[Double]
+      val pctLargos   = stats("pctLargos").asInstanceOf[Double]
+      val pj          = stats("pj").asInstanceOf[Int]
+      val pcs         = stats("pcs").asInstanceOf[Int]
+      val centTotal   = stats("centTotal").asInstanceOf[Int]
+      val centOk      = stats("centOk").asInstanceOf[Int]
+      val largTotal   = stats("largTotal").asInstanceOf[Int]
+      val largOk      = stats("largOk").asInstanceOf[Int]
+      val serie       = stats("serie").asInstanceOf[List[(String,Int,Double,String)]]
 
-    val influenceScore = {
-      var s = 50.0
-      if (avgPie > 8) s += 15 else if (avgPie > 5) s += 8
-      if (pctCentros > 0.7) s += 10 else if (pctCentros > 0.5) s += 5
-      if (pctLargos > 0.7) s += 10 else if (pctLargos > 0.5) s += 5
-      if (pj > 0 && pcs.toDouble/pj > 0.4) s += 10
-      if (notaAltaPie > notaBajaPie + 0.5) s += 10
-      math.min(99, math.max(1, s.toInt))
-    }
-    val (scoreColor, scoreLabel) = if (influenceScore >= 75) ("success","ALTO")
-    else if (influenceScore >= 50) ("warning","MEDIO")
-    else ("danger","BAJO")
+      val influenceScore = {
+        var s = 50.0
+        if (avgPie > 8) s += 15 else if (avgPie > 5) s += 8
+        if (pctCentros > 0.7) s += 10 else if (pctCentros > 0.5) s += 5
+        if (pctLargos > 0.7) s += 10 else if (pctLargos > 0.5) s += 5
+        if (pj > 0 && pcs.toDouble/pj > 0.4) s += 10
+        if (notaAltaPie > notaBajaPie + 0.5) s += 10
+        math.min(99, math.max(1, s.toInt))
+      }
+      val (scoreColor, scoreLabel) = if (influenceScore >= 75) ("success","ALTO")
+      else if (influenceScore >= 50) ("warning","MEDIO")
+      else ("danger","BAJO")
 
-    val serieLabels = serie.reverse.map(_._1.take(5)).map(s => "\"" + s + "\"").mkString("[", ",", "]")
-    val seriePie    = serie.reverse.map(_._2.toString).mkString("[",",","]")
-    val serieNota   = serie.reverse.map(_._3.toString).mkString("[",",","]")
+      val serieLabels = serie.reverse.map(_._1.take(5)).map(s => "\"" + s + "\"").mkString("[", ",", "]")
+      val seriePie    = serie.reverse.map(_._2.toString).mkString("[",",","]")
+      val serieNota   = serie.reverse.map(_._3.toString).mkString("[",",","]")
 
-    val content = basePage("history",
-      div(cls:="row justify-content-center",
-        div(cls:="col-md-10 col-12",
-          div(cls:="d-flex justify-content-between align-items-center mb-3",
-            h2(cls:="text-info mb-0", "GK INFLUENCE ANALYTICS"),
-            a(href:="/history", cls:="btn btn-outline-secondary btn-sm fw-bold", "Historial")
-          ),
-
-          // Score principal
-          div(cls:=s"card bg-dark border-$scoreColor shadow mb-4",
-            div(cls:=s"card-header bg-$scoreColor bg-opacity-10 border-$scoreColor d-flex justify-content-between align-items-center",
-              span(cls:=s"text-$scoreColor fw-bold", "INDICE DE INFLUENCIA DEL PORTERO"),
-              span(cls:=s"badge bg-$scoreColor fw-bold fs-6", s"$influenceScore / 100")
+      val content = basePage("history",
+        div(cls:="row justify-content-center",
+          div(cls:="col-md-10 col-12",
+            div(cls:="d-flex justify-content-between align-items-center mb-3",
+              h2(cls:="text-info mb-0", "GK INFLUENCE ANALYTICS"),
+              a(href:="/history", cls:="btn btn-outline-secondary btn-sm fw-bold", "Historial")
             ),
-            div(cls:="card-body",
-              div(cls:="d-flex align-items-center gap-4 mb-3",
-                div(style:=s"width:80px;height:80px;border-radius:50%;border:5px solid ${if(scoreColor=="success")"#28a745"else if(scoreColor=="warning")"#ffc107"else"#dc3545"};display:flex;align-items:center;justify-content:center;flex-shrink:0;",
-                  div(cls:=s"fw-bold fs-4 text-$scoreColor", s"$influenceScore")
-                ),
-                div(
-                  div(cls:="fw-bold text-white fs-6", s"IMPACTO $scoreLabel EN EL JUEGO"),
-                  div(cls:="text-muted small mt-1", "Basado en distribuciones, centros controlados y correlacion con resultado")
-                )
-              ),
-              div(cls:="row g-2",
-                Seq(
-                  ("Acc. con pie / partido", f"$avgPie%.1f", if(avgPie>6)"success"else"secondary"),
-    ("Total distribuciones", totalPie.toString, "info"),
-    ("% Centros controlados", if(centTotal>0) f"${pctCentros*100}%.0f%%" else "—", if(pctCentros>0.6)"success"else"warning"),
-    ("% Balones largos OK", if(largTotal>0) f"${pctLargos*100}%.0f%%" else "—", if(pctLargos>0.6)"success"else"warning"),
-    ("Nota con +pie", if(notaAltaPie>0) f"$notaAltaPie%.1f" else "—", if(notaAltaPie>7)"success"else"secondary"),
-    ("Nota con -pie", if(notaBajaPie>0) f"$notaBajaPie%.1f" else "—", if(notaBajaPie>7)"success"else"secondary")
-    ).map { case (lbl, v, c) =>
-      div(cls:="col-4",
-        div(cls:=s"text-center p-2 rounded border border-$c bg-dark",
-          div(cls:=s"fw-bold text-$c", v),
-          div(cls:="xx-small text-muted", lbl)
-        )
-      )
-    }
-    )
-    )
-    ),
 
-    div(cls:="row g-3",
-      // Grafico distribucion vs nota
-      div(cls:="col-md-7",
-        div(cls:="card bg-dark border-info shadow",
-          div(cls:="card-header text-info fw-bold small", "DISTRIBUCIONES CON PIE vs NOTA (ultimos 20 partidos)"),
-          div(cls:="card-body p-2",
-            tag("canvas")(id:="chartInfluence", style:="max-height:220px;")
+            // Score principal
+            div(cls:=s"card bg-dark border-$scoreColor shadow mb-4",
+              div(cls:=s"card-header bg-$scoreColor bg-opacity-10 border-$scoreColor d-flex justify-content-between align-items-center",
+                span(cls:=s"text-$scoreColor fw-bold", "INDICE DE INFLUENCIA DEL PORTERO"),
+                span(cls:=s"badge bg-$scoreColor fw-bold fs-6", s"$influenceScore / 100")
+              ),
+              div(cls:="card-body",
+                div(cls:="d-flex align-items-center gap-4 mb-3",
+                  div(style:=s"width:80px;height:80px;border-radius:50%;border:5px solid ${if(scoreColor=="success")"#28a745"else if(scoreColor=="warning")"#ffc107"else"#dc3545"};display:flex;align-items:center;justify-content:center;flex-shrink:0;",
+                    div(cls:=s"fw-bold fs-4 text-$scoreColor", s"$influenceScore")
+                  ),
+                  div(
+                    div(cls:="fw-bold text-white fs-6", s"IMPACTO $scoreLabel EN EL JUEGO"),
+                    div(cls:="text-muted small mt-1", "Basado en distribuciones, centros controlados y correlacion con resultado")
+                  )
+                ),
+                div(cls:="row g-2",
+                  Seq(
+                    ("Acc. con pie / partido", f"$avgPie%.1f", if(avgPie>6)"success"else"secondary"),
+      ("Total distribuciones", totalPie.toString, "info"),
+      ("% Centros controlados", if(centTotal>0) f"${pctCentros*100}%.0f%%" else "—", if(pctCentros>0.6)"success"else"warning"),
+      ("% Balones largos OK", if(largTotal>0) f"${pctLargos*100}%.0f%%" else "—", if(pctLargos>0.6)"success"else"warning"),
+      ("Nota con +pie", if(notaAltaPie>0) f"$notaAltaPie%.1f" else "—", if(notaAltaPie>7)"success"else"secondary"),
+      ("Nota con -pie", if(notaBajaPie>0) f"$notaBajaPie%.1f" else "—", if(notaBajaPie>7)"success"else"secondary")
+      ).map { case (lbl, v, c) =>
+        div(cls:="col-4",
+          div(cls:=s"text-center p-2 rounded border border-$c bg-dark",
+            div(cls:=s"fw-bold text-$c", v),
+            div(cls:="xx-small text-muted", lbl)
           )
         )
+      }
+      )
+      )
       ),
-      // Balones parados
-      div(cls:="col-md-5",
-        div(cls:="card bg-dark border-secondary shadow",
-          div(cls:="card-header text-white fw-bold small", "BALONES PARADOS"),
-          div(cls:="card-body p-3",
-            div(cls:="mb-3",
-              div(cls:="d-flex justify-content-between small mb-1",
-                span(cls:="text-muted fw-bold", "CENTROS"),
-                span(cls:="text-info fw-bold", s"$centOk / $centTotal")
+
+      div(cls:="row g-3",
+        // Grafico distribucion vs nota
+        div(cls:="col-md-7",
+          div(cls:="card bg-dark border-info shadow",
+            div(cls:="card-header text-info fw-bold small", "DISTRIBUCIONES CON PIE vs NOTA (ultimos 20 partidos)"),
+            div(cls:="card-body p-2",
+              tag("canvas")(id:="chartInfluence", style:="max-height:220px;")
+            )
+          )
+        ),
+        // Balones parados
+        div(cls:="col-md-5",
+          div(cls:="card bg-dark border-secondary shadow",
+            div(cls:="card-header text-white fw-bold small", "BALONES PARADOS"),
+            div(cls:="card-body p-3",
+              div(cls:="mb-3",
+                div(cls:="d-flex justify-content-between small mb-1",
+                  span(cls:="text-muted fw-bold", "CENTROS"),
+                  span(cls:="text-info fw-bold", s"$centOk / $centTotal")
+                ),
+                div(cls:="progress", style:="height:10px;",
+                  div(cls:="progress-bar bg-info",
+                    style:=s"width:${if(centTotal>0)(centOk*100/centTotal)else 0}%;")
+                )
               ),
-              div(cls:="progress", style:="height:10px;",
-                div(cls:="progress-bar bg-info",
-                  style:=s"width:${if(centTotal>0)(centOk*100/centTotal)else 0}%;")
-              )
-            ),
-            div(cls:="mb-3",
-              div(cls:="d-flex justify-content-between small mb-1",
-                span(cls:="text-muted fw-bold", "BALONES LARGOS"),
-                span(cls:="text-warning fw-bold", s"$largOk / $largTotal")
+              div(cls:="mb-3",
+                div(cls:="d-flex justify-content-between small mb-1",
+                  span(cls:="text-muted fw-bold", "BALONES LARGOS"),
+                  span(cls:="text-warning fw-bold", s"$largOk / $largTotal")
+                ),
+                div(cls:="progress", style:="height:10px;",
+                  div(cls:="progress-bar bg-warning",
+                    style:=s"width:${if(largTotal>0)(largOk*100/largTotal)else 0}%;")
+                )
               ),
-              div(cls:="progress", style:="height:10px;",
-                div(cls:="progress-bar bg-warning",
-                  style:=s"width:${if(largTotal>0)(largOk*100/largTotal)else 0}%;")
+              hr(cls:="border-secondary"),
+              div(cls:="text-center",
+                div(cls:="xx-small text-muted fw-bold", "CORRELACION PIE - RENDIMIENTO"),
+                if (notaAltaPie > 0 && notaBajaPie > 0) {
+                  val diff = notaAltaPie - notaBajaPie
+                  val (diffCls, diffTxt) = if (diff > 0.3) ("success", s"Con mas pie juegas un ${f"$diff%.1f"} mejor")
+                  else if (diff < -0.3) ("warning", "El pie no parece clave para tu rendimiento")
+                  else ("secondary", "Impacto neutro del juego con pie")
+                  div(cls:=s"text-$diffCls small fw-bold mt-2", diffTxt)
+                } else div(cls:="text-muted small mt-2", "Sin suficientes datos")
               )
-            ),
-            hr(cls:="border-secondary"),
-            div(cls:="text-center",
-              div(cls:="xx-small text-muted fw-bold", "CORRELACION PIE - RENDIMIENTO"),
-              if (notaAltaPie > 0 && notaBajaPie > 0) {
-                val diff = notaAltaPie - notaBajaPie
-                val (diffCls, diffTxt) = if (diff > 0.3) ("success", s"Con mas pie juegas un ${f"$diff%.1f"} mejor")
-                else if (diff < -0.3) ("warning", "El pie no parece clave para tu rendimiento")
-                else ("secondary", "Impacto neutro del juego con pie")
-                div(cls:=s"text-$diffCls small fw-bold mt-2", diffTxt)
-              } else div(cls:="text-muted small mt-2", "Sin suficientes datos")
             )
           )
         )
-      )
-    ),
+      ),
 
-    script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
-    script(raw(s"""
+      script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
+      script(raw(s"""
             const ctx = document.getElementById('chartInfluence');
             const labels = $serieLabels;
             const pie = $seriePie;
@@ -878,204 +878,205 @@ object HistoryController extends cask.Routes {
               });
             }
           """))
-    )
-    )
-    )
-    renderHtml(content)
+      )
+      )
+      )
+      renderHtml(content)
+    } // end else
   }
 
   // ── BIOMECANICA POSICIONAL ────────────────────────────────────────────────
   @cask.get("/biomecanica")
   def biomecanicaPage(request: cask.Request) = withAuth(request) {
     val stats = DatabaseManager.getBiomecPosicional()
-    if (stats.isEmpty) return renderHtml(basePage("history",
+    if (stats.isEmpty) renderHtml(basePage("history",
       div(cls:="text-center text-muted py-5", "Sin partidos jugados aun")
-    ))
+    )) else {
 
-    val goles     = stats("goles").asInstanceOf[Map[String,Int]]
-    val paradas   = stats("paradas").asInstanceOf[Map[String,Int]]
-    val tiros     = stats("tiros").asInstanceOf[Map[String,Int]]
-    val efic      = stats("eficiencia").asInstanceOf[Map[String,Int]]
-    val puntosCiegos  = stats("puntosCiegos").asInstanceOf[Seq[String]]
-    val zonasFuertes  = stats("zonasFuertes").asInstanceOf[Seq[String]]
-    val stopRate  = stats("stopRate").asInstanceOf[Map[String,String]]
-    val zones     = stats("zones").asInstanceOf[Seq[String]]
+      val goles     = stats("goles").asInstanceOf[Map[String,Int]]
+      val paradas   = stats("paradas").asInstanceOf[Map[String,Int]]
+      val tiros     = stats("tiros").asInstanceOf[Map[String,Int]]
+      val efic      = stats("eficiencia").asInstanceOf[Map[String,Int]]
+      val puntosCiegos  = stats("puntosCiegos").asInstanceOf[Seq[String]]
+      val zonasFuertes  = stats("zonasFuertes").asInstanceOf[Seq[String]]
+      val stopRate  = stats("stopRate").asInstanceOf[Map[String,String]]
+      val zones     = stats("zones").asInstanceOf[Seq[String]]
 
-    def zoneLabel(z: String) = z match {
-      case "TL"=>"Arr-Izq"; case "TC"=>"Arr-Cen"; case "TR"=>"Arr-Der"
-      case "ML"=>"Med-Izq"; case "MC"=>"Med-Cen"; case "MR"=>"Med-Der"
-      case "BL"=>"Baj-Izq"; case "BC"=>"Baj-Cen"; case "BR"=>"Baj-Der"
-      case _ => z
-    }
+      def zoneLabel(z: String) = z match {
+        case "TL"=>"Arr-Izq"; case "TC"=>"Arr-Cen"; case "TR"=>"Arr-Der"
+        case "ML"=>"Med-Izq"; case "MC"=>"Med-Cen"; case "MR"=>"Med-Der"
+        case "BL"=>"Baj-Izq"; case "BC"=>"Baj-Cen"; case "BR"=>"Baj-Der"
+        case _ => z
+      }
 
-    def zoneCellColor(z: String): String = {
-      val e = efic.getOrElse(z, -1)
-      if (e == -1) "#333"
-      else if (e >= 70) "rgba(40,167,69,0.4)"
-      else if (e >= 50) "rgba(255,193,7,0.3)"
-      else "rgba(220,53,69,0.4)"
-    }
+      def zoneCellColor(z: String): String = {
+        val e = efic.getOrElse(z, -1)
+        if (e == -1) "#333"
+        else if (e >= 70) "rgba(40,167,69,0.4)"
+        else if (e >= 50) "rgba(255,193,7,0.3)"
+        else "rgba(220,53,69,0.4)"
+      }
 
-    def zoneBorder(z: String): String = {
-      val e = efic.getOrElse(z, -1)
-      if (e == -1) "#555"
-      else if (e >= 70) "#28a745"
-      else if (e >= 50) "#ffc107"
-      else "#dc3545"
-    }
+      def zoneBorder(z: String): String = {
+        val e = efic.getOrElse(z, -1)
+        if (e == -1) "#555"
+        else if (e >= 70) "#28a745"
+        else if (e >= 50) "#ffc107"
+        else "#dc3545"
+      }
 
-    // Grid 3x3 de la porteria
-    def porteriaGrid(showMode: String) = {
-      val rows = Seq(
-        Seq("TL","TC","TR"),
-        Seq("ML","MC","MR"),
-        Seq("BL","BC","BR")
-      )
-      div(style:="border:3px solid #fff; border-radius:4px; overflow:hidden; background:#1a1a1a;",
-        rows.map { row =>
-          div(cls:="d-flex", style:="border-bottom:1px solid #444;",
-            row.map { z =>
-              val g = goles.getOrElse(z, 0)
-              val p = paradas.getOrElse(z, 0)
-              val t = tiros.getOrElse(z, 0)
-              val e = efic.getOrElse(z, -1)
-              val (mainVal, mainColor) = showMode match {
-                case "goles"   => (if(g>0) g.toString else "-", if(g>=2)"#dc3545"else if(g==1)"#ffc107"else"#555")
-                case "paradas" => (if(p>0) p.toString else "-", if(p>=3)"#28a745"else if(p>=1)"#0dcaf0"else"#555")
-                case _ =>
-                  val label = if(e == -1) "—" else s"$e%%"
-                  val c = if(e == -1)"#555" else if(e>=70)"#28a745" else if(e>=50)"#ffc107" else "#dc3545"
-                  (label, c)
-              }
-              div(
-                style:=s"flex:1; padding:12px 4px; text-align:center; background:${zoneCellColor(z)}; border-right:1px solid #444; cursor:default;",
-                div(style:=s"font-size:20px; font-weight:700; color:$mainColor;", mainVal),
-                div(style:="font-size:9px; color:#888; text-transform:uppercase; letter-spacing:1px;", zoneLabel(z))
-              )
-            }
-          )
-        }
-      )
-    }
-
-    val content = basePage("history",
-      div(cls:="row justify-content-center",
-        div(cls:="col-md-10 col-12",
-          div(cls:="d-flex justify-content-between align-items-center mb-3",
-            h2(cls:="text-warning mb-0", "BIOMECANICA POSICIONAL"),
-            a(href:="/history", cls:="btn btn-outline-secondary btn-sm fw-bold", "Historial")
-          ),
-
-          // Alertas puntos ciegos y zonas fuertes
-          div(cls:="row g-2 mb-4",
-            div(cls:="col-md-6",
-              div(cls:="card bg-dark border-danger shadow h-100",
-                div(cls:="card-header text-danger fw-bold small", "PUNTOS CIEGOS — Zonas vulnerables"),
-                div(cls:="card-body p-2",
-                  if (puntosCiegos.isEmpty)
-                    div(cls:="text-muted text-center small py-2", "Sin puntos ciegos detectados")
-                  else div(
-                    puntosCiegos.take(3).map { z =>
-                      val g = goles.getOrElse(z, 0)
-                      val p = paradas.getOrElse(z, 0)
-                      div(cls:="d-flex align-items-center gap-2 p-2 mb-1 rounded",
-                        style:="background:rgba(220,53,69,0.15); border-left:3px solid #dc3545;",
-                        div(cls:="fw-bold text-danger", style:="min-width:70px;", zoneLabel(z)),
-                        div(cls:="flex-grow-1",
-                          div(cls:="progress", style:="height:8px;",
-                            div(cls:="progress-bar bg-danger",
-                              style:=s"width:${if(g+p>0)(g*100/(g+p))else 0}%;")
-                          )
-                        ),
-                        span(cls:="text-danger fw-bold small", s"$g goles"),
-                        span(cls:="text-muted xx-small", s"$p paradas")
-                      )
-                    }
-                  )
-                )
-              )
-            ),
-            div(cls:="col-md-6",
-              div(cls:="card bg-dark border-success shadow h-100",
-                div(cls:="card-header text-success fw-bold small", "ZONAS FUERTES — Mayor dominio"),
-                div(cls:="card-body p-2",
-                  if (zonasFuertes.isEmpty)
-                    div(cls:="text-muted text-center small py-2", "Sin datos suficientes")
-                  else div(
-                    zonasFuertes.take(3).map { z =>
-                      val g = goles.getOrElse(z, 0)
-                      val p = paradas.getOrElse(z, 0)
-                      div(cls:="d-flex align-items-center gap-2 p-2 mb-1 rounded",
-                        style:="background:rgba(40,167,69,0.15); border-left:3px solid #28a745;",
-                        div(cls:="fw-bold text-success", style:="min-width:70px;", zoneLabel(z)),
-                        div(cls:="flex-grow-1",
-                          div(cls:="progress", style:="height:8px;",
-                            div(cls:="progress-bar bg-success",
-                              style:=s"width:${if(g+p>0)(p*100/(g+p))else 0}%;")
-                          )
-                        ),
-                        span(cls:="text-success fw-bold small", s"$p paradas"),
-                        span(cls:="text-muted xx-small", s"$g goles")
-                      )
-                    }
-                  )
-                )
-              )
-            )
-          ),
-
-          // Grid porteria — 3 vistas
-          div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-white fw-bold small d-flex justify-content-between align-items-center",
-              span("MAPA DE PORTERIA INTERACTIVO"),
-              div(cls:="d-flex gap-1",
-                Seq(("goles","Goles","danger"), ("paradas","Paradas","success"), ("efic","Eficiencia","warning")).map { case (mode, lbl, c) =>
-                  button(cls:=s"btn btn-sm btn-outline-$c fw-bold xx-small",
-                    onclick:=s"switchMode('$mode')", id:=s"btn-$mode", lbl)
+      // Grid 3x3 de la porteria
+      def porteriaGrid(showMode: String) = {
+        val rows = Seq(
+          Seq("TL","TC","TR"),
+          Seq("ML","MC","MR"),
+          Seq("BL","BC","BR")
+        )
+        div(style:="border:3px solid #fff; border-radius:4px; overflow:hidden; background:#1a1a1a;",
+          frag(rows.map { row =>
+            div(cls:="d-flex", style:="border-bottom:1px solid #444;",
+              row.map { z =>
+                val g = goles.getOrElse(z, 0)
+                val p = paradas.getOrElse(z, 0)
+                val t = tiros.getOrElse(z, 0)
+                val e = efic.getOrElse(z, -1)
+                val (mainVal, mainColor) = showMode match {
+                  case "goles"   => (if(g>0) g.toString else "-", if(g>=2)"#dc3545"else if(g==1)"#ffc107"else"#555")
+                  case "paradas" => (if(p>0) p.toString else "-", if(p>=3)"#28a745"else if(p>=1)"#0dcaf0"else"#555")
+                  case _ =>
+                    val label = if(e == -1) "—" else s"$e%%"
+                    val c = if(e == -1)"#555" else if(e>=70)"#28a745" else if(e>=50)"#ffc107" else "#dc3545"
+                    (label, c)
                 }
-              )
+                div(
+                  style:=s"flex:1; padding:12px 4px; text-align:center; background:${zoneCellColor(z)}; border-right:1px solid #444; cursor:default;",
+                  div(style:=s"font-size:20px; font-weight:700; color:$mainColor;", mainVal),
+                  div(style:="font-size:9px; color:#888; text-transform:uppercase; letter-spacing:1px;", zoneLabel(z))
+                )
+              }
+            )
+          }: _*)
+        )
+      }
+
+      val content = basePage("history",
+        div(cls:="row justify-content-center",
+          div(cls:="col-md-10 col-12",
+            div(cls:="d-flex justify-content-between align-items-center mb-3",
+              h2(cls:="text-warning mb-0", "BIOMECANICA POSICIONAL"),
+              a(href:="/history", cls:="btn btn-outline-secondary btn-sm fw-bold", "Historial")
             ),
-            div(cls:="card-body p-3",
-              div(cls:="row g-3",
-                div(cls:="col-md-5",
-                  div(id:="grid-goles", porteriaGrid("goles")),
-                  div(id:="grid-paradas", style:="display:none;", porteriaGrid("paradas")),
-                  div(id:="grid-efic", style:="display:none;", porteriaGrid("efic")),
-                  div(cls:="d-flex justify-content-center gap-3 mt-2",
-                    Seq(("#28a745","Alto (70%+)"),("#ffc107","Medio (50-70%)"),("#dc3545","Bajo (<50%)")).map { case (c, lbl) =>
-                      div(cls:="d-flex align-items-center gap-1",
-                        div(style:=s"width:12px;height:12px;background:$c;border-radius:2px;"),
-                        div(cls:="xx-small text-muted", lbl)
-                      )
-                    }
-                  )
-                ),
-                div(cls:="col-md-7",
-                  div(cls:="table-responsive",
-                    table(cls:="table table-dark table-sm small mb-0",
-                      thead(tr(
-                        th("Zona"), th(cls:="text-center","Tiros"), th(cls:="text-center","Goles"),
-                        th(cls:="text-center","Paradas"), th(cls:="text-center","Stop%")
-                      )),
-                      tbody(zones.map { z =>
-                        val e = efic.getOrElse(z, -1)
-                        val rowCls = if(e == -1) "" else if(e >= 70) "table-success" else if(e >= 50) "table-warning" else "table-danger"
-                        tr(cls:=s"$rowCls bg-opacity-25",
-                          td(cls:="fw-bold", zoneLabel(z)),
-                          td(cls:="text-center", tiros.getOrElse(z, 0).toString),
-                          td(cls:="text-center fw-bold text-danger", goles.getOrElse(z, 0).toString),
-                          td(cls:="text-center fw-bold text-success", paradas.getOrElse(z, 0).toString),
-                          td(cls:="text-center fw-bold", stopRate.getOrElse(z, "—"))
+
+            // Alertas puntos ciegos y zonas fuertes
+            div(cls:="row g-2 mb-4",
+              div(cls:="col-md-6",
+                div(cls:="card bg-dark border-danger shadow h-100",
+                  div(cls:="card-header text-danger fw-bold small", "PUNTOS CIEGOS — Zonas vulnerables"),
+                  div(cls:="card-body p-2",
+                    if (puntosCiegos.isEmpty)
+                      div(cls:="text-muted text-center small py-2", "Sin puntos ciegos detectados")
+                    else div(
+                      puntosCiegos.take(3).map { z =>
+                        val g = goles.getOrElse(z, 0)
+                        val p = paradas.getOrElse(z, 0)
+                        div(cls:="d-flex align-items-center gap-2 p-2 mb-1 rounded",
+                          style:="background:rgba(220,53,69,0.15); border-left:3px solid #dc3545;",
+                          div(cls:="fw-bold text-danger", style:="min-width:70px;", zoneLabel(z)),
+                          div(cls:="flex-grow-1",
+                            div(cls:="progress", style:="height:8px;",
+                              div(cls:="progress-bar bg-danger",
+                                style:=s"width:${if(g+p>0)(g*100/(g+p))else 0}%;")
+                            )
+                          ),
+                          span(cls:="text-danger fw-bold small", s"$g goles"),
+                          span(cls:="text-muted xx-small", s"$p paradas")
                         )
-                      })
+                      }
+                    )
+                  )
+                )
+              ),
+              div(cls:="col-md-6",
+                div(cls:="card bg-dark border-success shadow h-100",
+                  div(cls:="card-header text-success fw-bold small", "ZONAS FUERTES — Mayor dominio"),
+                  div(cls:="card-body p-2",
+                    if (zonasFuertes.isEmpty)
+                      div(cls:="text-muted text-center small py-2", "Sin datos suficientes")
+                    else div(
+                      zonasFuertes.take(3).map { z =>
+                        val g = goles.getOrElse(z, 0)
+                        val p = paradas.getOrElse(z, 0)
+                        div(cls:="d-flex align-items-center gap-2 p-2 mb-1 rounded",
+                          style:="background:rgba(40,167,69,0.15); border-left:3px solid #28a745;",
+                          div(cls:="fw-bold text-success", style:="min-width:70px;", zoneLabel(z)),
+                          div(cls:="flex-grow-1",
+                            div(cls:="progress", style:="height:8px;",
+                              div(cls:="progress-bar bg-success",
+                                style:=s"width:${if(g+p>0)(p*100/(g+p))else 0}%;")
+                            )
+                          ),
+                          span(cls:="text-success fw-bold small", s"$p paradas"),
+                          span(cls:="text-muted xx-small", s"$g goles")
+                        )
+                      }
                     )
                   )
                 )
               )
-            )
-          ),
+            ),
 
-          script(raw("""
+            // Grid porteria — 3 vistas
+            div(cls:="card bg-dark border-secondary shadow mb-4",
+              div(cls:="card-header text-white fw-bold small d-flex justify-content-between align-items-center",
+                span("MAPA DE PORTERIA INTERACTIVO"),
+                div(cls:="d-flex gap-1",
+                  Seq(("goles","Goles","danger"), ("paradas","Paradas","success"), ("efic","Eficiencia","warning")).map { case (mode, lbl, c) =>
+                    button(cls:=s"btn btn-sm btn-outline-$c fw-bold xx-small",
+                      onclick:=s"switchMode('$mode')", id:=s"btn-$mode", lbl)
+                  }
+                )
+              ),
+              div(cls:="card-body p-3",
+                div(cls:="row g-3",
+                  div(cls:="col-md-5",
+                    div(id:="grid-goles", porteriaGrid("goles")),
+                    div(id:="grid-paradas", style:="display:none;", porteriaGrid("paradas")),
+                    div(id:="grid-efic", style:="display:none;", porteriaGrid("efic")),
+                    div(cls:="d-flex justify-content-center gap-3 mt-2",
+                      Seq(("#28a745","Alto (70%+)"),("#ffc107","Medio (50-70%)"),("#dc3545","Bajo (<50%)")).map { case (c, lbl) =>
+                        div(cls:="d-flex align-items-center gap-1",
+                          div(style:=s"width:12px;height:12px;background:$c;border-radius:2px;"),
+                          div(cls:="xx-small text-muted", lbl)
+                        )
+                      }
+                    )
+                  ),
+                  div(cls:="col-md-7",
+                    div(cls:="table-responsive",
+                      table(cls:="table table-dark table-sm small mb-0",
+                        thead(tr(
+                          th("Zona"), th(cls:="text-center","Tiros"), th(cls:="text-center","Goles"),
+                          th(cls:="text-center","Paradas"), th(cls:="text-center","Stop%")
+                        )),
+                        tbody(frag(zones.toSeq.map { z =>
+                          val e = efic.getOrElse(z, -1)
+                          val rowCls = if(e == -1) "" else if(e >= 70) "table-success" else if(e >= 50) "table-warning" else "table-danger"
+                          tr(cls:=s"$rowCls bg-opacity-25",
+                            td(cls:="fw-bold", zoneLabel(z)),
+                            td(cls:="text-center", tiros.getOrElse(z, 0).toString),
+                            td(cls:="text-center fw-bold text-danger", goles.getOrElse(z, 0).toString),
+                            td(cls:="text-center fw-bold text-success", paradas.getOrElse(z, 0).toString),
+                            td(cls:="text-center fw-bold", stopRate.getOrElse(z, "—"))
+                          )
+                        }: _*))
+                      )
+                    )
+                  )
+                )
+              )
+            ),
+
+            script(raw("""
             function switchMode(mode) {
               ['goles','paradas','efic'].forEach(m => {
                 document.getElementById('grid-'+m).style.display = m === mode ? 'block' : 'none';
@@ -1084,10 +1085,11 @@ object HistoryController extends cask.Routes {
             }
             switchMode('goles');
           """))
+          )
         )
       )
-    )
-    renderHtml(content)
+      renderHtml(content)
+    } // end else
   }
 
   initialize()
