@@ -1138,8 +1138,8 @@ object HistoryController extends cask.Routes {
     val conNotas = entries.filter(_.notas.nonEmpty).takeRight(10).reverse
 
     // Emojis por nivel
-    def animoEmoji(n: Int) = n match { case 5=>"😄"; case 4=>"🙂"; case 3=>"😐"; case 2=>"😕"; case _=>"😞" }
-    def energiaEmoji(n: Int) = n match { case 5=>"⚡"; case 4=>"🔋"; case 3=>"➖"; case 2=>"🪫"; case _=>"😴" }
+    def animoEmoji(n: Int): String  = n match { case 5=>"😄"; case 4=>"🙂"; case 3=>"😐"; case 2=>"😕"; case _=>"😞" }
+    def energiaEmoji(n: Int): String = n match { case 5=>"⚡"; case 4=>"🔋"; case 3=>"➖"; case 2=>"🪫"; case _=>"😴" }
 
     if (total == 0) {
       renderHtml(basePage("bio",
