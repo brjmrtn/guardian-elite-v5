@@ -1063,10 +1063,10 @@ object DatabaseManager {
       while (rsV.next()) clips = clips :+ (rsV.getInt(1), rsV.getInt(2), rsV.getString(3), rsV.getString(4), rsV.getString(5))
 
       // Rival info
-      val rsRi = conn.prepareStatement("SELECT estilo, claves FROM rivals WHERE LOWER(nombre) LIKE LOWER(?)")
+      val rsRi = conn.prepareStatement("SELECT estilo_juego, jugadores_clave FROM rivals WHERE LOWER(nombre) LIKE LOWER(?)")
       rsRi.setString(1, s"%$rival%")
       val rsRiR = rsRi.executeQuery()
-      val (estilo, claves) = if (rsRiR.next()) (Option(rsRiR.getString("estilo")).getOrElse(""), Option(rsRiR.getString("claves")).getOrElse("")) else ("", "")
+      val (estilo, claves) = if (rsRiR.next()) (Option(rsRiR.getString("estilo_juego")).getOrElse(""), Option(rsRiR.getString("jugadores_clave")).getOrElse("")) else ("", "")
 
       Map("partidos" -> partidos, "zonaMasVulnerable" -> zonaMasVulnerable,
         "clips" -> clips, "estilo" -> estilo, "claves" -> claves)
