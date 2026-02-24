@@ -138,6 +138,18 @@ object DatabaseManager {
         estado_fisico TEXT DEFAULT 'DISPONIBLE'
       )""")
 
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS match_goals (
+        id              SERIAL PRIMARY KEY,
+        match_id        INT NOT NULL,
+        minuto          INT DEFAULT 0,
+        origen          TEXT,
+        situacion       TEXT,
+        responsabilidad TEXT DEFAULT 'Media',
+        era_parable     TEXT DEFAULT 'Dudoso',
+        zona_gol        TEXT,
+        notas           TEXT
+      )""")
+
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS growth_history (
         id     SERIAL PRIMARY KEY,
         fecha  DATE DEFAULT CURRENT_DATE,
@@ -1296,6 +1308,113 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
 
   // == DIGITAL TWIN HECTOR 2035 ==============================================
+
+  // == MATCH GOALS: Contexto de goles encajados ============================
+  def saveMatchGoal(matchId: Int, minuto: Int, origen: String, situacion: String,
+                    responsabilidad: String, eraParable: String, zonaGol: String, notas: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO match_goals (match_id, minuto, origen, situacion, responsabilidad, era_parable, zona_gol, notas) " +
+          "VALUES (?,?,?,?,?,?,?,?)")
+      ps.setInt(1, matchId); ps.setInt(2, minuto)
+      ps.setString(3, fixEncoding(origen)); ps.setString(4, fixEncoding(situacion))
+      ps.setString(5, responsabilidad); ps.setString(6, eraParable)
+      ps.setString(7, zonaGol); ps.setString(8, fixEncoding(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getLastMatchId(): Int = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT MAX(id) as id FROM matches WHERE status='PLAYED'")
+      if (rs.next()) rs.getInt("id") else 0
+    } finally { conn.close() }
+  }
+
+  def deleteMatchGoals(matchId: Int): Unit = {
+    val conn = getConnection()
+    try { conn.createStatement().executeUpdate(s"DELETE FROM match_goals WHERE match_id = $matchId") }
+    finally { conn.close() }
+  }
+
+  def getGoalsAnalysis(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT mg.*, m.rival, m.fecha, m.goles_favor, m.goles_contra " +
+          "FROM match_goals mg JOIN matches m ON mg.match_id = m.id ORDER BY m.fecha DESC, mg.minuto ASC")
+      var rows = List[Map[String, String]]()
+      while (rs.next()) {
+        rows = rows :+ Map(
+          "id"              -> rs.getInt("id").toString,
+          "matchId"         -> rs.getInt("match_id").toString,
+          "rival"           -> Option(rs.getString("rival")).getOrElse(""),
+          "fecha"           -> Option(rs.getString("fecha")).getOrElse(""),
+          "minuto"          -> rs.getInt("minuto").toString,
+          "origen"          -> Option(rs.getString("origen")).getOrElse(""),
+          "situacion"       -> Option(rs.getString("situacion")).getOrElse(""),
+          "responsabilidad" -> Option(rs.getString("responsabilidad")).getOrElse(""),
+          "eraParable"      -> Option(rs.getString("era_parable")).getOrElse(""),
+          "zonaGol"         -> Option(rs.getString("zona_gol")).getOrElse(""),
+          "notas"           -> Option(rs.getString("notas")).getOrElse(""),
+          "resultado"       -> (rs.getInt("goles_favor").toString + "-" + rs.getInt("goles_contra").toString)
+        )
+      }
+
+      val total: Int = rows.size
+      // Agrupaciones
+      def countBy(campo: String): Map[String, Int] =
+        rows.groupBy(_(campo)).map { case (k,v) => k -> v.size }
+
+      val porOrigen: Map[String, Int]         = countBy("origen")
+      val porSituacion: Map[String, Int]       = countBy("situacion")
+      val porResponsabilidad: Map[String, Int] = countBy("responsabilidad")
+      val porParable: Map[String, Int]         = countBy("eraParable")
+
+      // Goles evitables = responsabilidad Alta o Media + era_parable Si
+      val evitables: Int   = rows.count(r => r("responsabilidad") == "Alta" || (r("responsabilidad") == "Media" && r("eraParable") == "Si"))
+      val inevitables: Int = rows.count(r => r("responsabilidad") == "Ninguna")
+      val dudosos: Int     = total - evitables - inevitables
+
+      // Nota ajustada: de cada partido, descuenta los goles inevitables
+      val rsNota = conn.createStatement().executeQuery(
+        "SELECT m.id, m.nota, m.goles_contra, " +
+          "COUNT(CASE WHEN mg.responsabilidad='Ninguna' THEN 1 END) as goles_defensa " +
+          "FROM matches m LEFT JOIN match_goals mg ON mg.match_id = m.id " +
+          "WHERE m.status='PLAYED' AND m.nota > 0 " +
+          "GROUP BY m.id, m.nota, m.goles_contra ORDER BY m.fecha DESC LIMIT 20")
+      var notaAjustadaTotal = 0.0; var notaAjustadaCount = 0
+      var notaRealTotal = 0.0
+      while (rsNota.next()) {
+        val nota = rsNota.getDouble("nota")
+        val gc   = rsNota.getInt("goles_contra")
+        val golesDefensa = rsNota.getInt("goles_defensa")
+        // Cada gol de defensa suma 0.5 pts a la nota ajustada (aprox)
+        val notaAdj = math.min(10.0, nota + golesDefensa * 0.5)
+        notaAjustadaTotal += notaAdj
+        notaRealTotal += nota
+        notaAjustadaCount += 1
+      }
+      val notaAjustada: Double = if (notaAjustadaCount > 0) notaAjustadaTotal / notaAjustadaCount else 0.0
+      val notaReal: Double     = if (notaAjustadaCount > 0) notaRealTotal / notaAjustadaCount else 0.0
+
+      Map(
+        "total"            -> total,
+        "evitables"        -> evitables,
+        "inevitables"      -> inevitables,
+        "dudosos"          -> dudosos,
+        "porOrigen"        -> porOrigen,
+        "porSituacion"     -> porSituacion,
+        "porResponsabilidad" -> porResponsabilidad,
+        "porParable"       -> porParable,
+        "notaAjustada"     -> notaAjustada,
+        "notaReal"         -> notaReal,
+        "rows"             -> rows
+      )
+    } finally { conn.close() }
+  }
 
   // == FASE 6.5: MONEYBALL & DEEP INFLUENCE ANALYTICS =========================
   def getMoneyballData(): Map[String, Any] = {
