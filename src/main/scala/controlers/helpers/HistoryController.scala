@@ -1687,7 +1687,6 @@ object HistoryController extends cask.Routes {
     val usePadre: Double = if (hPadre > 0) hPadre else 180.0
     val useMadre: Double = if (hMadre > 0) hMadre else 168.0
     val d = DatabaseManager.getDigitalTwinData(usePadre, useMadre)
-    val bioInsights: String = DatabaseManager.getOracleInsights()
 
     // Pre-computar todo con tipos explicitos
     val edadAnios: Int         = d("edadAnios").asInstanceOf[Int]
@@ -1905,15 +1904,6 @@ object HistoryController extends cask.Routes {
               )
             )
           } else div(),
-
-          // Inteligencia Deportiva (ACWR + Biotipo)
-          div(cls:="card bg-dark border-info shadow mb-3",
-            div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
-              span("INTELIGENCIA DEPORTIVA"),
-              span(cls:="badge bg-dark text-info", s"Edad: $edadAnios anos")
-            ),
-            div(cls:="card-body p-3", raw(bioInsights))
-          ),
 
           // Graficos
           div(cls:="row g-3 mb-3",
