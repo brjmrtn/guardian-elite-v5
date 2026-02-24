@@ -1557,7 +1557,7 @@ Responde en 3 partes exactas, en espanol, conciso y directo:
 PATRON: [patron principal detectado en 1-2 frases]
 VENTAJA: [metrica donde destaca mas y por que es relevante]
 CONSEJO: [recomendacion de mejora basada en los datos]"""
-        AIProvider.ask(prompt, None, bypassCache = true)
+        AIProvider.ask(prompt, None, bypassCache = false)
       }
 
       // ── 7. Etiquetas temporales para graficos ────────────────────────────────
@@ -1737,7 +1737,7 @@ BIOTIPO: [descripcion del perfil fisico proyectado en 1-2 frases]
 VENTAJA: [principal ventaja competitiva de su biotipo para ser portero en 1 frase]
 RIESGO: [1 riesgo o area de mejora fisica concreta]
 PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivadora]"""
-        AIProvider.ask(prompt, None, bypassCache = true)
+        AIProvider.ask(prompt, None, bypassCache = false)
       }
 
       Map(
