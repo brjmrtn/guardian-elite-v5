@@ -25,31 +25,7 @@ object SharedLayout {
 
   def fixEncoding(s: String): String = { try { if (s.contains("A")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
 
-  // ==========================================
-
-  def renderMatchRow(m: MatchLog) = {
-    val pParts = m.resultado.split("-").map(s => try s.trim.toInt catch { case _:Exception => 0 })
-    val colorClass = if(pParts.length >= 2) { if (pParts(0) > pParts(1)) "text-success" else if (pParts(0) == pParts(1)) "text-warning" else "text-danger" } else "text-muted"
-    val extraBtn = if(m.video.nonEmpty) a(href:=m.video, target:="_blank", cls:="btn btn-sm btn-danger py-0 ms-1", style:="font-size:10px", "V") else span("")
-    val waText = URLEncoder.encode(s"MATCH: ${m.rival} ${m.resultado}", "UTF-8").replace("+", "%20")
-    val tipoBadge = if(m.tipo == "LIGA") span(cls:="badge bg-primary me-1", style:="font-size:9px", "LIGA") else if(m.tipo=="AMISTOSO") span(cls:="badge bg-secondary me-1", style:="font-size:9px", "AMIST") else span(cls:="badge bg-warning text-dark me-1", style:="font-size:9px", "TORNEO")
-    val estadioInfo = if(m.estadio.nonEmpty && m.estadio != "-") span(cls:="d-block text-muted fst-italic", style:="font-size:10px", s"🏟 ${fixEncoding(m.estadio)}") else span("")
-
-    tr(
-      td(cls:="fw-bold small", tipoBadge, fixEncoding(m.rival), extraBtn, br, span(cls:="text-muted xx-small", style:="font-size:11px", s"${m.fecha} ${m.clima}"), estadioInfo),
-      td(cls:=s"text-center fw-bold $colorClass", style:="font-size:16px", m.resultado),
-      td(cls:="text-center", span(cls:="badge bg-dark text-warning border border-warning", m.nota)),
-      td(cls:="text-end",
-        a(href:=s"https://wa.me/?text=$waText", target:="_blank", cls:="btn btn-sm btn-success me-1", style:="padding:2px 6px;", "W"),
-        a(href:=s"/match/edit/${m.id}", cls:="btn btn-sm btn-outline-primary me-1", style:="padding:2px 6px;", "E"),
-        a(href:=s"/match/delete/${m.id}", onclick:="return confirm('Borrar?');", cls:="btn btn-sm btn-outline-danger", style:="padding:2px 6px;", "X")
-      )
-    )
-  }
-
-  // ==========================================
-  // 1. DASHBOARD (INICIO)
-
+  // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
     "<!DOCTYPE html>" +
       html(
@@ -314,49 +290,46 @@ object SharedLayout {
       div(cls:="col-md-8 col-12",
         h2(cls:="text-center text-warning mb-4", "📊 MONEYBALL TACTICS"),
 
-        // Seccion Goles Encajados
-        div(cls:="card bg-dark text-white border-danger shadow mb-4",
-          div(cls:="card-header bg-danger text-white fw-bold text-center", "ZONA DE ENCAJE (Debilidades)"),
-          div(cls:="card-body p-0",
-            div(cls:="d-flex", tCell("ALTA", ga, "bg-danger bg-opacity-75"), tCell("MEDIA", gm, "bg-warning bg-opacity-75"), tCell("BAJA", gr, "bg-light bg-opacity-75")),
-            div(cls:="d-flex", tCell("IZQ", gl, "bg-danger bg-opacity-75"), tCell("CEN", gc, "bg-warning bg-opacity-75"), tCell("DER", gd, "bg-danger bg-opacity-75"))
-          )
-        ),
-
-        // Seccion Paradas
-        div(cls:="card bg-dark text-white border-success shadow mb-4",
-          div(cls:="card-header bg-success text-white fw-bold text-center", "ZONA DE SEGURIDAD (Fortalezas)"),
-          div(cls:="card-body p-0",
-            div(cls:="d-flex", tCell("ALTA", pa, "bg-success bg-opacity-75"), tCell("MEDIA", pm, "bg-info bg-opacity-75"), tCell("BAJA", pr, "bg-light bg-opacity-75")),
-            div(cls:="d-flex", tCell("IZQ", pl, "bg-success bg-opacity-75"), tCell("CEN", pc, "bg-info bg-opacity-75"), tCell("DER", pd, "bg-success bg-opacity-75"))
-          )
-        ),
-
-        div(cls:="text-center", a(href:="/bio", cls:="btn btn-outline-light", "Volver"))
-      )
-    ))
-    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
+  // /bio/medical/upload
   @cask.postForm("/bio/medical/upload")
   def uploadMedical(fecha: String,
                     tipo: String,
-                    esPrevio: String = "false", // Cambiado a String
-                    archivo: cask.FormValue) = {
+                    esPrevio: String = "false",
+                    archivo: cask.FormFile) = {
     val isPrevio = esPrevio == "on"
+    // cask 0.9.2: FormFile guarda el archivo en disco. toString = FormFile(name, /tmp/path, headers)
+    // Los campos son: fileName (String) y path (java.nio.file.Path o String)
+    val fileName: String = try {
+      archivo.getClass.getDeclaredFields
+        .find(f => f.getName == "fileName" || f.getName == "name")
+        .map { f => f.setAccessible(true); f.get(archivo).asInstanceOf[String] }
+        .getOrElse("documento.pdf")
+    } catch { case _: Exception => "documento.pdf" }
 
-    // 1. Extraemos los bytes directamente usando la interfaz de datos de Cask
-    // Intentamos obtener los bytes y el nombre sin llamar a la clase interna .File
-    val fileBytes = try {
-      archivo.getClass.getMethod("data").invoke(archivo).asInstanceOf[Array[Byte]]
-    } catch {
-      case _: Exception => Array.empty[Byte]
-    }
-
-    val fileName = try {
-      archivo.getClass.getMethod("name").invoke(archivo).asInstanceOf[String]
-    } catch {
-      case _: Exception => "documento.pdf"
-    }
+    val fileBytes: Array[Byte] = try {
+      // Buscar el campo path (puede ser Path o String)
+      val pathField = archivo.getClass.getDeclaredFields
+        .find(f => f.getName == "path" || f.getName == "filePath" || f.getName == "tmpFile")
+      pathField match {
+        case Some(f) =>
+          f.setAccessible(true)
+          val v = f.get(archivo)
+          v match {
+            case p: java.nio.file.Path => java.nio.file.Files.readAllBytes(p)
+            case s: String             => java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(s))
+            case _                     => Array.empty[Byte]
+          }
+        case None =>
+          // Fallback: parsear el toString "FormFile(name, /tmp/path, ...)"
+          val str = archivo.toString
+          val parts = str.stripPrefix("FormFile(").split(",")
+          if (parts.length >= 2) {
+            val p = java.nio.file.Paths.get(parts(1).trim)
+            if (java.nio.file.Files.exists(p)) java.nio.file.Files.readAllBytes(p)
+            else Array.empty[Byte]
+          } else Array.empty[Byte]
+      }
+    } catch { case _: Exception => Array.empty[Byte] }
 
     if (fileBytes.nonEmpty) {
       // 2. Proceso para Gemini
@@ -376,61 +349,10 @@ object SharedLayout {
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
   }
   // --- 3. MODO LEGADO (RPG) ---
-  @cask.get("/career/legacy")
-  def legacyPage() = {
-    val rpg = DatabaseManager.getRPGStatus()
-    val percent = if(rpg.nextLevelXp > 0) (rpg.xp.toDouble / rpg.nextLevelXp.toDouble * 100).toInt else 100
 
-    val content = basePage("career", div(cls:="row justify-content-center",
-      div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
+  // ── FASE 2: PAGINA GRAFICO DE CARGA ───────────────────────────────────────
 
-        div(cls:="card bg-dark text-white border-warning shadow mb-4",
-          div(cls:="card-body text-center",
-            h6(cls:="text-muted text-uppercase letter-spacing-2", "Rango Actual"),
-            h1(cls:="display-4 fw-bold text-warning mb-0", rpg.titulo),
-            div(cls:="badge bg-secondary mb-3", s"Nivel ${rpg.nivel}"),
-
-            div(cls:="progress bg-secondary mb-2", style:="height: 25px;",
-              div(cls:="progress-bar bg-warning progress-bar-striped progress-bar-animated",
-                style:=s"width: $percent%", s"${rpg.xp} XP")
-            ),
-            div(cls:="d-flex justify-content-between small text-muted",
-              span("Inicio Nivel"),
-              span(s"Siguiente: ${rpg.nextLevelXp} XP")
-            )
-          )
-        ),
-
-        div(cls:="row g-2",
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🛡"), h6("Muro"), small("Bonus por Porteria a Cero"))),
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🧤"), h6("Manos de Oro"), small("Bonus por Paradas")))
-        ),
-
-        div(cls:="alert alert-dark border-info mt-4 text-center",
-          h5(cls:="text-info", "Sistema de Puntos"),
-          ul(cls:="list-unstyled small text-start d-inline-block",
-            li("- Partido Jugado: +50 XP"),
-            li("- Porteria a Cero: +100 XP"),
-            li("- Parada: +5 XP"),
-            li("- Nota > 7.0: +100 XP (Bonus)")
-          )
-        )
-      )
-    ))
-    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
-
-  // --- Helpers de respuesta HTTP ---
-  def renderHtml(content: String): cask.Response[Array[Byte]] =
-    cask.Response(
-      data       = content.getBytes("UTF-8"),
-      statusCode = 200,
-      headers    = Seq("Content-Type" -> "text/html; charset=utf-8"),
-      cookies    = Seq.empty
-    )
-
-  def renderRedirect(url: String): cask.Response[Array[Byte]] =
+  def redirect(url: String): cask.Response[Array[Byte]] =
     cask.Response(
       data       = Array.emptyByteArray,
       statusCode = 302,
