@@ -1277,8 +1277,8 @@ object HistoryController extends cask.Routes {
   // == DIGITAL TWIN ============================================================
   @cask.get("/digital-twin")
   def digitalTwinPage(request: cask.Request, hPadre: Double = 0.0, hMadre: Double = 0.0) = withAuth(request) {
-    val usePadre: Double = if (hPadre > 0) hPadre else 185.0
-    val useMadre: Double = if (hMadre > 0) hMadre else 165.0
+    val usePadre: Double = if (hPadre > 0) hPadre else 180.0
+    val useMadre: Double = if (hMadre > 0) hMadre else 168.0
     val d = DatabaseManager.getDigitalTwinData(usePadre, useMadre)
 
     // Pre-computar todo con tipos explicitos
@@ -1300,6 +1300,8 @@ object HistoryController extends cask.Routes {
     val notaActual: Double     = d("notaActual").asInstanceOf[Double]
     val notaProy: Double       = d("notaProyectada").asInstanceOf[Double]
     val analisisIA: String     = d("analisisIA").asInstanceOf[String]
+    val advertenciaFecha: Boolean = d("advertenciaFecha").asInstanceOf[Boolean]
+    val midParentStr: String   = d("midParent").asInstanceOf[Double].toInt.toString
     val hPadreFmt: String      = f"$usePadre%.0f"
     val hMadreFmt: String      = f"$useMadre%.0f"
 
@@ -1409,7 +1411,8 @@ object HistoryController extends cask.Routes {
                     span(cls:="badge bg-dark border border-warning text-warning me-1", s"Min $alturaMinStr"),
                     span(cls:="badge bg-dark border border-warning text-warning", s"Max $alturaMaxStr")
                   ),
-                  div(cls:="mt-2 small text-muted", s"$pctAltura percentil porteros elite")
+                  div(cls:="mt-2 small text-muted", s"$pctAltura percentil porteros elite"),
+                  div(cls:="mt-1 xx-small text-secondary", "Midparent genetico: " + midParentStr + " cm")
                 ),
                 div(cls:="col-md-8",
                   div(cls:="row g-2",
