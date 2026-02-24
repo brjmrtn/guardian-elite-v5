@@ -3,8 +3,6 @@ import scalatags.Text.all._
 import scalatags.Text.tags2
 import SharedLayout._
 
-import cask.model.FormValue
-
 object BioController extends cask.Routes {
 
   def medicalSection(reports: List[MedicalReport]) = {
@@ -162,7 +160,7 @@ object BioController extends cask.Routes {
     val content = basePage("bio", div(cls := "row justify-content-center",
       div(cls := "col-md-6 mb-4",
         // LABORATORIO
-        div(cls:="card bg-secondary bg-opacity-10 border-info shadow mb-4", div(cls:="card-header bg-dark text-info fw-bold text-center", "🔬 LABORATORIO DE DATOS"), div(cls:="card-body p-2 d-flex justify-content-around", a(href:="/gear", cls:="btn btn-outline-light flex-fill me-1", div(style:="font-size:20px", "⚽"), span(cls:="small", "Material")), a(href:="/oracle", cls:="btn btn-outline-info flex-fill me-1", div(style:="font-size:20px", "🔮"), span(cls:="small", "Oraculo")), a(href:="/distribution", cls:="btn btn-outline-warning flex-fill", div(style:="font-size:20px", "📊"), span(cls:="small", "Moneyball")))),
+        div(cls:="card bg-secondary bg-opacity-10 border-info shadow mb-4", div(cls:="card-header bg-dark text-info fw-bold text-center", "🔬 LABORATORIO DE DATOS"), div(cls:="card-body p-2 d-flex justify-content-around", a(href:="/gear", cls:="btn btn-outline-light flex-fill me-1", div(style:="font-size:20px", "⚽"), span(cls:="small", "Material")), a(href:="/digital-twin", cls:="btn btn-outline-info flex-fill me-1", div(style:="font-size:20px", "🔮"), span(cls:="small", "Twin 2035")), a(href:="/moneyball", cls:="btn btn-outline-warning flex-fill", div(style:="font-size:20px", "📊"), span(cls:="small", "Moneyball")))),
         // --- NUEVO: MODULO JUDO (Insertar aqui) ---
         div(cls:="card bg-dark border-warning shadow mb-4",
           div(cls:="card-header bg-warning text-dark fw-bold text-center", "🥋 ESTADO DOJO (JUDO)"),
@@ -289,6 +287,7 @@ object BioController extends cask.Routes {
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
   }
 
+
   @cask.postForm("/bio/medical/upload")
   def uploadMedical(fecha: String,
                     tipo: String,
@@ -349,6 +348,7 @@ object BioController extends cask.Routes {
   // --- 3. MODO LEGADO (RPG) ---
 
   // ── FASE 2: PAGINA GRAFICO DE CARGA ───────────────────────────────────────
+
   @cask.get("/bio/carga")
   def cargaPage(request: cask.Request) = withAuth(request) {
     val weekly   = DatabaseManager.getWeeklyLoad(12)
