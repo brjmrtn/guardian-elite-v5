@@ -120,7 +120,7 @@ object MatchController extends cask.Routes {
                 ),
                 div(cls:="mb-3 p-2 border border-danger rounded bg-danger bg-opacity-10", label(cls:="form-label text-danger small fw-bold w-100 text-center", "SALA DE VIDEO"), input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="Link Video (Youtube/Drive)")),
                 div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white fw-bold", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
-                input(tpe:="hidden", name:="reaccion", value:=""),  // campo legacy mantenido para DB
+                div(cls:="mb-4", label(cls:="form-label text-danger small fw-bold", "ANALISIS GOLES / REACCION"), textarea(name:="reaccion", cls:="form-control form-control-sm bg-dark text-white border-danger fw-bold", rows:="3", placeholder:="Descripcion goles encajados y reaccion mental posterior.")),
                 div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
                 div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
 

@@ -1,33 +1,29 @@
 import cask._
 import scalatags.Text.all._
 import scalatags.Text.tags2
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
-object SharedLayout extends cask.Routes {
+object SharedLayout {
 
+  // --- Configuracion de seguridad (desde variables de entorno) ---
+  val authUser          = sys.env.getOrElse("GUARDIAN_USER", "admin")
+  val authPass          = sys.env.getOrElse("GUARDIAN_PASS", "hector2026")
   val sessionCookieName = "guardian_session"
-  val authUser = sys.env.getOrElse("GUARDIAN_USER", "admin")
-  val authPass = sys.env.getOrElse("GUARDIAN_PASS", "hector2026")
-
-  def fixEncoding(s: String): String = {
-    try { if (s.contains("\u00c3")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s }
-    catch { case _: Exception => s }
-  }
 
   def withAuth(request: cask.Request)(block: => cask.Response[Array[Byte]]): cask.Response[Array[Byte]] = {
     val isAuthenticated = request.cookies.get(sessionCookieName).exists(_.value == "active")
     if (isAuthenticated) {
       block
     } else {
+      // Guardamos la ruta actual para volver despues del login
       val currentPath = request.exchange.getRequestPath
       val red = cask.Redirect(s"/login?next=$currentPath")
-      cask.Response(Array.empty[Byte], red.statusCode,
-        red.headers ++ Seq("Cache-Control" -> "no-store, no-cache, must-revalidate"), red.cookies)
+      cask.Response(Array.empty[Byte], red.statusCode, red.headers ++ Seq("Cache-Control" -> "no-store, no-cache, must-revalidate"), red.cookies)
     }
   }
 
-  def renderHtml(content: String, headers: Seq[(String, String)] = Nil): cask.Response[Array[Byte]] =
-    cask.Response(content.getBytes("UTF-8"),
-      headers = Seq("Content-Type" -> "text/html; charset=utf-8") ++ headers)
+  def fixEncoding(s: String): String = { try { if (s.contains("A")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
 
   // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
@@ -46,15 +42,51 @@ object SharedLayout extends cask.Routes {
             div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"),
             div(cls:="d-flex align-items-center gap-3",
               a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
+              span(id:="themeToggle", onclick:="toggleTheme()", style:="cursor:pointer; font-size:20px; user-select:none;", "☀️"),
               a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
             )
           ),
-          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "ℹ️"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial"))))
+          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/bio/guantes", cls:=s"nav-item ${if(activeLink=="guantes") "active" else ""}", div(cls:="nav-icon", "🧤"), span(cls:="nav-label", "Guantes")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "ℹ️"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/tournament/bracket", cls:=s"nav-item ${if(activeLink=="bracket") "active" else ""}", div(cls:="nav-icon", "🏆"), span(cls:="nav-label", "Torneo")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial")), a(href:="/lesiones", cls:=s"nav-item ${if(activeLink=="lesiones") "active" else ""}", div(cls:="nav-icon", "🩹"), span(cls:="nav-label", "Lesiones")), a(href:="/flash-cards", cls:=s"nav-item ${if(activeLink=="flash-cards") "active" else ""}", div(cls:="nav-icon", "📋"), span(cls:="nav-label", "PrePartido")), a(href:="/gk-influence", cls:=s"nav-item ${if(activeLink=="gk-influence") "active" else ""}", div(cls:="nav-icon", "📡"), span(cls:="nav-label", "Influencia")), a(href:="/biomecanica", cls:=s"nav-item ${if(activeLink=="biomecanica") "active" else ""}", div(cls:="nav-icon", "🎯"), span(cls:="nav-label", "Biomecanica")), a(href:="/emocional", cls:=s"nav-item ${if(activeLink=="emocional") "active" else ""}", div(cls:="nav-icon", "🧠"), span(cls:="nav-label", "Emocional")), a(href:="/digital-twin", cls:=s"nav-item ${if(activeLink=="digital-twin") "active" else ""}", div(cls:="nav-icon", "🔮"), span(cls:="nav-label", "Twin")), a(href:="/moneyball", cls:=s"nav-item ${if(activeLink=="moneyball") "active" else ""}", div(cls:="nav-icon", "$"), span(cls:="nav-label", "Moneyball"))))
+        ,script(raw("""
+        (function(){
+          var t=localStorage.getItem('guardian_theme')||'dark';
+          if(t==='light'){document.body.classList.add('light-mode');var btn=document.getElementById('themeToggle');if(btn)btn.textContent='🌙';}
+        })();
+        function toggleTheme(){
+          var isLight=document.body.classList.toggle('light-mode');
+          localStorage.setItem('guardian_theme', isLight?'light':'dark');
+          var btn=document.getElementById('themeToggle');
+          if(btn)btn.textContent=isLight?'🌙':'☀️';
+        }
+      """))
       ).render
   }
 
   def getCss() = """
-    body { background-color: #121212; color: #f0f0f0; font-family: 'Oswald', sans-serif; padding-bottom: 80px; margin: 0; font-weight: 500; }
+    :root {
+      --bg-main: #121212; --bg-card: #1e1e1e; --bg-nav: #1a1a1a;
+      --text-main: #f0f0f0; --text-muted: #aaa; --border-col: #333;
+      --input-bg: #2b2b2b; --input-color: #fff;
+    }
+    body.light-mode {
+      --bg-main: #f5f5f5; --bg-card: #ffffff; --bg-nav: #ffffff;
+      --text-main: #111; --text-muted: #666; --border-col: #ddd;
+      --input-bg: #fff; --input-color: #111;
+    }
+    body { background-color: var(--bg-main); color: var(--text-main); font-family: 'Oswald', sans-serif; padding-bottom: 80px; margin: 0; font-weight: 500; transition: background 0.3s, color 0.3s; }
+    body.light-mode .card, body.light-mode .bg-dark { background-color: #ffffff !important; color: #111 !important; }
+    body.light-mode .text-muted { color: #666 !important; }
+    body.light-mode .app-header, body.light-mode .bottom-nav { background: #ffffff !important; border-color: #ddd !important; }
+    body.light-mode .nav-item { color: #555 !important; }
+    body.light-mode .nav-item.active { color: #d4af37 !important; }
+    body.light-mode .tm-table { background-color: #f9f9f9; }
+    body.light-mode table.table-dark { --bs-table-bg: #f9f9f9; --bs-table-color: #111; }
+    body.light-mode input, body.light-mode select, body.light-mode textarea,
+    body.light-mode .form-control, body.light-mode .form-select {
+      background-color: #fff !important; color: #111 !important; border-color: #ccc !important;
+    }
+    .theme-toggle-btn { position:fixed; top:12px; right:12px; z-index:2000; background:rgba(0,0,0,0.3); border:1px solid #444; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:18px; transition:all 0.2s; }
+    .theme-toggle-btn:hover { background:rgba(212,175,55,0.3); }
 
     /* MODO OSCURO FORZADO PARA INPUTS Y SELECTS */
     input, select, textarea, .form-control, .form-select {
@@ -91,6 +123,32 @@ object SharedLayout extends cask.Routes {
     .action-marker { font-size: 20px; display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; width: 100%; }
     .shot-btn.active { background-color: #ffc107; color: black; border-color: #ffc107; font-weight: bold; }
     .xx-small { font-size: 10px; display: block; }
+
+/* VIDEOTECA */
+.playlist-item { cursor: pointer; border: 1px solid transparent; transition: all 0.2s; background: rgba(255,255,255,0.03); }
+.playlist-item:hover { background: rgba(212,175,55,0.1); border-color: rgba(212,175,55,0.3); }
+.playlist-item.active { background: rgba(212,175,55,0.15); border-color: #d4af37 !important; }
+
+/* PENALTIS HEATMAP */
+.pen-heatmap-cell { min-height:60px; border-radius:3px; transition:transform 0.15s, box-shadow 0.15s; }
+.pen-heatmap-cell:hover { transform:scale(1.08); box-shadow:0 0 10px rgba(220,53,69,0.6); z-index:2; position:relative; }
+
+/* BRACKET TORNEO */
+.bracket-match { transition: transform 0.15s; }
+.bracket-match:hover { transform: translateX(3px); }
+
+/* MAPA DE GOLES */
+.goal-heatmap-cell {
+  min-height: 70px;
+  border-radius: 4px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.goal-heatmap-cell:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 12px rgba(220,53,69,0.5);
+  z-index: 2;
+  position: relative;
+}
     .field-container { width: 100%; height: 60vh; background-color: #2e7d32; border-radius: 8px; overflow: hidden; touch-action: none; }
     #rivalInput {
       position: relative !important;
@@ -100,14 +158,137 @@ object SharedLayout extends cask.Routes {
       user-select: text !important;
     }
   """
+  // ==========================================
+  // PAGINAS FALTANTES (RESTAURADAS)
+  // ==========================================
 
-  // /oracle -> redirect a /digital-twin (version mejorada)
-  // Manejado en CareerController
+  // --- 1. EL ORACULO (Prediccion de Altura) ---
+  @cask.get("/oracle")
+  def oraclePage(request: cask.Request, hDad: String = "180", hMom: String = "170") = withAuth(request) {
+    val hd = try hDad.toDouble catch { case _: Exception => 180.0 }
+    val hm = try hMom.toDouble catch { case _: Exception => 170.0 }
 
-  // /distribution -> redirect a /moneyball (version completa Fase 6.5)
-  // Manejado en CareerController
+    val card = DatabaseManager.getLatestCardData()
+    val edadActual = DatabaseManager.calcularEdadExacta(card.fechaNacimiento)
+    val (p50H, p15H, p85H, p50W, p15W, p85W) = DatabaseManager.getOMSPercents()
 
-  // /career/legacy -> manejado en CareerController
+    val predictionHtml = DatabaseManager.getOraclePrediction(hd, hm)
+    val bioInsights = DatabaseManager.getOracleInsights()
+    val growthJson = DatabaseManager.getGrowthHistory()
+
+    // 1. Definimos el contenido (Solo Modifiers de Scalatags)
+    val mainContent = div(
+      div(cls:="row justify-content-center",
+        div(cls:="col-md-8 col-12",
+          h2(cls:="text-center text-info mb-4", "🔮 EL ORACULO"),
+
+          // Tarjeta Inteligencia
+          div(cls:="card bg-dark border-info shadow mb-4",
+            div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
+              span("🧠 INTELIGENCIA DEPORTIVA"),
+              span(cls:="badge bg-dark text-info", s"Edad: $edadActual anos")
+            ),
+            div(cls:="card-body", raw(bioInsights))
+          ),
+
+          // Tarjeta Grafico
+          div(cls:="card bg-dark border-secondary shadow mb-4",
+            div(cls:="card-header text-white small", "Evolucion Biometrica Historica"),
+            div(cls:="card-body", style:="height: 300px; position: relative;",
+              canvas(id:="growthChart")
+            )
+          ),
+
+          // Tabla OMS
+          div(cls:="card bg-dark border-secondary shadow mb-4",
+            div(cls:="card-header text-muted small fw-bold text-uppercase", s"📊 Referencia OMS para $edadActual anos"),
+            div(cls:="card-body p-0",
+              table(cls:="table table-dark table-sm mb-0 small text-center",
+                thead(tr(th("Percentil"), th("Altura (cm)"), th("Peso (kg)"))),
+                tbody(
+                  tr(td("P15 (Bajo)"), td(f"$p15H%.1f"), td(f"$p15W%.1f")),
+                  tr(cls:="table-active text-info", td("P50 (Media)"), td(f"$p50H%.1f"), td(f"$p50W%.1f")),
+                  tr(td("P85 (Alto)"), td(f"$p85H%.1f"), td(f"$p85W%.1f"))
+                )
+              )
+            )
+          ),
+
+          // Prediccion Genetica
+          div(cls:="card bg-dark text-white border-secondary shadow p-4",
+            h4(cls:="text-center text-warning mb-3", "Prediccion Altura Final"),
+            div(cls:="bg-secondary bg-opacity-10 p-3 rounded mb-3", raw(predictionHtml)),
+            form(action:="/oracle", method:="get", cls:="mt-4 border-top border-secondary pt-3",
+              div(cls:="row",
+                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papa (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
+                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mama (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
+              ),
+              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular"))
+            )
+          )
+        )
+      ),
+      // 2. Script inyectado (Aseguramos que Chart.js este cargado en basePage)
+      script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+      script(raw(s"""
+      window.addEventListener('load', function() {
+        const rawData = $growthJson;
+        const ctx = document.getElementById('growthChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: rawData.labels,
+                datasets: [
+                    { label: 'Altura (cm)', data: rawData.altura, borderColor: '#0dcaf0', yAxisID: 'y', tension: 0.3, fill: true, backgroundColor: 'rgba(13, 202, 240, 0.1)' },
+                    { label: 'Peso (kg)', data: rawData.peso, borderColor: '#ffc107', yAxisID: 'y1', tension: 0.3, fill: false }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { type: 'linear', position: 'left', ticks: { color: '#0dcaf0' }, title: { display: true, text: 'cm', color: '#0dcaf0' }, grid: { color: '#333' } },
+                    y1: { type: 'linear', position: 'right', ticks: { color: '#ffc107' }, title: { display: true, text: 'kg', color: '#ffc107' }, grid: { drawOnChartArea: false } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#fff', font: { family: 'Oswald' } } }
+                }
+            }
+        });
+      });
+    """))
+    )
+
+    // 3. Renderizado final
+    renderHtml(basePage("bio", mainContent))
+  }
+  // --- 2. MONEYBALL (Distribucion Tactica) ---
+  @cask.get("/distribution")
+  def distributionPage() = {
+    val tac = DatabaseManager.getTacticalStats()
+
+    // Funcion auxiliar para calcular porcentajes seguros
+    def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
+
+    val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
+    val (ga, gm, gr) = (pct(tac("g_alt"), totG), pct(tac("g_med"), totG), pct(tac("g_ras"), totG))
+    val (gl, gc, gd) = (pct(tac("g_izq"), totG), pct(tac("g_cen"), totG), pct(tac("g_der"), totG))
+
+    val totP = if(tac("p_tot") > 0) tac("p_tot").toDouble else 1.0
+    val (pa, pm, pr) = (pct(tac("p_alt"), totP), pct(tac("p_med"), totP), pct(tac("p_ras"), totP))
+    val (pl, pc, pd) = (pct(tac("p_izq"), totP), pct(tac("p_cen"), totP), pct(tac("p_der"), totP))
+
+    // Celda tactica visual
+    def tCell(label: String, p: Int, color: String) = div(
+      cls:=s"flex-fill text-center p-3 border border-secondary $color",
+      style:="color: #000; font-weight: 800;",
+      div(style:="font-size:14px;", label),
+      div(style:="font-size:24px;", s"$p%")
+    )
+
+    val content = basePage("bio", div(cls:="row justify-content-center",
+      div(cls:="col-md-8 col-12",
+        h2(cls:="text-center text-warning mb-4", "📊 MONEYBALL TACTICS"),
 
   // /bio/medical/upload
   @cask.postForm("/bio/medical/upload")
@@ -179,5 +360,4 @@ object SharedLayout extends cask.Routes {
       cookies    = Seq.empty
     )
 
-  initialize()
 }
