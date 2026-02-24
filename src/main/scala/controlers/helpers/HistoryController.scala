@@ -1277,8 +1277,8 @@ object HistoryController extends cask.Routes {
   // == DIGITAL TWIN ============================================================
   @cask.get("/digital-twin")
   def digitalTwinPage(request: cask.Request, hPadre: Double = 0.0, hMadre: Double = 0.0) = withAuth(request) {
-    val usePadre: Double = if (hPadre > 0) hPadre else 180.0
-    val useMadre: Double = if (hMadre > 0) hMadre else 168.0
+    val usePadre: Double = if (hPadre > 0) hPadre else 185.0
+    val useMadre: Double = if (hMadre > 0) hMadre else 165.0
     val d = DatabaseManager.getDigitalTwinData(usePadre, useMadre)
 
     // Pre-computar todo con tipos explicitos
