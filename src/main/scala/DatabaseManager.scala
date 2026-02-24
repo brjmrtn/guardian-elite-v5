@@ -1406,10 +1406,10 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // y calcula la correlacion entre calidad/atencion media y la nota del partido
       val rsROI = conn.createStatement().executeQuery(
         "SELECT m.fecha as mfecha, m.nota, " +
-          "  (SELECT AVG(t.calidad) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as avg_calidad, " +
-          "  (SELECT AVG(t.atencion) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as avg_atencion, " +
-          "  (SELECT AVG(t.rpe) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as avg_rpe, " +
-          "  (SELECT COUNT(*) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as num_sesiones " +
+          "  (SELECT AVG(t.calidad) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_calidad, " +
+          "  (SELECT AVG(t.atencion) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_atencion, " +
+          "  (SELECT AVG(t.rpe) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_rpe, " +
+          "  (SELECT COUNT(*) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as num_sesiones " +
           "FROM matches m WHERE m.status='PLAYED' AND m.nota > 0 ORDER BY m.fecha DESC LIMIT 30")
       var roiRows = List[(Double,Double,Double,Double,Int)]()
       while (rsROI.next()) {
