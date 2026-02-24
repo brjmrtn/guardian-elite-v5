@@ -118,6 +118,58 @@
 
 ---
 
+
+## FASE 6.5: MONEYBALL & DEEP INFLUENCE ANALYTICS
+*Scouting cognitivo para encontrar ineficiencias de mercado, valor oculto e impacto estructural del portero*
+
+* **Expected Threat del Portero (xT_GK):** Algoritmo que cuantifica el peligro generado por la distribucion con el pie. Pondera origen y destino del balon: xT = P(Gol|Zona_recepcion) - P(Gol|Zona_inicio).
+* **Bypass Rate (Lineas Superadas):** Metrica de presion que contabiliza rivales que quedan por detras tras un pase en salida, diferenciando distribucion libre de marca vs bajo presion.
+* **Sweeper Keeper Index (SPV - Shot Prevention Value):** IA predictiva que calcula tiros a puerta evitados gracias a anticipaciones preventivas, cortes como libero y dominio del espacio aereo.
+* **Expected Points Saved (xPoints):** Ponderacion dinamica del valor de cada parada (Clutch Factor). Mide la relevancia de la intervencion multiplicada por la tension del marcador y el minuto del partido.
+* **Sinergia de Roster (Lineup Value):** Radar de correlacion cruzada entre el rendimiento de Hector y los perfiles de sus companeros: exito de distribucion buscando extremos rapidos, impacto en Clean Sheet segun perfiles defensivos, fluctuacion de metricas segun rotacion. URL: `/moneyball/synergy`.
+* **ROI de Entrenamiento:** Grafico de dispersion interactivo que cruza horas en el simulador cognitivo (Flash-Cards, Laboratorio) con la mejora neta en el Guardian Readiness Score.
+
+---
+
+## FASE 7: GESTION DE CARRERA Y RENDIMIENTO 360 (Career Management Hub)
+*Infraestructura de analisis profundo para monitorizacion fisica, tactica y de entorno a largo plazo*
+
+* **Striker Clustering (ML):** Agrupacion de delanteros de la liga en arquetipos via K-Means. Cruza perfiles con el historial para adaptar el posicionamiento previo.
+* **Set-Piece Control (Poligonos de Voronoi):** Calculo del radio de accion en corners y faltas. Mide el porcentaje de area dominada y el impacto en la anulacion de segundas jugadas.
+* **Scanning Rate:** Metrica cognitiva que evalua escaneos de campo antes de recibir una cesion, correlacionando con la tasa de exito del primer toque bajo presion.
+* **Red-Zone Analytics:** Aislamiento estadistico del rendimiento en escenarios de fatiga extrema (ultimos 10 minutos) o cuando el rival domina mas del 65% de la posesion en el tercio defensivo.
+* **Impact Asymmetry Tracker:** Registro de volumen y lateralidad de las caidas cruzado con dureza de superficie. Alerta sobre descompensaciones musculares antes de que deriven en lesiones.
+* **HRV Tracker:** Monitorizacion de variabilidad de frecuencia cardiaca para identificar asimilacion de cargas y prevenir sobreentrenamiento.
+* **Periodizacion Nutricional Reactiva:** Ajuste automatico de macronutrientes y suplementacion cognitiva basado en la carga de estres tactico y de reflejos de la sesion.
+* **Market Estimator (Regresion Lineal):** Compara la curva de evolucion de KPIs con bases de datos de elite, proyectando techos de rendimiento y estimaciones de mercado futuras.
+* **NLP Scouting Aggregator:** Pipeline de NLP que ingiere informes de ojeadores en texto y extrae sentimiento y palabras clave, transformando opiniones subjetivas en datos estructurados.
+* **Dinamicas de Competicion Interna:** Analisis de fluctuacion de reflejos segun nivel de exigencia y rotacion de los companeros de posicion en la misma categoria.
+
+---
+
+## FASE 8: DEEP PERFORMANCE & COGNITIVE SCOUTING
+*Vanguardia cientifica para diseccionar tecnica pura, biomecanica y robustez psicologica*
+
+* **PSxG vs Goals Conceded (Post-Shot xG Delta):** Metrica definitiva de Shot-Stopping. Evalua la calidad real del tiro (PSxG) frente a los goles encajados, aislando el merito individual del rendimiento de la linea defensiva.
+* **Set-Stance Timing:** Auditoria por vision artificial del delta de tiempo (en milisegundos) entre el impacto del delantero y el momento en que los pies de Hector se clavan en el suelo ("set position").
+* **Bilateral Power Asymmetry:** Analisis longitudinal de la diferencia de explosividad y alcance entre estiradas izquierda y derecha, para prescribir trabajo compensatorio temprano.
+* **Quiet Eye Duration:** Metrica neurocognitiva que cronometra el tiempo de fijacion visual en el balon antes del movimiento defensivo, correlacionandolo con el exito de la estirada.
+* **Cognitive Reset Rate:** Aislamiento de los 10 minutos posteriores a un error grave. Cuantifica la capacidad de "reseteo mental" midiendo fluctuaciones en la asuncion de riesgos y el tiempo de reaccion.
+* **Development Pathway Matcher:** Algoritmo que cruza el estilo de juego de equipos superiores con las necesidades de desarrollo de Hector, sugiriendo ecosistemas tacticos que aceleren sus areas de mejora.
+
+---
+
+## FASE 9: ESTRUCTURA PROFESIONAL & VANGUARDIA (The Elite Layer)
+*Modulos de alta gestion para proteccion de activos, liderazgo en campo y proyeccion en ligas profesionales*
+
+* **Vocal Influence Analysis:** Analisis de audio para medir frecuencia, claridad y efectividad de instrucciones tacticas. Cuantifica la capacidad de evitar remates mediante organizacion vocal de la defensa.
+* **Digital Twin Proyectivo (What-if ML):** Modelo virtual basado en el historico para ejecutar simulaciones sobre cambios en masa muscular, biotipo o contextos de liga especificos.
+* **Gaze Behavior Audit:** Analisis de la secuencia de escaneo previa a acciones a balon parado. Detecta patrones de fijacion para ampliar la conciencia situacional y evitar el "tunel visual".
+* **Guardian Insurance & Contract Vault:** Gestion de clausulas contractuales, derechos de imagen y optimizacion de seguros deportivos basados en el historial de lesiones e Indice de Desgaste Articular.
+* **Sentiment AI & Media Resilience:** Motor de NLP que monitoriza la narrativa externa en prensa y entornos digitales para preparar la resiliencia mediatica ante picos de presion o criticas externas.
+
+---
+
 ## Stack Tecnologico
 
 | Capa | Tecnologia |
@@ -138,10 +190,13 @@
 FASE 1 — Core Platform          ██████████ 100%
 FASE 2 — Cognitive Synergy      ██████████ 100%
 FASE 3 — Computer Vision        ░░░░░░░░░░   0%  (requiere Python/OpenCV)
-FASE 4 — ML & Estrategia Pro    ████████░░  80%  (falta Digital Twin)
+FASE 4 — ML & Estrategia Pro    █████████░  90%  (Digital Twin desplegado)
 FASE 5 — Inteligencia Proactiva ████████░░  80%  (falta Dojo + Bio-Banding)
 FASE 6 — Innovacion Exclusiva   ██████████ 100%
-FASES 7-11 — El Olimpo          ░░░░░░░░░░   0%  (out of scope stack actual)
+FASE 6.5 — Moneyball Analytics  ░░░░░░░░░░   0%  (roadmap definido)
+FASE 7 — Career Management 360  ░░░░░░░░░░   0%  (roadmap definido)
+FASE 8 — Deep Performance       ░░░░░░░░░░   0%  (requiere hardware/CV)
+FASE 9 — Elite Layer            ░░░░░░░░░░   0%  (requiere infra externa)
 ```
 
 ---
