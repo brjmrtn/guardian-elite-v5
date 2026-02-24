@@ -1360,9 +1360,12 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
       // 7. Evolucion de nota media por temporada para proyeccion de rendimiento
       val rsN = conn.createStatement().executeQuery(
-        "SELECT temporada, media FROM seasons ORDER BY id ASC")
+        "SELECT id, nombre_club, categoria, media FROM seasons ORDER BY id ASC")
       var notaTemps = List[(String, Double)]()
-      while (rsN.next()) notaTemps = notaTemps :+ (rsN.getString("temporada"), rsN.getDouble("media"))
+      while (rsN.next()) {
+        val label: String = Option(rsN.getString("nombre_club")).filter(_.nonEmpty).getOrElse("T" + rsN.getInt("id"))
+        notaTemps = notaTemps :+ (label, rsN.getDouble("media"))
+      }
       val tendenciaNota: Double = if (notaTemps.size >= 2) {
         val mejora = notaTemps.last._2 - notaTemps.head._2
         val aniosTranscurridos = notaTemps.size.toDouble
