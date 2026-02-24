@@ -124,6 +124,20 @@ object MatchController extends cask.Routes {
                 div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
                 div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
 
+                // ── REGISTRO DE GOLES ENCAJADOS ─────────────────────────
+                div(cls:="mb-4 p-3 border border-danger rounded",
+                  style:="background:rgba(220,53,69,0.05);",
+                  div(cls:="d-flex justify-content-between align-items-center mb-2",
+                    label(cls:="text-danger fw-bold small", "ANALISIS DE GOLES ENCAJADOS"),
+                    tag("button")(tpe:="button", cls:="btn btn-outline-danger btn-sm fw-bold",
+                      onclick:="addGoalRow()", "Añadir gol")
+                  ),
+                  div(cls:="xx-small text-muted mb-2",
+                    "Registra el contexto de cada gol para analisis avanzado (PSxG, Clutch, Nota ajustada)"),
+                  div(id:="goalsContainer"),
+                  input(tpe:="hidden", name:="goalsData", id:="goalsDataInput", value:="")
+                ),
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
@@ -152,6 +166,54 @@ object MatchController extends cask.Routes {
                 var dot = document.createElement('div');
                 dot.style.cssText = 'position:absolute; width:10px; height:10px; background:orange; border:1px solid white; border-radius:50%; transform:translate(-50%,-50%); pointer-events:none; left:'+x+'px; top:'+y+'px;';
                 e.target.appendChild(dot);
+              }
+
+              // ── GOLES ENCAJADOS ─────────────────────────────────────
+              var goalCount = 0;
+              function addGoalRow() {
+                goalCount++;
+                var n = goalCount;
+                var html = '<div id="goal_'+n+'" class="p-2 mb-2 rounded" style="background:rgba(220,53,69,0.1); border:1px solid rgba(220,53,69,0.3);">' +
+                  '<div class="d-flex justify-content-between mb-1"><span class="text-danger fw-bold xx-small">GOL '+n+'</span><button type="button" class="btn btn-link btn-sm text-danger p-0" onclick="removeGoal('+n+')">x</button></div>' +
+                  '<div class="row g-1">' +
+                  '<div class="col-3"><label class="xx-small text-muted">Minuto</label><input type="number" class="form-control form-control-sm bg-dark text-white border-secondary" id="gMin_'+n+'" value="0" min="0" max="90" onchange="updateGoalsData()"></div>' +
+                  '<div class="col-9"><label class="xx-small text-muted">Origen</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gOrigen_'+n+'" onchange="updateGoalsData()">' +
+                  '<option>Jugada elaborada</option><option>Contragolpe</option><option>Error defensivo</option>' +
+                  '<option>Corner</option><option>Falta directa</option><option>Penalti</option><option>Otro</option></select></div>' +
+                  '<div class="col-6"><label class="xx-small text-muted">Situacion</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gSit_'+n+'" onchange="updateGoalsData()">' +
+                  '<option>1 vs 1</option><option>2 vs 1</option><option>Tiro lejano</option>' +
+                  '<option>Remate cabeza</option><option>Penalti</option><option>Gol en propia</option><option>Otro</option></select></div>' +
+                  '<div class="col-6"><label class="xx-small text-muted">Responsabilidad portero</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gResp_'+n+'" onchange="updateGoalsData()">' +
+                  '<option>Ninguna</option><option>Media</option><option>Alta</option></select></div>' +
+                  '<div class="col-6"><label class="xx-small text-muted">Era parable</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gPar_'+n+'" onchange="updateGoalsData()">' +
+                  '<option>No</option><option>Dudoso</option><option>Si</option></select></div>' +
+                  '<div class="col-6"><label class="xx-small text-muted">Zona</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gZona_'+n+'" onchange="updateGoalsData()">' +
+                  '<option value="">-</option><option>TL</option><option>TC</option><option>TR</option><option>ML</option><option>MC</option><option>MR</option><option>BL</option><option>BC</option><option>BR</option></select></div>' +
+                  '<div class="col-12"><input type="text" class="form-control form-control-sm bg-dark text-white border-secondary" id="gNota_'+n+'" placeholder="Nota breve..." onchange="updateGoalsData()"></div>' +
+                  '</div></div>';
+                document.getElementById('goalsContainer').insertAdjacentHTML('beforeend', html);
+                updateGoalsData();
+              }
+              function removeGoal(n) {
+                var el = document.getElementById('goal_'+n);
+                if (el) el.remove();
+                updateGoalsData();
+              }
+              function updateGoalsData() {
+                var rows = [];
+                for (var i = 1; i <= goalCount; i++) {
+                  var el = document.getElementById('goal_'+i);
+                  if (!el) continue;
+                  var min   = document.getElementById('gMin_'+i).value;
+                  var orig  = document.getElementById('gOrigen_'+i).value;
+                  var sit   = document.getElementById('gSit_'+i).value;
+                  var resp  = document.getElementById('gResp_'+i).value;
+                  var par   = document.getElementById('gPar_'+i).value;
+                  var zona  = document.getElementById('gZona_'+i).value;
+                  var nota2 = document.getElementById('gNota_'+i).value;
+                  rows.push([min,orig,sit,resp,par,zona,nota2].join('|'));
+                }
+                document.getElementById('goalsDataInput').value = rows.join(';');
               }
             """))
           )
@@ -202,7 +264,9 @@ object MatchController extends cask.Routes {
     val passData = getStr("passData")
     val actionData = getStr("actionData")
     val tipo = getStr("tipo")
-    val mapaCampo = getStr("mapaCampo")
+    val mapaCampo  = getStr("mapaCampo")
+    val goalsData  = getStr("goalsData")
+    val lineasSup  = getInt("lineasSuperadas")
 
     // --- LOGICA DE PROCESAMIENTO (Base de datos y calculos) ---
     val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
@@ -222,6 +286,25 @@ object MatchController extends cask.Routes {
       DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo)
     } else {
       DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo)
+    }
+
+    // Guardar contexto de goles encajados
+    if (goalsData.nonEmpty) {
+      val matchId: Int = DatabaseManager.getLastMatchId()
+      DatabaseManager.deleteMatchGoals(matchId)  // limpiar si es re-save
+      goalsData.split(";").foreach { row =>
+        val parts = row.split("\\|", -1)
+        if (parts.length >= 6) {
+          val minuto   = try parts(0).toInt catch { case _: Exception => 0 }
+          val origen   = if (parts.length > 1) parts(1) else ""
+          val situacion= if (parts.length > 2) parts(2) else ""
+          val resp     = if (parts.length > 3) parts(3) else "Media"
+          val parable  = if (parts.length > 4) parts(4) else "Dudoso"
+          val zona     = if (parts.length > 5) parts(5) else ""
+          val notaG    = if (parts.length > 6) parts(6) else ""
+          DatabaseManager.saveMatchGoal(matchId, minuto, origen, situacion, resp, parable, zona, notaG)
+        }
+      }
     }
 
     // Respuesta visual renderizada como Array[Byte] para cumplir con withAuth

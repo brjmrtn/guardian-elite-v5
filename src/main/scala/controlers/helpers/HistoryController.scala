@@ -1300,6 +1300,24 @@ object HistoryController extends cask.Routes {
     val roiSesiones: Double  = d("roiSesiones").asInstanceOf[Double]
     val analisisIA: String   = d("analisisIA").asInstanceOf[String]
 
+    // Analisis de goles encajados
+    val g = DatabaseManager.getGoalsAnalysis()
+    val gTotal: Int         = g("total").asInstanceOf[Int]
+    val gEvitables: Int     = g("evitables").asInstanceOf[Int]
+    val gInevitables: Int   = g("inevitables").asInstanceOf[Int]
+    val gDudosos: Int       = g("dudosos").asInstanceOf[Int]
+    val gNotaReal: Double   = g("notaReal").asInstanceOf[Double]
+    val gNotaAdj: Double    = g("notaAjustada").asInstanceOf[Double]
+    val gPorOrigen: Map[String,Int]   = g("porOrigen").asInstanceOf[Map[String,Int]]
+    val gPorSit: Map[String,Int]      = g("porSituacion").asInstanceOf[Map[String,Int]]
+    val gPorResp: Map[String,Int]     = g("porResponsabilidad").asInstanceOf[Map[String,Int]]
+    val gRows: List[Map[String,String]] = g("rows").asInstanceOf[List[Map[String,String]]]
+    val gNotaRealStr: String  = f"$gNotaReal%.1f"
+    val gNotaAdjStr: String   = f"$gNotaAdj%.1f"
+    val gDelta: Double        = gNotaAdj - gNotaReal
+    val gDeltaStr: String     = (if(gDelta >= 0) "+" else "") + f"$gDelta%.1f"
+    val gDeltaColor: String   = if (gDelta >= 0.3) "success" else if (gDelta >= 0) "warning" else "danger"
+
     val xtSerie: List[Double]  = d("xtSerie").asInstanceOf[List[Double]]
     val xpSerie: List[Double]  = d("xpSerie").asInstanceOf[List[Double]]
     val spvSerie: List[Double] = d("spvSerie").asInstanceOf[List[Double]]
@@ -1523,6 +1541,116 @@ object HistoryController extends cask.Routes {
                 div(cls:="card-body p-2",
                   tag("canvas")(id:="chartSPV", style:="max-height:200px;")
                 )
+              )
+            )
+          ),
+
+          // ── ANALISIS DE GOLES ENCAJADOS ───────────────────────────────
+          div(cls:="card bg-dark border-danger shadow mb-3",
+            div(cls:="card-header d-flex justify-content-between align-items-center",
+              span(cls:="text-danger fw-bold small", "PSxG | Responsabilidad en goles encajados"),
+              if (gTotal > 0) span(cls:="badge bg-danger", gTotal.toString + " goles registrados")
+              else span(cls:="badge bg-secondary", "Sin datos aun")
+            ),
+            div(cls:="card-body p-3",
+              if (gTotal == 0) div(cls:="text-center text-muted py-3 small",
+                div(style:="font-size:32px;", "⚽"),
+                div(cls:="mt-2", "Registra el contexto de cada gol desde el Match Center"),
+                div(cls:="xx-small mt-1 text-secondary",
+                  "Al guardar un partido, usa la seccion 'Analisis de Goles Encajados' para clasificar cada gol")
+              ) else frag(
+                // KPIs principales
+                div(cls:="row g-3 mb-3",
+                  div(cls:="col-4 text-center",
+                    div(cls:="text-danger fw-bold", style:="font-size:2rem;", gEvitables.toString),
+                    div(cls:="xx-small text-muted", "Evitables"),
+                    div(cls:="xx-small text-secondary", "Resp. Alta/Media + parable")
+                  ),
+                  div(cls:="col-4 text-center",
+                    div(cls:="text-warning fw-bold", style:="font-size:2rem;", gDudosos.toString),
+                    div(cls:="xx-small text-muted", "Dudosos"),
+                    div(cls:="xx-small text-secondary", "Situaciones ambiguas")
+                  ),
+                  div(cls:="col-4 text-center",
+                    div(cls:="text-success fw-bold", style:="font-size:2rem;", gInevitables.toString),
+                    div(cls:="xx-small text-muted", "Inevitables"),
+                    div(cls:="xx-small text-secondary", "Sin responsabilidad")
+                  )
+                ),
+                // Nota ajustada
+                div(cls:="p-2 rounded mb-3",
+                  style:="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);",
+                  div(cls:="d-flex justify-content-around text-center",
+                    div(
+                      div(cls:="text-muted xx-small", "Nota media real"),
+                      div(cls:="text-white fw-bold", style:="font-size:1.4rem;", gNotaRealStr)
+                    ),
+                    div(cls:="text-muted d-flex align-items-center", "→"),
+                    div(
+                      div(cls:="text-muted xx-small", "Nota ajustada (sin errores ajenos)"),
+                      div(cls:=s"text-$gDeltaColor fw-bold", style:="font-size:1.4rem;",
+                        gNotaAdjStr + " (" + gDeltaStr + ")")
+                    )
+                  ),
+                  div(cls:="xx-small text-secondary text-center mt-1",
+                    "Cada gol inevitable suma +0.5 a la nota ajustada (rendimiento real de Hector)")
+                ),
+                // Desglose por origen y situacion
+                div(cls:="row g-2 mb-3",
+                  div(cls:="col-md-6",
+                    div(cls:="xx-small text-muted fw-bold mb-2", "POR ORIGEN"),
+                    frag(gPorOrigen.toList.sortBy(-_._2).map { case (origen, cnt) =>
+                      val pct: Int = if (gTotal > 0) cnt * 100 / gTotal else 0
+                      val pctStr: String = pct.toString
+                      div(cls:="mb-2",
+                        div(cls:="d-flex justify-content-between xx-small mb-1",
+                          span(cls:="text-white", origen),
+                          span(cls:="text-warning", cnt.toString)
+                        ),
+                        div(cls:="progress", style:="height:6px;",
+                          div(cls:="progress-bar bg-warning", style:=s"width:$pctStr%;")
+                        )
+                      )
+                    }: _*)
+                  ),
+                  div(cls:="col-md-6",
+                    div(cls:="xx-small text-muted fw-bold mb-2", "POR SITUACION"),
+                    frag(gPorSit.toList.sortBy(-_._2).map { case (sit, cnt) =>
+                      val pct: Int = if (gTotal > 0) cnt * 100 / gTotal else 0
+                      val pctStr: String = pct.toString
+                      div(cls:="mb-2",
+                        div(cls:="d-flex justify-content-between xx-small mb-1",
+                          span(cls:="text-white", sit),
+                          span(cls:="text-info", cnt.toString)
+                        ),
+                        div(cls:="progress", style:="height:6px;",
+                          div(cls:="progress-bar bg-info", style:=s"width:$pctStr%;")
+                        )
+                      )
+                    }: _*)
+                  )
+                ),
+                // Ultimos goles registrados
+                if (gRows.nonEmpty) div(
+                  div(cls:="xx-small text-muted fw-bold mb-2", "ULTIMOS GOLES REGISTRADOS"),
+                  div(style:="max-height:200px; overflow-y:auto;",
+                    frag(gRows.take(10).map { r =>
+                      val respColor: String = r("responsabilidad") match {
+                        case "Alta" => "danger"
+                        case "Media" => "warning"
+                        case _ => "success"
+                      }
+                      div(cls:="d-flex align-items-center gap-2 py-1",
+                        style:="border-bottom:1px solid rgba(255,255,255,0.05);",
+                        span(cls:="text-muted xx-small", r("fecha").take(5)),
+                        span(cls:="xx-small text-white", r("rival")),
+                        span(cls:="badge bg-secondary xx-small", "m." + r("minuto")),
+                        span(cls:="xx-small text-muted", r("situacion")),
+                        span(cls:=s"badge bg-$respColor xx-small ms-auto", r("responsabilidad"))
+                      )
+                    }: _*)
+                  )
+                ) else div()
               )
             )
           ),
