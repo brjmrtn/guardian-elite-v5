@@ -125,98 +125,86 @@
 | 11 | Guardian Vault Blockchain | Infraestructura blockchain |
 
 ---
-
+---
 
 ## FASE 6.5: MONEYBALL & DEEP INFLUENCE ANALYTICS
-*Scouting cognitivo para encontrar ineficiencias de mercado, valor oculto e impacto estructural del portero*
+*Módulo de scouting cognitivo para encontrar ineficiencias de mercado, valor oculto y el impacto estructural del portero en el juego.*
 
-* **Expected Threat del Portero (xT_GK):** Algoritmo que cuantifica el peligro generado por la distribucion con el pie. Pondera origen y destino del balon: xT = P(Gol|Zona_recepcion) - P(Gol|Zona_inicio).
-* **Bypass Rate (Lineas Superadas):** Metrica de presion que contabiliza rivales que quedan por detras tras un pase en salida, diferenciando distribucion libre de marca vs bajo presion.
-* **Sweeper Keeper Index (SPV - Shot Prevention Value):** IA predictiva que calcula tiros a puerta evitados gracias a anticipaciones preventivas, cortes como libero y dominio del espacio aereo.
-* **Expected Points Saved (xPoints):** Ponderacion dinamica del valor de cada parada (Clutch Factor). Mide la relevancia de la intervencion multiplicada por la tension del marcador y el minuto del partido.
-* **Sinergia de Roster (Lineup Value):** Radar de correlacion cruzada entre el rendimiento de Hector y los perfiles de sus companeros: exito de distribucion buscando extremos rapidos, impacto en Clean Sheet segun perfiles defensivos, fluctuacion de metricas segun rotacion. URL: `/moneyball/synergy`.
-* **ROI de Entrenamiento:** Grafico de dispersion interactivo que cruza horas en el simulador cognitivo (Flash-Cards, Laboratorio) con la mejora neta en el Guardian Readiness Score.
+* **Expected Threat del Portero ($xT_{GK}$):** Algoritmo que cuantifica el peligro generado por la distribución con el pie. Asigna valor ponderando el origen y destino del balón: $xT = P(Gol | Zona_{recepción}) - P(Gol | Zona_{inicio})$.
+* **Bypass Rate (Líneas Superadas):** Métrica de presión que contabiliza el número de rivales que quedan por detrás de la línea del balón tras un pase en salida, diferenciando entre distribución libre de marca y bajo presión.
+* **Sweeper Keeper Index ($SPV$ - Shot Prevention Value):** IA predictiva que calcula el número de tiros a puerta evitados (*Expected Shots*) gracias a anticipaciones preventivas, cortes como líbero y dominio del espacio aéreo.
+* **Expected Points Saved ($xPoints$):** Ponderación dinámica del valor de cada parada (Clutch Factor). Mide la relevancia de la intervención multiplicada por la tensión del marcador y el minuto del partido.
+* **Sinergia de Roster (Lineup Value):** Radar de correlación cruzada entre el rendimiento de Héctor y los perfiles en pista. Cuantifica el éxito de distribución buscando extremos rápidos, el impacto en el *Clean Sheet* al estar escudado por la seguridad técnica de Dani o la fuerza de Julito, y cómo fluctúan las métricas frente a la capitanía de Luis o la juventud de Beto. URL: `/moneyball/synergy`.
+* **ROI de Entrenamiento (Return On Investment):** Gráfico de dispersión interactivo que cruza las horas invertidas en el simulador cognitivo (*Flash-Cards*, *Laboratorio*) con la mejora neta en el *Guardian Readiness Score*.
 
 ---
 
-## FASE 7: GESTION DE CARRERA Y RENDIMIENTO 360 (Career Management Hub)
-*Infraestructura de analisis profundo para monitorizacion fisica, tactica y de entorno a largo plazo*
+## FASE 7: GESTIÓN DE CARRERA Y RENDIMIENTO 360º (Career Management Hub)
+*Infraestructura de análisis profundo para la monitorización física, táctica y de entorno a largo plazo.*
 
-* **Striker Clustering (ML):** Agrupacion de delanteros de la liga en arquetipos via K-Means. Cruza perfiles con el historial para adaptar el posicionamiento previo.
-* **Set-Piece Control (Poligonos de Voronoi):** Calculo del radio de accion en corners y faltas. Mide el porcentaje de area dominada y el impacto en la anulacion de segundas jugadas.
-* **Scanning Rate:** Metrica cognitiva que evalua escaneos de campo antes de recibir una cesion, correlacionando con la tasa de exito del primer toque bajo presion.
-* **Red-Zone Analytics:** Aislamiento estadistico del rendimiento en escenarios de fatiga extrema (ultimos 10 minutos) o cuando el rival domina mas del 65% de la posesion en el tercio defensivo.
-* **Impact Asymmetry Tracker:** Registro de volumen y lateralidad de las caidas cruzado con dureza de superficie. Alerta sobre descompensaciones musculares antes de que deriven en lesiones.
-* **HRV Tracker:** Monitorizacion de variabilidad de frecuencia cardiaca para identificar asimilacion de cargas y prevenir sobreentrenamiento.
-* **Periodizacion Nutricional Reactiva:** Ajuste automatico de macronutrientes y suplementacion cognitiva basado en la carga de estres tactico y de reflejos de la sesion.
-* **Market Estimator (Regresion Lineal):** Compara la curva de evolucion de KPIs con bases de datos de elite, proyectando techos de rendimiento y estimaciones de mercado futuras.
-* **NLP Scouting Aggregator:** Pipeline de NLP que ingiere informes de ojeadores en texto y extrae sentimiento y palabras clave, transformando opiniones subjetivas en datos estructurados.
-* **Dinamicas de Competicion Interna:** Analisis de fluctuacion de reflejos segun nivel de exigencia y rotacion de los companeros de posicion en la misma categoria.
+* **Perfilado de Rivales mediante ML (Striker Clustering):** Agrupación de delanteros de la liga mediante un algoritmo *K-Means* en arquetipos. Cruza perfiles con el historial para adaptar el posicionamiento previo.
+* **Auditoría de Dominio en Balón Parado (Set-Piece Control):** Cálculo del radio de acción en córners y faltas mediante Polígonos de Voronoi. Mide el porcentaje de área dominada de manera efectiva.
+* **Análisis de Frecuencia de Escaneo (Scanning Rate):** Métrica cognitiva que evalúa las veces que escanea el campo por encima del hombro antes de recibir una cesión, correlacionándolo con el éxito bajo presión.
+* **Red-Zone Analytics (Rendimiento Bajo Asedio):** Aislamiento estadístico del rendimiento en escenarios de fatiga extrema (últimos 10 minutos) o cuando el rival domina más del 65% de la posesión.
+* **Índice de Desgaste Articular (Impact Asymmetry Tracker):** Registro del volumen y lateralidad de las caídas cruzado con la dureza de la superficie para prevenir lesiones crónicas.
+* **Tracker HRV y Sistema Nervioso Central:** Monitorización de la variabilidad de la frecuencia cardíaca para identificar la asimilación de cargas y prevenir el sobreentrenamiento.
+* **Modelado Predictivo de Trayectoria (Market Estimator):** Regresión lineal que compara la curva de evolución de KPIs con bases de datos de élite, proyectando techos de rendimiento futuros.
+* **NLP Scouting Aggregator:** Pipeline de Procesamiento de Lenguaje Natural que ingiere informes de ojeadores y extrae sentimiento y palabras clave de forma estructurada.
 
 ---
 
 ## FASE 8: DEEP PERFORMANCE & COGNITIVE SCOUTING
-*Vanguardia cientifica para diseccionar tecnica pura, biomecanica y robustez psicologica*
+*Vanguardia científica orientada a diseccionar la técnica pura, la biomecánica y la robustez psicológica.*
 
-* **PSxG vs Goals Conceded (Post-Shot xG Delta):** Metrica definitiva de Shot-Stopping. Evalua la calidad real del tiro (PSxG) frente a los goles encajados, aislando el merito individual del rendimiento de la linea defensiva.
-* **Set-Stance Timing:** Auditoria por vision artificial del delta de tiempo (en milisegundos) entre el impacto del delantero y el momento en que los pies de Hector se clavan en el suelo ("set position").
-* **Bilateral Power Asymmetry:** Analisis longitudinal de la diferencia de explosividad y alcance entre estiradas izquierda y derecha, para prescribir trabajo compensatorio temprano.
-* **Quiet Eye Duration:** Metrica neurocognitiva que cronometra el tiempo de fijacion visual en el balon antes del movimiento defensivo, correlacionandolo con el exito de la estirada.
-* **Cognitive Reset Rate:** Aislamiento de los 10 minutos posteriores a un error grave. Cuantifica la capacidad de "reseteo mental" midiendo fluctuaciones en la asuncion de riesgos y el tiempo de reaccion.
-* **Development Pathway Matcher:** Algoritmo que cruza el estilo de juego de equipos superiores con las necesidades de desarrollo de Hector, sugiriendo ecosistemas tacticos que aceleren sus areas de mejora.
+* **PSxG vs Goals Conceded (Post-Shot xG Delta):** Métrica de *Shot-Stopping* que evalúa la calidad real del tiro ($PSxG$) frente a los goles encajados, aislando el mérito individual de Héctor.
+* **Sincronización de Postura Estática (Set-Stance Timing):** Auditoría del delta de tiempo entre el impacto del delantero y el momento en que los pies de Héctor se clavan en el suelo ("set position").
+* **Índice de Asimetría de Impulso (Bilateral Power Asymmetry):** Análisis de la diferencia de explosividad y alcance entre las estiradas a la izquierda y derecha para trabajo compensatorio.
+* **Duración del Quiet Eye (Fijación Visual Pre-Impacto):** Métrica neurocognitiva que cronometra el tiempo de mirada fija en el balón justo antes del movimiento defensivo.
+* **Auditoría de Resiliencia Post-Error (Cognitive Reset Rate):** Cuantifica la capacidad de "reseteo mental" tras un error grave midiendo fluctuaciones en la asunción de riesgos y tiempo de reacción.
 
 ---
 
 ## FASE 9: ESTRUCTURA PROFESIONAL & VANGUARDIA (The Elite Layer)
-*Modulos de alta gestion para proteccion de activos, liderazgo en campo y proyeccion en ligas profesionales*
+*Módulos de alta gestión para protección de activos, liderazgo en campo y proyección profesional.*
 
-* **Vocal Influence Analysis:** Analisis de audio para medir frecuencia, claridad y efectividad de instrucciones tacticas. Cuantifica la capacidad de evitar remates mediante organizacion vocal de la defensa.
-* **Digital Twin Proyectivo (What-if ML):** Modelo virtual basado en el historico para ejecutar simulaciones sobre cambios en masa muscular, biotipo o contextos de liga especificos.
-* **Gaze Behavior Audit:** Analisis de la secuencia de escaneo previa a acciones a balon parado. Detecta patrones de fijacion para ampliar la conciencia situacional y evitar el "tunel visual".
-* **Guardian Insurance & Contract Vault:** Gestion de clausulas contractuales, derechos de imagen y optimizacion de seguros deportivos basados en el historial de lesiones e Indice de Desgaste Articular.
-* **Sentiment AI & Media Resilience:** Motor de NLP que monitoriza la narrativa externa en prensa y entornos digitales para preparar la resiliencia mediatica ante picos de presion o criticas externas.
+* **Liderazgo Acústico (Vocal Influence Analysis):** Análisis de audio para medir frecuencia y claridad de instrucciones tácticas. Cuantifica la eficacia del mando en la organización defensiva.
+* **Digital Twin Proyectivo (What-if ML):** Modelo virtual basado en el histórico para ejecutar simulaciones sobre cambios en masa muscular, biotipo o contextos de liga.
+* **Guardian Insurance & Contract Vault:** Gestión de cláusulas contractuales y optimización de seguros deportivos basados en el historial de lesiones e Índice de Desgaste Articular.
+* **Sentiment AI & Media Resilience:** Motor de NLP que monitoriza la narrativa externa para preparar la resiliencia mediática ante picos de presión o críticas.
 
-## FASE 12: QUANTUM PERFORMANCE & DEEP INTELLIGENCE
-*Vanguardia en computación avanzada y modelos de aprendizaje profundo para la excelencia deportiva.*
-
-* **Multi-Modal Latent Fusion:** Integración de audio, video y biometría en un solo vector de estado para detectar fatiga invisible.
-* **Explainable AI (XAI):** Uso de valores SHAP para explicar matemáticamente las recomendaciones del Neuro-Scout.
-* **Tactical Graph Networks (GNN):** Modelado del equipo como un grafo dinámico para medir la centralidad y sinergia defensiva de Héctor.
-* **Reinforcement Learning Positioning:** Simulaciones de IA para determinar el posicionamiento óptimo basado en física y biotipo.
-* **Anomaly Autoencoders:** Detección desatendida de patrones de riesgo médico antes de la aparición de síntomas.
-
-  ## FASE 10: QUANTUM PERFORMANCE & SCIENCE
-*Integración de leyes físicas y modelos estocásticos para la precisión absoluta.*
-
-* **Markov Pathing:** Modelo estocástico para predecir transiciones de categoría y probabilidad de éxito profesional.
-* **Vocal Stress Biomarkers:** Análisis de la frecuencia fundamental en el Audio-Diario para detección de picos de cortisol y fatiga suprarrenal.
-* **Tactical Knowledge Graph:** Mapeo de relaciones complejas entre rivales, zonas de riesgo y sinergias defensivas mediante bases de datos de grafos.
-* **Federated Benchmarking:** Sistema de comparación de rendimiento global manteniendo la privacidad absoluta de los datos crudos mediante aprendizaje federado.
-
-  FASE 11: TOTAL SPECTRUM & BIOLOGICAL INTELLIGENCE
-Módulos de ingeniería avanzada para el control de variables internas, biológicas y de equipamiento.
-
-Circadian Performance Index: Cruza los datos del Correlación Sueño-Rendimiento con el cronotipo de Héctor para identificar su "ventana de gloria" biológica, optimizando las horas de carga táctica y física.
-
-Análisis de Inferencia Causal: Evaluación de decisiones mediante modelos contrafácticos. Determina matemáticamente qué habría ocurrido si se hubiera tomado una decisión posicional distinta, eliminando el sesgo del resultado final.
-
-Red de Confianza Táctica (SNA): Análisis de redes sociales aplicado al campo para medir la "química" y centralidad de Héctor con compañeros específicos como la seguridad de Dani, la fuerza de Julito o el alma de Luis.
-
-Física de Degradación de Materiales: Algoritmo que calcula el coeficiente de fricción residual del látex en el Inventario de Guantes según minutos de uso y clima, alertando sobre el riesgo de error técnico por pérdida de grip.
-
-Seguimiento de Carga Cognitiva (Dual-Tasking): Cuantifica la caída de precisión en la toma de decisiones cuando la frecuencia cardíaca supera el 90%, prescribiendo neuro-entrenamiento específico en estados de fatiga extrema.
-
-Modelado de Transferencia Bio-Kinética: Análisis del flujo de energía en la cadena cinética de la estirada para identificar fugas de potencia en el core o extremidades, optimizando la explosividad sin necesidad de análisis de vídeo constante.
-
-Índice de Resiliencia Ambiental: Perfil de rendimiento atmosférico que ajusta el Predictor de Clean Sheet según la densidad del aire y el microclima, anticipando cambios en la velocidad del esférico.
-
-Predictive Hydration & Electrolytes: Cálculo de pérdida de sales minerales cruzando el RPE por Sesión y temperatura, generando protocolos de rehidratación específicos para evitar la pérdida de reflejos.
-
-Auditoría de Latencia Sacádica: Medición de la velocidad de procesamiento visual y búsqueda (sacádicos) para cambiar el foco entre balón y receptores, vinculado directamente al Scanning Rate.
-
-Recursive Neural Feedback: Sistema de auto-auditoría de la IA que analiza las predicciones fallidas del IA Neuro-Scout, recalibrando automáticamente los pesos de las variables emocionales o físicas.
 ---
 
+## FASE 10: QUANTUM PERFORMANCE & SCIENCE
+*Integración de leyes físicas y modelos estocásticos para la precisión absoluta.*
+
+* **Simulador Magnus (Physics Engine):** Integración de física de fluidos para modelar el vuelo del balón según altitud, presión atmosférica y humedad: $$F_M = S \cdot (\omega \times v)$$.
+* **Markov Career Pathing:** Modelo estocástico para predecir transiciones de categoría y probabilidad de éxito profesional basado en Cadenas de Markov.
+* **Vocal Stress Biomarkers:** Análisis de frecuencia fundamental en el Audio-Diario para detección de picos de cortisol y fatiga suprarrenal antes de síntomas físicos.
+* **Tactical Knowledge Graph:** Mapeo de relaciones complejas en bases de datos de grafos (Neo4j) para identificar patrones ocultos en rivales y sinergias defensivas.
+* **Federated Benchmarking:** Sistema de comparación de rendimiento global manteniendo la privacidad absoluta de los datos mediante aprendizaje federado.
+
+---
+
+## FASE 11: TOTAL SPECTRUM & BIOLOGICAL INTELLIGENCE
+*Módulos de ingeniería avanzada para el control de variables internas, biológicas y de equipamiento.*
+
+* **Circadian Performance Index:** Optimización de cargas físicas y tácticas identificando la "ventana de gloria" biológica según el cronotipo y calidad de sueño.
+* **Análisis de Inferencia Causal:** Evaluación de decisiones mediante modelos contrafácticos para determinar qué habría ocurrido ante decisiones posicionales alternativas.
+* **Social Network Analysis (SNA):** Medición de la "química" y centralidad de Héctor con compañeros específicos como Dani, Julito o Luis para optimizar la red defensiva.
+* **Física de Degradación de Materiales:** Algoritmo que calcula el coeficiente de fricción residual del látex de los guantes según uso y clima para alertar sobre riesgo de error técnico.
+* **Seguimiento de Carga Cognitiva (Dual-Tasking):** Cuantifica la caída de precisión en toma de decisiones bajo fatiga extrema (FC > 90%).
+* **Modelado de Transferencia Bio-Kinética:** Identificación de fugas de potencia en la cadena cinética de la estirada para optimizar la explosividad muscular.
+
+---
+
+## FASE 12: FRONTIERS OF SCIENCE & DIGITAL LEGACY
+*Madurez biológica real, inteligencia semántica y soberanía del dato deportivo.*
+
+* **Madurez Ósea Predictiva (Greulich-Pyle AI):** Estimación de la edad ósea real frente a la cronológica para ajustar expectativas de potencia y prevenir sobrecargas articulares.
+* **Semantic Tactical Search (RAG):** Implementación de búsqueda semántica sobre el historial completo para consultas en lenguaje natural: "¿Cómo ha evolucionado mi tasa de paradas con alta carga académica?".
+* **Física de la Barrera y Geometría de Sombra:** Cálculo trigonométrico del posicionamiento óptimo de la barrera para maximizar la cobertura visual de Héctor.
+* **Kinetic Signature Analytics:** Identificación del patrón de movimiento único. Desviaciones >5% actúan como el predictor más fiable de riesgo de lesión inminente.
+* **Guardian Performance Passport (Blockchain):** Creación de un pasaporte de rendimiento auditable e inmutable para el mercado profesional, garantizando la soberanía de Héctor sobre sus datos.
 ## Stack Tecnologico
 
 | Capa | Tecnologia |
