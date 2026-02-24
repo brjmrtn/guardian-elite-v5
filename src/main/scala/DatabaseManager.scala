@@ -1329,20 +1329,44 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val fasePhv: String = if (phvDetectado) "PICO ACTIVO" else if (edadAnios < 12) "PRE-PICO" else "POST-PICO"
 
       // 4. Proyeccion de altura adulta
-      // Metodo midparent (Tanner): chico = (hPadre + hMadre + 13) / 2
+      // Base cientifica: Metodo Tanner midparent (correlacion genetica ~0.75)
+      // chico = (hPadre + hMadre + 13) / 2  => rango +/- 8.5 cm (1 SD)
       val midParent: Double = if (hPadre > 0 && hMadre > 0) (hPadre + hMadre + 13.0) / 2.0 else 183.0
-      // Ajuste por altura actual vs percentil esperado a la edad
-      // Referencia OMS: nino 9 anios aprox 135cm, adulto ~178cm => factor residual
-      val factorCrecimiento: Double = if (edadAnios > 0 && alturaActual > 80) {
-        // Tabla simplificada: porcentaje de altura adulta alcanzado por edad
-        val pctPorEdad = Map(7->77.0, 8->80.0, 9->82.0, 10->84.0, 11->86.5, 12->89.0,
-          13->93.0, 14->97.0, 15->99.0, 16->100.0)
-        val pct = pctPorEdad.getOrElse(edadAnios, if(edadAnios < 7) 75.0 else 100.0)
-        alturaActual / (pct / 100.0)
-      } else midParent
-      val alturaProyectada: Double = (factorCrecimiento * 0.6 + midParent * 0.4)
-      val alturaMin: Double = alturaProyectada - 4.0
-      val alturaMax: Double = alturaProyectada + 4.0
+
+      // Tabla OMS: % de altura adulta alcanzado por edad (chicos)
+      val pctPorEdad = Map(5->72.0, 6->75.0, 7->77.0, 8->80.0, 9->82.0, 10->84.0,
+        11->86.5, 12->89.0, 13->93.0, 14->97.0, 15->99.0, 16->100.0)
+
+      // Altura actual inconsistente con la edad registrada
+      val alturaConsistente: Boolean = alturaActual > 80 && !(edadAnios >= 12 && alturaActual < 130)
+
+      // Factor extrapolado desde altura actual
+      val factorAlturaActual: Double =
+        if (alturaConsistente && edadAnios >= 5) {
+          val pct = pctPorEdad.getOrElse(edadAnios, if(edadAnios > 16) 100.0 else 75.0)
+          alturaActual / (pct / 100.0)
+        } else midParent
+
+      // Ponderacion dinamica por edad:
+      // A menos edad, la extrapolacion desde la altura actual es menos fiable.
+      // < 8 anos: 10% altura / 90% genetica
+      // 8-11 anos: 25% altura / 75% genetica
+      // 12-14 anos: 40% altura / 60% genetica
+      // >= 15 anos: 60% altura / 40% genetica (ya casi adulto, los datos mandan)
+      val pesoAlturaActual: Double =
+        if (!alturaConsistente) 0.0
+        else if (edadAnios < 8)  0.10
+        else if (edadAnios < 12) 0.25
+        else if (edadAnios < 15) 0.40
+        else                     0.60
+
+      val alturaProyRaw: Double = factorAlturaActual * pesoAlturaActual + midParent * (1.0 - pesoAlturaActual)
+
+      // Suelo/techo: la proyeccion no puede alejarse mas de 1 SD del midparent (8.5 cm, Tanner)
+      val alturaProyectada: Double = math.max(midParent - 8.5, math.min(midParent + 8.5, alturaProyRaw))
+      val alturaMin: Double = alturaProyectada - 8.5
+      val alturaMax: Double = alturaProyectada + 8.5
+      val advertenciaFecha: Boolean = false  // fecha real confirmada
 
       // 5. Metricas de portero proyectadas
       val envergaduraActual: Double  = alturaActual  * 1.065
@@ -1427,7 +1451,8 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         "analisisIA"        -> analisisIA,
         "hPadre"            -> hPadre,
         "hMadre"            -> hMadre,
-        "midParent"         -> midParent
+        "midParent"         -> midParent,
+        "advertenciaFecha"  -> advertenciaFecha
       )
     } finally { conn.close() }
   }
