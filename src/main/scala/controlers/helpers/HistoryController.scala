@@ -850,44 +850,21 @@ object HistoryController extends cask.Routes {
         )
       ),
 
-      // Pre-computed chart data (evita interpolaciones complejas en s""")
-      val chartHistData: String = {
-        val pairs = growthRows.map(r => "{x:\"" + r._1 + "\",y:" + r._2.toString + "}")
-        "[" + pairs.mkString(",") + "]"
-      }
-      val chartProyData: String = {
-        val pairs = curvaProy.map(r => "{x:\"" + r._1.toString + "a\",y:" + r._2.formatted("%.1f") + "}")
-        "[" + pairs.mkString(",") + "]"
-      }
-
       script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
-      script(raw(s"""
-            const ctx = document.getElementById('chartInfluence');
-            const labels = $serieLabels;
-            const pie = $seriePie;
-            const notas = $serieNota;
-            if (ctx) {
-              new Chart(ctx, {
-                type: 'bar',
-                data: {
-                  labels: labels,
-                  datasets: [
-                    { label: 'Acc. con pie', data: pie, backgroundColor: 'rgba(13,202,240,0.5)', borderColor: '#0dcaf0', borderWidth: 2, yAxisID: 'y' },
-                    { label: 'Nota partido', data: notas, type: 'line', borderColor: '#ffc107', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y1' }
-                  ]
-                },
-                options: {
-                  responsive: true, maintainAspectRatio: false,
-                  scales: {
-                    y:  { position: 'left',  ticks: { color: '#0dcaf0' }, grid: { color: '#333' }, min: 0 },
-                    y1: { position: 'right', ticks: { color: '#ffc107' }, grid: { display: false }, min: 0, max: 10 },
-                    x:  { ticks: { color: '#aaa', font: { size: 9 } }, grid: { display: false } }
-                  },
-                  plugins: { legend: { labels: { color: '#fff', font: { size: 11 } } } }
-                }
-              });
-            }
-          """))
+      {
+        val jsGK: String =
+          "var ctxGK=document.getElementById('chartInfluence');" +
+            "if(ctxGK){new Chart(ctxGK,{type:'bar'," +
+            "data:{labels:" + serieLabels + ",datasets:[" +
+            "{label:'Acc. con pie',data:" + seriePie + ",backgroundColor:'rgba(13,202,240,0.5)',borderColor:'#0dcaf0',borderWidth:2,yAxisID:'y'}," +
+            "{label:'Nota partido',data:" + serieNota + ",type:'line',borderColor:'#ffc107',borderWidth:2,pointRadius:3,tension:0.3,yAxisID:'y1'}]}," +
+            "options:{responsive:true,maintainAspectRatio:false," +
+            "scales:{y:{position:'left',ticks:{color:'#0dcaf0'},grid:{color:'#333'},min:0}," +
+            "y1:{position:'right',ticks:{color:'#ffc107'},grid:{display:false},min:0,max:10}," +
+            "x:{ticks:{color:'#aaa'},grid:{display:false}}}," +
+            "plugins:{legend:{labels:{color:'#fff'}}}}})}"
+        script(raw(jsGK))
+      }
       )
       )
       )
@@ -1274,34 +1251,21 @@ object HistoryController extends cask.Routes {
       ) else div(),
 
       script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
-      script(raw(s"""
-              const ctxE = document.getElementById('chartEmocional');
-              if (ctxE) {
-                new Chart(ctxE, {
-                  type: 'line',
-                  data: {
-                    labels: $fechas,
-                    datasets: [
-                      { label: 'Animo', data: $animos, borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.1)', borderWidth: 2, tension: 0.4, pointRadius: 3, fill: true },
-                      { label: 'Energia', data: $energias, borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.05)', borderWidth: 2, tension: 0.4, pointRadius: 3 },
-                      { label: 'Nota partido', data: $notasPartido, borderColor: '#28a745', borderWidth: 2, tension: 0.4, pointRadius: 5, pointBackgroundColor: '#28a745', spanGaps: true, yAxisID: 'y1' }
-                    ]
-                  },
-                  options: {
-                    responsive: true, maintainAspectRatio: false,
-                    scales: {
-                      y:  { min: 0, max: 5, ticks: { color: '#aaa', stepSize: 1 }, grid: { color: '#333' } },
-                      y1: { position: 'right', min: 0, max: 10, ticks: { color: '#28a745' }, grid: { display: false } },
-                      x:  { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } }
-                    },
-                    plugins: {
-                      legend: { labels: { color: '#fff', font: { size: 11 } } },
-                      tooltip: { mode: 'index', intersect: false }
-                    }
-                  }
-                });
-              }
-            """))
+      {
+        val jsEmoc: String =
+          "var ctxE=document.getElementById('chartEmocional');" +
+            "if(ctxE){new Chart(ctxE,{type:'line'," +
+            "data:{labels:" + fechas + ",datasets:[" +
+            "{label:'Animo',data:" + animos + ",borderColor:'#0dcaf0',backgroundColor:'rgba(13,202,240,0.1)',borderWidth:2,tension:0.4,pointRadius:3,fill:true}," +
+            "{label:'Energia',data:" + energias + ",borderColor:'#ffc107',backgroundColor:'rgba(255,193,7,0.05)',borderWidth:2,tension:0.4,pointRadius:3}," +
+            "{label:'Nota partido',data:" + notasPartido + ",borderColor:'#28a745',borderWidth:2,tension:0.4,pointRadius:5,spanGaps:true,yAxisID:'y1'}]}," +
+            "options:{responsive:true,maintainAspectRatio:false," +
+            "scales:{y:{min:0,max:5,ticks:{color:'#aaa',stepSize:1},grid:{color:'#333'}}," +
+            "y1:{position:'right',min:0,max:10,ticks:{color:'#28a745'},grid:{display:false}}," +
+            "x:{ticks:{color:'#888'},grid:{display:false}}}," +
+            "plugins:{legend:{labels:{color:'#fff'}},tooltip:{mode:'index',intersect:false}}}}});"
+        script(raw(jsEmoc))
+      }
       )
       )
       )
@@ -1552,43 +1516,35 @@ object HistoryController extends cask.Routes {
           ),
 
           script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
-          script(raw(
-            s"""<script>
-      function recalcular(){
-      var p=document.getElementById('hPadreInput').value;
-      var m=document.getElementById('hMadreInput').value;
-      window.location.href='/digital-twin?hPadre='+p+'&hMadre='+m;
-    }
-    var ctxC=document.getElementById('chartCrecimiento');
-    if(ctxC){
-      new Chart(ctxC,{
-        type:'line',
-        data:{
-          labels:$histFechas,
-          datasets:[
-        {label:'Historico real',data:$histAltura,borderColor:'#0dcaf0',backgroundColor:'rgba(13,202,240,0.1)',borderWidth:2,pointRadius:4,fill:true},
-        {label:'Proyeccion adulta',data:$proyAlturas,borderColor:'#ffc107',borderDash:[6,3],borderWidth:2,pointRadius:3}
-          ]
-        },
-        options:{responsive:true,maintainAspectRatio:false,
-          scales:{x:{ticks:{color:'#888',maxTicksLimit:8},grid:{color:'#333'}},y:{ticks:{color:'#aaa'},grid:{color:'#333'}}},
-          plugins:{legend:{labels:{color:'#fff',font:{size:10}}}}}
-      });
-    }
-    var ctxR=document.getElementById('chartRendimiento');
-    if(ctxR){
-      new Chart(ctxR,{
-        type:'bar',
-        data:{labels:$tempLabels,datasets:[{label:'Nota media',data:$tempNotas,backgroundColor:'rgba(255,193,7,0.7)',borderColor:'#ffc107',borderWidth:1}]},
-        options:{responsive:true,maintainAspectRatio:false,
-          scales:{y:{min:0,max:100,ticks:{color:'#aaa'},grid:{color:'#333'}},x:{ticks:{color:'#888'},grid:{display:false}}},
-          plugins:{legend:{labels:{color:'#fff',font:{size:10}}}}}
-      });
-    }
-    </script>"""
-    ))
-    )
-    )
+          {
+            val jsCode: String =
+              "function recalcular(){" +
+                "var p=document.getElementById('hPadreInput').value;" +
+                "var m=document.getElementById('hMadreInput').value;" +
+                "window.location.href='/digital-twin?hPadre='+p+'&hMadre='+m;}" +
+                "var ctxC=document.getElementById('chartCrecimiento');" +
+                "if(ctxC){new Chart(ctxC,{type:'line'," +
+                "data:{labels:" + histFechas + ",datasets:[" +
+                "{label:'Historico real',data:" + histAltura + ",borderColor:'#0dcaf0'," +
+                "backgroundColor:'rgba(13,202,240,0.1)',borderWidth:2,pointRadius:4,fill:true}," +
+                "{label:'Proyeccion',data:" + proyAlturas + ",borderColor:'#ffc107'," +
+                "borderDash:[6,3],borderWidth:2,pointRadius:3}]}," +
+                "options:{responsive:true,maintainAspectRatio:false," +
+                "scales:{x:{ticks:{color:'#888'},grid:{color:'#333'}}," +
+                "y:{ticks:{color:'#aaa'},grid:{color:'#333'}}}," +
+                "plugins:{legend:{labels:{color:'#fff'}}}}});}" +
+                "var ctxR=document.getElementById('chartRendimiento');" +
+                "if(ctxR){new Chart(ctxR,{type:'bar'," +
+                "data:{labels:" + tempLabels + ",datasets:[{label:'Nota media',data:" + tempNotas + "," +
+                "backgroundColor:'rgba(255,193,7,0.7)',borderColor:'#ffc107',borderWidth:1}]}," +
+                "options:{responsive:true,maintainAspectRatio:false," +
+                "scales:{y:{min:0,max:100,ticks:{color:'#aaa'},grid:{color:'#333'}}," +
+                "x:{ticks:{color:'#888'},grid:{display:false}}}," +
+                "plugins:{legend:{labels:{color:'#fff'}}}}});}"
+            script(raw(jsCode))
+          }
+        )
+      )
     ))
   }
 
