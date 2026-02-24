@@ -1116,7 +1116,7 @@ object HistoryController extends cask.Routes {
 
     // Datos para graficos
     val ultimos = entries.takeRight(30)
-    val fechas  = ultimos.map(e => """ + e.fecha.drop(5) + """).mkString("[", ",", "]")
+    val fechas  = ultimos.map(e => "\"" + e.fecha.drop(5) + "\"").mkString("[", ",", "]")
     val animos  = ultimos.map(_.animo.toString).mkString("[", ",", "]")
     val energias= ultimos.map(_.energia.toString).mkString("[", ",", "]")
     val notasPartido = ultimos.map(e => e.notaPartido.map(_.toString).getOrElse("null")).mkString("[",",","]")
@@ -1352,11 +1352,11 @@ object HistoryController extends cask.Routes {
     val curvaProy  = d("curvaProyeccion").asInstanceOf[List[(Int, Double)]]
     val notaTemps  = d("notaTemps").asInstanceOf[List[(String, Double)]]
 
-    val histFechas: String  = growthRows.map(r => """ + r._1 + """).mkString("[", ",", "]")
+    val histFechas: String  = growthRows.map(r => "\"" + r._1 + "\"").mkString("[", ",", "]")
     val histAltura: String  = growthRows.map(_._2.toString).mkString("[", ",", "]")
-    val proyEdades: String  = curvaProy.map(r => """ + r._1.toString + "a"").mkString("[", ",", "]")
+    val proyEdades: String  = curvaProy.map(r => "\"" + r._1.toString + "a\"").mkString("[", ",", "]")
     val proyAlturas: String = curvaProy.map(_._2.formatted("%.1f")).mkString("[", ",", "]")
-    val tempLabels: String  = notaTemps.map(r => """ + r._1 + """).mkString("[", ",", "]")
+    val tempLabels: String  = notaTemps.map(r => "\"" + r._1 + "\"").mkString("[", ",", "]")
     val tempNotas: String   = notaTemps.map(_._2.toString).mkString("[", ",", "]")
 
     // Comparativa porteros elite
