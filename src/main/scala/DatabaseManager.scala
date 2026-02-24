@@ -286,6 +286,8 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS fecha_nacimiento DATE DEFAULT '2020-06-19'")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS mapa_campo TEXT")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS analisis_voz TEXT")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS lineas_superadas INT DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS acciones_preventivas INT DEFAULT 0")
 
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
@@ -1294,6 +1296,199 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
 
   // == DIGITAL TWIN HECTOR 2035 ==============================================
+
+  // == FASE 6.5: MONEYBALL & DEEP INFLUENCE ANALYTICS =========================
+  def getMoneyballData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // ── 1. xT_GK: Expected Threat de Distribucion ──────────────────────────
+      // Mide el peligro generado con el pie. Formula:
+      // xT = (exito_pases_cortos * 0.4 + exito_pases_largos * 0.6) * volumen_relativo
+      val rsXT = conn.createStatement().executeQuery(
+        "SELECT pc_t, pc_ok, pl_t, pl_ok, acciones_pie, nota " +
+          "FROM matches WHERE status='PLAYED' AND (pc_t+pl_t) > 0 ORDER BY fecha DESC LIMIT 30")
+      var xtRows = List[(Int,Int,Int,Int,Int,Double)]()
+      while (rsXT.next()) xtRows = xtRows :+ (
+        rsXT.getInt("pc_t"), rsXT.getInt("pc_ok"),
+        rsXT.getInt("pl_t"), rsXT.getInt("pl_ok"),
+        rsXT.getInt("acciones_pie"), rsXT.getDouble("nota"))
+
+      val xtPerMatch: List[Double] = xtRows.map { case (pct,pco,plt,plo,pie,_) =>
+        val eficCorto: Double = if (pct > 0) pco.toDouble / pct else 0.0
+        val eficLargo: Double = if (plt > 0) plo.toDouble / plt else 0.0
+        val eficPond: Double  = eficCorto * 0.4 + eficLargo * 0.6
+        val volumen: Double   = math.min(1.0, (pct + plt).toDouble / 20.0)
+        eficPond * volumen * pie.toDouble * 10.0
+      }
+      val xtScore: Double = if (xtPerMatch.nonEmpty) xtPerMatch.sum / xtPerMatch.size else 0.0
+
+      // Correlacion xT -> nota
+      val xtNotas: List[(Double,Double)] = xtRows.zip(xtPerMatch).map { case ((a,b,c,d,e,nota),xt) => (xt,nota) }
+      val xtCorr: Double = calcCorrelation(xtNotas)
+
+      // Serie temporal para grafico (ultimos 20)
+      val xtSerie: List[Double] = xtPerMatch.takeRight(20)
+
+      // ── 2. xPoints: Expected Points Saved (Clutch Factor) ──────────────────
+      // Valor de las paradas ponderado por: importancia del partido x tension del marcador
+      // Importancia: TORNEO=2.0, LIGA=1.0, AMISTOSO=0.5
+      // Tension: paradas en partidos ajustados (diferencia goles <= 1) valen mas
+      val rsXP = conn.createStatement().executeQuery(
+        "SELECT paradas, paradas_1v1, nota, goles_favor, goles_contra, tipo_partido, torneo_nombre " +
+          "FROM matches WHERE status='PLAYED' AND paradas > 0 ORDER BY fecha DESC LIMIT 30")
+      var xpRows = List[(Int,Int,Double,Int,Int,String,String)]()
+      while (rsXP.next()) xpRows = xpRows :+ (
+        rsXP.getInt("paradas"), rsXP.getInt("paradas_1v1"),
+        rsXP.getDouble("nota"), rsXP.getInt("goles_favor"),
+        rsXP.getInt("goles_contra"), Option(rsXP.getString("tipo_partido")).getOrElse("LIGA"),
+        Option(rsXP.getString("torneo_nombre")).getOrElse(""))
+
+      val xpPerMatch: List[Double] = xpRows.map { case (par, par1v1, nota, gf, gc, tipo, torneo) =>
+        val importancia: Double = if (torneo.nonEmpty && tipo == "TORNEO") 2.0
+        else if (tipo == "LIGA") 1.0 else 0.5
+        val diferencia: Int    = math.abs(gf - gc)
+        val tension: Double    = if (diferencia == 0) 1.5 else if (diferencia == 1) 1.2 else 1.0
+        val valorParadas: Double = par * 1.0 + par1v1 * 0.8  // 1v1 son de alto valor
+        valorParadas * importancia * tension * (nota / 100.0)
+      }
+      val xpTotal: Double   = if (xpPerMatch.nonEmpty) xpPerMatch.sum else 0.0
+      val xpMedia: Double   = if (xpPerMatch.nonEmpty) xpTotal / xpPerMatch.size else 0.0
+      val xpSerie: List[Double] = xpPerMatch.takeRight(20)
+
+      // Clutch rating 0-100
+      val maxXP: Double = if (xpPerMatch.nonEmpty) xpPerMatch.max else 1.0
+      val clutchRating: Int = math.min(100, (xpMedia / math.max(maxXP, 1.0) * 100).toInt)
+
+      // ── 3. SPV: Sweeper Keeper / Shot Prevention Value ──────────────────────
+      // Cuantifica el valor del portero mas alla de la porteria
+      // Paradas 1v1 (alto riesgo) + aereas (dominio espacio) + normal
+      val rsSPV = conn.createStatement().executeQuery(
+        "SELECT paradas, paradas_1v1, paradas_aereas, nota, fecha " +
+          "FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 30")
+      var spvRows = List[(Int,Int,Int,Double)]()
+      while (rsSPV.next()) spvRows = spvRows :+ (
+        rsSPV.getInt("paradas"), rsSPV.getInt("paradas_1v1"),
+        rsSPV.getInt("paradas_aereas"), rsSPV.getDouble("nota"))
+
+      val spvPerMatch: List[Double] = spvRows.map { case (par, p1v1, paer, nota) =>
+        p1v1 * 1.5 + paer * 1.2 + math.max(0, par - p1v1 - paer) * 1.0
+      }
+      val spvMedia: Double   = if (spvPerMatch.nonEmpty) spvPerMatch.sum / spvPerMatch.size else 0.0
+      val spvMax: Double     = if (spvPerMatch.nonEmpty) spvPerMatch.max else 1.0
+      val spvScore: Int      = math.min(100, (spvMedia / math.max(spvMax, 1.0) * 100 * 1.5).toInt)
+      val spvSerie: List[Double] = spvPerMatch.takeRight(20)
+
+      // Breakdown por tipo
+      val spv1v1Total: Int  = spvRows.map(_._2).sum
+      val spvAerTotal: Int  = spvRows.map(_._3).sum
+      val spvNorTotal: Int  = spvRows.map(r => math.max(0, r._1 - r._2 - r._3)).sum
+      val spvTotalAll: Int  = spv1v1Total + spvAerTotal + spvNorTotal
+      val pct1v1: Int       = if (spvTotalAll > 0) (spv1v1Total * 100 / spvTotalAll) else 0
+      val pctAer: Int       = if (spvTotalAll > 0) (spvAerTotal * 100 / spvTotalAll) else 0
+      val pctNor: Int       = if (spvTotalAll > 0) (spvNorTotal * 100 / spvTotalAll) else 0
+
+      // ── 4. Bypass Rate: Lineas Superadas ────────────────────────────────────
+      val rsBP = conn.createStatement().executeQuery(
+        "SELECT lineas_superadas, acciones_pie, fecha FROM matches " +
+          "WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 30")
+      var bpRows = List[(Int,Int)]()
+      while (rsBP.next()) bpRows = bpRows :+ (rsBP.getInt("lineas_superadas"), rsBP.getInt("acciones_pie"))
+      val bpMedia: Double   = if (bpRows.nonEmpty) bpRows.map(_._1.toDouble).sum / bpRows.size else 0.0
+      val bpConDatos: Int   = bpRows.count(_._1 > 0)
+      val bpEfic: Double    = {
+        val filas = bpRows.filter(_._2 > 0)
+        if (filas.nonEmpty) filas.map(r => r._1.toDouble / r._2).sum / filas.size else 0.0
+      }
+      val bpSerie: List[Int] = bpRows.map(_._1).takeRight(20)
+
+      // ── 5. ROI de Entrenamiento ──────────────────────────────────────────────
+      // Para cada partido, busca los entrenamientos en los 7 dias previos
+      // y calcula la correlacion entre calidad/atencion media y la nota del partido
+      val rsROI = conn.createStatement().executeQuery(
+        "SELECT m.fecha as mfecha, m.nota, " +
+          "  (SELECT AVG(t.calidad) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as avg_calidad, " +
+          "  (SELECT AVG(t.atencion) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as avg_atencion, " +
+          "  (SELECT AVG(t.rpe) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as avg_rpe, " +
+          "  (SELECT COUNT(*) FROM trainings t WHERE t.fecha BETWEEN m.fecha - 7 AND m.fecha) as num_sesiones " +
+          "FROM matches m WHERE m.status='PLAYED' AND m.nota > 0 ORDER BY m.fecha DESC LIMIT 30")
+      var roiRows = List[(Double,Double,Double,Double,Int)]()
+      while (rsROI.next()) {
+        val nota = rsROI.getDouble("nota")
+        val cal  = Option(rsROI.getObject("avg_calidad")).map(_.toString.toDouble).getOrElse(0.0)
+        val ate  = Option(rsROI.getObject("avg_atencion")).map(_.toString.toDouble).getOrElse(0.0)
+        val rpe  = Option(rsROI.getObject("avg_rpe")).map(_.toString.toDouble).getOrElse(0.0)
+        val ses  = rsROI.getInt("num_sesiones")
+        if (ses > 0) roiRows = roiRows :+ (nota, cal, ate, rpe, ses)
+      }
+      val roiCorrCalidad: Double  = calcCorrelation(roiRows.map(r => (r._2, r._1)))
+      val roiCorrAtencion: Double = calcCorrelation(roiRows.map(r => (r._3, r._1)))
+      val roiCorrCarga: Double    = calcCorrelation(roiRows.map(r => (r._4, r._1)))
+      val roiPartidosConDatos: Int = roiRows.size
+      val roiSesionesMedia: Double = if (roiRows.nonEmpty) roiRows.map(_._5.toDouble).sum / roiRows.size else 0.0
+
+      // ── 6. Analisis IA Moneyball ─────────────────────────────────────────────
+      val analisisIA: String = {
+        val prompt = s"""Eres un analista de datos de porteros al nivel de los mejores clubes de Europa. Analiza estas metricas avanzadas:
+xT_GK (distribucion): ${f"$xtScore%.2f"} pts/partido | Correlacion con nota: ${f"$xtCorr%.2f"}
+xPoints (clutch): ${f"$xpMedia%.2f"} pts/partido | Clutch Rating: $clutchRating/100
+SPV (sweeper): ${f"$spvMedia%.1f"} pts/partido | Paradas 1v1: $pct1v1% | Aereas: $pctAer%
+Bypass Rate: ${f"$bpMedia%.1f"} lineas/partido | Eficiencia: ${f"${bpEfic*100}%.0f"}%
+ROI Entreno: correlacion calidad-nota: ${f"$roiCorrCalidad%.2f"} | atencion-nota: ${f"$roiCorrAtencion%.2f"} | carga-nota: ${f"$roiCorrCarga%.2f"}
+Responde en 3 partes exactas, en espanol, conciso y directo:
+PATRON: [patron principal detectado en 1-2 frases]
+VENTAJA: [metrica donde destaca mas y por que es relevante]
+CONSEJO: [recomendacion de mejora basada en los datos]"""
+        AIProvider.ask(prompt, None, bypassCache = true)
+      }
+
+      // ── 7. Etiquetas temporales para graficos ────────────────────────────────
+      val rsLabels = conn.createStatement().executeQuery(
+        "SELECT TO_CHAR(fecha,'MM-DD') as f FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 20")
+      var labels = List[String]()
+      while (rsLabels.next()) labels = labels :+ rsLabels.getString("f")
+      val labelsRev: List[String] = labels.reverse
+
+      Map(
+        "xtScore"          -> xtScore,
+        "xtCorr"           -> xtCorr,
+        "xtSerie"          -> xtSerie,
+        "xpMedia"          -> xpMedia,
+        "xpTotal"          -> xpTotal,
+        "xpSerie"          -> xpSerie,
+        "clutchRating"     -> clutchRating,
+        "spvScore"         -> spvScore,
+        "spvMedia"         -> spvMedia,
+        "spvSerie"         -> spvSerie,
+        "spv1v1Pct"        -> pct1v1,
+        "spvAerPct"        -> pctAer,
+        "spvNorPct"        -> pctNor,
+        "bpMedia"          -> bpMedia,
+        "bpEfic"           -> bpEfic,
+        "bpSerie"          -> bpSerie,
+        "bpConDatos"       -> bpConDatos,
+        "roiCorrCalidad"   -> roiCorrCalidad,
+        "roiCorrAtencion"  -> roiCorrAtencion,
+        "roiCorrCarga"     -> roiCorrCarga,
+        "roiPartidos"      -> roiPartidosConDatos,
+        "roiSesiones"      -> roiSesionesMedia,
+        "analisisIA"       -> analisisIA,
+        "labels"           -> labelsRev
+      )
+    } finally { conn.close() }
+  }
+
+  // Pearson correlation helper
+  private def calcCorrelation(pairs: List[(Double, Double)]): Double = {
+    if (pairs.size < 3) return 0.0
+    val n = pairs.size.toDouble
+    val meanX = pairs.map(_._1).sum / n
+    val meanY = pairs.map(_._2).sum / n
+    val num   = pairs.map(p => (p._1 - meanX) * (p._2 - meanY)).sum
+    val denX  = math.sqrt(pairs.map(p => math.pow(p._1 - meanX, 2)).sum)
+    val denY  = math.sqrt(pairs.map(p => math.pow(p._2 - meanY, 2)).sum)
+    if (denX * denY == 0) 0.0 else num / (denX * denY)
+  }
+
   def getDigitalTwinData(hPadre: Double, hMadre: Double): Map[String, Any] = {
     val conn = getConnection()
     try {
