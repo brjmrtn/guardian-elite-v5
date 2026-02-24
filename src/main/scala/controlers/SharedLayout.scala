@@ -29,21 +29,6 @@ object SharedLayout extends cask.Routes {
     cask.Response(content.getBytes("UTF-8"),
       headers = Seq("Content-Type" -> "text/html; charset=utf-8") ++ headers)
 
-  def renderRedirect(url: String): cask.Response[Array[Byte]] =
-    cask.Response(Array.empty[Byte], statusCode = 302,
-      headers = Seq("Location" -> url, "Cache-Control" -> "no-store"))
-
-  def renderMatchRow(m: MatchLog) = {
-    val notaCls = if (m.nota >= 7) "table-success" else if (m.nota >= 5) "table-warning" else "table-danger"
-    tr(cls := notaCls,
-      td(m.fecha.take(10)),
-      td(m.rival),
-      td(m.resultado),
-      td(cls := "text-center", m.paradas.toString),
-      td(cls := "text-center fw-bold", m.nota.toString)
-    )
-  }
-
   // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
     "<!DOCTYPE html>" +
@@ -123,6 +108,68 @@ object SharedLayout extends cask.Routes {
   // Manejado en CareerController
 
   // /career/legacy -> manejado en CareerController
+
+  // /bio/medical/upload
+  @cask.postForm("/bio/medical/upload")
+  def uploadMedical(fecha: String,
+                    tipo: String,
+                    esPrevio: String = "false",
+                    archivo: cask.FormFile) = {
+    val isPrevio = esPrevio == "on"
+    // cask 0.9.2: FormFile guarda el archivo en disco. toString = FormFile(name, /tmp/path, headers)
+    // Los campos son: fileName (String) y path (java.nio.file.Path o String)
+    val fileName: String = try {
+      archivo.getClass.getDeclaredFields
+        .find(f => f.getName == "fileName" || f.getName == "name")
+        .map { f => f.setAccessible(true); f.get(archivo).asInstanceOf[String] }
+        .getOrElse("documento.pdf")
+    } catch { case _: Exception => "documento.pdf" }
+
+    val fileBytes: Array[Byte] = try {
+      // Buscar el campo path (puede ser Path o String)
+      val pathField = archivo.getClass.getDeclaredFields
+        .find(f => f.getName == "path" || f.getName == "filePath" || f.getName == "tmpFile")
+      pathField match {
+        case Some(f) =>
+          f.setAccessible(true)
+          val v = f.get(archivo)
+          v match {
+            case p: java.nio.file.Path => java.nio.file.Files.readAllBytes(p)
+            case s: String             => java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(s))
+            case _                     => Array.empty[Byte]
+          }
+        case None =>
+          // Fallback: parsear el toString "FormFile(name, /tmp/path, ...)"
+          val str = archivo.toString
+          val parts = str.stripPrefix("FormFile(").split(",")
+          if (parts.length >= 2) {
+            val p = java.nio.file.Paths.get(parts(1).trim)
+            if (java.nio.file.Files.exists(p)) java.nio.file.Files.readAllBytes(p)
+            else Array.empty[Byte]
+          } else Array.empty[Byte]
+      }
+    } catch { case _: Exception => Array.empty[Byte] }
+
+    if (fileBytes.nonEmpty) {
+      // 2. Proceso para Gemini
+      val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
+      val mimeType = if (fileName.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
+
+      val medicalPrompt = s"Analiza este informe ($tipo) de Hector. Extrae DIAGNOSTICO y RECOMENDACION DEPORTIVA. Formato: DIAGNOSTICO: 📝 | RECOMENDACION: 📝"
+
+      val analisisIA = DatabaseManager.AIProvider.ask(medicalPrompt, Some((mimeType, base64Content)))
+      val partes = analisisIA.split("\\|")
+      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNOSTICO:", "").trim
+      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACION:", "").trim
+
+      DatabaseManager.saveMedicalRecordFull(fecha, tipo, diag, rec, isPrevio)
+    }
+
+    cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
+  }
+  // --- 3. MODO LEGADO (RPG) ---
+
+  // ── FASE 2: PAGINA GRAFICO DE CARGA ───────────────────────────────────────
 
   def redirect(url: String): cask.Response[Array[Byte]] =
     cask.Response(
