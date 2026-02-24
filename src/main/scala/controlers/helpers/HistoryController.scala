@@ -1274,6 +1274,285 @@ object HistoryController extends cask.Routes {
   }
 
 
+
+  // == FASE 6.5: MONEYBALL =====================================================
+  @cask.get("/moneyball")
+  def moneyballPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getMoneyballData()
+
+    val xtScore: Double      = d("xtScore").asInstanceOf[Double]
+    val xtCorr: Double       = d("xtCorr").asInstanceOf[Double]
+    val xpMedia: Double      = d("xpMedia").asInstanceOf[Double]
+    val xpTotal: Double      = d("xpTotal").asInstanceOf[Double]
+    val clutchRating: Int    = d("clutchRating").asInstanceOf[Int]
+    val spvScore: Int        = d("spvScore").asInstanceOf[Int]
+    val spvMedia: Double     = d("spvMedia").asInstanceOf[Double]
+    val spv1v1Pct: Int       = d("spv1v1Pct").asInstanceOf[Int]
+    val spvAerPct: Int       = d("spvAerPct").asInstanceOf[Int]
+    val spvNorPct: Int       = d("spvNorPct").asInstanceOf[Int]
+    val bpMedia: Double      = d("bpMedia").asInstanceOf[Double]
+    val bpEfic: Double       = d("bpEfic").asInstanceOf[Double]
+    val bpConDatos: Int      = d("bpConDatos").asInstanceOf[Int]
+    val roiCorrCal: Double   = d("roiCorrCalidad").asInstanceOf[Double]
+    val roiCorrAte: Double   = d("roiCorrAtencion").asInstanceOf[Double]
+    val roiCorrCar: Double   = d("roiCorrCarga").asInstanceOf[Double]
+    val roiPartidos: Int     = d("roiPartidos").asInstanceOf[Int]
+    val roiSesiones: Double  = d("roiSesiones").asInstanceOf[Double]
+    val analisisIA: String   = d("analisisIA").asInstanceOf[String]
+
+    val xtSerie: List[Double]  = d("xtSerie").asInstanceOf[List[Double]]
+    val xpSerie: List[Double]  = d("xpSerie").asInstanceOf[List[Double]]
+    val spvSerie: List[Double] = d("spvSerie").asInstanceOf[List[Double]]
+    val bpSerie: List[Int]     = d("bpSerie").asInstanceOf[List[Int]]
+    val labels: List[String]   = d("labels").asInstanceOf[List[String]]
+
+    // Strings para UI
+    val xtScoreStr: String    = f"$xtScore%.2f"
+    val xtCorrStr: String     = f"$xtCorr%.2f"
+    val xtCorrColor: String   = if (xtCorr >= 0.4) "success" else if (xtCorr >= 0.2) "warning" else "secondary"
+    val xpMediaStr: String    = f"$xpMedia%.2f"
+    val xpTotalStr: String    = f"$xpTotal%.1f"
+    val clutchColor: String   = if (clutchRating >= 70) "success" else if (clutchRating >= 45) "warning" else "danger"
+    val spvMediaStr: String   = f"$spvMedia%.1f"
+    val bpMediaStr: String    = f"$bpMedia%.1f"
+    val bpEficStr: String     = f"${bpEfic * 100}%.0f"
+    val roiCalStr: String     = f"$roiCorrCal%.2f"
+    val roiAteStr: String     = f"$roiCorrAte%.2f"
+    val roiCarStr: String     = f"$roiCorrCar%.2f"
+    val roiCalColor: String   = if (roiCorrCal >= 0.4) "success" else if (roiCorrCal >= 0.2) "warning" else "secondary"
+    val roiAteColor: String   = if (roiCorrAte >= 0.4) "success" else if (roiCorrAte >= 0.2) "warning" else "secondary"
+    val roiCarColor: String   = if (roiCorrCar <= -0.3) "danger" else if (roiCorrCar >= 0.3) "warning" else "secondary"
+    val roiSesStr: String     = f"$roiSesiones%.1f"
+
+    def extractIA(tag: String): String = {
+      val idx = analisisIA.indexOf(tag + ":")
+      if (idx == -1) "" else {
+        val start = idx + tag.length + 1
+        val nexts = Seq("PATRON:", "VENTAJA:", "CONSEJO:").filter(_ != tag + ":").flatMap { t =>
+          val i = analisisIA.indexOf(t, start); if (i > 0) Some(i) else None
+        }
+        val end = if (nexts.nonEmpty) nexts.min else analisisIA.length
+        analisisIA.substring(start, end).trim
+      }
+    }
+    val iaPatron: String  = extractIA("PATRON")
+    val iaVentaja: String = extractIA("VENTAJA")
+    val iaConsejo: String = extractIA("CONSEJO")
+
+    // JSON para graficos
+    val labelsJson: String = labels.map(l => """ + l + """).mkString("[", ",", "]")
+    val xtJson: String     = xtSerie.map(v => f"$v%.2f").mkString("[", ",", "]")
+    val xpJson: String     = xpSerie.map(v => f"$v%.2f").mkString("[", ",", "]")
+    val spvJson: String    = spvSerie.map(v => f"$v%.1f").mkString("[", ",", "]")
+    val bpJson: String     = bpSerie.map(_.toString).mkString("[", ",", "]")
+
+    renderHtml(basePage("history",
+      div(cls:="row justify-content-center",
+        div(cls:="col-md-11 col-12",
+
+          div(cls:="d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls:="text-warning mb-0", "MONEYBALL | Deep Influence Analytics"),
+              span(cls:="badge bg-dark border border-warning text-warning", "FASE 6.5")
+            ),
+            a(href:="/dashboard", cls:="btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+          ),
+
+          // ── SCORES PRINCIPALES ─────────────────────────────────────────────
+          div(cls:="row g-3 mb-3",
+            frag(Seq(
+              ("xT_GK", "Distribucion", xtScoreStr, "pts/partido", "info",
+                "Amenaza generada con el pie", xtCorrStr, "corr. nota"),
+              ("xPoints", "Clutch Factor", xpMediaStr, "pts/partido", "warning",
+                "Valor ponderado de paradas", clutchRating.toString + "/100", "clutch rating"),
+              ("SPV", "Sweeper Keeper", spvMediaStr, "pts/partido", "primary",
+                "Shot Prevention Value", spvScore.toString + "/100", "score"),
+              ("Bypass", "Rate", bpMediaStr, "lineas/partido", "success",
+                "Lineas superadas en salida", bpEficStr + "%", "eficiencia")
+            ).map { case (titulo, sub, valor, unidad, c, desc, extra, extraLabel) =>
+              div(cls:="col-md-3 col-6",
+                div(cls:=s"card bg-dark border-$c h-100 shadow",
+                  div(cls:="card-body p-3",
+                    div(cls:="d-flex justify-content-between align-items-start",
+                      div(
+                        div(cls:=s"text-$c fw-bold", titulo),
+                        div(cls:="xx-small text-muted", sub)
+                      ),
+                      div(cls:=s"badge bg-$c bg-opacity-25 text-$c xx-small", desc)
+                    ),
+                    div(cls:=s"display-6 fw-black text-$c mt-2", valor),
+                    div(cls:="xx-small text-muted", unidad),
+                    div(cls:="mt-2 pt-2 border-top border-secondary",
+                      span(cls:=s"text-$c fw-bold small", extra),
+                      span(cls:="xx-small text-muted ms-1", extraLabel)
+                    )
+                  )
+                )
+              )
+            }: _*)
+          ),
+
+          // ── SPV BREAKDOWN ──────────────────────────────────────────────────
+          div(cls:="row g-3 mb-3",
+            div(cls:="col-md-4",
+              div(cls:="card bg-dark border-primary shadow h-100",
+                div(cls:="card-header text-primary fw-bold small", "SPV | Desglose por tipo de parada"),
+                div(cls:="card-body p-3",
+                  frag(Seq(
+                    ("Paradas 1 vs 1", spv1v1Pct, "danger", "Alto riesgo x1.5"),
+                    ("Paradas aereas", spvAerPct, "info",   "Dominio espacio x1.2"),
+                    ("Paradas normales", spvNorPct, "secondary", "Estandar x1.0")
+                  ).map { case (lbl, pct, c, nota2) =>
+                    div(cls:="mb-3",
+                      div(cls:="d-flex justify-content-between xx-small mb-1",
+                        span(cls:="text-white", lbl),
+                        span(cls:=s"text-$c fw-bold", pct.toString + "%")
+                      ),
+                      div(cls:="progress", style:="height:8px;",
+                        div(cls:=s"progress-bar bg-$c", style:=s"width:$pct%;")
+                      ),
+                      div(cls:="xx-small text-muted mt-1", nota2)
+                    )
+                  }: _*)
+                )
+              )
+            ),
+
+            // ── ROI ENTRENAMIENTO ──────────────────────────────────────────
+            div(cls:="col-md-4",
+              div(cls:="card bg-dark border-success shadow h-100",
+                div(cls:="card-header text-success fw-bold small", "ROI Entrenamiento | Correlacion con rendimiento"),
+                div(cls:="card-body p-3",
+                  div(cls:="xx-small text-muted mb-3",
+                    s"Basado en $roiPartidos partidos | Media $roiSesStr sesiones/semana"
+                  ),
+                  frag(Seq(
+                    ("Calidad sesion", roiCalStr, roiCalColor, "Efecto calidad tecnica"),
+                    ("Atencion/foco", roiAteStr, roiAteColor, "Efecto concentracion"),
+                    ("Carga (RPE)",   roiCarStr, roiCarColor, "Efecto fatiga acumulada")
+                  ).map { case (lbl, corr, c, desc) =>
+                    val corrNum: Double = corr.toDouble
+                    val corrPct: Int    = math.min(100, math.max(0, ((corrNum + 1.0) / 2.0 * 100).toInt))
+                    val corrPctStr: String = corrPct.toString
+                    div(cls:="mb-3",
+                      div(cls:="d-flex justify-content-between xx-small mb-1",
+                        span(cls:="text-white", lbl),
+                        span(cls:=s"text-$c fw-bold", "r=" + corr)
+                      ),
+                      div(cls:="progress", style:="height:8px;",
+                        div(cls:=s"progress-bar bg-$c", style:=s"width:$corrPctStr%;")
+                      ),
+                      div(cls:="xx-small text-muted mt-1", desc)
+                    )
+                  }: _*)
+                )
+              )
+            ),
+
+            // ── BYPASS RATE ────────────────────────────────────────────────
+            div(cls:="col-md-4",
+              div(cls:="card bg-dark border-success shadow h-100",
+                div(cls:="card-header text-success fw-bold small", "Bypass Rate | Lineas superadas en salida"),
+                div(cls:="card-body p-3",
+                  if (bpConDatos > 0) frag(
+                    div(cls:="row g-2 mb-3",
+                      div(cls:="col-6",
+                        div(cls:="text-center",
+                          div(cls:="display-6 fw-black text-success", bpMediaStr),
+                          div(cls:="xx-small text-muted", "lineas/partido")
+                        )
+                      ),
+                      div(cls:="col-6",
+                        div(cls:="text-center",
+                          div(cls:="display-6 fw-black text-info", bpEficStr + "%"),
+                          div(cls:="xx-small text-muted", "eficiencia")
+                        )
+                      )
+                    ),
+                    div(cls:="xx-small text-muted mt-2",
+                      "Registrado en " + bpConDatos.toString + " partidos. " +
+                        "Anota las lineas superadas al registrar cada partido en el Match Center.")
+                  ) else frag(
+                    div(cls:="text-center py-3",
+                      div(style:="font-size:36px;", "?"),
+                      div(cls:="text-muted small mt-2", "Sin datos de Bypass Rate"),
+                      div(cls:="xx-small text-secondary mt-1",
+                        "Activa el campo en Match Center al registrar partidos")
+                    )
+                  )
+                )
+              )
+            )
+          ),
+
+          // ── ANALISIS IA ────────────────────────────────────────────────────
+          if (iaPatron.nonEmpty) div(cls:="card bg-dark border-warning shadow mb-3",
+            div(cls:="card-header text-warning fw-bold small", "Analisis de Scout IA | Moneyball"),
+            div(cls:="card-body p-3",
+              div(cls:="row g-3",
+                frag(Seq(
+                  ("PATRON", iaPatron, "info"),
+                  ("VENTAJA", iaVentaja, "success"),
+                  ("CONSEJO", iaConsejo, "warning")
+                ).filter(_._2.nonEmpty).map { case (titulo, texto, c) =>
+                  div(cls:="col-md-4",
+                    div(cls:="p-3 rounded h-100",
+                      style:=s"border-left:3px solid ${if(c=="info")"#0dcaf0"else if(c=="success")"#28a745"else"#ffc107"};background:rgba(255,255,255,0.03);",
+                      div(cls:=s"text-$c fw-bold xx-small mb-2", titulo),
+                      div(cls:="text-white small", texto)
+                    )
+                  )
+                }: _*)
+              )
+            )
+          ) else div(),
+
+          // ── GRAFICOS ───────────────────────────────────────────────────────
+          div(cls:="row g-3 mb-3",
+            div(cls:="col-md-6",
+              div(cls:="card bg-dark border-secondary shadow h-100",
+                div(cls:="card-header text-white fw-bold small", "xT_GK & xPoints por partido"),
+                div(cls:="card-body p-2",
+                  tag("canvas")(id:="chartXT", style:="max-height:200px;")
+                )
+              )
+            ),
+            div(cls:="col-md-6",
+              div(cls:="card bg-dark border-secondary shadow h-100",
+                div(cls:="card-header text-white fw-bold small", "SPV & Bypass Rate por partido"),
+                div(cls:="card-body p-2",
+                  tag("canvas")(id:="chartSPV", style:="max-height:200px;")
+                )
+              )
+            )
+          ),
+
+          script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
+          {
+            val js: String =
+              "var ctxXT=document.getElementById('chartXT');" +
+                "if(ctxXT){new Chart(ctxXT,{type:'line'," +
+                "data:{labels:" + labelsJson + ",datasets:[" +
+                "{label:'xT_GK',data:" + xtJson + ",borderColor:'#0dcaf0',backgroundColor:'rgba(13,202,240,0.1)',borderWidth:2,tension:0.3,yAxisID:'y'}," +
+                "{label:'xPoints',data:" + xpJson + ",borderColor:'#ffc107',backgroundColor:'rgba(255,193,7,0.05)',borderWidth:2,tension:0.3,yAxisID:'y'}]}," +
+                "options:{responsive:true,maintainAspectRatio:false," +
+                "scales:{y:{ticks:{color:'#aaa'},grid:{color:'#333'}},x:{ticks:{color:'#888',maxTicksLimit:8},grid:{display:false}}}," +
+                "plugins:{legend:{labels:{color:'#fff',font:{size:10}}}}}});}" +
+                "var ctxSPV=document.getElementById('chartSPV');" +
+                "if(ctxSPV){new Chart(ctxSPV,{type:'bar'," +
+                "data:{labels:" + labelsJson + ",datasets:[" +
+                "{label:'SPV',data:" + spvJson + ",backgroundColor:'rgba(13,110,253,0.6)',borderColor:'#0d6efd',borderWidth:1,yAxisID:'y'}," +
+                "{label:'Bypass',data:" + bpJson + ",type:'line',borderColor:'#28a745',borderWidth:2,pointRadius:3,tension:0.3,yAxisID:'y1'}]}," +
+                "options:{responsive:true,maintainAspectRatio:false," +
+                "scales:{y:{ticks:{color:'#aaa'},grid:{color:'#333'}},y1:{position:'right',ticks:{color:'#28a745'},grid:{display:false}},x:{ticks:{color:'#888',maxTicksLimit:8},grid:{display:false}}}," +
+                "plugins:{legend:{labels:{color:'#fff',font:{size:10}}}}}});}"
+            script(raw(js))
+          }
+        )
+      )
+    ))
+  }
+
   // == DIGITAL TWIN ============================================================
   @cask.get("/digital-twin")
   def digitalTwinPage(request: cask.Request, hPadre: Double = 0.0, hMadre: Double = 0.0) = withAuth(request) {

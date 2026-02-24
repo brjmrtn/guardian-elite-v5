@@ -4,7 +4,7 @@
 
 **Guardian Elite** es un ecosistema de alto rendimiento diseñado para la monitorización longitudinal (de los 5 a los 20 años) del desarrollo de **Héctor**. Esta plataforma integra Big Data, Machine Learning e IA Generativa para transformar el crecimiento biológico, técnico y cognitivo en un activo estratégico.
 
-![Version](https://img.shields.io/badge/Version-6.0_Cognitive_Data_Ready-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4_Parcial-COMPLETADA-blue?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5_Parcial-COMPLETADA-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-6.0_Cognitive_Data_Ready-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4-COMPLETADA-brightgreen?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5_Parcial-COMPLETADA-blue?style=for-the-badge)
 
 ---
 
@@ -81,6 +81,15 @@
 * **Notificaciones Push:** Alertas de partido proximo, recordatorio wellness y avisos ACWR.
 * **Predictor de Clean Sheet:** Probabilidad de porteria a cero basada en ACWR, sueno y rival.
 
+## 14. DIGITAL TWIN | HECTOR 2035 (Nuevo - Fase 4)
+* **Proyeccion de Altura Adulta:** Algoritmo Tanner midparent ((hPadre + hMadre + 13) / 2) con ponderacion dinamica por edad: 90% genetica a los 5 anos, 60% datos reales a los 15. Se auto-afina con cada medicion registrada en Wellness.
+* **PHV Detector:** Detecta automaticamente el Pico de Velocidad de Crecimiento comparando registros consecutivos de altura. Activa alerta PICO ACTIVO si crece >6 cm/anio.
+* **Metricas de Portero Proyectadas:** Envergadura adulta, alcance de parada y cobertura de porteria (%) calculados desde la altura adulta estimada.
+* **Comparativa vs Elite:** Barras comparativas contra la media profesional (189 cm altura / 200 cm envergadura / 251 cm alcance).
+* **Informe de Ojeador IA:** Gemini genera 4 bloques: Biotipo / Ventaja Competitiva / Riesgo / Proyeccion de Nivel.
+* **Graficos:** Curva de crecimiento historico + proyeccion hasta los 18 anos, y evolucion de nota media por temporada.
+* **Calibrador Parental:** Inputs de altura padre/madre para recalcular la proyeccion al instante. URL: `/digital-twin`.
+
 ---
 
 # PARTE II: ROADMAP — LO QUE QUEDA
@@ -104,7 +113,6 @@
 
 | Fase | Feature | Bloqueante |
 |------|---------|------------|
-| 7 | Digital Twin Proyectivo | Stack ML avanzado |
 | 7 | Clutch Factor Analytics | Volumen de datos suficiente |
 | 8 | Liderazgo Acustico (Voice Command) | Procesamiento de audio en tiempo real |
 | 9 | Deep-Video Highlights IA | Integracion FFmpeg + Gemini Vision |
@@ -190,7 +198,7 @@
 FASE 1 — Core Platform          ██████████ 100%
 FASE 2 — Cognitive Synergy      ██████████ 100%
 FASE 3 — Computer Vision        ░░░░░░░░░░   0%  (requiere Python/OpenCV)
-FASE 4 — ML & Estrategia Pro    █████████░  90%  (Digital Twin desplegado)
+FASE 4 — ML & Estrategia Pro    ██████████ 100%  (Digital Twin desplegado)
 FASE 5 — Inteligencia Proactiva ████████░░  80%  (falta Dojo + Bio-Banding)
 FASE 6 — Innovacion Exclusiva   ██████████ 100%
 FASE 6.5 — Moneyball Analytics  ░░░░░░░░░░   0%  (roadmap definido)
