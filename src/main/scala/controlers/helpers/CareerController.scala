@@ -403,155 +403,18 @@ object CareerController extends cask.Routes {
 
   // 8. PIZARRA TACTICA
 
+  // /oracle -> digital-twin (version mejorada con algoritmo Tanner + PHV)
   @cask.get("/oracle")
   def oraclePage(request: cask.Request, hDad: String = "180", hMom: String = "170") = withAuth(request) {
-    val hd = try hDad.toDouble catch { case _: Exception => 180.0 }
-    val hm = try hMom.toDouble catch { case _: Exception => 170.0 }
-
-    val card = DatabaseManager.getLatestCardData()
-    val edadActual = DatabaseManager.calcularEdadExacta(card.fechaNacimiento)
-    val (p50H, p15H, p85H, p50W, p15W, p85W) = DatabaseManager.getOMSPercents()
-
-    val predictionHtml = DatabaseManager.getOraclePrediction(hd, hm)
-    val bioInsights = DatabaseManager.getOracleInsights()
-    val growthJson = DatabaseManager.getGrowthHistory()
-
-    // 1. Definimos el contenido (Solo Modifiers de Scalatags)
-    val mainContent = div(
-      div(cls:="row justify-content-center",
-        div(cls:="col-md-8 col-12",
-          h2(cls:="text-center text-info mb-4", "🔮 EL ORACULO"),
-
-          // Tarjeta Inteligencia
-          div(cls:="card bg-dark border-info shadow mb-4",
-            div(cls:="card-header bg-info text-dark fw-bold d-flex justify-content-between align-items-center",
-              span("🧠 INTELIGENCIA DEPORTIVA"),
-              span(cls:="badge bg-dark text-info", s"Edad: $edadActual anos")
-            ),
-            div(cls:="card-body", raw(bioInsights))
-          ),
-
-          // Tarjeta Grafico
-          div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-white small", "Evolucion Biometrica Historica"),
-            div(cls:="card-body", style:="height: 300px; position: relative;",
-              canvas(id:="growthChart")
-            )
-          ),
-
-          // Tabla OMS
-          div(cls:="card bg-dark border-secondary shadow mb-4",
-            div(cls:="card-header text-muted small fw-bold text-uppercase", s"📊 Referencia OMS para $edadActual anos"),
-            div(cls:="card-body p-0",
-              table(cls:="table table-dark table-sm mb-0 small text-center",
-                thead(tr(th("Percentil"), th("Altura (cm)"), th("Peso (kg)"))),
-                tbody(
-                  tr(td("P15 (Bajo)"), td(f"$p15H%.1f"), td(f"$p15W%.1f")),
-                  tr(cls:="table-active text-info", td("P50 (Media)"), td(f"$p50H%.1f"), td(f"$p50W%.1f")),
-                  tr(td("P85 (Alto)"), td(f"$p85H%.1f"), td(f"$p85W%.1f"))
-                )
-              )
-            )
-          ),
-
-          // Prediccion Genetica
-          div(cls:="card bg-dark text-white border-secondary shadow p-4",
-            h4(cls:="text-center text-warning mb-3", "Prediccion Altura Final"),
-            div(cls:="bg-secondary bg-opacity-10 p-3 rounded mb-3", raw(predictionHtml)),
-            form(action:="/oracle", method:="get", cls:="mt-4 border-top border-secondary pt-3",
-              div(cls:="row",
-                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Papa (cm)"), input(tpe:="number", name:="hDad", value:=hDad, cls:="form-control bg-dark text-white text-center")),
-                div(cls:="col-6", label(cls:="small text-muted fw-bold", "Mama (cm)"), input(tpe:="number", name:="hMom", value:=hMom, cls:="form-control bg-dark text-white text-center"))
-              ),
-              div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "🔄 Recalcular"))
-            )
-          )
-        )
-      ),
-      // 2. Script inyectado (Aseguramos que Chart.js este cargado en basePage)
-      script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
-      script(raw(s"""
-      window.addEventListener('load', function() {
-        const rawData = $growthJson;
-        const ctx = document.getElementById('growthChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: rawData.labels,
-                datasets: [
-                    { label: 'Altura (cm)', data: rawData.altura, borderColor: '#0dcaf0', yAxisID: 'y', tension: 0.3, fill: true, backgroundColor: 'rgba(13, 202, 240, 0.1)' },
-                    { label: 'Peso (kg)', data: rawData.peso, borderColor: '#ffc107', yAxisID: 'y1', tension: 0.3, fill: false }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: { type: 'linear', position: 'left', ticks: { color: '#0dcaf0' }, title: { display: true, text: 'cm', color: '#0dcaf0' }, grid: { color: '#333' } },
-                    y1: { type: 'linear', position: 'right', ticks: { color: '#ffc107' }, title: { display: true, text: 'kg', color: '#ffc107' }, grid: { drawOnChartArea: false } }
-                },
-                plugins: {
-                    legend: { labels: { color: '#fff', font: { family: 'Oswald' } } }
-                }
-            }
-        });
-      });
-    """))
-    )
-
-    // 3. Renderizado final
-    renderHtml(basePage("bio", mainContent))
+    cask.Response("".getBytes("UTF-8"), statusCode = 302,
+      headers = Seq("Location" -> s"/digital-twin?hPadre=$hDad&hMadre=$hMom"))
   }
-  // --- 2. MONEYBALL (Distribucion Tactica) ---
+
+  // /distribution -> moneyball (version Fase 6.5 completa)
   @cask.get("/distribution")
   def distributionPage() = {
-    val tac = DatabaseManager.getTacticalStats()
-
-    // Funcion auxiliar para calcular porcentajes seguros
-    def pct(n: Double, d: Double): Int = if(d > 0) ((n/d)*100).toInt else 0
-
-    val totG = if(tac("g_tot") > 0) tac("g_tot").toDouble else 1.0
-    val (ga, gm, gr) = (pct(tac("g_alt"), totG), pct(tac("g_med"), totG), pct(tac("g_ras"), totG))
-    val (gl, gc, gd) = (pct(tac("g_izq"), totG), pct(tac("g_cen"), totG), pct(tac("g_der"), totG))
-
-    val totP = if(tac("p_tot") > 0) tac("p_tot").toDouble else 1.0
-    val (pa, pm, pr) = (pct(tac("p_alt"), totP), pct(tac("p_med"), totP), pct(tac("p_ras"), totP))
-    val (pl, pc, pd) = (pct(tac("p_izq"), totP), pct(tac("p_cen"), totP), pct(tac("p_der"), totP))
-
-    // Celda tactica visual
-    def tCell(label: String, p: Int, color: String) = div(
-      cls:=s"flex-fill text-center p-3 border border-secondary $color",
-      style:="color: #000; font-weight: 800;",
-      div(style:="font-size:14px;", label),
-      div(style:="font-size:24px;", s"$p%")
-    )
-
-    val content = basePage("bio", div(cls:="row justify-content-center",
-      div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "📊 MONEYBALL TACTICS"),
-
-        // Seccion Goles Encajados
-        div(cls:="card bg-dark text-white border-danger shadow mb-4",
-          div(cls:="card-header bg-danger text-white fw-bold text-center", "ZONA DE ENCAJE (Debilidades)"),
-          div(cls:="card-body p-0",
-            div(cls:="d-flex", tCell("ALTA", ga, "bg-danger bg-opacity-75"), tCell("MEDIA", gm, "bg-warning bg-opacity-75"), tCell("BAJA", gr, "bg-light bg-opacity-75")),
-            div(cls:="d-flex", tCell("IZQ", gl, "bg-danger bg-opacity-75"), tCell("CEN", gc, "bg-warning bg-opacity-75"), tCell("DER", gd, "bg-danger bg-opacity-75"))
-          )
-        ),
-
-        // Seccion Paradas
-        div(cls:="card bg-dark text-white border-success shadow mb-4",
-          div(cls:="card-header bg-success text-white fw-bold text-center", "ZONA DE SEGURIDAD (Fortalezas)"),
-          div(cls:="card-body p-0",
-            div(cls:="d-flex", tCell("ALTA", pa, "bg-success bg-opacity-75"), tCell("MEDIA", pm, "bg-info bg-opacity-75"), tCell("BAJA", pr, "bg-light bg-opacity-75")),
-            div(cls:="d-flex", tCell("IZQ", pl, "bg-success bg-opacity-75"), tCell("CEN", pc, "bg-info bg-opacity-75"), tCell("DER", pd, "bg-success bg-opacity-75"))
-          )
-        ),
-
-        div(cls:="text-center", a(href:="/bio", cls:="btn btn-outline-light", "Volver"))
-      )
-    ))
-    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+    cask.Response("".getBytes("UTF-8"), statusCode = 302,
+      headers = Seq("Location" -> "/moneyball"))
   }
 
   @cask.get("/career/legacy")

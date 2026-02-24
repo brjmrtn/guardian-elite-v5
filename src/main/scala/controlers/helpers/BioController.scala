@@ -162,7 +162,7 @@ object BioController extends cask.Routes {
     val content = basePage("bio", div(cls := "row justify-content-center",
       div(cls := "col-md-6 mb-4",
         // LABORATORIO
-        div(cls:="card bg-secondary bg-opacity-10 border-info shadow mb-4", div(cls:="card-header bg-dark text-info fw-bold text-center", "🔬 LABORATORIO DE DATOS"), div(cls:="card-body p-2 d-flex justify-content-around", a(href:="/gear", cls:="btn btn-outline-light flex-fill me-1", div(style:="font-size:20px", "⚽"), span(cls:="small", "Material")), a(href:="/oracle", cls:="btn btn-outline-info flex-fill me-1", div(style:="font-size:20px", "🔮"), span(cls:="small", "Oraculo")), a(href:="/distribution", cls:="btn btn-outline-warning flex-fill", div(style:="font-size:20px", "📊"), span(cls:="small", "Moneyball")))),
+        div(cls:="card bg-secondary bg-opacity-10 border-info shadow mb-4", div(cls:="card-header bg-dark text-info fw-bold text-center", "🔬 LABORATORIO DE DATOS"), div(cls:="card-body p-2 d-flex justify-content-around", a(href:="/gear", cls:="btn btn-outline-light flex-fill me-1", div(style:="font-size:20px", "⚽"), span(cls:="small", "Material")), a(href:="/digital-twin", cls:="btn btn-outline-info flex-fill me-1", div(style:="font-size:20px", "🔮"), span(cls:="small", "Twin 2035")), a(href:="/moneyball", cls:="btn btn-outline-warning flex-fill", div(style:="font-size:20px", "📊"), span(cls:="small", "Moneyball")))),
         // --- NUEVO: MODULO JUDO (Insertar aqui) ---
         div(cls:="card bg-dark border-warning shadow mb-4",
           div(cls:="card-header bg-warning text-dark fw-bold text-center", "🥋 ESTADO DOJO (JUDO)"),
@@ -289,66 +289,8 @@ object BioController extends cask.Routes {
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
   }
 
-  @cask.postForm("/bio/medical/upload")
-  def uploadMedical(fecha: String,
-                    tipo: String,
-                    esPrevio: String = "false",
-                    archivo: cask.FormFile) = {
-    val isPrevio = esPrevio == "on"
-    // cask 0.9.2: FormFile guarda el archivo en disco. toString = FormFile(name, /tmp/path, headers)
-    // Los campos son: fileName (String) y path (java.nio.file.Path o String)
-    val fileName: String = try {
-      archivo.getClass.getDeclaredFields
-        .find(f => f.getName == "fileName" || f.getName == "name")
-        .map { f => f.setAccessible(true); f.get(archivo).asInstanceOf[String] }
-        .getOrElse("documento.pdf")
-    } catch { case _: Exception => "documento.pdf" }
 
-    val fileBytes: Array[Byte] = try {
-      // Buscar el campo path (puede ser Path o String)
-      val pathField = archivo.getClass.getDeclaredFields
-        .find(f => f.getName == "path" || f.getName == "filePath" || f.getName == "tmpFile")
-      pathField match {
-        case Some(f) =>
-          f.setAccessible(true)
-          val v = f.get(archivo)
-          v match {
-            case p: java.nio.file.Path => java.nio.file.Files.readAllBytes(p)
-            case s: String             => java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(s))
-            case _                     => Array.empty[Byte]
-          }
-        case None =>
-          // Fallback: parsear el toString "FormFile(name, /tmp/path, ...)"
-          val str = archivo.toString
-          val parts = str.stripPrefix("FormFile(").split(",")
-          if (parts.length >= 2) {
-            val p = java.nio.file.Paths.get(parts(1).trim)
-            if (java.nio.file.Files.exists(p)) java.nio.file.Files.readAllBytes(p)
-            else Array.empty[Byte]
-          } else Array.empty[Byte]
-      }
-    } catch { case _: Exception => Array.empty[Byte] }
-
-    if (fileBytes.nonEmpty) {
-      // 2. Proceso para Gemini
-      val base64Content = java.util.Base64.getEncoder.encodeToString(fileBytes)
-      val mimeType = if (fileName.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
-
-      val medicalPrompt = s"Analiza este informe ($tipo) de Hector. Extrae DIAGNOSTICO y RECOMENDACION DEPORTIVA. Formato: DIAGNOSTICO: 📝 | RECOMENDACION: 📝"
-
-      val analisisIA = DatabaseManager.AIProvider.ask(medicalPrompt, Some((mimeType, base64Content)))
-      val partes = analisisIA.split("\\|")
-      val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNOSTICO:", "").trim
-      val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACION:", "").trim
-
-      DatabaseManager.saveMedicalRecordFull(fecha, tipo, diag, rec, isPrevio)
-    }
-
-    cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
-  }
-  // --- 3. MODO LEGADO (RPG) ---
-
-  // ── FASE 2: PAGINA GRAFICO DE CARGA ───────────────────────────────────────
+  // /bio/medical/upload manejado en SharedLayout
   @cask.get("/bio/carga")
   def cargaPage(request: cask.Request) = withAuth(request) {
     val weekly   = DatabaseManager.getWeeklyLoad(12)
