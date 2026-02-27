@@ -107,7 +107,8 @@
 
 ---
 
-## FASE 6.5 — Moneyball & Deep Influence Analytics *(Parcial)*
+## FASE 6.5: MONEYBALL & DEEP INFLUENCE ANALYTICS
+*Módulo de scouting cognitivo para encontrar ineficiencias de mercado, valor oculto e impacto estructural del portero.*
 
 *Módulo de scouting cognitivo para encontrar ineficiencias de mercado, valor oculto e impacto estructural del portero.*
 
@@ -121,14 +122,22 @@
 
 ---
 
-# PARTE II: ROADMAP — LO QUE QUEDA
+## FASE 8: DEEP PERFORMANCE & COGNITIVE SCOUTING
+*Vanguardia científica para diseccionar técnica pura, biomecánica y robustez psicológica.*
 
 ## FASE 3 — Computer Vision & Video Analysis
 *Requiere integración Python/OpenCV — Fuera del stack actual Scala.*
 
-* **Pose-Estimation Analyst:** Detección de errores de sustentación y Paso Negativo en video.
-* **Goal Coverage Mapping:** Superficie de portería cubierta según biotipo vs. dimensiones reglamentarias.
-* **Reaction Time Tracker:** Milisegundos exactos desde el disparo hasta la estirada.
+---
+
+## FASE 9: ESTRUCTURA PROFESIONAL & VANGUARDIA (The Elite Layer)
+*Módulos de alta gestión para protección de activos, liderazgo en campo y proyección profesional.*
+
+* **Vocal Influence Analysis:** Análisis de audio para medir frecuencia, claridad y efectividad de instrucciones tácticas y mando de área.
+* **Digital Twin Proyectivo (What-if ML):** Modelo virtual para ejecutar simulaciones sobre cambios en masa muscular, biotipo o contextos de liga específicos.
+* **Gaze Behavior Audit:** Análisis de la secuencia de escaneo previa a acciones a balón parado para ampliar la conciencia situacional y evitar el "túnel visual".
+* **Guardian Insurance & Contract Vault:** Gestión de cláusulas, derechos de imagen y optimización de seguros basados en el historial de lesiones e índice articular.
+* **Sentiment AI & Media Resilience:** Monitorización de la narrativa externa en prensa y redes para preparar la resiliencia mediática ante picos de presión.
 
 ---
 
@@ -213,6 +222,12 @@
 
 ---
 
+## FASE 13: THE BIOLOGICAL & SOCIAL DEEP-CORE
+*La última frontera: genética, entorno social y ética algorítmica.*
+
+* **Perfilado Nutrigenómico:** Análisis de predisposición genética a lesiones de ligamentos, metabolización de nutrientes y respuesta inflamatoria sistémica.
+* **Micro-Ecosistema Social (Invisible Training):** Integración de carga académica, tiempos de viaje y estabilidad del entorno para ajustar el *Readiness Score* diario.
+* **AI Fairness & Evolution Audit:** Sistema de auditoría para asegurar que los modelos de ML no generen sesgos y permitan la evolución natural del atleta.
 ## Stack Tecnológico
 
 | Capa | Tecnología |
