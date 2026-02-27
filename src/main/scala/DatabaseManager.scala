@@ -1500,21 +1500,22 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val notaSigSerie: List[Double]   = rows.reverse.map(_.notaSig)
 
       // 6. Datos individuales para tabla
-      val tablaRows: List[Map[String, String]] = rows.map(r =>
+      val tablaRows: List[Map[String, String]] = rows.map { r =>
+        val diff = r.notaSig - r.notaError
+        val deltaStr = (if (diff >= 0) "+" else "") + f"$diff%.1f"
+        val resultado = if (diff > 0.4) "REBOTE" else if (diff < -0.5) "IMPACTO" else "ESTABLE"
         Map(
-          "fecha"       -> r.fecha.take(10),
-          "rival"       -> r.rival,
-          "notaError"   -> f"${r.notaError}%.1f",
-          "nEvitables"  -> r.nEvitables.toString,
-          "fechaSig"    -> r.fechaSig.take(10),
-          "rivalSig"    -> r.rivalSig,
-          "notaSig"     -> f"${r.notaSig}%.1f",
-          "delta"       -> (if (r.notaSig - r.notaError >= 0) "+" else "") + f"${r.notaSig - r.notaError}%.1f",
-          "resultado"   -> (if (r.notaSig > r.notaError + 0.4) "REBOTE"
-          else if (r.notaSig < r.notaError - 0.5) "IMPACTO"
-          else "ESTABLE")
+          "fecha"      -> r.fecha.take(10),
+          "rival"      -> r.rival,
+          "notaError"  -> f"${r.notaError}%.1f",
+          "nEvitables" -> r.nEvitables.toString,
+          "fechaSig"   -> r.fechaSig.take(10),
+          "rivalSig"   -> r.rivalSig,
+          "notaSig"    -> f"${r.notaSig}%.1f",
+          "delta"      -> deltaStr,
+          "resultado"  -> resultado
         )
-      )
+      }
 
       Map(
         "n"                -> n,

@@ -1827,7 +1827,7 @@ object HistoryController extends cask.Routes {
             div(cls := "card-header text-white fw-bold small", "Evolucion: Nota con error vs Nota siguiente"),
             div(cls := "card-body p-3",
               div(style := "height:240px;",
-                tags2.canvas(id := "resetChart")
+                tag("canvas")(id := "resetChart", style := "max-height:240px;")
               )
             )
           ) else frag(),
