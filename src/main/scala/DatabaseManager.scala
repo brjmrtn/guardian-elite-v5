@@ -1416,6 +1416,126 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+  // == FASE 8: COGNITIVE RESET RATE ============================================
+  def getCognitiveResetData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // 1. Partidos con al menos un gol evitable (responsabilidad Alta o Media+parable)
+      //    y la nota del partido SIGUIENTE
+      val rs = conn.createStatement().executeQuery("""
+        WITH partidos_con_error AS (
+          SELECT DISTINCT ON (m.id)
+            m.id, m.fecha, m.nota, m.rival,
+            COUNT(mg.id) OVER (PARTITION BY m.id) as n_evitables
+          FROM matches m
+          JOIN match_goals mg ON mg.match_id = m.id
+          WHERE m.status = 'PLAYED' AND m.nota > 0
+            AND (mg.responsabilidad = 'Alta'
+              OR (mg.responsabilidad = 'Media' AND mg.era_parable = 'Si'))
+        ),
+        partidos_ord AS (
+          SELECT id, fecha, nota, rival,
+            ROW_NUMBER() OVER (ORDER BY fecha ASC) AS rn
+          FROM matches
+          WHERE status = 'PLAYED' AND nota > 0
+        )
+        SELECT
+          pe.id, pe.fecha, pe.nota AS nota_error, pe.rival,
+          pe.n_evitables,
+          nx.nota  AS nota_siguiente,
+          nx.rival AS rival_siguiente,
+          nx.fecha AS fecha_siguiente
+        FROM partidos_con_error pe
+        JOIN partidos_ord po ON po.id = pe.id
+        JOIN partidos_ord nx ON nx.rn = po.rn + 1
+        ORDER BY pe.fecha DESC
+        LIMIT 20
+      """)
+
+      case class ResetRow(fecha: String, rival: String, notaError: Double,
+                          nEvitables: Int, notaSig: Double, rivalSig: String,
+                          fechaSig: String)
+      var rows = List[ResetRow]()
+      while (rs.next()) {
+        rows = rows :+ ResetRow(
+          fecha        = Option(rs.getString("fecha")).getOrElse(""),
+          rival        = Option(rs.getString("rival")).getOrElse(""),
+          notaError    = rs.getDouble("nota_error"),
+          nEvitables   = rs.getInt("n_evitables"),
+          notaSig      = rs.getDouble("nota_siguiente"),
+          rivalSig     = Option(rs.getString("rival_siguiente")).getOrElse(""),
+          fechaSig     = Option(rs.getString("fecha_siguiente")).getOrElse("")
+        )
+      }
+
+      // 2. Metricas agregadas
+      val n = rows.size
+      val rebounds   = rows.count(r => r.notaSig >= r.notaError - 0.2)  // recuperó o mejoró
+      val positivos  = rows.count(r => r.notaSig > r.notaError + 0.4)   // rebote claro
+      val negativos  = rows.count(r => r.notaSig < r.notaError - 0.5)   // impacto negativo
+
+      val resetScore: Int = if (n > 0) math.min(100, (rebounds.toDouble / n * 100).toInt) else 0
+      val avgNotaError: Double = if (n > 0) rows.map(_.notaError).sum / n else 0.0
+      val avgNotaSig: Double   = if (n > 0) rows.map(_.notaSig).sum / n else 0.0
+      val avgDelta: Double     = avgNotaSig - avgNotaError
+
+      // 3. Mediana de recuperacion (para ver si sube normalmente tras un error)
+      val mediaGeneral: Double = {
+        val rsM = conn.createStatement().executeQuery(
+          "SELECT AVG(nota) FROM matches WHERE status='PLAYED' AND nota > 0")
+        if (rsM.next()) rsM.getDouble(1) else 0.0
+      }
+
+      // 4. Clasificacion
+      val clasificacion: String = if (resetScore >= 70) "RESILIENTE"
+      else if (resetScore >= 45) "EN PROCESO"
+      else "VULNERABLE"
+      val clasificacionColor: String = if (resetScore >= 70) "success"
+      else if (resetScore >= 45) "warning"
+      else "danger"
+
+      // 5. Series para grafico
+      val fechasSerie: List[String] = rows.reverse.map(_.fechaSig.take(10))
+      val notaErrorSerie: List[Double] = rows.reverse.map(_.notaError)
+      val notaSigSerie: List[Double]   = rows.reverse.map(_.notaSig)
+
+      // 6. Datos individuales para tabla
+      val tablaRows: List[Map[String, String]] = rows.map(r =>
+        Map(
+          "fecha"       -> r.fecha.take(10),
+          "rival"       -> r.rival,
+          "notaError"   -> f"${r.notaError}%.1f",
+          "nEvitables"  -> r.nEvitables.toString,
+          "fechaSig"    -> r.fechaSig.take(10),
+          "rivalSig"    -> r.rivalSig,
+          "notaSig"     -> f"${r.notaSig}%.1f",
+          "delta"       -> (if (r.notaSig - r.notaError >= 0) "+" else "") + f"${r.notaSig - r.notaError}%.1f",
+          "resultado"   -> (if (r.notaSig > r.notaError + 0.4) "REBOTE"
+          else if (r.notaSig < r.notaError - 0.5) "IMPACTO"
+          else "ESTABLE")
+        )
+      )
+
+      Map(
+        "n"                -> n,
+        "resetScore"       -> resetScore,
+        "clasificacion"    -> clasificacion,
+        "clasificacionColor" -> clasificacionColor,
+        "rebounds"         -> rebounds,
+        "positivos"        -> positivos,
+        "negativos"        -> negativos,
+        "avgNotaError"     -> avgNotaError,
+        "avgNotaSig"       -> avgNotaSig,
+        "avgDelta"         -> avgDelta,
+        "mediaGeneral"     -> mediaGeneral,
+        "fechasSerie"      -> fechasSerie,
+        "notaErrorSerie"   -> notaErrorSerie,
+        "notaSigSerie"     -> notaSigSerie,
+        "tablaRows"        -> tablaRows
+      )
+    } finally { conn.close() }
+  }
+
   // == FASE 6.5: MONEYBALL & DEEP INFLUENCE ANALYTICS =========================
   def getMoneyballData(): Map[String, Any] = {
     val conn = getConnection()
