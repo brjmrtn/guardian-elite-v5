@@ -1681,6 +1681,253 @@ object HistoryController extends cask.Routes {
     ))
   }
 
+  // == COGNITIVE RESET RATE ====================================================
+  @cask.get("/cognitive-reset")
+  def cognitiveResetPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getCognitiveResetData()
+
+    val n: Int               = d("n").asInstanceOf[Int]
+    val resetScore: Int      = d("resetScore").asInstanceOf[Int]
+    val clasificacion: String = d("clasificacion").asInstanceOf[String]
+    val clasColor: String    = d("clasificacionColor").asInstanceOf[String]
+    val rebounds: Int        = d("rebounds").asInstanceOf[Int]
+    val positivos: Int       = d("positivos").asInstanceOf[Int]
+    val negativos: Int       = d("negativos").asInstanceOf[Int]
+    val avgNotaError: Double = d("avgNotaError").asInstanceOf[Double]
+    val avgNotaSig: Double   = d("avgNotaSig").asInstanceOf[Double]
+    val avgDelta: Double     = d("avgDelta").asInstanceOf[Double]
+    val mediaGeneral: Double = d("mediaGeneral").asInstanceOf[Double]
+    val tablaRows: List[Map[String,String]] = d("tablaRows").asInstanceOf[List[Map[String,String]]]
+    val fechasSerie: List[String]     = d("fechasSerie").asInstanceOf[List[String]]
+    val notaErrorSerie: List[Double]  = d("notaErrorSerie").asInstanceOf[List[Double]]
+    val notaSigSerie: List[Double]    = d("notaSigSerie").asInstanceOf[List[Double]]
+
+    val avgNotaErrorStr = f"$avgNotaError%.1f"
+    val avgNotaSigStr   = f"$avgNotaSig%.1f"
+    val avgDeltaStr     = (if (avgDelta >= 0) "+" else "") + f"$avgDelta%.2f"
+    val avgDeltaColor   = if (avgDelta >= 0.2) "success" else if (avgDelta >= -0.2) "warning" else "danger"
+    val mediaGeneralStr = f"$mediaGeneral%.1f"
+    val estabPct        = if (n > 0) ((rebounds - positivos).toDouble / n * 100).toInt else 0
+    val positivosPct    = if (n > 0) (positivos.toDouble / n * 100).toInt else 0
+    val negativosPct    = if (n > 0) (negativos.toDouble / n * 100).toInt else 0
+
+    val labelsJson    = fechasSerie.map(l => "\"" + l + "\"").mkString("[", ",", "]")
+    val errorJson     = notaErrorSerie.map(v => f"$v%.1f").mkString("[", ",", "]")
+    val sigJson       = notaSigSerie.map(v => f"$v%.1f").mkString("[", ",", "]")
+    val mediaJson     = fechasSerie.map(_ => f"$mediaGeneral%.1f").mkString("[", ",", "]")
+
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+
+          // Header
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-danger mb-0", "COGNITIVE RESET RATE"),
+              span(cls := "badge bg-dark border border-danger text-danger", "FASE 8 — Early Access")
+            ),
+            div(cls := "d-flex gap-2",
+              a(href := "/moneyball", cls := "btn btn-outline-warning btn-sm fw-bold", "Moneyball"),
+              a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+            )
+          ),
+
+          // Alerta si no hay datos
+          if (n == 0) div(cls := "alert alert-secondary",
+            "Sin datos suficientes. Registra partidos con goles y clasifica su responsabilidad en el Match Center."
+          ) else frag(),
+
+          // KPI principal
+          div(cls := "row g-3 mb-3",
+            div(cls := "col-md-4",
+              div(cls := s"card bg-dark border-$clasColor shadow text-center h-100",
+                div(cls := "card-body p-4",
+                  div(cls := s"display-1 fw-black text-$clasColor", resetScore.toString),
+                  div(cls := "text-white fw-bold fs-5 mt-1", "Reset Score"),
+                  div(cls := s"badge bg-$clasColor mt-2 fs-6", clasificacion),
+                  div(cls := "xx-small text-muted mt-3",
+                    s"Basado en $n partidos con gol evitable"
+                  )
+                )
+              )
+            ),
+            div(cls := "col-md-8",
+              div(cls := "row g-3 h-100",
+                // Nota en partido con error
+                div(cls := "col-6",
+                  div(cls := "card bg-dark border-secondary shadow h-100",
+                    div(cls := "card-body p-3",
+                      div(cls := "text-muted small fw-bold", "NOTA TRAS ERROR"),
+                      div(cls := "display-5 fw-black text-warning mt-1", avgNotaErrorStr),
+                      div(cls := "xx-small text-muted", "media en partido con gol evitable")
+                    )
+                  )
+                ),
+                // Nota partido siguiente
+                div(cls := "col-6",
+                  div(cls := s"card bg-dark border-$avgDeltaColor shadow h-100",
+                    div(cls := "card-body p-3",
+                      div(cls := "text-muted small fw-bold", "NOTA PARTIDO SIGUIENTE"),
+                      div(cls := s"display-5 fw-black text-$avgDeltaColor mt-1", avgNotaSigStr),
+                      div(cls := s"badge bg-$avgDeltaColor bg-opacity-25 text-$avgDeltaColor mt-1",
+                        s"$avgDeltaStr vs partido con error")
+                    )
+                  )
+                ),
+                // Media general
+                div(cls := "col-6",
+                  div(cls := "card bg-dark border-secondary shadow h-100",
+                    div(cls := "card-body p-3",
+                      div(cls := "text-muted small fw-bold", "MEDIA GLOBAL"),
+                      div(cls := "display-5 fw-black text-info mt-1", mediaGeneralStr),
+                      div(cls := "xx-small text-muted", "todos los partidos")
+                    )
+                  )
+                ),
+                // Distribucion de respuestas
+                div(cls := "col-6",
+                  div(cls := "card bg-dark border-secondary shadow h-100",
+                    div(cls := "card-body p-3",
+                      div(cls := "text-muted small fw-bold mb-2", "RESPUESTA POST-ERROR"),
+                      div(cls := "d-flex justify-content-between xx-small mb-1",
+                        span(cls := "text-success", s"Rebote $positivosPct%"),
+                        span(cls := "text-warning", s"Estable $estabPct%"),
+                        span(cls := "text-danger", s"Impacto $negativosPct%")
+                      ),
+                      div(cls := "progress", style := "height:10px;",
+                        div(cls := "progress-bar bg-success", style := s"width:${positivosPct}%"),
+                        div(cls := "progress-bar bg-warning",  style := s"width:${estabPct}%"),
+                        div(cls := "progress-bar bg-danger",   style := s"width:${negativosPct}%")
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          ),
+
+          // Explicacion de la metrica
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-body p-3 small text-muted",
+              span(cls := "text-white fw-bold", "Metodologia: "),
+              "Detecta cada partido donde Hector encajo al menos un gol catalogado como ",
+              span(cls := "text-warning fw-bold", "Evitable"),
+              " y compara su nota con la del siguiente partido. ",
+              span(cls := "text-success fw-bold", "Rebote"),
+              s": nota siguiente > +0.4. ",
+              span(cls := "text-warning fw-bold", "Estable"),
+              s": variacion <= 0.2. ",
+              span(cls := "text-danger fw-bold", "Impacto"),
+              s": caida > 0.5. Score = % de veces que recupero o mantuvo nivel."
+            )
+          ),
+
+          // Grafico de lineas
+          if (n > 0) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "Evolucion: Nota con error vs Nota siguiente"),
+            div(cls := "card-body p-3",
+              div(style := "height:240px;",
+                tags2.canvas(id := "resetChart")
+              )
+            )
+          ) else frag(),
+
+          // Tabla detalle
+          if (n > 0) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", s"Detalle de $n episodios"),
+            div(cls := "card-body p-2",
+              div(cls := "table-responsive",
+                table(cls := "table table-dark table-sm table-hover mb-0",
+                  thead(tr(
+                    th(cls := "xx-small text-muted", "FECHA"),
+                    th(cls := "xx-small text-muted", "RIVAL"),
+                    th(cls := "xx-small text-muted text-center", "NOTA"),
+                    th(cls := "xx-small text-muted text-center", "GOL EV."),
+                    th(cls := "xx-small text-muted", "SIGUIENTE"),
+                    th(cls := "xx-small text-muted text-center", "NOTA SIG."),
+                    th(cls := "xx-small text-muted text-center", "DELTA"),
+                    th(cls := "xx-small text-muted text-center", "RESULTADO")
+                  )),
+                  tbody(
+                    frag(tablaRows.map { r =>
+                      val resCls = r("resultado") match {
+                        case "REBOTE"  => "success"
+                        case "IMPACTO" => "danger"
+                        case _         => "warning"
+                      }
+                      tr(
+                        td(cls := "xx-small text-muted", r("fecha")),
+                        td(cls := "xx-small", r("rival")),
+                        td(cls := "xx-small text-center text-warning fw-bold", r("notaError")),
+                        td(cls := "xx-small text-center text-danger", r("nEvitables")),
+                        td(cls := "xx-small text-muted", r("rivalSig")),
+                        td(cls := "xx-small text-center fw-bold", r("notaSig")),
+                        td(cls := s"xx-small text-center fw-bold text-$resCls", r("delta")),
+                        td(cls := "text-center",
+                          span(cls := s"badge bg-$resCls bg-opacity-25 text-$resCls xx-small",
+                            r("resultado"))
+                        )
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ) else frag(),
+
+          script(raw(s"""
+            (function() {
+              if ($n === 0) return;
+              var ctx = document.getElementById('resetChart');
+              if (!ctx) return;
+              new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                  labels: $labelsJson,
+                  datasets: [
+                    {
+                      label: 'Nota con error',
+                      data: $errorJson,
+                      borderColor: 'rgba(255,193,7,0.9)',
+                      backgroundColor: 'rgba(255,193,7,0.1)',
+                      tension: 0.3,
+                      pointRadius: 5,
+                      borderDash: [5,3]
+                    },
+                    {
+                      label: 'Nota siguiente',
+                      data: $sigJson,
+                      borderColor: 'rgba(40,167,69,0.9)',
+                      backgroundColor: 'rgba(40,167,69,0.1)',
+                      tension: 0.3,
+                      pointRadius: 5
+                    },
+                    {
+                      label: 'Media global',
+                      data: $mediaJson,
+                      borderColor: 'rgba(13,202,240,0.4)',
+                      borderDash: [2,4],
+                      pointRadius: 0,
+                      fill: false
+                    }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#333' } },
+                    y: { min: 0, max: 10, ticks: { color: '#888', stepSize: 1 }, grid: { color: '#333' } }
+                  }
+                }
+              });
+            })();
+          """))
+        )
+      )
+    ))
+  }
+
   // == DIGITAL TWIN ============================================================
   @cask.get("/digital-twin")
   def digitalTwinPage(request: cask.Request, hPadre: Double = 0.0, hMadre: Double = 0.0) = withAuth(request) {
