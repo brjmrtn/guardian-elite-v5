@@ -196,5 +196,4 @@ object SharedLayout {
       cookies    = Seq.empty
     )
 
-  initialize()
 }
