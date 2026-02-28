@@ -1537,6 +1537,146 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+
+  // == FASE 7: RED-ZONE ANALYTICS ==============================================
+  def getRedZoneData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // 1. Media global de referencia
+      val rsGlobal = conn.createStatement().executeQuery(
+        "SELECT AVG(nota) as avg_nota, AVG(paradas) as avg_paradas, " +
+          "AVG(goles_contra) as avg_gc, COUNT(*) as total " +
+          "FROM matches WHERE status='PLAYED' AND nota > 0")
+      val (avgNotaGlobal, avgParadasGlobal, avgGcGlobal, totalPartidos) =
+        if (rsGlobal.next()) (rsGlobal.getDouble("avg_nota"), rsGlobal.getDouble("avg_paradas"),
+          rsGlobal.getDouble("avg_gc"),   rsGlobal.getInt("total"))
+        else (0.0, 0.0, 0.0, 0)
+
+      // 2. Partidos de alta presion: goles_contra >= 2 (asedio ofensivo)
+      val rsAsedio = conn.createStatement().executeQuery(
+        "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor, minutos " +
+          "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 2 " +
+          "ORDER BY fecha DESC LIMIT 30")
+      var asedioRows = List[Map[String, Any]]()
+      while (rsAsedio.next()) {
+        asedioRows = asedioRows :+ Map(
+          "fecha"  -> rsAsedio.getString("fecha").take(10),
+          "rival"  -> Option(rsAsedio.getString("rival")).getOrElse(""),
+          "nota"   -> rsAsedio.getDouble("nota"),
+          "paradas"-> rsAsedio.getInt("paradas"),
+          "gc"     -> rsAsedio.getInt("goles_contra"),
+          "gf"     -> rsAsedio.getInt("goles_favor"),
+          "minutos"-> rsAsedio.getInt("minutos")
+        )
+      }
+      val nAsedio = asedioRows.size
+      val avgNotaAsedio   = if (nAsedio > 0) asedioRows.map(_(("nota")).asInstanceOf[Double]).sum / nAsedio else 0.0
+      val avgParadasAsedio= if (nAsedio > 0) asedioRows.map(_(("paradas")).asInstanceOf[Int].toDouble).sum / nAsedio else 0.0
+
+      // 3. Partidos disputados con minutos >= 70 (final del partido - zona de fatiga)
+      val rsFatiga = conn.createStatement().executeQuery(
+        "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor, minutos " +
+          "FROM matches WHERE status='PLAYED' AND nota > 0 AND minutos >= 70 " +
+          "ORDER BY fecha DESC LIMIT 30")
+      var fatigaRows = List[Map[String, Any]]()
+      while (rsFatiga.next()) {
+        fatigaRows = fatigaRows :+ Map(
+          "fecha"  -> rsFatiga.getString("fecha").take(10),
+          "rival"  -> Option(rsFatiga.getString("rival")).getOrElse(""),
+          "nota"   -> rsFatiga.getDouble("nota"),
+          "paradas"-> rsFatiga.getInt("paradas"),
+          "gc"     -> rsFatiga.getInt("goles_contra"),
+          "gf"     -> rsFatiga.getInt("goles_favor"),
+          "minutos"-> rsFatiga.getInt("minutos")
+        )
+      }
+      val nFatiga = fatigaRows.size
+      val avgNotaFatiga    = if (nFatiga > 0) fatigaRows.map(_(("nota")).asInstanceOf[Double]).sum / nFatiga else 0.0
+      val avgParadasFatiga = if (nFatiga > 0) fatigaRows.map(_(("paradas")).asInstanceOf[Int].toDouble).sum / nFatiga else 0.0
+
+      // 4. Partidos de derrota abultada (gc >= 3) — colapso total
+      val rsColapso = conn.createStatement().executeQuery(
+        "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor " +
+          "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 3 " +
+          "ORDER BY fecha DESC LIMIT 20")
+      var colapsoRows = List[Map[String, Any]]()
+      while (rsColapso.next()) {
+        colapsoRows = colapsoRows :+ Map(
+          "fecha"  -> rsColapso.getString("fecha").take(10),
+          "rival"  -> Option(rsColapso.getString("rival")).getOrElse(""),
+          "nota"   -> rsColapso.getDouble("nota"),
+          "paradas"-> rsColapso.getInt("paradas"),
+          "gc"     -> rsColapso.getInt("goles_contra"),
+          "gf"     -> rsColapso.getInt("goles_favor")
+        )
+      }
+      val nColapso = colapsoRows.size
+      val avgNotaColapso = if (nColapso > 0) colapsoRows.map(_(("nota")).asInstanceOf[Double]).sum / nColapso else 0.0
+
+      // 5. Resilience Index: nota en asedio vs nota global (0-100)
+      val resilienceIndex: Int = if (avgNotaGlobal > 0)
+        math.min(100, math.max(0, ((avgNotaAsedio / avgNotaGlobal) * 100).toInt))
+      else 0
+      val resilienceLabel: String = if (resilienceIndex >= 90) "ÉLITE"
+      else if (resilienceIndex >= 75) "SOLIDO"
+      else if (resilienceIndex >= 55) "EN PROCESO"
+      else "VULNERABLE"
+      val resilienceColor: String = if (resilienceIndex >= 90) "warning"
+      else if (resilienceIndex >= 75) "success"
+      else if (resilienceIndex >= 55) "info"
+      else "danger"
+
+      // 6. Fatigue Index: nota en partidos largos vs global
+      val fatigueIndex: Int = if (avgNotaGlobal > 0)
+        math.min(100, math.max(0, ((avgNotaFatiga / avgNotaGlobal) * 100).toInt))
+      else 0
+      val fatigueLabel: String = if (fatigueIndex >= 90) "SIN CAIDA"
+      else if (fatigueIndex >= 75) "AGUANTA"
+      else if (fatigueIndex >= 55) "LEVE CAIDA"
+      else "FATIGA CLARA"
+      val fatigueColor: String = if (fatigueIndex >= 90) "success"
+      else if (fatigueIndex >= 75) "info"
+      else if (fatigueIndex >= 55) "warning"
+      else "danger"
+
+      // 7. Serie temporal: nota en asedio (ultimos 15)
+      val asedioSerie   = asedioRows.reverse.takeRight(15).map(_("nota").asInstanceOf[Double])
+      val asedioLabels  = asedioRows.reverse.takeRight(15).map(_("fecha").asInstanceOf[String].take(5))
+      val globalLine    = asedioSerie.map(_ => avgNotaGlobal)
+
+      Map(
+        "totalPartidos"     -> totalPartidos,
+        "avgNotaGlobal"     -> avgNotaGlobal,
+        "avgParadasGlobal"  -> avgParadasGlobal,
+        "avgGcGlobal"       -> avgGcGlobal,
+        // Asedio
+        "nAsedio"           -> nAsedio,
+        "avgNotaAsedio"     -> avgNotaAsedio,
+        "avgParadasAsedio"  -> avgParadasAsedio,
+        "resilienceIndex"   -> resilienceIndex,
+        "resilienceLabel"   -> resilienceLabel,
+        "resilienceColor"   -> resilienceColor,
+        // Fatiga
+        "nFatiga"           -> nFatiga,
+        "avgNotaFatiga"     -> avgNotaFatiga,
+        "avgParadasFatiga"  -> avgParadasFatiga,
+        "fatigueIndex"      -> fatigueIndex,
+        "fatigueLabel"      -> fatigueLabel,
+        "fatigueColor"      -> fatigueColor,
+        // Colapso
+        "nColapso"          -> nColapso,
+        "avgNotaColapso"    -> avgNotaColapso,
+        // Series
+        "asedioSerie"       -> asedioSerie,
+        "asedioLabels"      -> asedioLabels,
+        "globalLine"        -> globalLine,
+        // Tablas detalle
+        "asedioRows"        -> asedioRows,
+        "fatigaRows"        -> fatigaRows
+      )
+    } finally { conn.close() }
+  }
+
   // == FASE 6.5: MONEYBALL & DEEP INFLUENCE ANALYTICS =========================
   def getMoneyballData(): Map[String, Any] = {
     val conn = getConnection()

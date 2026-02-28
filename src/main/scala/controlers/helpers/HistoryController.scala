@@ -1681,6 +1681,296 @@ object HistoryController extends cask.Routes {
     ))
   }
 
+
+  // == RED-ZONE ANALYTICS ======================================================
+  @cask.get("/red-zone")
+  def redZonePage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getRedZoneData()
+
+    val totalPartidos: Int    = d("totalPartidos").asInstanceOf[Int]
+    val avgNotaGlobal: Double = d("avgNotaGlobal").asInstanceOf[Double]
+    val avgGcGlobal: Double   = d("avgGcGlobal").asInstanceOf[Double]
+    val nAsedio: Int          = d("nAsedio").asInstanceOf[Int]
+    val avgNotaAsedio: Double = d("avgNotaAsedio").asInstanceOf[Double]
+    val avgParadasAsedio: Double = d("avgParadasAsedio").asInstanceOf[Double]
+    val resilienceIndex: Int  = d("resilienceIndex").asInstanceOf[Int]
+    val resilienceLabel: String = d("resilienceLabel").asInstanceOf[String]
+    val resilienceColor: String = d("resilienceColor").asInstanceOf[String]
+    val nFatiga: Int          = d("nFatiga").asInstanceOf[Int]
+    val avgNotaFatiga: Double = d("avgNotaFatiga").asInstanceOf[Double]
+    val avgParadasFatiga: Double = d("avgParadasFatiga").asInstanceOf[Double]
+    val fatigueIndex: Int     = d("fatigueIndex").asInstanceOf[Int]
+    val fatigueLabel: String  = d("fatigueLabel").asInstanceOf[String]
+    val fatigueColor: String  = d("fatigueColor").asInstanceOf[String]
+    val nColapso: Int         = d("nColapso").asInstanceOf[Int]
+    val avgNotaColapso: Double = d("avgNotaColapso").asInstanceOf[Double]
+    val asedioRows: List[Map[String,Any]] = d("asedioRows").asInstanceOf[List[Map[String,Any]]]
+    val fatigaRows: List[Map[String,Any]] = d("fatigaRows").asInstanceOf[List[Map[String,Any]]]
+    val asedioSerie: List[Double]  = d("asedioSerie").asInstanceOf[List[Double]]
+    val asedioLabels: List[String] = d("asedioLabels").asInstanceOf[List[String]]
+    val globalLine: List[Double]   = d("globalLine").asInstanceOf[List[Double]]
+
+    val avgNotaGlobalStr  = f"$avgNotaGlobal%.1f"
+    val avgNotaAsedioStr  = f"$avgNotaAsedio%.1f"
+    val avgNotaFatigaStr  = f"$avgNotaFatiga%.1f"
+    val avgNotaColapsoStr = f"$avgNotaColapso%.1f"
+    val deltaAsedio   = avgNotaAsedio - avgNotaGlobal
+    val deltaFatiga   = avgNotaFatiga - avgNotaGlobal
+    val deltaAsedioStr = (if (deltaAsedio >= 0) "+" else "") + f"$deltaAsedio%.1f"
+    val deltaFatigaStr = (if (deltaFatiga >= 0) "+" else "") + f"$deltaFatiga%.1f"
+    val deltaAsedioColor = if (deltaAsedio >= 0) "success" else if (deltaAsedio >= -0.5) "warning" else "danger"
+    val deltaFatigaColor = if (deltaFatiga >= 0) "success" else if (deltaFatiga >= -0.5) "warning" else "danger"
+
+    val labelsJson  = asedioLabels.map(l => "\"" + l + "\"").mkString("[", ",", "]")
+    val asedioJson  = asedioSerie.map(v => f"$v%.1f").mkString("[", ",", "]")
+    val globalJson  = globalLine.map(v => f"$v%.1f").mkString("[", ",", "]")
+
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+
+          // Header
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-danger mb-0", "RED-ZONE ANALYTICS"),
+              span(cls := "badge bg-dark border border-danger text-danger", "FASE 7 — Under Pressure")
+            ),
+            div(cls := "d-flex gap-2",
+              a(href := "/moneyball", cls := "btn btn-outline-warning btn-sm fw-bold", "Moneyball"),
+              a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+            )
+          ),
+
+          if (totalPartidos < 5) div(cls := "alert alert-secondary",
+            s"Datos insuficientes. Necesitas al menos 5 partidos registrados (tienes $totalPartidos)."
+          ) else frag(),
+
+          // Referencia global
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-body p-3",
+              div(cls := "row g-3 text-center",
+                div(cls := "col-4",
+                  div(cls := "text-muted xx-small fw-bold", "MEDIA GLOBAL"),
+                  div(cls := "fs-3 fw-black text-white", avgNotaGlobalStr),
+                  div(cls := "xx-small text-muted", s"$totalPartidos partidos")
+                ),
+                div(cls := "col-4",
+                  div(cls := "text-muted xx-small fw-bold", "GC MEDIA"),
+                  div(cls := "fs-3 fw-black text-white", f"$avgGcGlobal%.1f"),
+                  div(cls := "xx-small text-muted", "goles/partido")
+                ),
+                div(cls := "col-4",
+                  div(cls := "text-muted xx-small fw-bold", "PARTIDOS ANÁLISIS"),
+                  div(cls := "fs-3 fw-black text-warning", s"$nAsedio"),
+                  div(cls := "xx-small text-muted", "con GC >= 2")
+                )
+              )
+            )
+          ),
+
+          // Dos KPIs principales
+          div(cls := "row g-3 mb-3",
+
+            // Resilience Index — asedio
+            div(cls := "col-md-6",
+              div(cls := s"card bg-dark border-$resilienceColor shadow h-100",
+                div(cls := "card-header fw-bold small text-white", "🔥 BAJO ASEDIO (GC ≥ 2)"),
+                div(cls := "card-body p-3",
+                  div(cls := "row g-2 align-items-center",
+                    div(cls := "col-4 text-center",
+                      div(cls := s"display-4 fw-black text-$resilienceColor", resilienceIndex.toString),
+                      div(cls := s"badge bg-$resilienceColor mt-1", resilienceLabel)
+                    ),
+                    div(cls := "col-8",
+                      div(cls := "row g-2",
+                        div(cls := "col-6",
+                          div(cls := "xx-small text-muted", "NOTA EN ASEDIO"),
+                          div(cls := s"fs-4 fw-black text-$resilienceColor", avgNotaAsedioStr),
+                          div(cls := s"badge bg-$deltaAsedioColor bg-opacity-25 text-$deltaAsedioColor xx-small",
+                            s"$deltaAsedioStr vs media")
+                        ),
+                        div(cls := "col-6",
+                          div(cls := "xx-small text-muted", "PARADAS MEDIA"),
+                          div(cls := "fs-4 fw-black text-white", f"$avgParadasAsedio%.1f"),
+                          div(cls := "xx-small text-muted", s"$nAsedio partidos")
+                        )
+                      )
+                    )
+                  ),
+                  // Barra de progreso
+                  div(cls := "mt-2",
+                    div(cls := "d-flex justify-content-between xx-small text-muted mb-1",
+                      span("Rendimiento bajo presion"),
+                      span(s"$resilienceIndex/100")
+                    ),
+                    div(cls := "progress", style := "height:8px;",
+                      div(cls := s"progress-bar bg-$resilienceColor",
+                        style := s"width:${resilienceIndex}%; transition:width 1s;")
+                    )
+                  )
+                )
+              )
+            ),
+
+            // Fatigue Index — partidos largos
+            div(cls := "col-md-6",
+              div(cls := s"card bg-dark border-$fatigueColor shadow h-100",
+                div(cls := "card-header fw-bold small text-white", "⏱️ FATIGA FINAL (≥ 70 min)"),
+                div(cls := "card-body p-3",
+                  div(cls := "row g-2 align-items-center",
+                    div(cls := "col-4 text-center",
+                      div(cls := s"display-4 fw-black text-$fatigueColor", fatigueIndex.toString),
+                      div(cls := s"badge bg-$fatigueColor mt-1", fatigueLabel)
+                    ),
+                    div(cls := "col-8",
+                      div(cls := "row g-2",
+                        div(cls := "col-6",
+                          div(cls := "xx-small text-muted", "NOTA CON FATIGA"),
+                          div(cls := s"fs-4 fw-black text-$fatigueColor", avgNotaFatigaStr),
+                          div(cls := s"badge bg-$deltaFatigaColor bg-opacity-25 text-$deltaFatigaColor xx-small",
+                            s"$deltaFatigaStr vs media")
+                        ),
+                        div(cls := "col-6",
+                          div(cls := "xx-small text-muted", "PARADAS MEDIA"),
+                          div(cls := "fs-4 fw-black text-white", f"$avgParadasFatiga%.1f"),
+                          div(cls := "xx-small text-muted", s"$nFatiga partidos")
+                        )
+                      )
+                    )
+                  ),
+                  div(cls := "mt-2",
+                    div(cls := "d-flex justify-content-between xx-small text-muted mb-1",
+                      span("Resistencia a la fatiga"),
+                      span(s"$fatigueIndex/100")
+                    ),
+                    div(cls := "progress", style := "height:8px;",
+                      div(cls := s"progress-bar bg-$fatigueColor",
+                        style := s"width:${fatigueIndex}%; transition:width 1s;")
+                    )
+                  )
+                )
+              )
+            )
+          ),
+
+          // Colapso total (GC >= 3)
+          if (nColapso > 0) div(cls := "card bg-dark border-danger shadow mb-3",
+            div(cls := "card-header text-danger fw-bold small", s"💥 COLAPSO TOTAL (GC ≥ 3) — $nColapso partidos"),
+            div(cls := "card-body p-3",
+              div(cls := "row g-3 text-center",
+                div(cls := "col-4",
+                  div(cls := "xx-small text-muted", "NOTA MEDIA"),
+                  div(cls := "fs-3 fw-black text-danger", avgNotaColapsoStr)
+                ),
+                div(cls := "col-4",
+                  div(cls := "xx-small text-muted", "VS MEDIA GLOBAL"),
+                  div(cls := s"fs-3 fw-black text-${if (avgNotaColapso >= avgNotaGlobal - 0.5) "warning" else "danger"}",
+                    (if (avgNotaColapso - avgNotaGlobal >= 0) "+" else "") + f"${avgNotaColapso - avgNotaGlobal}%.1f")
+                ),
+                div(cls := "col-4",
+                  div(cls := "xx-small text-muted", "INTERPRETACION"),
+                  div(cls := "small fw-bold text-white",
+                    if (avgNotaColapso >= avgNotaGlobal - 0.3) "Aguanta el tipo"
+                    else if (avgNotaColapso >= avgNotaGlobal - 1.0) "Leve impacto"
+                    else "Necesita trabajo"
+                  )
+                )
+              )
+            )
+          ) else frag(),
+
+          // Grafico evolucion bajo asedio
+          if (asedioSerie.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "Evolucion de nota en partidos de asedio"),
+            div(cls := "card-body p-3",
+              div(style := "height:220px;",
+                tag("canvas")(id := "redZoneChart")
+              )
+            )
+          ) else frag(),
+
+          // Tabla partidos de asedio
+          if (asedioRows.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", s"Partidos bajo asedio (GC ≥ 2) — últimos ${math.min(asedioRows.size, 10)}"),
+            div(cls := "card-body p-2",
+              div(cls := "table-responsive",
+                table(cls := "table table-dark table-sm table-hover mb-0",
+                  thead(tr(
+                    th(cls := "xx-small text-muted", "FECHA"),
+                    th(cls := "xx-small text-muted", "RIVAL"),
+                    th(cls := "xx-small text-muted text-center", "RES."),
+                    th(cls := "xx-small text-muted text-center", "PAR."),
+                    th(cls := "xx-small text-muted text-center", "NOTA"),
+                    th(cls := "xx-small text-muted text-center", "VS MEDIA")
+                  )),
+                  tbody(
+                    frag(asedioRows.take(10).map { r =>
+                      val nota   = r("nota").asInstanceOf[Double]
+                      val gc     = r("gc").asInstanceOf[Int]
+                      val gf     = r("gf").asInstanceOf[Int]
+                      val par    = r("paradas").asInstanceOf[Int]
+                      val delta  = nota - avgNotaGlobal
+                      val notaCls = if (nota >= avgNotaGlobal) "success" else if (nota >= avgNotaGlobal - 0.5) "warning" else "danger"
+                      tr(
+                        td(cls := "xx-small text-muted", r("fecha").asInstanceOf[String]),
+                        td(cls := "xx-small", r("rival").asInstanceOf[String]),
+                        td(cls := "xx-small text-center text-danger fw-bold", s"$gf-$gc"),
+                        td(cls := "xx-small text-center text-info", par.toString),
+                        td(cls := s"xx-small text-center fw-black text-$notaCls", f"$nota%.1f"),
+                        td(cls := s"xx-small text-center text-$notaCls",
+                          (if (delta >= 0) "+" else "") + f"$delta%.1f")
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ) else frag(),
+
+          script(raw(s"""
+            (function() {
+              var ctx = document.getElementById('redZoneChart');
+              if (!ctx || ${ asedioSerie.size } === 0) return;
+              new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                  labels: $labelsJson,
+                  datasets: [
+                    {
+                      label: 'Nota en asedio',
+                      data: $asedioJson,
+                      borderColor: 'rgba(220,53,69,0.9)',
+                      backgroundColor: 'rgba(220,53,69,0.1)',
+                      tension: 0.3,
+                      pointRadius: 5,
+                      fill: true
+                    },
+                    {
+                      label: 'Media global',
+                      data: $globalJson,
+                      borderColor: 'rgba(13,202,240,0.5)',
+                      borderDash: [4,3],
+                      pointRadius: 0,
+                      fill: false
+                    }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#333' } },
+                    y: { min: 0, max: 10, ticks: { color: '#888', stepSize: 1 }, grid: { color: '#333' } }
+                  }
+                }
+              });
+            })();
+          """))
+        )
+      )
+    ))
+  }
+
   // == COGNITIVE RESET RATE ====================================================
   @cask.get("/cognitive-reset")
   def cognitiveResetPage(request: cask.Request) = withAuth(request) {
