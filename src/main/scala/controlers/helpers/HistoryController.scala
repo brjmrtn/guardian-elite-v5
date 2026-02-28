@@ -1682,6 +1682,243 @@ object HistoryController extends cask.Routes {
   }
 
 
+
+  // == PSxG DELTA ==============================================================
+  @cask.get("/psxg-delta")
+  def psxgDeltaPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getPSxGDeltaData()
+
+    val nGoles: Int           = d("nGoles").asInstanceOf[Int]
+    val xgTotal: Double       = d("xgTotal").asInstanceOf[Double]
+    val psxgDelta: Double     = d("psxgDelta").asInstanceOf[Double]
+    val psxgDeltaStr: String  = d("psxgDeltaStr").asInstanceOf[String]
+    val psxgDeltaColor: String= d("psxgDeltaColor").asInstanceOf[String]
+    val psxgLabel: String     = d("psxgLabel").asInstanceOf[String]
+    val golesAltaDif: Int     = d("golesAltaDif").asInstanceOf[Int]
+    val golesMediaDif: Int    = d("golesMediaDif").asInstanceOf[Int]
+    val golesBajaDif: Int     = d("golesBajaDif").asInstanceOf[Int]
+    val xgPorPartido: Double  = d("xgPorPartido").asInstanceOf[Double]
+    val nPartidos: Int        = d("nPartidos").asInstanceOf[Int]
+    val porZona: List[Map[String,Any]] = d("porZona").asInstanceOf[List[Map[String,Any]]]
+    val tablaGoles: List[Map[String,String]] = d("tablaGoles").asInstanceOf[List[Map[String,String]]]
+
+    val xgTotalStr     = f"$xgTotal%.2f"
+    val xgPorPartidoStr= f"$xgPorPartido%.2f"
+    val pctAltaDif     = if (nGoles > 0) (golesAltaDif * 100 / nGoles) else 0
+    val pctMediaDif    = if (nGoles > 0) (golesMediaDif * 100 / nGoles) else 0
+    val pctBajaDif     = if (nGoles > 0) (golesBajaDif * 100 / nGoles) else 0
+
+    // Datos para grafico de barras por zona
+    val zonaLabels = porZona.map(z => """ + z("zona").asInstanceOf[String] + """).mkString("[",",","]")
+    val zonaGoles  = porZona.map(z => z("goles").asInstanceOf[Int].toString).mkString("[",",","]")
+    val zonaXG     = porZona.map(z => f"${z("xg").asInstanceOf[Double]}%.2f").mkString("[",",","]")
+
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+
+          // Header
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-warning mb-0", "PSxG DELTA"),
+              span(cls := "badge bg-dark border border-warning text-warning",
+                "FASE 8 — Post-Shot xG Analysis")
+            ),
+            div(cls := "d-flex gap-2",
+              a(href := "/moneyball", cls := "btn btn-outline-warning btn-sm fw-bold", "Moneyball"),
+              a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+            )
+          ),
+
+          if (nGoles == 0) div(cls := "alert alert-secondary",
+            "Sin goles registrados con análisis. Clasifica los goles en el Match Center para ver el PSxG Delta."
+          ) else frag(),
+
+          // Explicacion breve
+          div(cls := "card bg-dark border-secondary mb-3",
+            div(cls := "card-body p-3 small text-muted",
+              span(cls := "text-white fw-bold", "¿Qué mide? "),
+              "Compara los goles reales encajados con los esperados estadisticamente (xG) segun la zona y situacion del disparo. ",
+              span(cls := "text-success fw-bold", "Negativo = mejor que la estadística. "),
+              span(cls := "text-danger fw-bold", "Positivo = por encima de lo esperado.")
+            )
+          ),
+
+          // KPIs principales
+          div(cls := "row g-3 mb-3",
+            // Delta principal
+            div(cls := "col-md-4",
+              div(cls := s"card bg-dark border-$psxgDeltaColor shadow text-center h-100",
+                div(cls := "card-body p-4",
+                  div(cls := "xx-small text-muted fw-bold mb-1", "PSxG DELTA"),
+                  div(cls := s"display-3 fw-black text-$psxgDeltaColor", psxgDeltaStr),
+                  div(cls := s"badge bg-$psxgDeltaColor mt-2 fs-6", psxgLabel),
+                  div(cls := "xx-small text-muted mt-2",
+                    s"$nGoles goles reales vs ${xgTotalStr} xG esperados")
+                )
+              )
+            ),
+            // Columna de stats
+            div(cls := "col-md-8",
+              div(cls := "row g-3",
+                div(cls := "col-6",
+                  div(cls := "card bg-dark border-secondary shadow h-100",
+                    div(cls := "card-body p-3",
+                      div(cls := "xx-small text-muted fw-bold", "xG ACUMULADO"),
+                      div(cls := "fs-3 fw-black text-info", xgTotalStr),
+                      div(cls := "xx-small text-muted", s"esperado en $nPartidos partidos")
+                    )
+                  )
+                ),
+                div(cls := "col-6",
+                  div(cls := "card bg-dark border-secondary shadow h-100",
+                    div(cls := "card-body p-3",
+                      div(cls := "xx-small text-muted fw-bold", "xG / PARTIDO"),
+                      div(cls := "fs-3 fw-black text-warning", xgPorPartidoStr),
+                      div(cls := "xx-small text-muted", "dificultad media de tiros")
+                    )
+                  )
+                ),
+                // Desglose por dificultad
+                div(cls := "col-12",
+                  div(cls := "card bg-dark border-secondary shadow",
+                    div(cls := "card-body p-3",
+                      div(cls := "xx-small text-muted fw-bold mb-2", "GOLES POR DIFICULTAD DEL TIRO"),
+                      div(cls := "d-flex justify-content-between xx-small mb-1",
+                        span(cls := "text-success", s"Difícil $pctAltaDif% ($golesAltaDif)"),
+                        span(cls := "text-warning", s"Media $pctMediaDif% ($golesMediaDif)"),
+                        span(cls := "text-danger",  s"Fácil $pctBajaDif% ($golesBajaDif)")
+                      ),
+                      div(cls := "progress", style := "height:12px;",
+                        div(cls := "progress-bar bg-success", style := s"width:${pctAltaDif}%"),
+                        div(cls := "progress-bar bg-warning", style := s"width:${pctMediaDif}%"),
+                        div(cls := "progress-bar bg-danger",  style := s"width:${pctBajaDif}%")
+                      ),
+                      div(cls := "xx-small text-muted mt-1",
+                        "Verde = gol de tiro difícil (inevitable). Rojo = gol de tiro fácil (evitable).")
+                    )
+                  )
+                )
+              )
+            )
+          ),
+
+          // Grafico goles reales vs xG por zona
+          if (porZona.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small",
+              "Goles encajados vs xG esperado por zona de portería"),
+            div(cls := "card-body p-3",
+              div(style := "height:220px;",
+                tag("canvas")(id := "psxgChart")
+              )
+            )
+          ) else frag(),
+
+          // Grid de zonas de portería
+          if (porZona.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "Análisis por zona"),
+            div(cls := "card-body p-3",
+              div(cls := "row g-2",
+                frag(porZona.map { z =>
+                  val zGoles = z("goles").asInstanceOf[Int]
+                  val zXG    = z("xg").asInstanceOf[Double]
+                  val zDelta = z("delta").asInstanceOf[Double]
+                  val zLabel = z("label").asInstanceOf[String]
+                  val zColor = if (zDelta <= -0.3) "success" else if (zDelta >= 0.3) "danger" else "secondary"
+                  div(cls := "col-4",
+                    div(cls := s"card bg-dark border-$zColor text-center p-2",
+                      div(cls := "fw-bold text-white", z("zona").asInstanceOf[String]),
+                      div(cls := s"fs-5 fw-black text-$zColor", zGoles.toString),
+                      div(cls := "xx-small text-muted", s"xG: ${f"$zXG%.2f"}"),
+                      div(cls := s"xx-small text-$zColor fw-bold", zLabel)
+                    )
+                  )
+                }: _*)
+              )
+            )
+          ) else frag(),
+
+          // Tabla de goles individuales
+          if (tablaGoles.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small",
+              s"Últimos ${tablaGoles.size} goles analizados"),
+            div(cls := "card-body p-2",
+              div(cls := "table-responsive",
+                table(cls := "table table-dark table-sm table-hover mb-0",
+                  thead(tr(
+                    th(cls := "xx-small text-muted", "FECHA"),
+                    th(cls := "xx-small text-muted", "RIVAL"),
+                    th(cls := "xx-small text-muted text-center", "ZONA"),
+                    th(cls := "xx-small text-muted", "SITUACIÓN"),
+                    th(cls := "xx-small text-muted text-center", "xG"),
+                    th(cls := "xx-small text-muted text-center", "DIFIC."),
+                    th(cls := "xx-small text-muted text-center", "RESP.")
+                  )),
+                  tbody(
+                    frag(tablaGoles.map { g =>
+                      val c = g("color")
+                      tr(
+                        td(cls := "xx-small text-muted", g("fecha")),
+                        td(cls := "xx-small", g("rival")),
+                        td(cls := "xx-small text-center fw-bold text-white", g("zona")),
+                        td(cls := "xx-small text-muted", g("sit")),
+                        td(cls := s"xx-small text-center fw-bold text-$c", g("xg")),
+                        td(cls := "text-center",
+                          span(cls := s"badge bg-$c bg-opacity-25 text-$c xx-small", g("dific"))
+                        ),
+                        td(cls := "xx-small text-center text-muted", g("resp"))
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ) else frag(),
+
+          script(raw(s"""
+            (function() {
+              var ctx = document.getElementById('psxgChart');
+              if (!ctx || ${porZona.size} === 0) return;
+              new Chart(ctx.getContext('2d'), {
+                type: 'bar',
+                data: {
+                  labels: $zonaLabels,
+                  datasets: [
+                    {
+                      label: 'Goles reales',
+                      data: $zonaGoles,
+                      backgroundColor: 'rgba(220,53,69,0.7)',
+                      borderColor: 'rgba(220,53,69,1)',
+                      borderWidth: 1
+                    },
+                    {
+                      label: 'xG esperado',
+                      data: $zonaXG,
+                      backgroundColor: 'rgba(13,202,240,0.4)',
+                      borderColor: 'rgba(13,202,240,0.8)',
+                      borderWidth: 1,
+                      type: 'line',
+                      tension: 0.3,
+                      pointRadius: 5
+                    }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x: { ticks: { color: '#aaa', font: { size: 11 } }, grid: { color: '#333' } },
+                    y: { ticks: { color: '#aaa', stepSize: 1 }, grid: { color: '#333' }, beginAtZero: true }
+                  }
+                }
+              });
+            })();
+          """))
+        )
+      )
+    ))
+  }
+
   // == RED-ZONE ANALYTICS ======================================================
   @cask.get("/red-zone")
   def redZonePage(request: cask.Request) = withAuth(request) {

@@ -1416,6 +1416,140 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+  // == FASE 8: PSxG DELTA (Post-Shot xG vs Goals Conceded) =====================
+  def getPSxGDeltaData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Tabla de xG base por zona + situacion
+      // Probabilidad de gol segun zona de porteria y tipo de disparo
+      // Valores calibrados para futbol base (5-10 anos)
+      def xGBase(zona: String, situacion: String): Double = {
+        val xgZona: Double = zona match {
+          case "MC" => 0.72  // centro medio — maxima probabilidad
+          case "BC" => 0.65  // centro bajo
+          case "TC" => 0.55  // centro alto
+          case "ML" | "MR" => 0.42  // laterales medios
+          case "BL" | "BR" => 0.38  // laterales bajos
+          case "TL" | "TR" => 0.28  // esquinas
+          case _           => 0.45  // sin zona — valor medio
+        }
+        val multSit: Double = situacion match {
+          case s if s.contains("1v1")  => 1.35
+          case s if s.contains("2v1")  => 1.20
+          case s if s.contains("penalti") | s.contains("penalty") => 1.60
+          case s if s.contains("libre") => 0.85
+          case s if s.contains("cabeza") | s.contains("aereo") => 0.90
+          case _ => 1.0
+        }
+        math.min(0.97, xgZona * multSit)
+      }
+
+      // Obtener todos los goles de match_goals con su zona y situacion
+      val rsGoles = conn.createStatement().executeQuery(
+        "SELECT mg.zona_gol, mg.situacion, mg.responsabilidad, mg.era_parable, " +
+          "mg.minuto, m.fecha, m.rival, m.nota " +
+          "FROM match_goals mg " +
+          "JOIN matches m ON mg.match_id = m.id " +
+          "WHERE m.status = 'PLAYED' " +
+          "ORDER BY m.fecha DESC")
+
+      case class GoalRow(zona: String, situacion: String, responsabilidad: String,
+                         eraParable: String, minuto: Int, fecha: String,
+                         rival: String, notaPartido: Double,
+                         xg: Double)
+      var goles = List[GoalRow]()
+      while (rsGoles.next()) {
+        val zona = Option(rsGoles.getString("zona_gol")).getOrElse("")
+        val sit  = Option(rsGoles.getString("situacion")).getOrElse("").toLowerCase
+        val xg   = xGBase(zona, sit)
+        goles = goles :+ GoalRow(
+          zona            = zona,
+          situacion       = Option(rsGoles.getString("situacion")).getOrElse(""),
+          responsabilidad = Option(rsGoles.getString("responsabilidad")).getOrElse(""),
+          eraParable      = Option(rsGoles.getString("era_parable")).getOrElse(""),
+          minuto          = rsGoles.getInt("minuto"),
+          fecha           = Option(rsGoles.getString("fecha")).getOrElse("").take(10),
+          rival           = Option(rsGoles.getString("rival")).getOrElse(""),
+          notaPartido     = rsGoles.getDouble("nota"),
+          xg              = xg
+        )
+      }
+
+      val nGoles = goles.size
+      // xG total acumulado (cuantos goles "debia" encajar estadisticamente)
+      val xgTotal: Double = goles.map(_.xg).sum
+      // Goles reales encajados
+      val golesReales: Int = nGoles
+      // PSxG Delta: goles reales - xG. Negativo = mejor que esperado
+      val psxgDelta: Double = golesReales - xgTotal
+      val psxgDeltaStr: String = (if (psxgDelta <= 0) "" else "+") + f"$psxgDelta%.2f"
+      val psxgDeltaColor: String = if (psxgDelta <= -1.0) "success"
+      else if (psxgDelta <= 0.5) "info"
+      else if (psxgDelta <= 1.5) "warning"
+      else "danger"
+      val psxgLabel: String = if (psxgDelta <= -1.0) "BAJO LO ESPERADO"
+      else if (psxgDelta <= 0.5) "EN LO ESPERADO"
+      else if (psxgDelta <= 1.5) "ALGO POR ENCIMA"
+      else "POR ENCIMA"
+
+      // Clasificacion de goles por dificultad del tiro
+      val golesAltaDif   = goles.count(_.xg < 0.35)   // tiros muy dificiles
+      val golesMediaDif  = goles.count(g => g.xg >= 0.35 && g.xg < 0.60)
+      val golesBajaDif   = goles.count(_.xg >= 0.60)   // tiros faciles — los que mas duelen
+
+      // Por zona: xG medio vs goles reales
+      val zonas = List("TL","TC","TR","ML","MC","MR","BL","BC","BR")
+      val porZona: List[Map[String, Any]] = zonas.map { z =>
+        val golesZona = goles.filter(g => g.zona == z || (z == "" && g.zona.isEmpty))
+        val nZ  = golesZona.size
+        val xgZ = golesZona.map(_.xg).sum
+        val deltaZ = nZ - xgZ
+        Map(
+          "zona"   -> z,
+          "goles"  -> nZ,
+          "xg"     -> xgZ,
+          "delta"  -> deltaZ,
+          "label"  -> (if (deltaZ <= -0.5) "Mejor" else if (deltaZ >= 0.5) "Peor" else "Normal")
+        )
+      }.filter(_("goles").asInstanceOf[Int] > 0)
+
+      // Tabla individual de goles con xG
+      val tablaGoles: List[Map[String, String]] = goles.take(20).map { g =>
+        val deltaInd = 1.0 - g.xg  // 1 - xG = cuanto costó parar (inverso: para goles encajados, xG alto = facil)
+        Map(
+          "fecha"   -> g.fecha,
+          "rival"   -> g.rival,
+          "zona"    -> (if (g.zona.isEmpty) "—" else g.zona),
+          "sit"     -> (if (g.situacion.isEmpty) "—" else g.situacion),
+          "xg"      -> f"${g.xg}%.2f",
+          "dific"   -> (if (g.xg < 0.35) "DIFÍCIL" else if (g.xg < 0.60) "MEDIA" else "FÁCIL"),
+          "resp"    -> g.responsabilidad,
+          "color"   -> (if (g.xg < 0.35) "success" else if (g.xg < 0.60) "warning" else "danger")
+        )
+      }
+
+      // xG medio por partido
+      val nPartidos = goles.map(_.fecha).distinct.size
+      val xgPorPartido = if (nPartidos > 0) xgTotal / nPartidos else 0.0
+
+      Map(
+        "nGoles"         -> nGoles,
+        "xgTotal"        -> xgTotal,
+        "psxgDelta"      -> psxgDelta,
+        "psxgDeltaStr"   -> psxgDeltaStr,
+        "psxgDeltaColor" -> psxgDeltaColor,
+        "psxgLabel"      -> psxgLabel,
+        "golesAltaDif"   -> golesAltaDif,
+        "golesMediaDif"  -> golesMediaDif,
+        "golesBajaDif"   -> golesBajaDif,
+        "xgPorPartido"   -> xgPorPartido,
+        "nPartidos"      -> nPartidos,
+        "porZona"        -> porZona,
+        "tablaGoles"     -> tablaGoles
+      )
+    } finally { conn.close() }
+  }
+
   // == FASE 8: COGNITIVE RESET RATE ============================================
   def getCognitiveResetData(): Map[String, Any] = {
     val conn = getConnection()
