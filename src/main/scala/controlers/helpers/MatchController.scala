@@ -92,6 +92,27 @@ object MatchController extends cask.Routes {
                   ),
                   input(tpe:="hidden", name:="actionData", id:="actionData", value:="0,0,0"), input(tpe:="hidden", id:="cnt_p1v1", value:="0"), input(tpe:="hidden", id:="cnt_pAir", value:="0"), input(tpe:="hidden", id:="cnt_pPie", value:="0"),
 
+                  // BYPASS RATE — Lineas Superadas en salida con pie
+                  div(cls:="mb-2 mt-3 p-2 border border-success rounded bg-success bg-opacity-10",
+                    label(cls:="form-label text-success small fw-bold w-100 text-center mb-2", "⚡ BYPASS RATE — Lineas superadas"),
+                    div(cls:="d-flex align-items-center justify-content-center gap-3",
+                      button(tpe:="button", cls:="btn btn-outline-success btn-sm px-3",
+                        onclick:="adjustBypass(-1)", "-"),
+                      div(cls:="text-center",
+                        input(tpe:="number", name:="lineasSuperadas", id:="lineasSuperadas",
+                          value:="0", cls:="form-control form-control-sm text-center bg-dark text-success fw-bold border-success",
+                          style:="width:70px; font-size:1.3rem;",
+                          attr("inputmode"):="numeric", attr("min"):="0"),
+                        div(cls:="xx-small text-muted mt-1", "rivales superados")
+                      ),
+                      button(tpe:="button", cls:="btn btn-outline-success btn-sm px-3",
+                        onclick:="adjustBypass(1)", "+")
+                    ),
+                    div(cls:="text-center xx-small text-muted mt-1",
+                      "Nº de rivales que quedan por detras tras un pase en salida"
+                    )
+                  ),
+
                   label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"),
                   div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))
                 ),
@@ -120,7 +141,7 @@ object MatchController extends cask.Routes {
                 ),
                 div(cls:="mb-3 p-2 border border-danger rounded bg-danger bg-opacity-10", label(cls:="form-label text-danger small fw-bold w-100 text-center", "SALA DE VIDEO"), input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="Link Video (Youtube/Drive)")),
                 div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white fw-bold", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
-                div(cls:="mb-4", label(cls:="form-label text-danger small fw-bold", "ANALISIS GOLES / REACCION"), textarea(name:="reaccion", cls:="form-control form-control-sm bg-dark text-white border-danger fw-bold", rows:="3", placeholder:="Descripcion goles encajados y reaccion mental posterior.")),
+                input(tpe:="hidden", name:="reaccion", value:=""),  // campo legacy mantenido para DB
                 div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
                 div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
 
@@ -148,6 +169,7 @@ object MatchController extends cask.Routes {
               function setMode(mode){currentMode=mode;}
               function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
               function incCounter(key){var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val; document.getElementById('disp_'+key).value=val; updateActionData();}
+              function adjustBypass(delta){var el=document.getElementById('lineasSuperadas'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
               function updateActionData(){var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value]; document.getElementById('actionData').value = d.join(',');}
               function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
               function pass(type, success) { var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type); var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0); totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t; updatePassData(); }
