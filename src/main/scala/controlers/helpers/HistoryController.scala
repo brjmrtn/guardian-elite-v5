@@ -1941,7 +1941,7 @@ object HistoryController extends cask.Routes {
                 div(cls := "card-body p-3",
                   div(cls := "d-flex align-items-center gap-3 mb-2",
                     div(style := "font-size:2.5rem;",
-                      arquetipoEmoji.getOrElse(mejorLabel, "⚽")),
+                      raw(arquetipoEmoji.getOrElse(mejorLabel, "&#x26BD;"))),
                     div(
                       div(cls := s"fs-4 fw-black text-$mejorColor", mejorLabel),
                       div(cls := "xx-small text-muted",
@@ -1959,7 +1959,7 @@ object HistoryController extends cask.Routes {
                 div(cls := "card-body p-3",
                   div(cls := "d-flex align-items-center gap-3 mb-2",
                     div(style := "font-size:2.5rem;",
-                      arquetipoEmoji.getOrElse(peorLabel, "⚽")),
+                      raw(arquetipoEmoji.getOrElse(peorLabel, "&#x26BD;"))),
                     div(
                       div(cls := s"fs-4 fw-black text-$peorColor", peorLabel),
                       div(cls := "xx-small text-muted",
