@@ -1683,6 +1683,639 @@ object HistoryController extends cask.Routes {
 
 
 
+
+  // == DOJO COGNITIVO ==========================================================
+  @cask.get("/dojo")
+  def dojoPage(request: cask.Request) = withAuth(request) {
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-10 col-12",
+
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-info mb-0", "DOJO COGNITIVO"),
+              span(cls := "badge bg-dark border border-info text-info", "FASE 5 — Decisiones Bajo Presión")
+            ),
+            a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+          ),
+
+          // Descripcion
+          div(cls := "card bg-dark border-info shadow mb-3",
+            div(cls := "card-body p-3 small text-muted",
+              span(cls := "text-white fw-bold", "Entrena tu mente. "),
+              "Cada situacion tiene una respuesta optima. Acumula puntos y mejora tu Decision Score. ",
+              span(cls := "text-info fw-bold", "El portero que piensa mas rapido gana el duelo antes de que empiece.")
+            )
+          ),
+
+          // Panel de juego
+          div(id := "dojoPanel",
+            // Score y nivel
+            div(cls := "row g-3 mb-3",
+              div(cls := "col-4 text-center",
+                div(cls := "card bg-dark border-warning shadow",
+                  div(cls := "card-body p-2",
+                    div(cls := "xx-small text-muted", "DECISION SCORE"),
+                    div(id := "dojoScore", cls := "display-4 fw-black text-warning", "0")
+                  )
+                )
+              ),
+              div(cls := "col-4 text-center",
+                div(cls := "card bg-dark border-info shadow",
+                  div(cls := "card-body p-2",
+                    div(cls := "xx-small text-muted", "PREGUNTA"),
+                    div(id := "dojoQ", cls := "display-4 fw-black text-info", "1/10")
+                  )
+                )
+              ),
+              div(cls := "col-4 text-center",
+                div(cls := "card bg-dark border-secondary shadow",
+                  div(cls := "card-body p-2",
+                    div(cls := "xx-small text-muted", "RACHA"),
+                    div(id := "dojoStreak", cls := "display-4 fw-black text-success", "0")
+                  )
+                )
+              )
+            ),
+
+            // Situacion
+            div(id := "situacionCard", cls := "card bg-dark border-warning shadow mb-3",
+              div(cls := "card-header text-warning fw-bold small", "SITUACION"),
+              div(cls := "card-body p-3 text-center",
+                div(id := "dojoEmoji", cls := "mb-2", style := "font-size:3rem;", "⚽"),
+                div(id := "dojoSit", cls := "fs-5 fw-bold text-white mb-1", "Cargando..."),
+                div(id := "dojoCtx", cls := "small text-muted", "")
+              )
+            ),
+
+            // Opciones
+            div(id := "opcionesDiv", cls := "row g-2 mb-3"),
+
+            // Feedback
+            div(id := "feedbackDiv", cls := "d-none",
+              div(id := "feedbackCard", cls := "card shadow mb-3",
+                div(cls := "card-body p-3 text-center",
+                  div(id := "feedbackEmoji", cls := "mb-1", style := "font-size:2rem;"),
+                  div(id := "feedbackTxt", cls := "fw-bold fs-5"),
+                  div(id := "feedbackExp", cls := "small text-muted mt-1")
+                )
+              ),
+              div(cls := "d-grid",
+                button(tpe := "button", cls := "btn btn-warning fw-bold",
+                  onclick := "nextQuestion()", "SIGUIENTE SITUACION →")
+              )
+            ),
+
+            // Final
+            div(id := "finalDiv", cls := "d-none",
+              div(cls := "card bg-dark border-warning shadow text-center",
+                div(cls := "card-body p-4",
+                  div(style := "font-size:3rem;", "🏆"),
+                  h3(cls := "text-warning", "SESION COMPLETADA"),
+                  div(id := "finalScore", cls := "display-3 fw-black text-warning", ""),
+                  div(cls := "small text-muted mb-3", "puntos de decision"),
+                  div(id := "finalLabel", cls := "badge fs-5 mb-3", ""),
+                  div(cls := "d-grid",
+                    button(tpe := "button", cls := "btn btn-warning fw-bold",
+                      onclick := "resetDojo()", "JUGAR DE NUEVO")
+                  )
+                )
+              )
+            )
+          ),
+
+          script(raw("""
+            var preguntas = [
+              {
+                sit: "1 vs 1 con el delantero",
+                ctx: "El delantero viene solo, a 8 metros. El equipo no llega.",
+                emoji: "🔥",
+                opciones: [
+                  { txt: "Salir a achicar angulo rapidamente", pts: 10, ok: true,
+                    exp: "Correcto. Salir reduce el angulo de tiro y te hace grande." },
+                  { txt: "Quedarte en la linea de gol", pts: 0, ok: false,
+                    exp: "Mal. Quedarte le das todo el angulo al delantero." },
+                  { txt: "Intentar hablar con la defensa", pts: 2, ok: false,
+                    exp: "Demasiado tarde. La decision debia ser tuya." }
+                ]
+              },
+              {
+                sit: "Corner al segundo palo",
+                ctx: "El balon viene centrado al segundo palo. Hay un rival entre ti y el balon.",
+                emoji: "🎯",
+                opciones: [
+                  { txt: "Salir a por el balon gritando PORTERO", pts: 10, ok: true,
+                    exp: "Correcto. La iniciativa vocal y la salida temprana son clave." },
+                  { txt: "Esperar a ver si llega alguien de la defensa", pts: 2, ok: false,
+                    exp: "Mal. La inaccion en el area propia genera caos." },
+                  { txt: "Quedarte en el primer palo por si hay remate", pts: 4, ok: false,
+                    exp: "Parcial. Cubriste un riesgo pero abandonaste el principal." }
+                ]
+              },
+              {
+                sit: "Penalty",
+                ctx: "Penalty en contra. El tirador corre hacia el balon.",
+                emoji: "⚡",
+                opciones: [
+                  { txt: "Lanzarte a un lado justo antes del chut", pts: 8, ok: true,
+                    exp: "Buena decision. Comprometerte tarde reduce la lectura del rival." },
+                  { txt: "Lanzarte muy pronto", pts: 3, ok: false,
+                    exp: "Mal. Si te lanzas pronto el tirador cambia el lado facilmente." },
+                  { txt: "Quedarte quieto en el centro", pts: 5, ok: false,
+                    exp: "Aceptable solo si lees el lado. Sin lectura es pasividad." }
+                ]
+              },
+              {
+                sit: "Balon largo en profundidad",
+                ctx: "El rival lanza un balon largo. Tu defensa y el delantero van a por el.",
+                emoji: "💨",
+                opciones: [
+                  { txt: "Salir decidido a despejar antes de que llegue el rival", pts: 10, ok: true,
+                    exp: "Perfecto. El portero que manda el area evita el duelo." },
+                  { txt: "Quedarte en la porteria por si el rival llega primero", pts: 3, ok: false,
+                    exp: "Demasiado pasivo. Perdiste la oportunidad de dominar el area." },
+                  { txt: "Gritar al defensa para que despeje el", pts: 5, ok: false,
+                    exp: "Aceptable si el defensa tiene ventaja, pero tu decias ser protagonista." }
+                ]
+              },
+              {
+                sit: "2 vs 1 en contraataque",
+                ctx: "Dos rivales solos contra tu porteria. Solo tu puedes actuar.",
+                emoji: "😰",
+                opciones: [
+                  { txt: "Avanzar lentamente para cerrar angulo al que tiene el balon", pts: 10, ok: true,
+                    exp: "Correcto. Cortas el tiro y fuerzas el pase, que puede interceptar la defensa." },
+                  { txt: "Lanzarte al suelo a por el balon", pts: 1, ok: false,
+                    exp: "Error grave. Si te anticipa el pase, gol seguro." },
+                  { txt: "Quedarte en la porteria", pts: 4, ok: false,
+                    exp: "Parcial. Al menos cubres la porteria pero no haces nada proactivo." }
+                ]
+              },
+              {
+                sit: "Saque de puerta bajo presion",
+                ctx: "Rivales presionando. Tus companeros se ofrecen en corto y en largo.",
+                emoji: "👟",
+                opciones: [
+                  { txt: "Pase corto seguro al defensa mas cercano con espacio", pts: 8, ok: true,
+                    exp: "Bien. El balon seguro construye juego desde atras." },
+                  { txt: "Chut largo hacia adelante sin mirar", pts: 3, ok: false,
+                    exp: "Mal. Pierdes posesion y cedes terreno." },
+                  { txt: "Esperar a que los rivales se alejen antes de sacar", pts: 6, ok: false,
+                    exp: "Aceptable, pero la espera da ventaja tactica al rival." }
+                ]
+              },
+              {
+                sit: "Tiro libre rasante a la escuadra",
+                ctx: "Tiro libre a 20 metros. El balon se dirige a la escuadra izquierda.",
+                emoji: "🧤",
+                opciones: [
+                  { txt: "Lanzarte con las dos manos hacia la escuadra", pts: 10, ok: true,
+                    exp: "Correcto. Extension maxima con las dos manos es la tecnica optima." },
+                  { txt: "Lanzarte pero con una sola mano", pts: 5, ok: false,
+                    exp: "Parcial. Reduces el area de cobertura innecesariamente." },
+                  { txt: "Intentar desviar con el pie", pts: 1, ok: false,
+                    exp: "Incorrecto. El pie no da el control ni la extension necesaria." }
+                ]
+              },
+              {
+                sit: "Error propio en el partido anterior",
+                ctx: "Cometiste un error grave el partido pasado. Hoy vuelves a jugar.",
+                emoji: "🧠",
+                opciones: [
+                  { txt: "Concentrarte solo en el partido de hoy, error superado", pts: 10, ok: true,
+                    exp: "Perfecto. El reset mental es una habilidad de elite." },
+                  { txt: "Jugar con mas precaucion para no volver a fallar", pts: 4, ok: false,
+                    exp: "El exceso de precaucion genera nuevos errores." },
+                  { txt: "Pensar en el error para no repetirlo", pts: 2, ok: false,
+                    exp: "Mal. Pensar en el error durante el partido bloquea la decision rapida." }
+                ]
+              },
+              {
+                sit: "Defensa mal colocada, rival solo",
+                ctx: "Tu defensa se quedo adelantada. Un rival queda solo en offside dudoso.",
+                emoji: "🚩",
+                opciones: [
+                  { txt: "Pedir al linier que levante el baston y seguir atento", pts: 8, ok: true,
+                    exp: "Bien. Confias en el arbitro pero te preparas igual." },
+                  { txt: "Protestar al arbitro en ese momento", pts: 0, ok: false,
+                    exp: "Error grave. Te distraes justo cuando debes estar listo." },
+                  { txt: "Salir a por el delantero asumiendo que es offside", pts: 3, ok: false,
+                    exp: "Riesgo innecesario. Si el arbitro no pita, gol cantado." }
+                ]
+              },
+              {
+                sit: "Remate de cabeza a quemarropa",
+                ctx: "Centro al area, remate de cabeza a 2 metros. No hay tiempo para pensar.",
+                emoji: "💥",
+                opciones: [
+                  { txt: "Reaccion pura, tirarse al lado del balon", pts: 10, ok: true,
+                    exp: "Correcto. En remates a quemarropa solo cuenta el reflejo y la posicion inicial." },
+                  { txt: "Intentar leer la trayectoria antes de moverse", pts: 2, ok: false,
+                    exp: "Mal. No hay tiempo. La posicion previa lo decide todo." },
+                  { txt: "Saltar para achcar", pts: 5, ok: false,
+                    exp: "Parcial. Util si estas bien colocado, pero el lateral es mas seguro." }
+                ]
+              }
+            ];
+
+            var idx = 0, score = 0, streak = 0, maxStreak = 0;
+
+            function shuffle(arr) {
+              for (var i = arr.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1));
+                var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+              }
+              return arr;
+            }
+
+            preguntas = shuffle(preguntas);
+
+            function loadQuestion() {
+              if (idx >= preguntas.length) { showFinal(); return; }
+              var p = preguntas[idx];
+              document.getElementById('dojoQ').textContent = (idx+1) + '/' + preguntas.length;
+              document.getElementById('dojoEmoji').textContent = p.emoji;
+              document.getElementById('dojoSit').textContent = p.sit;
+              document.getElementById('dojoCtx').textContent = p.ctx;
+              document.getElementById('feedbackDiv').classList.add('d-none');
+              document.getElementById('situacionCard').classList.remove('d-none');
+
+              var ops = document.getElementById('opcionesDiv');
+              ops.innerHTML = '';
+              var shuffled = shuffle(p.opciones.slice());
+              shuffled.forEach(function(op, i) {
+                var col = document.createElement('div');
+                col.className = 'col-12';
+                col.innerHTML = '<button class="btn btn-outline-light w-100 text-start fw-bold p-3" onclick="answer(' + p.opciones.indexOf(op) + ')">' + op.txt + '</button>';
+                ops.appendChild(col);
+              });
+            }
+
+            function answer(opIdx) {
+              var p = preguntas[idx];
+              var op = p.opciones[opIdx];
+              score += op.pts;
+              if (op.ok) { streak++; if (streak > maxStreak) maxStreak = streak; }
+              else streak = 0;
+
+              document.getElementById('dojoScore').textContent = score;
+              document.getElementById('dojoStreak').textContent = streak;
+
+              var fc = document.getElementById('feedbackCard');
+              fc.className = 'card shadow mb-3 ' + (op.ok ? 'border-success bg-success bg-opacity-10' : 'border-danger bg-danger bg-opacity-10');
+              document.getElementById('feedbackEmoji').textContent = op.ok ? '✅' : '❌';
+              document.getElementById('feedbackTxt').textContent = op.ok ? '¡Correcto! +' + op.pts + ' pts' : 'No era esa. +' + op.pts + ' pts';
+              document.getElementById('feedbackExp').textContent = op.exp;
+              document.getElementById('situacionCard').classList.add('d-none');
+              document.getElementById('opcionesDiv').innerHTML = '';
+              document.getElementById('feedbackDiv').classList.remove('d-none');
+              idx++;
+            }
+
+            function nextQuestion() { loadQuestion(); }
+
+            function showFinal() {
+              document.getElementById('feedbackDiv').classList.add('d-none');
+              document.getElementById('situacionCard').classList.add('d-none');
+              document.getElementById('opcionesDiv').innerHTML = '';
+              document.getElementById('finalDiv').classList.remove('d-none');
+              document.getElementById('finalScore').textContent = score;
+              var max = preguntas.length * 10;
+              var pct = Math.round(score / max * 100);
+              var lbl = document.getElementById('finalLabel');
+              if (pct >= 85) { lbl.textContent = 'ELITE MENTAL'; lbl.className = 'badge bg-warning text-dark fs-5 mb-3'; }
+              else if (pct >= 65) { lbl.textContent = 'SOLIDO'; lbl.className = 'badge bg-success fs-5 mb-3'; }
+              else if (pct >= 45) { lbl.textContent = 'EN DESARROLLO'; lbl.className = 'badge bg-info fs-5 mb-3'; }
+              else { lbl.textContent = 'SIGUE ENTRENANDO'; lbl.className = 'badge bg-danger fs-5 mb-3'; }
+            }
+
+            function resetDojo() {
+              idx = 0; score = 0; streak = 0; maxStreak = 0;
+              preguntas = shuffle(preguntas);
+              document.getElementById('finalDiv').classList.add('d-none');
+              document.getElementById('dojoScore').textContent = '0';
+              document.getElementById('dojoStreak').textContent = '0';
+              document.getElementById('situacionCard').classList.remove('d-none');
+              loadQuestion();
+            }
+
+            loadQuestion();
+          """))
+        )
+      )
+    ))
+  }
+
+  // == STRIKER CLUSTERING ======================================================
+  @cask.get("/striker-clustering")
+  def strikerClusteringPage(request: cask.Request) = withAuth(request) {
+    val clusters = DatabaseManager.getStrikerClusters()
+
+    val nRivales = clusters.size
+    val arquetipos = Map(
+      "RAPIDO"     -> clusters.count(_("arquetipo") == "RAPIDO"),
+      "AEREO"      -> clusters.count(_("arquetipo") == "AEREO"),
+      "COLECTIVO"  -> clusters.count(_("arquetipo") == "COLECTIVO"),
+      "DIRECTO"    -> clusters.count(_("arquetipo") == "DIRECTO"),
+      "EQUILIBRADO"-> clusters.count(_("arquetipo") == "EQUILIBRADO")
+    )
+    val masComun = if (arquetipos.nonEmpty) arquetipos.maxBy(_._2)._1 else "—"
+
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-warning mb-0", "STRIKER CLUSTERING"),
+              span(cls := "badge bg-dark border border-warning text-warning", "FASE 7 — Análisis de Rivales")
+            ),
+            a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+          ),
+
+          if (nRivales == 0) div(cls := "alert alert-secondary",
+            "Sin datos suficientes. Registra partidos y clasifica los goles en el Match Center."
+          ) else frag(),
+
+          // Resumen de arquetipos
+          div(cls := "row g-3 mb-3",
+            frag(Seq(
+              ("RAPIDO",     "danger",    "1v1 y contraataques"),
+              ("AEREO",      "info",      "Remates de cabeza"),
+              ("COLECTIVO",  "warning",   "Jugadas en equipo 2v1"),
+              ("DIRECTO",    "primary",   "Alto GC, juego directo"),
+              ("EQUILIBRADO","secondary", "Perfil mixto")
+            ).map { case (arq, color, desc) =>
+              div(cls := "col-6 col-md",
+                div(cls := s"card bg-dark border-$color shadow text-center",
+                  div(cls := "card-body p-2",
+                    div(cls := s"fs-2 fw-black text-$color",
+                      arquetipos.getOrElse(arq, 0).toString),
+                    div(cls := s"xx-small fw-bold text-$color", arq),
+                    div(cls := "xx-small text-muted", desc)
+                  )
+                )
+              )
+            }: _*)
+          ),
+
+          // Alerta del arquetipo mas comun
+          if (nRivales > 0) div(cls := "card bg-dark border-warning shadow mb-3",
+            div(cls := "card-body p-3",
+              span(cls := "text-warning fw-bold", "⚠️ Perfil más frecuente: "),
+              span(cls := "text-white fw-bold fs-5", masComun),
+              span(cls := "text-muted small ms-2",
+                masComun match {
+                  case "RAPIDO"     => "— Trabaja la salida en 1v1 y el achique de ángulo."
+                  case "AEREO"      => "— Domina el área aérea. Posición y grito son clave."
+                  case "COLECTIVO"  => "— Anticipa el pase en jugadas 2v1. No te lances al primer toque."
+                  case "DIRECTO"    => "— Cuidado con los balones largos. Sal a por ellos."
+                  case _            => "— Perfil variado. Estudia cada rival individualmente."
+                }
+              )
+            )
+          ) else frag(),
+
+          // Tabla de rivales
+          if (clusters.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", s"Directorio de $nRivales rivales"),
+            div(cls := "card-body p-2",
+              div(cls := "table-responsive",
+                table(cls := "table table-dark table-sm table-hover mb-0",
+                  thead(tr(
+                    th(cls := "xx-small text-muted", "RIVAL"),
+                    th(cls := "xx-small text-muted text-center", "PJ"),
+                    th(cls := "xx-small text-muted text-center", "GC"),
+                    th(cls := "xx-small text-muted text-center", "GC/PJ"),
+                    th(cls := "xx-small text-muted text-center", "ARQUETIPO"),
+                    th(cls := "xx-small text-muted text-center", "AMENAZA"),
+                    th(cls := "xx-small text-muted text-center", "TU NOTA")
+                  )),
+                  tbody(
+                    frag(clusters.map { c =>
+                      val arqColor  = c("arquetipoColor").asInstanceOf[String]
+                      val amenColor = c("amenazaColor").asInstanceOf[String]
+                      val nota      = c("notaHec").asInstanceOf[Double]
+                      val notaCls   = if (nota >= 7) "success" else if (nota >= 5) "warning" else "danger"
+                      tr(
+                        td(cls := "small fw-bold", c("rival").asInstanceOf[String]),
+                        td(cls := "xx-small text-center text-muted", c("pj").asInstanceOf[Int].toString),
+                        td(cls := "xx-small text-center text-danger fw-bold", c("gcTotal").asInstanceOf[Int].toString),
+                        td(cls := "xx-small text-center text-warning",
+                          f"${c("gcMedia").asInstanceOf[Double]}%.1f"),
+                        td(cls := "text-center",
+                          span(cls := s"badge bg-$arqColor bg-opacity-25 text-$arqColor xx-small",
+                            c("arquetipo").asInstanceOf[String])
+                        ),
+                        td(cls := "text-center",
+                          span(cls := s"badge bg-$amenColor bg-opacity-25 text-$amenColor xx-small",
+                            c("amenaza").asInstanceOf[String])
+                        ),
+                        td(cls := s"xx-small text-center fw-bold text-$notaCls",
+                          f"$nota%.1f")
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ) else frag()
+        )
+      )
+    ))
+  }
+
+  // == SCANNING RATE ===========================================================
+  @cask.get("/scanning-rate")
+  def scanningRatePage(request: cask.Request) = withAuth(request) {
+    val conn = DatabaseManager.getConnection()
+    val (partidos, avgScan, avgNota, corrData) = try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT fecha, rival, nota, scanning_rate, goles_contra " +
+          "FROM matches WHERE status='PLAYED' AND nota > 0 " +
+          "ORDER BY fecha DESC LIMIT 30")
+      var rows = List[(String, String, Double, Int, Int)]()
+      while (rs.next()) rows = rows :+ (
+        rs.getString("fecha").take(10),
+        Option(rs.getString("rival")).getOrElse(""),
+        rs.getDouble("nota"),
+        rs.getInt("scanning_rate"),
+        rs.getInt("goles_contra")
+      )
+      val conDatos = rows.filter(_._4 > 0)
+      val avg  = if (conDatos.nonEmpty) conDatos.map(_._4.toDouble).sum / conDatos.size else 0.0
+      val nota = if (conDatos.nonEmpty) conDatos.map(_._3).sum / conDatos.size else 0.0
+      // Correlacion simple Pearson scan vs nota
+      val n = conDatos.size.toDouble
+      val corrVal = if (n >= 3) {
+        val mx = conDatos.map(_._4.toDouble).sum / n
+        val my = conDatos.map(_._3).sum / n
+        val num = conDatos.map(r => (r._4 - mx) * (r._3 - my)).sum
+        val den = math.sqrt(conDatos.map(r => math.pow(r._4 - mx, 2)).sum *
+          conDatos.map(r => math.pow(r._3 - my, 2)).sum)
+        if (den > 0) num / den else 0.0
+      } else 0.0
+      (rows, avg, nota, corrVal)
+    } finally { conn.close() }
+
+    val conDatos   = partidos.count(_._4 > 0)
+    val avgScanStr = f"$avgScan%.1f"
+    val corrStr    = (if (corrData >= 0) "+" else "") + f"$corrData%.2f"
+    val corrColor  = if (corrData >= 0.4) "success" else if (corrData >= 0.2) "info"
+    else if (corrData >= -0.1) "secondary" else "danger"
+    val corrLabel  = if (corrData >= 0.4) "CORRELACIÓN FUERTE"
+    else if (corrData >= 0.2) "CORRELACIÓN LEVE"
+    else if (corrData >= -0.1) "SIN CORRELACIÓN"
+    else "CORRELACIÓN NEGATIVA"
+
+    val labelsJson = partidos.reverse.map(r => """ + r._1.takeRight(5) + """).mkString("[",",","]")
+    val scanJson   = partidos.reverse.map(_._4.toString).mkString("[",",","]")
+    val notaJson   = partidos.reverse.map(r => f"${r._3}%.1f").mkString("[",",","]")
+
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-info mb-0", "SCANNING RATE"),
+              span(cls := "badge bg-dark border border-info text-info", "FASE 7 — Conciencia Situacional")
+            ),
+            a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+          ),
+
+          div(cls := "card bg-dark border-secondary mb-3",
+            div(cls := "card-body p-3 small text-muted",
+              span(cls := "text-white fw-bold", "¿Qué mide? "),
+              "Número de escaneos de campo que Héctor realiza antes de recibir una cesión. ",
+              "Un portero que escanea más ve el campo antes de tocar el balón — mejor decisión, ",
+              "más velocidad de juego. Se registra manualmente en el Match Center."
+            )
+          ),
+
+          if (conDatos == 0) div(cls := "alert alert-secondary",
+            "Sin datos de Scanning Rate aún. Registra los escaneos en el campo 👁️ del Match Center."
+          ) else frag(),
+
+          // KPIs
+          div(cls := "row g-3 mb-3",
+            div(cls := "col-4 text-center",
+              div(cls := "card bg-dark border-info shadow",
+                div(cls := "card-body p-3",
+                  div(cls := "xx-small text-muted fw-bold", "MEDIA ESCANEOS"),
+                  div(cls := "display-5 fw-black text-info", avgScanStr),
+                  div(cls := "xx-small text-muted", s"$conDatos partidos con datos")
+                )
+              )
+            ),
+            div(cls := "col-4 text-center",
+              div(cls := s"card bg-dark border-$corrColor shadow",
+                div(cls := "card-body p-3",
+                  div(cls := "xx-small text-muted fw-bold", "CORRELACIÓN"),
+                  div(cls := s"display-5 fw-black text-$corrColor", corrStr),
+                  div(cls := s"badge bg-$corrColor bg-opacity-25 text-$corrColor xx-small", corrLabel)
+                )
+              )
+            ),
+            div(cls := "col-4 text-center",
+              div(cls := "card bg-dark border-secondary shadow",
+                div(cls := "card-body p-3",
+                  div(cls := "xx-small text-muted fw-bold", "NOTA CON DATOS"),
+                  div(cls := "display-5 fw-black text-warning", f"$avgNota%.1f"),
+                  div(cls := "xx-small text-muted", "en partidos registrados")
+                )
+              )
+            )
+          ),
+
+          // Grafico dual
+          if (conDatos >= 3) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small",
+              "Escaneos vs Nota — últimos 30 partidos"),
+            div(cls := "card-body p-3",
+              div(style := "height:220px;",
+                tag("canvas")(id := "scanChart")
+              )
+            )
+          ) else frag(),
+
+          // Tabla
+          if (partidos.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "Registro por partido"),
+            div(cls := "card-body p-2",
+              div(cls := "table-responsive",
+                table(cls := "table table-dark table-sm table-hover mb-0",
+                  thead(tr(
+                    th(cls := "xx-small text-muted", "FECHA"),
+                    th(cls := "xx-small text-muted", "RIVAL"),
+                    th(cls := "xx-small text-muted text-center", "ESCANEOS"),
+                    th(cls := "xx-small text-muted text-center", "GC"),
+                    th(cls := "xx-small text-muted text-center", "NOTA")
+                  )),
+                  tbody(
+                    frag(partidos.map { case (fecha, rival, nota, scan, gc) =>
+                      val notaCls = if (nota >= 7) "success" else if (nota >= 5) "warning" else "danger"
+                      tr(
+                        td(cls := "xx-small text-muted", fecha),
+                        td(cls := "xx-small", rival),
+                        td(cls := s"xx-small text-center fw-bold text-info",
+                          if (scan > 0) scan.toString else "—"),
+                        td(cls := "xx-small text-center text-danger", gc.toString),
+                        td(cls := s"xx-small text-center fw-bold text-$notaCls", f"$nota%.1f")
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ) else frag(),
+
+          script(raw(s"""
+            (function() {
+              var ctx = document.getElementById('scanChart');
+              if (!ctx) return;
+              new Chart(ctx.getContext('2d'), {
+                data: {
+                  labels: $labelsJson,
+                  datasets: [
+                    {
+                      type: 'bar',
+                      label: 'Escaneos',
+                      data: $scanJson,
+                      backgroundColor: 'rgba(13,202,240,0.4)',
+                      borderColor: 'rgba(13,202,240,0.8)',
+                      yAxisID: 'y1'
+                    },
+                    {
+                      type: 'line',
+                      label: 'Nota',
+                      data: $notaJson,
+                      borderColor: 'rgba(255,193,7,0.9)',
+                      tension: 0.3,
+                      pointRadius: 4,
+                      yAxisID: 'y2'
+                    }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x:  { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#333' } },
+                    y1: { position: 'left',  beginAtZero: true,
+                          ticks: { color: '#0dcaf0', stepSize: 1 }, grid: { color: '#333' } },
+                    y2: { position: 'right', min: 0, max: 10,
+                          ticks: { color: '#ffc107', stepSize: 2 }, grid: { drawOnChartArea: false } }
+                  }
+                }
+              });
+            })();
+          """))
+        )
+      )
+    ))
+  }
+
   // == PSxG DELTA ==============================================================
   @cask.get("/psxg-delta")
   def psxgDeltaPage(request: cask.Request) = withAuth(request) {
