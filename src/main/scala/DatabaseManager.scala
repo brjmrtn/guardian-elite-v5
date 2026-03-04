@@ -1673,6 +1673,265 @@ Responde en espanol, tono positivo y motivador para un nino."""
   }
 
 
+  // == FASE 8: DEVELOPMENT PATHWAY MATCHER =====================================
+  def getPathwayData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Cruza el arquetipo de rivales (Striker Clustering) con métricas de Héctor
+      // Responde: ¿contra qué estilo de equipo crece más como portero?
+
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          m.rival,
+          m.nota,
+          m.paradas,
+          m.goles_contra,
+          m.acciones_pie,
+          m.lineas_superadas,
+          m.scanning_rate,
+          COUNT(mg.id)                                                       AS n_goles,
+          COUNT(CASE WHEN mg.situacion ILIKE '%1v1%' THEN 1 END)            AS g_1v1,
+          COUNT(CASE WHEN mg.situacion ILIKE '%aereo%'
+                       OR mg.situacion ILIKE '%cabeza%' THEN 1 END)         AS g_aereo,
+          COUNT(CASE WHEN mg.situacion ILIKE '%2v1%' THEN 1 END)            AS g_2v1
+        FROM matches m
+        LEFT JOIN match_goals mg ON mg.match_id = m.id
+        WHERE m.status = 'PLAYED' AND m.nota > 0
+        GROUP BY m.id, m.rival, m.nota, m.paradas, m.goles_contra,
+                 m.acciones_pie, m.lineas_superadas, m.scanning_rate
+        ORDER BY m.fecha DESC
+      """)
+
+      case class PRow(rival: String, nota: Double, paradas: Int, gc: Int,
+                      pie: Int, lineas: Int, scan: Int,
+                      nGoles: Int, g1v1: Int, gAereo: Int, g2v1: Int)
+      var rows = List[PRow]()
+      while (rs.next()) {
+        rows = rows :+ PRow(
+          rival   = Option(rs.getString("rival")).getOrElse(""),
+          nota    = rs.getDouble("nota"),
+          paradas = rs.getInt("paradas"),
+          gc      = rs.getInt("goles_contra"),
+          pie     = rs.getInt("acciones_pie"),
+          lineas  = rs.getInt("lineas_superadas"),
+          scan    = rs.getInt("scanning_rate"),
+          nGoles  = rs.getInt("n_goles"),
+          g1v1    = rs.getInt("g_1v1"),
+          gAereo  = rs.getInt("g_aereo"),
+          g2v1    = rs.getInt("g_2v1")
+        )
+      }
+
+      // Clasificar cada partido por arquetipo de rival (misma lógica que Striker Clustering)
+      def arquetipoRival(r: PRow): String = {
+        val nG = r.nGoles
+        if (r.g1v1 >= 2 || (nG > 0 && r.g1v1.toDouble/nG >= 0.35)) "RAPIDO"
+        else if (r.gAereo >= 2 || (nG > 0 && r.gAereo.toDouble/nG >= 0.30)) "AEREO"
+        else if (r.g2v1 >= 2 || (nG > 0 && r.g2v1.toDouble/nG >= 0.30)) "COLECTIVO"
+        else if (r.gc >= 3) "DIRECTO"
+        else "EQUILIBRADO"
+      }
+
+      // Agrupar por arquetipo y calcular métricas de crecimiento
+      case class PathStats(nota: Double, paradas: Double, pie: Double,
+                           lineas: Double, n: Int)
+
+      def statsFor(arq: String): Option[PathStats] = {
+        val sub = rows.filter(r => arquetipoRival(r) == arq)
+        if (sub.isEmpty) None
+        else Some(PathStats(
+          nota    = sub.map(_.nota).sum / sub.size,
+          paradas = sub.map(_.paradas.toDouble).sum / sub.size,
+          pie     = sub.map(_.pie.toDouble).sum / sub.size,
+          lineas  = sub.map(_.lineas.toDouble).sum / sub.size,
+          n       = sub.size
+        ))
+      }
+
+      val arqs = List("RAPIDO","AEREO","COLECTIVO","DIRECTO","EQUILIBRADO")
+      val perArq: List[Map[String, Any]] = arqs.flatMap { arq =>
+        statsFor(arq).map { s =>
+          Map(
+            "arquetipo" -> arq,
+            "n"         -> s.n,
+            "nota"      -> s.nota,
+            "paradas"   -> s.paradas,
+            "pie"       -> s.pie,
+            "lineas"    -> s.lineas,
+            "color"     -> (arq match {
+              case "RAPIDO"     => "danger"
+              case "AEREO"      => "info"
+              case "COLECTIVO"  => "warning"
+              case "DIRECTO"    => "primary"
+              case _            => "secondary"
+            })
+          )
+        }
+      }
+
+      // Mejor arquetipo para crecer (nota más alta = entorno más favorable)
+      val mejorArq = if (perArq.nonEmpty)
+        perArq.maxBy(_("nota").asInstanceOf[Double])
+      else Map("arquetipo" -> "—", "nota" -> 0.0, "color" -> "secondary")
+
+      // Arquetipo más desafiante (nota más baja = área de mejora)
+      val peorArq = if (perArq.nonEmpty)
+        perArq.minBy(_("nota").asInstanceOf[Double])
+      else Map("arquetipo" -> "—", "nota" -> 0.0, "color" -> "secondary")
+
+      // Recomendacion de entorno de desarrollo
+      val recomendacion: String = mejorArq("arquetipo").asInstanceOf[String] match {
+        case "RAPIDO"     => "Héctor rinde mejor contra equipos rápidos. Busca rivales con pressing alto y 1v1 frecuentes para consolidar esta fortaleza."
+        case "AEREO"      => "Su mejor rendimiento es contra equipos aéreos. Los entrenamientos de salida en córner y dominio del área deben ser prioritarios."
+        case "COLECTIVO"  => "Rinde bien en entornos de juego colectivo. Equipos con buen juego combinativo le sacan el máximo partido."
+        case "DIRECTO"    => "Mejora contra el juego directo. Equipos que juegan largo le entrenan la salida y el despeje."
+        case _            => "Perfil equilibrado. Cualquier estilo de rival le aporta crecimiento similar."
+      }
+
+      val areasMejora: String = peorArq("arquetipo").asInstanceOf[String] match {
+        case "RAPIDO"     => "Trabajar salida en 1v1 y achique de ángulo con presión temporal."
+        case "AEREO"      => "Reforzar dominio del área aérea — posición, grito y timing de salida."
+        case "COLECTIVO"  => "Mejorar lectura de jugadas 2v1 y anticipación del pase de gol."
+        case "DIRECTO"    => "Consolidar la salida a balones largos y la comunicación con la defensa."
+        case _            => "Mantener la consistencia independientemente del estilo rival."
+      }
+
+      Map(
+        "perArq"        -> perArq,
+        "mejorArq"      -> mejorArq,
+        "peorArq"       -> peorArq,
+        "recomendacion" -> recomendacion,
+        "areasMejora"   -> areasMejora,
+        "totalPartidos" -> rows.size
+      )
+    } finally { conn.close() }
+  }
+
+  // == FASE 5: BIO-BANDING =====================================================
+  def getBioBandingData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // 1. Edad y PHV del Digital Twin
+      val rsP = conn.createStatement().executeQuery(
+        "SELECT fecha_nacimiento FROM seasons ORDER BY id DESC LIMIT 1")
+      val fechaNac = if (rsP.next())
+        Option(rsP.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2015-06-19")
+      else "2015-06-19"
+      val hoy       = java.time.LocalDate.now()
+      val nac       = java.time.LocalDate.parse(fechaNac)
+      val edadAnios = java.time.Period.between(nac, hoy).getYears
+      val edadMeses = java.time.Period.between(nac, hoy).getYears * 12 +
+        java.time.Period.between(nac, hoy).getMonths
+
+      // 2. Altura actual y velocidad de crecimiento
+      val rsG = conn.createStatement().executeQuery(
+        "SELECT altura, peso, velocidad_crecimiento FROM physical_growth ORDER BY fecha DESC LIMIT 1")
+      val (alturaActual, pesoActual, velCrecimiento) =
+        if (rsG.next()) (rsG.getDouble("altura"), rsG.getDouble("peso"),
+          rsG.getDouble("velocidad_crecimiento"))
+        else (0.0, 0.0, 0.0)
+
+      // 3. Velocidad máxima (PHV detector)
+      val rsVel = conn.createStatement().executeQuery(
+        "SELECT MAX(velocidad_crecimiento) as max_vel FROM physical_growth")
+      val phvVelocidad = if (rsVel.next()) rsVel.getDouble("max_vel") else 0.0
+      val phvActivo    = phvVelocidad >= 6.0  // >6 cm/año = pico activo
+
+      // 4. Fase biológica estimada
+      val faseBio: String = if (edadAnios < 8) "INFANCIA TARDÍA"
+      else if (edadAnios < 10) "PRE-PUBERTAD"
+      else if (edadAnios < 12) "INICIO PUBERTAD"
+      else if (phvActivo) "PHV — PICO ACTIVO"
+      else if (edadAnios < 15) "PUBERTAD MEDIA"
+      else if (edadAnios < 17) "POST-PHV"
+      else "MADUREZ"
+      val faseBioColor: String = faseBio match {
+        case "PHV — PICO ACTIVO" => "danger"
+        case "INICIO PUBERTAD"   => "warning"
+        case "PUBERTAD MEDIA"    => "warning"
+        case "POST-PHV"          => "info"
+        case _                   => "secondary"
+      }
+
+      // 5. Factor de ajuste de nota según fase biológica
+      // Durante el PHV el cuerpo consume energía en crecer — rendimiento esperado baja
+      // Un 6.5 durante PHV activo equivale a un 7.5 en condiciones normales
+      val factorAjuste: Double = faseBio match {
+        case "PHV — PICO ACTIVO" => 1.15   // +15%: notas más valiosas durante el pico
+        case "INICIO PUBERTAD"   => 1.08   // +8%
+        case "PUBERTAD MEDIA"    => 1.05   // +5%
+        case "PRE-PUBERTAD"      => 1.02   // +2%: ajuste mínimo
+        case _                   => 1.0    // sin ajuste
+      }
+
+      // 6. Nota real vs nota bio-ajustada (últimos 20 partidos)
+      val rsM = conn.createStatement().executeQuery(
+        "SELECT fecha, rival, nota, goles_contra, paradas " +
+          "FROM matches WHERE status='PLAYED' AND nota > 0 " +
+          "ORDER BY fecha DESC LIMIT 20")
+      var matchRows = List[Map[String, Any]]()
+      while (rsM.next()) {
+        val nota      = rsM.getDouble("nota")
+        val notaAdj   = math.min(10.0, nota * factorAjuste)
+        matchRows = matchRows :+ Map(
+          "fecha"    -> rsM.getString("fecha").take(10),
+          "rival"    -> Option(rsM.getString("rival")).getOrElse(""),
+          "nota"     -> nota,
+          "notaAdj"  -> notaAdj,
+          "gc"       -> rsM.getInt("goles_contra"),
+          "paradas"  -> rsM.getInt("paradas")
+        )
+      }
+
+      val n = matchRows.size
+      val avgNota    = if (n > 0) matchRows.map(_("nota").asInstanceOf[Double]).sum / n else 0.0
+      val avgNotaAdj = if (n > 0) matchRows.map(_("notaAdj").asInstanceOf[Double]).sum / n else 0.0
+      val deltaMedia = avgNotaAdj - avgNota
+
+      // 7. Percentil de altura para la edad (estimación simplificada OMS)
+      val percentilAltura: String = if (alturaActual <= 0) "Sin datos" else {
+        // Medianas OMS para niños (cm) por edad
+        val medianas = Map(5->109.0, 6->116.0, 7->122.0, 8->128.0, 9->133.0,
+          10->138.0, 11->143.0, 12->149.0, 13->156.0, 14->163.0,
+          15->169.0, 16->173.0, 17->175.0, 18->176.0)
+        val mediana = medianas.getOrElse(edadAnios, 155.0)
+        val diff = alturaActual - mediana
+        if (diff > 6) "P97 — Muy alto para su edad"
+        else if (diff > 3) "P75-P90 — Alto para su edad"
+        else if (diff > -3) "P50 — Talla media"
+        else if (diff > -6) "P25 — Algo por debajo"
+        else "P10 — Por debajo de la media"
+      }
+
+      // 8. Series para gráfico
+      val fechasSerie  = matchRows.reverse.map(_("fecha").asInstanceOf[String].take(5))
+      val notaSerie    = matchRows.reverse.map(_("nota").asInstanceOf[Double])
+      val notaAdjSerie = matchRows.reverse.map(_("notaAdj").asInstanceOf[Double])
+
+      Map(
+        "edadAnios"       -> edadAnios,
+        "edadMeses"       -> edadMeses,
+        "alturaActual"    -> alturaActual,
+        "pesoActual"      -> pesoActual,
+        "velCrecimiento"  -> velCrecimiento,
+        "phvActivo"       -> phvActivo,
+        "phvVelocidad"    -> phvVelocidad,
+        "faseBio"         -> faseBio,
+        "faseBioColor"    -> faseBioColor,
+        "factorAjuste"    -> factorAjuste,
+        "avgNota"         -> avgNota,
+        "avgNotaAdj"      -> avgNotaAdj,
+        "deltaMedia"      -> deltaMedia,
+        "percentilAltura" -> percentilAltura,
+        "matchRows"       -> matchRows,
+        "fechasSerie"     -> fechasSerie,
+        "notaSerie"       -> notaSerie,
+        "notaAdjSerie"    -> notaAdjSerie,
+        "n"               -> n
+      )
+    } finally { conn.close() }
+  }
+
   // == FASE 7: STRIKER CLUSTERING ==============================================
   def getStrikerClusters(): List[Map[String, Any]] = {
     val conn = getConnection()
