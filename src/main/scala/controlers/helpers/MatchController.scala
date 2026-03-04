@@ -92,6 +92,27 @@ object MatchController extends cask.Routes {
                   ),
                   input(tpe:="hidden", name:="actionData", id:="actionData", value:="0,0,0"), input(tpe:="hidden", id:="cnt_p1v1", value:="0"), input(tpe:="hidden", id:="cnt_pAir", value:="0"), input(tpe:="hidden", id:="cnt_pPie", value:="0"),
 
+                  // SCANNING RATE — Escaneos antes de recibir el balon
+                  div(cls:="mb-2 mt-3 p-2 border border-info rounded bg-info bg-opacity-10",
+                    label(cls:="form-label text-info small fw-bold w-100 text-center mb-2", "👁️ SCANNING RATE — Escaneos de campo"),
+                    div(cls:="d-flex align-items-center justify-content-center gap-3",
+                      button(tpe:="button", cls:="btn btn-outline-info btn-sm px-3",
+                        onclick:="adjustScanning(-1)", "-"),
+                      div(cls:="text-center",
+                        input(tpe:="number", name:="scanningRate", id:="scanningRate",
+                          value:="0", cls:="form-control form-control-sm text-center bg-dark text-info fw-bold border-info",
+                          style:="width:70px; font-size:1.3rem;",
+                          attr("inputmode"):="numeric", attr("min"):="0"),
+                        div(cls:="xx-small text-muted mt-1", "escaneos")
+                      ),
+                      button(tpe:="button", cls:="btn btn-outline-info btn-sm px-3",
+                        onclick:="adjustScanning(1)", "+")
+                    ),
+                    div(cls:="text-center xx-small text-muted mt-1",
+                      "Nº de veces que mira al campo antes de recibir una cesion"
+                    )
+                  ),
+
                   // BYPASS RATE — Lineas Superadas en salida con pie
                   div(cls:="mb-2 mt-3 p-2 border border-success rounded bg-success bg-opacity-10",
                     label(cls:="form-label text-success small fw-bold w-100 text-center mb-2", "⚡ BYPASS RATE — Lineas superadas"),
@@ -170,6 +191,7 @@ object MatchController extends cask.Routes {
               function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
               function incCounter(key){var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val; document.getElementById('disp_'+key).value=val; updateActionData();}
               function adjustBypass(delta){var el=document.getElementById('lineasSuperadas'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
+              function adjustScanning(delta){var el=document.getElementById('scanningRate'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
               function updateActionData(){var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value]; document.getElementById('actionData').value = d.join(',');}
               function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
               function pass(type, success) { var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type); var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0); totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t; updatePassData(); }
@@ -288,7 +310,8 @@ object MatchController extends cask.Routes {
     val tipo = getStr("tipo")
     val mapaCampo  = getStr("mapaCampo")
     val goalsData  = getStr("goalsData")
-    val lineasSup  = getInt("lineasSuperadas")
+    val lineasSup    = getInt("lineasSuperadas")
+    val scanningRate = getInt("scanningRate")
 
     // --- LOGICA DE PROCESAMIENTO (Base de datos y calculos) ---
     val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
@@ -307,7 +330,7 @@ object MatchController extends cask.Routes {
     if (scheduleId > 0) {
       DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo)
     } else {
-      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo)
+      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate)
     }
 
     // Guardar contexto de goles encajados

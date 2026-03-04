@@ -300,6 +300,7 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS analisis_voz TEXT")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS lineas_superadas INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS acciones_preventivas INT DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS scanning_rate INT DEFAULT 0")
 
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
@@ -692,26 +693,25 @@ object DatabaseManager {
                 clima: String, estadio: String, temp: Int, notas: String, video: String,
                 reaccion: String, fechaStr: String, tipo: String,
                 pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
-                mapaCampo: String // <--- NUEVO PARAMETRO
+                mapaCampo: String,
+                lineasSup: Int = 0, scanningRate: Int = 0
               ): Unit = {
     val conn = getConnection()
     try {
       val rs = conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons")
       if(rs.next()){
-        // Consulta SQL actualizada con 'mapa_campo' al final
         val s = conn.prepareStatement("""
         INSERT INTO matches (
           season_id, rival, goles_favor, goles_contra, minutos, nota, media_historica,
           paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
           acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
           reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
-          torneo_nombre, fase, mapa_campo
+          torneo_nombre, fase, mapa_campo, lineas_superadas, scanning_rate
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          'PLAYED', ?, ?, ?, ?, ?, '', '', ?
+          'PLAYED', ?, ?, ?, ?, ?, '', '', ?, ?, ?
         )
       """)
-
         s.setInt(1, rs.getInt("id"))
         s.setString(2, fixEncoding(riv))
         s.setInt(3, gf)
@@ -738,8 +738,9 @@ object DatabaseManager {
         s.setInt(24, pcOk)
         s.setInt(25, plTot)
         s.setInt(26, plOk)
-        s.setString(27, mapaCampo) // <--- ASIGNACION DEL NUEVO VALOR
-
+        s.setString(27, mapaCampo)
+        s.setInt(28, lineasSup)
+        s.setInt(29, scanningRate)
         s.executeUpdate()
       }
     } finally {
@@ -1671,6 +1672,100 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+
+  // == FASE 7: STRIKER CLUSTERING ==============================================
+  def getStrikerClusters(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      // Agrupamos rivales por perfil de ataque usando datos ya disponibles
+      // Arquetipo: RAPIDO (muchos goles en contraataque/1v1), FISICO (muchos goles aereos/2v1),
+      //            TECNICO (pocos goles pero alta nota rival), DIRECTO (muchos goles de tiro lejano)
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          m.rival,
+          COUNT(DISTINCT m.id)                                              AS pj,
+          SUM(m.goles_contra)                                               AS gc_total,
+          AVG(m.goles_contra)                                               AS gc_media,
+          AVG(m.nota)                                                       AS nota_media_hector,
+          COUNT(mg.id)                                                      AS goles_analizados,
+          COUNT(CASE WHEN mg.situacion ILIKE '%1v1%' THEN 1 END)           AS g_1v1,
+          COUNT(CASE WHEN mg.situacion ILIKE '%2v1%' THEN 1 END)           AS g_2v1,
+          COUNT(CASE WHEN mg.situacion ILIKE '%aereo%'
+                       OR mg.situacion ILIKE '%cabeza%' THEN 1 END)        AS g_aereo,
+          COUNT(CASE WHEN mg.origen ILIKE '%contra%'
+                       OR mg.minuto <= 15
+                       OR mg.minuto >= 75 THEN 1 END)                      AS g_presion,
+          MAX(m.goles_contra)                                               AS gc_max
+        FROM matches m
+        LEFT JOIN match_goals mg ON mg.match_id = m.id
+        WHERE m.status = 'PLAYED'
+        GROUP BY m.rival
+        HAVING COUNT(DISTINCT m.id) >= 1
+        ORDER BY gc_total DESC
+        LIMIT 30
+      """)
+
+      var clusters = List[Map[String, Any]]()
+      while (rs.next()) {
+        val rival    = Option(rs.getString("rival")).getOrElse("")
+        val pj       = rs.getInt("pj")
+        val gcTotal  = rs.getInt("gc_total")
+        val gcMedia  = rs.getDouble("gc_media")
+        val notaHec  = rs.getDouble("nota_media_hector")
+        val gAnz     = rs.getInt("goles_analizados")
+        val g1v1     = rs.getInt("g_1v1")
+        val g2v1     = rs.getInt("g_2v1")
+        val gAereo   = rs.getInt("g_aereo")
+        val gPresion = rs.getInt("g_presion")
+        val gcMax    = rs.getInt("gc_max")
+
+        // Clasificacion por arquetipo
+        val arquetipo: String = if (g1v1 >= 2 || (gAnz > 0 && g1v1.toDouble / gAnz >= 0.35))
+          "RAPIDO"
+        else if (gAereo >= 2 || (gAnz > 0 && gAereo.toDouble / gAnz >= 0.30))
+          "AEREO"
+        else if (g2v1 >= 2 || (gAnz > 0 && g2v1.toDouble / gAnz >= 0.30))
+          "COLECTIVO"
+        else if (gcMedia >= 2.5)
+          "DIRECTO"
+        else
+          "EQUILIBRADO"
+
+        val arquetipoColor: String = arquetipo match {
+          case "RAPIDO"     => "danger"
+          case "AEREO"      => "info"
+          case "COLECTIVO"  => "warning"
+          case "DIRECTO"    => "primary"
+          case _            => "secondary"
+        }
+
+        val amenaza: String = if (gcMedia >= 3.0) "ALTA"
+        else if (gcMedia >= 1.5) "MEDIA"
+        else "BAJA"
+        val amenazaColor: String = if (gcMedia >= 3.0) "danger"
+        else if (gcMedia >= 1.5) "warning"
+        else "success"
+
+        clusters = clusters :+ Map(
+          "rival"          -> rival,
+          "pj"             -> pj,
+          "gcTotal"        -> gcTotal,
+          "gcMedia"        -> gcMedia,
+          "notaHec"        -> notaHec,
+          "g1v1"           -> g1v1,
+          "g2v1"           -> g2v1,
+          "gAereo"         -> gAereo,
+          "gPresion"       -> gPresion,
+          "gcMax"          -> gcMax,
+          "arquetipo"      -> arquetipo,
+          "arquetipoColor" -> arquetipoColor,
+          "amenaza"        -> amenaza,
+          "amenazaColor"   -> amenazaColor
+        )
+      }
+      clusters
+    } finally { conn.close() }
+  }
 
   // == FASE 7: RED-ZONE ANALYTICS ==============================================
   def getRedZoneData(): Map[String, Any] = {
