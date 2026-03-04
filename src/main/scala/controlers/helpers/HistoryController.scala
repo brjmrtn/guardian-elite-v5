@@ -1684,6 +1684,586 @@ object HistoryController extends cask.Routes {
 
 
 
+
+  // == BIO-BANDING =============================================================
+  @cask.get("/bio-banding")
+  def bioBandingPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getBioBandingData()
+
+    val edadAnios: Int        = d("edadAnios").asInstanceOf[Int]
+    val alturaActual: Double  = d("alturaActual").asInstanceOf[Double]
+    val pesoActual: Double    = d("pesoActual").asInstanceOf[Double]
+    val velCrecimiento: Double= d("velCrecimiento").asInstanceOf[Double]
+    val phvActivo: Boolean    = d("phvActivo").asInstanceOf[Boolean]
+    val phvVelocidad: Double  = d("phvVelocidad").asInstanceOf[Double]
+    val faseBio: String       = d("faseBio").asInstanceOf[String]
+    val faseBioColor: String  = d("faseBioColor").asInstanceOf[String]
+    val factorAjuste: Double  = d("factorAjuste").asInstanceOf[Double]
+    val avgNota: Double       = d("avgNota").asInstanceOf[Double]
+    val avgNotaAdj: Double    = d("avgNotaAdj").asInstanceOf[Double]
+    val deltaMedia: Double    = d("deltaMedia").asInstanceOf[Double]
+    val percentilAltura: String = d("percentilAltura").asInstanceOf[String]
+    val n: Int                = d("n").asInstanceOf[Int]
+    val matchRows: List[Map[String,Any]] = d("matchRows").asInstanceOf[List[Map[String,Any]]]
+    val fechasSerie: List[String]  = d("fechasSerie").asInstanceOf[List[String]]
+    val notaSerie: List[Double]    = d("notaSerie").asInstanceOf[List[Double]]
+    val notaAdjSerie: List[Double] = d("notaAdjSerie").asInstanceOf[List[Double]]
+
+    val factorStr    = f"×${factorAjuste}%.2f"
+    val avgNotaStr   = f"$avgNota%.1f"
+    val avgNotaAdjStr= f"$avgNotaAdj%.1f"
+    val deltaStr     = (if (deltaMedia >= 0) "+" else "") + f"$deltaMedia%.2f"
+    val altStr       = if (alturaActual > 0) f"$alturaActual%.0f cm" else "Sin datos"
+    val pesoStr      = if (pesoActual > 0) f"$pesoActual%.1f kg" else "Sin datos"
+    val velStr       = if (velCrecimiento > 0) f"+$velCrecimiento%.1f cm" else "—"
+
+    val labelsJson   = fechasSerie.map(l => """ + l + """).mkString("[",",","]")
+    val notaJson     = notaSerie.map(v => f"$v%.1f").mkString("[",",","]")
+    val notaAdjJson  = notaAdjSerie.map(v => f"$v%.1f").mkString("[",",","]")
+
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-info mb-0", "BIO-BANDING"),
+              span(cls := "badge bg-dark border border-info text-info", "FASE 5 — Madurez Biológica")
+            ),
+            div(cls := "d-flex gap-2",
+              a(href := "/digital-twin", cls := "btn btn-outline-primary btn-sm fw-bold", "Digital Twin"),
+              a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+            )
+          ),
+
+          div(cls := "card bg-dark border-secondary mb-3",
+            div(cls := "card-body p-3 small text-muted",
+              span(cls := "text-white fw-bold", "¿Qué es el Bio-Banding? "),
+              "El cuerpo consume energía en crecer. Durante el Pico de Velocidad de Altura (PHV), ",
+              "una nota de 6.5 vale más que un 8 fuera del pico. Este módulo ajusta las métricas de Héctor ",
+              "por su fase biológica real para una valoración justa de su rendimiento."
+            )
+          ),
+
+          // Fase biológica actual
+          div(cls := "row g-3 mb-3",
+            div(cls := "col-md-4",
+              div(cls := s"card bg-dark border-$faseBioColor shadow text-center h-100",
+                div(cls := "card-body p-3",
+                  div(cls := "xx-small text-muted fw-bold mb-1", "FASE BIOLÓGICA"),
+                  div(cls := s"fs-4 fw-black text-$faseBioColor mt-1", faseBio),
+                  if (phvActivo) div(cls := "badge bg-danger mt-2", s"PHV: ${f"$phvVelocidad%.1f"} cm/año")
+                  else div(cls := s"badge bg-$faseBioColor bg-opacity-25 text-$faseBioColor mt-2",
+                    s"$edadAnios años"),
+                  div(cls := "xx-small text-muted mt-2", percentilAltura)
+                )
+              )
+            ),
+            div(cls := "col-md-4",
+              div(cls := "card bg-dark border-secondary shadow text-center h-100",
+                div(cls := "card-body p-3",
+                  div(cls := "xx-small text-muted fw-bold", "FACTOR DE AJUSTE"),
+                  div(cls := s"display-4 fw-black text-$faseBioColor", factorStr),
+                  div(cls := "xx-small text-muted", "multiplicador sobre la nota real"),
+                  div(cls := "xx-small text-muted mt-1",
+                    altStr + " | " + pesoStr),
+                  div(cls := "xx-small text-muted", s"Últ. crecimiento: $velStr")
+                )
+              )
+            ),
+            div(cls := "col-md-4",
+              div(cls := "row g-2 h-100",
+                div(cls := "col-12",
+                  div(cls := "card bg-dark border-secondary shadow",
+                    div(cls := "card-body p-3 text-center",
+                      div(cls := "xx-small text-muted fw-bold", "NOTA REAL MEDIA"),
+                      div(cls := "fs-3 fw-black text-warning", avgNotaStr),
+                      div(cls := "xx-small text-muted", s"últimos $n partidos")
+                    )
+                  )
+                ),
+                div(cls := "col-12",
+                  div(cls := s"card bg-dark border-$faseBioColor shadow",
+                    div(cls := "card-body p-3 text-center",
+                      div(cls := "xx-small text-muted fw-bold", "NOTA BIO-AJUSTADA"),
+                      div(cls := s"fs-3 fw-black text-$faseBioColor", avgNotaAdjStr),
+                      div(cls := s"badge bg-$faseBioColor bg-opacity-25 text-$faseBioColor xx-small",
+                        s"$deltaStr sobre la nota real")
+                    )
+                  )
+                )
+              )
+            )
+          ),
+
+          // Grafico nota real vs bio-ajustada
+          if (n > 0) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small",
+              "Nota real vs Nota bio-ajustada"),
+            div(cls := "card-body p-3",
+              div(style := "height:220px;",
+                tag("canvas")(id := "bioChart")
+              )
+            )
+          ) else frag(),
+
+          // Tabla de partidos con ajuste
+          if (matchRows.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small",
+              s"Últimos $n partidos con ajuste biológico"),
+            div(cls := "card-body p-2",
+              div(cls := "table-responsive",
+                table(cls := "table table-dark table-sm table-hover mb-0",
+                  thead(tr(
+                    th(cls := "xx-small text-muted", "FECHA"),
+                    th(cls := "xx-small text-muted", "RIVAL"),
+                    th(cls := "xx-small text-muted text-center", "NOTA REAL"),
+                    th(cls := "xx-small text-muted text-center", "BIO-AJUSTADA"),
+                    th(cls := "xx-small text-muted text-center", "GC"),
+                    th(cls := "xx-small text-muted text-center", "PAR.")
+                  )),
+                  tbody(
+                    frag(matchRows.map { r =>
+                      val nota    = r("nota").asInstanceOf[Double]
+                      val notaAdj = r("notaAdj").asInstanceOf[Double]
+                      val diff    = notaAdj - nota
+                      val adjCls  = if (diff >= 0.5) "success" else if (diff >= 0.1) "info" else "secondary"
+                      tr(
+                        td(cls := "xx-small text-muted", r("fecha").asInstanceOf[String]),
+                        td(cls := "xx-small", r("rival").asInstanceOf[String]),
+                        td(cls := "xx-small text-center text-warning fw-bold", f"$nota%.1f"),
+                        td(cls := s"xx-small text-center fw-bold text-$adjCls", f"$notaAdj%.1f"),
+                        td(cls := "xx-small text-center text-danger", r("gc").asInstanceOf[Int].toString),
+                        td(cls := "xx-small text-center text-info", r("paradas").asInstanceOf[Int].toString)
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ) else frag(),
+
+          script(raw(s"""
+            (function() {
+              var ctx = document.getElementById('bioChart');
+              if (!ctx || ${notaSerie.size} === 0) return;
+              new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                  labels: $labelsJson,
+                  datasets: [
+                    {
+                      label: 'Nota real',
+                      data: $notaJson,
+                      borderColor: 'rgba(255,193,7,0.8)',
+                      backgroundColor: 'rgba(255,193,7,0.05)',
+                      tension: 0.3, pointRadius: 4,
+                      borderDash: [5,3]
+                    },
+                    {
+                      label: 'Bio-ajustada ($factorStr)',
+                      data: $notaAdjJson,
+                      borderColor: 'rgba(13,202,240,0.9)',
+                      backgroundColor: 'rgba(13,202,240,0.08)',
+                      tension: 0.3, pointRadius: 5,
+                      fill: true
+                    }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                  scales: {
+                    x: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#333' } },
+                    y: { min: 0, max: 10, ticks: { color: '#888', stepSize: 1 }, grid: { color: '#333' } }
+                  }
+                }
+              });
+            })();
+          """))
+        )
+      )
+    ))
+  }
+
+  // == DEVELOPMENT PATHWAY MATCHER =============================================
+  @cask.get("/pathway")
+  def pathwayPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getPathwayData()
+
+    val perArq: List[Map[String,Any]] = d("perArq").asInstanceOf[List[Map[String,Any]]]
+    val mejorArq: Map[String,Any]     = d("mejorArq").asInstanceOf[Map[String,Any]]
+    val peorArq: Map[String,Any]      = d("peorArq").asInstanceOf[Map[String,Any]]
+    val recomendacion: String         = d("recomendacion").asInstanceOf[String]
+    val areasMejora: String           = d("areasMejora").asInstanceOf[String]
+    val totalPartidos: Int            = d("totalPartidos").asInstanceOf[Int]
+
+    val mejorLabel = mejorArq("arquetipo").asInstanceOf[String]
+    val mejorColor = mejorArq("color").asInstanceOf[String]
+    val peorLabel  = peorArq("arquetipo").asInstanceOf[String]
+    val peorColor  = peorArq("color").asInstanceOf[String]
+
+    val arquetipoEmoji: Map[String,String] = Map(
+      "RAPIDO" -> "💨", "AEREO" -> "✈️", "COLECTIVO" -> "🤝",
+      "DIRECTO" -> "🎯", "EQUILIBRADO" -> "⚖️"
+    )
+
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-warning mb-0", "DEVELOPMENT PATHWAY"),
+              span(cls := "badge bg-dark border border-warning text-warning",
+                "FASE 8 — Entorno Óptimo de Crecimiento")
+            ),
+            a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+          ),
+
+          div(cls := "card bg-dark border-secondary mb-3",
+            div(cls := "card-body p-3 small text-muted",
+              span(cls := "text-white fw-bold", "¿Qué mide? "),
+              "Cruza el perfil de ataque de cada rival (Striker Clustering) con el rendimiento real de Héctor. ",
+              "Detecta contra qué estilo de equipo crece más como portero y dónde necesita más trabajo."
+            )
+          ),
+
+          if (totalPartidos < 5) div(cls := "alert alert-secondary",
+            s"Datos insuficientes ($totalPartidos partidos). Registra más partidos con análisis de goles."
+          ) else frag(),
+
+          // Mejor y peor entorno
+          div(cls := "row g-3 mb-3",
+            div(cls := "col-md-6",
+              div(cls := s"card bg-dark border-$mejorColor shadow h-100",
+                div(cls := "card-header text-white fw-bold small", "🌱 ENTORNO DE MÁXIMO CRECIMIENTO"),
+                div(cls := "card-body p-3",
+                  div(cls := "d-flex align-items-center gap-3 mb-2",
+                    div(style := "font-size:2.5rem;",
+                      arquetipoEmoji.getOrElse(mejorLabel, "⚽")),
+                    div(
+                      div(cls := s"fs-4 fw-black text-$mejorColor", mejorLabel),
+                      div(cls := "xx-small text-muted",
+                        s"Nota media: ${f"${mejorArq("nota").asInstanceOf[Double]}%.1f"} | " +
+                          s"${mejorArq("n").asInstanceOf[Int]} partidos")
+                    )
+                  ),
+                  div(cls := "small text-muted", recomendacion)
+                )
+              )
+            ),
+            div(cls := "col-md-6",
+              div(cls := s"card bg-dark border-$peorColor shadow h-100",
+                div(cls := "card-header text-white fw-bold small", "⚠️ ÁREA DE MEJORA PRIORITARIA"),
+                div(cls := "card-body p-3",
+                  div(cls := "d-flex align-items-center gap-3 mb-2",
+                    div(style := "font-size:2.5rem;",
+                      arquetipoEmoji.getOrElse(peorLabel, "⚽")),
+                    div(
+                      div(cls := s"fs-4 fw-black text-$peorColor", peorLabel),
+                      div(cls := "xx-small text-muted",
+                        s"Nota media: ${f"${peorArq("nota").asInstanceOf[Double]}%.1f"} | " +
+                          s"${peorArq("n").asInstanceOf[Int]} partidos")
+                    )
+                  ),
+                  div(cls := "small text-muted", areasMejora)
+                )
+              )
+            )
+          ),
+
+          // Tabla por arquetipo
+          if (perArq.nonEmpty) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "Rendimiento por estilo de rival"),
+            div(cls := "card-body p-2",
+              div(cls := "table-responsive",
+                table(cls := "table table-dark table-sm table-hover mb-0",
+                  thead(tr(
+                    th(cls := "xx-small text-muted", "ARQUETIPO"),
+                    th(cls := "xx-small text-muted text-center", "PJ"),
+                    th(cls := "xx-small text-muted text-center", "NOTA MEDIA"),
+                    th(cls := "xx-small text-muted text-center", "PARADAS/PJ"),
+                    th(cls := "xx-small text-muted text-center", "PIE/PJ"),
+                    th(cls := "xx-small text-muted text-center", "BYPASS/PJ")
+                  )),
+                  tbody(
+                    frag(perArq.sortBy(r => -r("nota").asInstanceOf[Double]).map { a =>
+                      val arq   = a("arquetipo").asInstanceOf[String]
+                      val color = a("color").asInstanceOf[String]
+                      val nota  = a("nota").asInstanceOf[Double]
+                      val notaCls = if (nota >= 7) "success" else if (nota >= 5) "warning" else "danger"
+                      tr(
+                        td(
+                          span(cls := s"badge bg-$color bg-opacity-25 text-$color xx-small", arq),
+                          if (arq == mejorLabel) span(cls := "ms-1 text-success", "★") else frag()
+                        ),
+                        td(cls := "xx-small text-center text-muted", a("n").asInstanceOf[Int].toString),
+                        td(cls := s"xx-small text-center fw-black text-$notaCls", f"$nota%.1f"),
+                        td(cls := "xx-small text-center text-info",
+                          f"${a("paradas").asInstanceOf[Double]}%.1f"),
+                        td(cls := "xx-small text-center text-secondary",
+                          f"${a("pie").asInstanceOf[Double]}%.1f"),
+                        td(cls := "xx-small text-center text-success",
+                          f"${a("lineas").asInstanceOf[Double]}%.1f")
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          ) else frag()
+        )
+      )
+    ))
+  }
+
+  // == DOJO v2: MODO ENTRENADOR ================================================
+  @cask.get("/dojo/entrenador")
+  def dojoEntrenadorPage(request: cask.Request) = withAuth(request) {
+    renderHtml(basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-10 col-12",
+
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls := "text-warning mb-0", "DOJO — MODO ENTRENADOR"),
+              span(cls := "badge bg-dark border border-warning text-warning",
+                "FASE 5 — Situaciones Personalizadas")
+            ),
+            a(href := "/dojo", cls := "btn btn-outline-info btn-sm fw-bold", "Dojo Normal")
+          ),
+
+          div(cls := "card bg-dark border-warning shadow mb-3",
+            div(cls := "card-body p-3 small text-muted",
+              span(cls := "text-white fw-bold", "Modo Entrenador. "),
+              "Crea situaciones tácticas personalizadas para Héctor. ",
+              "Define la situación, tres opciones y marca cuál es la correcta. ",
+              span(cls := "text-warning fw-bold", "Las sesiones se guardan para reutilizarlas.")
+            )
+          ),
+
+          // Formulario de creación de situación
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "➕ Nueva situación"),
+            div(cls := "card-body p-3",
+              div(cls := "mb-3",
+                label(cls := "small text-white fw-bold", "SITUACIÓN"),
+                input(tpe := "text", id := "sit", cls := "form-control bg-dark text-white",
+                  placeholder := "Ej: 1v1 con el delantero en velocidad")
+              ),
+              div(cls := "mb-3",
+                label(cls := "small text-white fw-bold", "CONTEXTO"),
+                input(tpe := "text", id := "ctx", cls := "form-control bg-dark text-white",
+                  placeholder := "Ej: El delantero viene por el lado izquierdo a 10m")
+              ),
+              div(cls := "mb-3",
+                label(cls := "small text-white fw-bold", "EMOJI"),
+                input(tpe := "text", id := "emoji", cls := "form-control bg-dark text-white",
+                  value := "⚽", style := "width:80px;")
+              ),
+              frag(Seq(1,2,3).map { i =>
+                div(cls := "mb-3 p-2 border border-secondary rounded",
+                  label(cls := s"small fw-bold text-${if(i==1) "success" else "muted"}",
+                    s"OPCIÓN $i ${if(i==1) "← CORRECTA" else ""}"),
+                  input(tpe := "text", id := s"op$i",
+                    cls := "form-control bg-dark text-white mb-1",
+                    placeholder := s"Descripción de la opción $i"),
+                  input(tpe := "text", id := s"exp$i",
+                    cls := "form-control bg-dark text-white form-control-sm",
+                    placeholder := "Explicación táctica..."),
+                  input(tpe := "number", id := s"pts$i",
+                    cls := "form-control bg-dark text-white form-control-sm mt-1",
+                    value := (if(i==1) "10" else "0"), style := "width:100px;",
+                    attr("placeholder") := "Puntos")
+                )
+              }: _*),
+              button(tpe := "button", cls := "btn btn-warning fw-bold w-100",
+                onclick := "addSituacion()", "AÑADIR SITUACIÓN")
+            )
+          ),
+
+          // Lista de situaciones creadas
+          div(id := "listaCustom", cls := "mb-3"),
+
+          // Botón iniciar sesión custom
+          div(id := "startBtnDiv", cls := "d-none d-grid mb-3",
+            button(tpe := "button", cls := "btn btn-success fw-bold",
+              onclick := "startCustomSession()", "▶ INICIAR SESIÓN CON ESTAS SITUACIONES")
+          ),
+
+          // Panel de juego (reutiliza misma estructura que Dojo normal)
+          div(id := "dojoPanel", cls := "d-none",
+            div(cls := "row g-3 mb-3",
+              div(cls := "col-6 text-center",
+                div(cls := "card bg-dark border-warning shadow",
+                  div(cls := "card-body p-2",
+                    div(cls := "xx-small text-muted", "SCORE"),
+                    div(id := "dojoScore2", cls := "display-5 fw-black text-warning", "0")
+                  )
+                )
+              ),
+              div(cls := "col-6 text-center",
+                div(cls := "card bg-dark border-info shadow",
+                  div(cls := "card-body p-2",
+                    div(cls := "xx-small text-muted", "PREGUNTA"),
+                    div(id := "dojoQ2", cls := "display-5 fw-black text-info", "1")
+                  )
+                )
+              )
+            ),
+            div(id := "sitCard2", cls := "card bg-dark border-warning shadow mb-3",
+              div(cls := "card-header text-warning fw-bold small", "SITUACIÓN"),
+              div(cls := "card-body p-3 text-center",
+                div(id := "dojoEmoji2", cls := "mb-2", style := "font-size:3rem;", "⚽"),
+                div(id := "dojoSit2", cls := "fs-5 fw-bold text-white mb-1", ""),
+                div(id := "dojoCtx2", cls := "small text-muted", "")
+              )
+            ),
+            div(id := "opcionesDiv2", cls := "row g-2 mb-3"),
+            div(id := "feedbackDiv2", cls := "d-none",
+              div(id := "feedbackCard2", cls := "card shadow mb-3",
+                div(cls := "card-body p-3 text-center",
+                  div(id := "feedbackEmoji2"),
+                  div(id := "feedbackTxt2", cls := "fw-bold fs-5"),
+                  div(id := "feedbackExp2", cls := "small text-muted mt-1")
+                )
+              ),
+              div(cls := "d-grid",
+                button(tpe := "button", cls := "btn btn-warning fw-bold",
+                  onclick := "next2()", "SIGUIENTE →"))
+            ),
+            div(id := "final2", cls := "d-none text-center",
+              div(cls := "card bg-dark border-warning shadow p-4",
+                div(style := "font-size:3rem;", "🏆"),
+                h4(cls := "text-warning", "SESIÓN COMPLETADA"),
+                div(id := "finalScore2", cls := "display-3 fw-black text-warning"),
+                div(cls := "small text-muted", "puntos de decisión"),
+                div(cls := "d-grid mt-3",
+                  button(tpe := "button", cls := "btn btn-warning fw-bold",
+                    onclick := "resetCustom()", "REPETIR"))
+              )
+            )
+          ),
+
+          script(raw("""
+            var customSituaciones = [];
+            var idx2 = 0, score2 = 0;
+
+            function addSituacion() {
+              var sit = document.getElementById('sit').value.trim();
+              var ctx = document.getElementById('ctx').value.trim();
+              var emoji = document.getElementById('emoji').value.trim() || '⚽';
+              if (!sit) { alert('Escribe la situación'); return; }
+              var ops = [];
+              for (var i = 1; i <= 3; i++) {
+                var txt = document.getElementById('op'+i).value.trim();
+                var exp = document.getElementById('exp'+i).value.trim();
+                var pts = parseInt(document.getElementById('pts'+i).value) || 0;
+                if (!txt) { alert('Rellena la opción ' + i); return; }
+                ops.push({ txt: txt, exp: exp || '—', pts: pts, ok: i === 1 });
+              }
+              customSituaciones.push({ sit: sit, ctx: ctx, emoji: emoji, opciones: ops });
+              renderLista();
+              document.getElementById('sit').value = '';
+              document.getElementById('ctx').value = '';
+              document.getElementById('emoji').value = '⚽';
+              for (var j = 1; j <= 3; j++) {
+                document.getElementById('op'+j).value = '';
+                document.getElementById('exp'+j).value = '';
+                document.getElementById('pts'+j).value = j === 1 ? '10' : '0';
+              }
+            }
+
+            function renderLista() {
+              var div = document.getElementById('listaCustom');
+              div.innerHTML = customSituaciones.map(function(s, i) {
+                return '<div class="card bg-dark border-secondary mb-2 p-2 d-flex flex-row justify-content-between align-items-center">' +
+                  '<span class="text-white small fw-bold">' + (i+1) + '. ' + s.emoji + ' ' + s.sit + '</span>' +
+                  '<button class="btn btn-outline-danger btn-sm" onclick="removeSit('+i+')">✕</button></div>';
+              }).join('');
+              document.getElementById('startBtnDiv').classList.toggle('d-none', customSituaciones.length === 0);
+            }
+
+            function removeSit(i) {
+              customSituaciones.splice(i, 1); renderLista();
+            }
+
+            function startCustomSession() {
+              if (customSituaciones.length === 0) return;
+              idx2 = 0; score2 = 0;
+              document.getElementById('dojoPanel').classList.remove('d-none');
+              document.getElementById('startBtnDiv').classList.add('d-none');
+              loadQ2();
+            }
+
+            function shuffle(arr) {
+              for (var i = arr.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1));
+                var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+              }
+              return arr;
+            }
+
+            function loadQ2() {
+              if (idx2 >= customSituaciones.length) { showFinal2(); return; }
+              var p = customSituaciones[idx2];
+              document.getElementById('dojoQ2').textContent = (idx2+1) + '/' + customSituaciones.length;
+              document.getElementById('dojoEmoji2').textContent = p.emoji;
+              document.getElementById('dojoSit2').textContent = p.sit;
+              document.getElementById('dojoCtx2').textContent = p.ctx;
+              document.getElementById('feedbackDiv2').classList.add('d-none');
+              document.getElementById('sitCard2').classList.remove('d-none');
+              var ops = document.getElementById('opcionesDiv2');
+              ops.innerHTML = '';
+              var shuffled = shuffle(p.opciones.slice());
+              shuffled.forEach(function(op, i) {
+                var idx = p.opciones.indexOf(op);
+                var col = document.createElement('div');
+                col.className = 'col-12';
+                col.innerHTML = '<button class="btn btn-outline-light w-100 text-start fw-bold p-3" onclick="answer2(' + idx + ')">' + op.txt + '</button>';
+                ops.appendChild(col);
+              });
+            }
+
+            function answer2(opIdx) {
+              var p = customSituaciones[idx2];
+              var op = p.opciones[opIdx];
+              score2 += op.pts;
+              document.getElementById('dojoScore2').textContent = score2;
+              var fc = document.getElementById('feedbackCard2');
+              fc.className = 'card shadow mb-3 ' + (op.ok ? 'border-success bg-success bg-opacity-10' : 'border-danger bg-danger bg-opacity-10');
+              document.getElementById('feedbackEmoji2').textContent = op.ok ? '✅' : '❌';
+              document.getElementById('feedbackTxt2').textContent = op.ok ? '¡Correcto! +' + op.pts + ' pts' : 'No era esa. +' + op.pts + ' pts';
+              document.getElementById('feedbackExp2').textContent = op.exp;
+              document.getElementById('sitCard2').classList.add('d-none');
+              document.getElementById('opcionesDiv2').innerHTML = '';
+              document.getElementById('feedbackDiv2').classList.remove('d-none');
+              idx2++;
+            }
+
+            function next2() { loadQ2(); }
+
+            function showFinal2() {
+              document.getElementById('feedbackDiv2').classList.add('d-none');
+              document.getElementById('sitCard2').classList.add('d-none');
+              document.getElementById('opcionesDiv2').innerHTML = '';
+              document.getElementById('final2').classList.remove('d-none');
+              document.getElementById('finalScore2').textContent = score2;
+            }
+
+            function resetCustom() {
+              idx2 = 0; score2 = 0;
+              document.getElementById('final2').classList.add('d-none');
+              document.getElementById('dojoScore2').textContent = '0';
+              loadQ2();
+            }
+          """))
+        )
+      )
+    ))
+  }
+
   // == DOJO COGNITIVO ==========================================================
   @cask.get("/dojo")
   def dojoPage(request: cask.Request) = withAuth(request) {
