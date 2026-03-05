@@ -3141,10 +3141,10 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
 
       // 3. LOCAL vs VISITANTE (heurística: si el estadio contiene el nombre del club → LOCAL)
       val rsSeasonStadium = conn.createStatement().executeQuery(
-        "SELECT COALESCE(nombre_club,''), COALESCE(estadio_propio,'') FROM seasons ORDER BY id DESC LIMIT 1"
+        "SELECT COALESCE(nombre_club,'') FROM seasons ORDER BY id DESC LIMIT 1"
       )
       val (clubName, homeStadium) = if (rsSeasonStadium.next())
-        (rsSeasonStadium.getString(1).toUpperCase, rsSeasonStadium.getString(2).toUpperCase)
+        (rsSeasonStadium.getString(1).toUpperCase, rsSeasonStadium.getString(1).toUpperCase)
       else ("", "")
 
       // Si no hay estadio propio, usamos la heurística: local = no hay "en" o "campo de" en el rival
