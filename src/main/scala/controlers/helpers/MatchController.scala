@@ -62,6 +62,46 @@ object MatchController extends cask.Routes {
                 ),
                 div(cls := "mb-3", label(cls := "form-label text-white fw-bold small", "FECHA"), input(tpe := "date", name := "fecha", cls := "form-control", value := preFecha)),
                 div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "ESTADIO / CAMPO"), input(tpe:="text", name:="estadio", cls:="form-control bg-dark text-white", value:=fixEncoding(preEstadio), placeholder:="Ej: Valdebebas Campo 3")),
+                div(cls:="mb-3",
+                  label(cls:="form-label text-white fw-bold small", "¿LOCAL O VISITANTE?"),
+                  div(cls:="d-flex gap-2",
+                    label(cls:="flex-fill text-center border border-secondary rounded p-2 fw-bold small",
+                      style:="cursor:pointer;",
+                      input(tpe:="radio", name:="esLocal", value:="", cls:="d-none",
+                        attr("checked"):="checked"),
+                      span(id:="lblNeutro", "— Sin especificar")
+                    ),
+                    label(cls:="flex-fill text-center border border-success rounded p-2 fw-bold small text-success",
+                      style:="cursor:pointer;",
+                      input(tpe:="radio", name:="esLocal", value:="true", cls:="d-none"),
+                      span("🏠 Local")
+                    ),
+                    label(cls:="flex-fill text-center border border-info rounded p-2 fw-bold small text-info",
+                      style:="cursor:pointer;",
+                      input(tpe:="radio", name:="esLocal", value:="false", cls:="d-none"),
+                      span("✈️ Visitante")
+                    )
+                  ),
+                  script(raw("""
+                    (function() {
+                      var radios = document.querySelectorAll('input[name="esLocal"]');
+                      radios.forEach(function(r) {
+                        r.addEventListener('change', function() {
+                          radios.forEach(function(x) {
+                            var lbl = x.parentElement;
+                            lbl.style.background = '';
+                            lbl.style.opacity = '0.6';
+                          });
+                          var sel = this.parentElement;
+                          sel.style.opacity = '1';
+                          if (this.value === 'true')  sel.style.background = 'rgba(40,167,69,0.2)';
+                          if (this.value === 'false') sel.style.background = 'rgba(13,202,240,0.2)';
+                          if (this.value === '')      sel.style.background = 'rgba(255,255,255,0.05)';
+                        });
+                      });
+                    })();
+                  """))
+                ),
 
                 // 2. MARCADOR Y PARADAS
                 div(cls := "row mb-3 bg-secondary bg-opacity-25 p-2 rounded mx-0",
@@ -312,6 +352,12 @@ object MatchController extends cask.Routes {
     val goalsData  = getStr("goalsData")
     val lineasSup    = getInt("lineasSuperadas")
     val scanningRate = getInt("scanningRate")
+    val esLocalStr   = getStr("esLocal")
+    val esLocalOpt: Option[Boolean] = esLocalStr match {
+      case "true"  => Some(true)
+      case "false" => Some(false)
+      case _       => None
+    }
 
     // --- LOGICA DE PROCESAMIENTO (Base de datos y calculos) ---
     val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
@@ -330,7 +376,7 @@ object MatchController extends cask.Routes {
     if (scheduleId > 0) {
       DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo)
     } else {
-      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate)
+      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt)
     }
 
     // Guardar contexto de goles encajados
