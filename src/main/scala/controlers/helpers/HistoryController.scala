@@ -1655,6 +1655,86 @@ object HistoryController extends cask.Routes {
             )
           ),
 
+          // ── BYPASS RATE HISTÓRICO POR TEMPORADA ───────────────────────────
+          {
+            val bpEvo = DatabaseManager.getBypassRateEvolution()
+            if (bpEvo.size >= 2) {
+              val bpAniosJson = bpEvo.map(r => s"'${r("anio")}'").mkString("[",",","]")
+              val bpMediaJson = bpEvo.map(r => f"${r("bpMedia").asInstanceOf[Double]}%.2f").mkString("[",",","]")
+              val bpEficJson  = bpEvo.map(r => f"${r("bpEfic").asInstanceOf[Double]*100}%.1f").mkString("[",",","]")
+              frag(
+                div(cls:="card bg-dark border-success shadow mb-3",
+                  div(cls:="card-header d-flex justify-content-between align-items-center",
+                    span(cls:="text-success fw-bold small", "Bypass Rate | Evolución histórica por temporada"),
+                    span(cls:="badge bg-success bg-opacity-25 text-success xx-small", "FASE 6.5 ✓")
+                  ),
+                  div(cls:="card-body p-2",
+                    div(cls:="row g-3",
+                      div(cls:="col-md-8",
+                        tag("canvas")(id:="chartBPEvo", style:="max-height:190px;")
+                      ),
+                      div(cls:="col-md-4",
+                        div(cls:="table-responsive",
+                          table(cls:="table table-dark table-sm xx-small mb-0",
+                            thead(tr(th("Año"), th("Media/pj"), th("Efic.%"), th("PJ"), th(""))),
+                            tbody(frag(bpEvo.zipWithIndex.map { case (r, idx) =>
+                              val media = r("bpMedia").asInstanceOf[Double]
+                              val efic  = r("bpEfic").asInstanceOf[Double] * 100
+                              val pj    = r("pj").asInstanceOf[Int]
+                              val trend = if (idx > 0) {
+                                val prev = bpEvo(idx - 1)("bpMedia").asInstanceOf[Double]
+                                if (media > prev + 0.1) "↑" else if (media < prev - 0.1) "↓" else "→"
+                              } else "—"
+                              val tc = trend match { case "↑" => "success"; case "↓" => "danger"; case _ => "secondary" }
+                              tr(
+                                td(cls:="text-muted", r("anio").toString),
+                                td(cls:="text-success fw-bold", f"$media%.1f"),
+                                td(cls:="text-info", f"$efic%.0f%%"),
+                                td(cls:="text-muted", pj.toString),
+                                td(cls:=s"text-$tc fw-bold", trend)
+                              )
+                            }: _*))
+                          )
+                        ),
+                        div(cls:="xx-small text-muted mt-2 fst-italic",
+                          "Líneas superadas por partido y eficiencia por temporada."
+                        )
+                      )
+                    )
+                  )
+                ),
+                script(raw(s"""
+                  (function() {
+                    var ctxBP = document.getElementById('chartBPEvo');
+                    if (!ctxBP) return;
+                    new Chart(ctxBP, {
+                      type: 'bar',
+                      data: {
+                        labels: $bpAniosJson,
+                        datasets: [
+                          { label: 'Lineas/partido', data: $bpMediaJson,
+                            backgroundColor: 'rgba(40,167,69,0.6)', borderColor: '#28a745', borderWidth: 1, yAxisID: 'y' },
+                          { label: 'Eficiencia %', data: $bpEficJson, type: 'line',
+                            borderColor: '#0dcaf0', borderWidth: 2, pointRadius: 5,
+                            pointBackgroundColor: '#0dcaf0', tension: 0.3, yAxisID: 'y1' }
+                        ]
+                      },
+                      options: {
+                        responsive: true, maintainAspectRatio: false,
+                        scales: {
+                          y:  { ticks: { color: '#28a745' }, grid: { color: '#333' } },
+                          y1: { position: 'right', ticks: { color: '#0dcaf0' }, grid: { display: false } },
+                          x:  { ticks: { color: '#aaa' }, grid: { display: false } }
+                        },
+                        plugins: { legend: { labels: { color: '#fff', font: { size: 10 } } } }
+                      }
+                    });
+                  })();
+                """))
+              )
+            } else div()
+          },
+
           script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
           {
             val js: String =
@@ -3416,6 +3496,314 @@ object HistoryController extends cask.Routes {
               });
             })();
           """))
+        )
+      )
+    ))
+  }
+
+  // == MATCH CONTEXT ANALYTICS =================================================
+  @cask.get("/match-context")
+  def matchContextPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getMatchContextData()
+
+    val porTipo     = d("porTipo").asInstanceOf[List[Map[String, Any]]]
+    val porClima    = d("porClima").asInstanceOf[List[Map[String, Any]]]
+    val porDuracion = d("porDuracion").asInstanceOf[List[Map[String, Any]]]
+    val localNota   = d("localNota").asInstanceOf[Double]
+    val localGC     = d("localGC").asInstanceOf[Double]
+    val localPJ     = d("localPJ").asInstanceOf[Int]
+    val localLimpias= d("localLimpias").asInstanceOf[Int]
+    val visitNota   = d("visitNota").asInstanceOf[Double]
+    val visitGC     = d("visitGC").asInstanceOf[Double]
+    val visitPJ     = d("visitPJ").asInstanceOf[Int]
+    val visitLimpias= d("visitLimpias").asInstanceOf[Int]
+    val trendLabels = d("trendLabels").asInstanceOf[List[String]]
+    val trendNotas  = d("trendNotas").asInstanceOf[List[Double]]
+    val trendPJs    = d("trendPJs").asInstanceOf[List[Int]]
+    val mejorCtx    = d("mejorCtx").asInstanceOf[Option[(String, Double, Int)]]
+    val peorCtx     = d("peorCtx").asInstanceOf[Option[(String, Double, Int)]]
+    val totalPJ     = d("totalPJ").asInstanceOf[Int]
+    val notaGlobal  = d("notaGlobal").asInstanceOf[Double]
+    val gcGlobal    = d("gcGlobal").asInstanceOf[Double]
+
+    val notaGlobalStr = f"$notaGlobal%.1f"
+    val gcGlobalStr   = f"$gcGlobal%.1f"
+
+    // helpers de color
+    def notaColor(n: Double): String =
+      if (n >= notaGlobal + 0.5) "success"
+      else if (n >= notaGlobal - 0.3) "warning"
+      else "danger"
+    def gcColor(gc: Double): String =
+      if (gc <= gcGlobal - 0.3) "success"
+      else if (gc <= gcGlobal + 0.3) "warning"
+      else "danger"
+
+    // icono clima
+    def climaIcon(c: String): String = c.toLowerCase match {
+      case s if s.contains("sol")    => "☀️"
+      case s if s.contains("lluv")   => "🌧️"
+      case s if s.contains("frio") || s.contains("frío") => "🥶"
+      case s if s.contains("nub")    => "☁️"
+      case s if s.contains("vient")  => "💨"
+      case _                         => "🌤️"
+    }
+
+    // JSON para gráfico tendencia mensual
+    val trendLabelsJson = trendLabels.map(l => s"'$l'").mkString("[", ",", "]")
+    val trendNotasJson  = trendNotas.map(v => f"$v%.2f").mkString("[", ",", "]")
+    val trendPJsJson    = trendPJs.map(_.toString).mkString("[", ",", "]")
+    val globalLineJson  = trendLabels.map(_ => f"$notaGlobal%.2f").mkString("[", ",", "]")
+
+    // Tabla genérica para los 3 bloques de contexto
+    def contextTable(rows: List[Map[String, Any]], labelKey: String, labelIcon: String => String = identity) =
+      if (rows.isEmpty)
+        div(cls:="text-center text-muted small py-3", "Sin datos suficientes")
+      else
+        div(cls:="table-responsive",
+          table(cls:="table table-dark table-sm table-hover mb-0 xx-small align-middle",
+            thead(tr(
+              th("Contexto"), th("PJ"), th("Nota ø"), th("GC ø"), th("Limpias"), th("vs media")
+            )),
+            tbody(
+              frag(rows.map { r =>
+                val nota   = r("nota").asInstanceOf[Double]
+                val gc     = r("gc").asInstanceOf[Double]
+                val pj     = r("pj").asInstanceOf[Int]
+                val cs     = r("limpias").asInstanceOf[Int]
+                val label  = labelIcon(r(labelKey).toString)
+                val diff   = nota - notaGlobal
+                val diffStr = (if (diff >= 0) "+" else "") + f"$diff%.1f"
+                val nc     = notaColor(nota)
+                val badge  = if (diff >= 0.5) "bg-success" else if (diff >= -0.3) "bg-warning text-dark" else "bg-danger"
+                tr(
+                  td(cls:="text-white fw-bold", label),
+                  td(cls:="text-muted", pj.toString),
+                  td(cls:=s"text-$nc fw-bold", f"$nota%.1f"),
+                  td(cls:=s"text-${gcColor(gc)}", f"$gc%.1f"),
+                  td(cls:="text-info", s"$cs / $pj"),
+                  td(span(cls:=s"badge $badge", diffStr))
+                )
+              }: _*)
+            )
+          )
+        )
+
+    renderHtml(basePage("history",
+      div(cls:="row justify-content-center",
+        div(cls:="col-md-11 col-12",
+
+          // Header
+          div(cls:="d-flex justify-content-between align-items-center mb-3",
+            div(
+              h2(cls:="text-warning mb-0", "MATCH CONTEXT | Rendimiento por Entorno"),
+              span(cls:="badge bg-dark border border-warning text-warning", "FASE 7")
+            ),
+            a(href:="/dashboard", cls:="btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
+          ),
+
+          // Banner resumen
+          if (totalPJ >= 3) div(cls:="row g-2 mb-3",
+            frag(Seq(
+              ("Total partidos", totalPJ.toString, "secondary"),
+              ("Nota media global", notaGlobalStr, "warning"),
+              ("GC medio global", gcGlobalStr, "danger"),
+              ("Mejor entorno", mejorCtx.map(c => s"${c._1} (${f"${c._2}%.1f"})").getOrElse("—"), "success"),
+              ("Peor entorno",  peorCtx.map(c => s"${c._1} (${f"${c._2}%.1f"})").getOrElse("—"), "danger")
+            ).map { case (lbl, v, c) =>
+              div(cls:="col",
+                div(cls:=s"card bg-dark border-$c text-center p-2 h-100",
+                  div(cls:=s"fw-bold text-$c", v),
+                  div(cls:="xx-small text-muted", lbl)
+                )
+              )
+            }: _*)
+          ) else div(),
+
+          // Fila 1: TIPO + CLIMA
+          div(cls:="row g-3 mb-3",
+            div(cls:="col-md-6",
+              div(cls:="card bg-dark border-warning shadow h-100",
+                div(cls:="card-header text-warning fw-bold small",
+                  "🏆 Por tipo de partido"
+                ),
+                div(cls:="card-body p-2",
+                  contextTable(porTipo, "tipo")
+                )
+              )
+            ),
+            div(cls:="col-md-6",
+              div(cls:="card bg-dark border-info shadow h-100",
+                div(cls:="card-header text-info fw-bold small",
+                  "🌤️ Por condición climática"
+                ),
+                div(cls:="card-body p-2",
+                  contextTable(porClima, "clima", climaIcon)
+                )
+              )
+            )
+          ),
+
+          // Fila 2: LOCAL vs VISITANTE + DURACIÓN
+          div(cls:="row g-3 mb-3",
+
+            // Local vs Visitante
+            div(cls:="col-md-5",
+              div(cls:="card bg-dark border-success shadow h-100",
+                div(cls:="card-header text-success fw-bold small", "🏟️ Local vs Visitante"),
+                div(cls:="card-body p-3",
+                  if (localPJ + visitPJ < 3)
+                    div(cls:="text-center text-muted small py-3",
+                      div(style:="font-size:32px; opacity:0.3", "🏟️"),
+                      div(cls:="mt-2", "Añade el estadio en el Match Center"),
+                      div(cls:="xx-small text-secondary mt-1",
+                        "Guardian detecta si el partido es local usando el campo 'Estadio'")
+                    )
+                  else frag(
+                    div(cls:="row g-2 text-center",
+                      div(cls:="col-6",
+                        div(cls:="p-3 rounded",
+                          style:=s"border:2px solid #28a745; background:rgba(40,167,69,0.08);",
+                          div(cls:="xx-small text-muted fw-bold mb-1", "LOCAL"),
+                          div(cls:=s"fw-black text-${notaColor(localNota)}",
+                            style:="font-size:2rem;", f"$localNota%.1f"),
+                          div(cls:="xx-small text-muted", "nota media"),
+                          div(cls:="mt-2 xx-small",
+                            span(cls:="text-muted", "GC: "),
+                            span(cls:=s"text-${gcColor(localGC)} fw-bold", f"$localGC%.1f")
+                          ),
+                          div(cls:="xx-small text-info mt-1",
+                            s"$localLimpias limpias / $localPJ PJ")
+                        )
+                      ),
+                      div(cls:="col-6",
+                        div(cls:="p-3 rounded",
+                          style:="border:2px solid #0dcaf0; background:rgba(13,202,240,0.08);",
+                          div(cls:="xx-small text-muted fw-bold mb-1", "VISITANTE"),
+                          div(cls:=s"fw-black text-${notaColor(visitNota)}",
+                            style:="font-size:2rem;", f"$visitNota%.1f"),
+                          div(cls:="xx-small text-muted", "nota media"),
+                          div(cls:="mt-2 xx-small",
+                            span(cls:="text-muted", "GC: "),
+                            span(cls:=s"text-${gcColor(visitGC)} fw-bold", f"$visitGC%.1f")
+                          ),
+                          div(cls:="xx-small text-info mt-1",
+                            s"$visitLimpias limpias / $visitPJ PJ")
+                        )
+                      )
+                    ),
+                    if (localPJ >= 2 && visitPJ >= 2) {
+                      val diffLV = localNota - visitNota
+                      val msg = if (diffLV > 0.5) "Rinde claramente mejor en casa."
+                      else if (diffLV < -0.5) "Rinde mejor como visitante — inusual y positivo."
+                      else "Rendimiento equilibrado local/visitante."
+                      div(cls:="mt-3 p-2 rounded xx-small text-center",
+                        style:="background:rgba(255,255,255,0.04);",
+                        span(cls:="text-white fst-italic", msg)
+                      )
+                    } else div()
+                  )
+                )
+              )
+            ),
+
+            // Duración
+            div(cls:="col-md-7",
+              div(cls:="card bg-dark border-secondary shadow h-100",
+                div(cls:="card-header text-white fw-bold small", "⏱️ Por duración del partido"),
+                div(cls:="card-body p-2",
+                  contextTable(porDuracion, "franja")
+                )
+              )
+            )
+          ),
+
+          // Fila 3: Tendencia mensual
+          if (trendLabels.size >= 2)
+            div(cls:="card bg-dark border-secondary shadow mb-3",
+              div(cls:="card-header text-white fw-bold small",
+                "📈 Tendencia mensual — últimos 12 meses"
+              ),
+              div(cls:="card-body p-2",
+                tag("canvas")(id:="chartTrend", style:="max-height:220px;")
+              )
+            )
+          else div(),
+
+          // Nota de uso
+          div(cls:="alert alert-dark border-secondary xx-small text-muted mt-2",
+            "💡 Los contextos con menos de 2 partidos se excluyen del análisis comparativo. ",
+            "Cuantos más partidos registres, más precisas serán las comparativas. ",
+            "La columna 'vs media' compara cada entorno con tu nota global de temporada."
+          ),
+
+          // Script gráfico tendencia
+          if (trendLabels.size >= 2) frag(
+            script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
+            script(raw(s"""
+              var ctxTrend = document.getElementById('chartTrend');
+              if (ctxTrend) {
+                new Chart(ctxTrend, {
+                  type: 'line',
+                  data: {
+                    labels: $trendLabelsJson,
+                    datasets: [
+                      {
+                        label: 'Nota media',
+                        data: $trendNotasJson,
+                        borderColor: '#ffc107',
+                        backgroundColor: 'rgba(255,193,7,0.12)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#ffc107',
+                        yAxisID: 'y'
+                      },
+                      {
+                        label: 'Media global (' + $notaGlobal.toFixed(1) + ')',
+                        data: $globalLineJson,
+                        borderColor: 'rgba(255,255,255,0.25)',
+                        borderWidth: 1,
+                        borderDash: [6,4],
+                        pointRadius: 0,
+                        yAxisID: 'y'
+                      },
+                      {
+                        label: 'Partidos',
+                        data: $trendPJsJson,
+                        type: 'bar',
+                        backgroundColor: 'rgba(13,202,240,0.15)',
+                        borderColor: 'rgba(13,202,240,0.4)',
+                        borderWidth: 1,
+                        yAxisID: 'y1'
+                      }
+                    ]
+                  },
+                  options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                      y: {
+                        min: 4, max: 10,
+                        ticks: { color: '#aaa' },
+                        grid: { color: '#333' }
+                      },
+                      y1: {
+                        position: 'right',
+                        ticks: { color: '#0dcaf0', stepSize: 1 },
+                        grid: { display: false }
+                      },
+                      x: { ticks: { color: '#888' }, grid: { display: false } }
+                    },
+                    plugins: {
+                      legend: { labels: { color: '#fff', font: { size: 10 } } },
+                      tooltip: { mode: 'index', intersect: false }
+                    }
+                  }
+                });
+              }
+            """))
+          ) else span()
         )
       )
     ))

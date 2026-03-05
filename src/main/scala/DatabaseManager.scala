@@ -3087,4 +3087,217 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     }
   }
 
+  // ── MATCH CONTEXT ANALYTICS ─────────────────────────────────────────────
+  def getMatchContextData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // 1. POR TIPO DE PARTIDO (LIGA / TORNEO / AMISTOSO)
+      val rsTipo = conn.createStatement().executeQuery("""
+        SELECT
+          COALESCE(tipo_partido, 'LIGA') as tipo,
+          COUNT(*) as pj,
+          AVG(nota) as nota_media,
+          AVG(goles_contra) as gc_media,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias,
+          AVG(paradas) as paradas_media
+        FROM matches WHERE status='PLAYED'
+        GROUP BY COALESCE(tipo_partido, 'LIGA')
+        ORDER BY nota_media DESC
+      """)
+      var porTipo = List[Map[String, Any]]()
+      while (rsTipo.next()) {
+        porTipo = porTipo :+ Map(
+          "tipo"    -> rsTipo.getString("tipo"),
+          "pj"      -> rsTipo.getInt("pj"),
+          "nota"    -> rsTipo.getDouble("nota_media"),
+          "gc"      -> rsTipo.getDouble("gc_media"),
+          "limpias" -> rsTipo.getInt("limpias"),
+          "paradas" -> rsTipo.getDouble("paradas_media")
+        )
+      }
+
+      // 2. POR CLIMA
+      val rsClima = conn.createStatement().executeQuery("""
+        SELECT
+          COALESCE(clima, 'Sin datos') as clima,
+          COUNT(*) as pj,
+          AVG(nota) as nota_media,
+          AVG(goles_contra) as gc_media,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
+        FROM matches WHERE status='PLAYED' AND clima IS NOT NULL AND clima != ''
+        GROUP BY COALESCE(clima, 'Sin datos')
+        ORDER BY nota_media DESC
+      """)
+      var porClima = List[Map[String, Any]]()
+      while (rsClima.next()) {
+        porClima = porClima :+ Map(
+          "clima"   -> rsClima.getString("clima"),
+          "pj"      -> rsClima.getInt("pj"),
+          "nota"    -> rsClima.getDouble("nota_media"),
+          "gc"      -> rsClima.getDouble("gc_media"),
+          "limpias" -> rsClima.getInt("limpias")
+        )
+      }
+
+      // 3. LOCAL vs VISITANTE (heurística: si el estadio contiene el nombre del club → LOCAL)
+      val rsSeasonStadium = conn.createStatement().executeQuery(
+        "SELECT COALESCE(nombre_club,''), COALESCE(estadio_propio,'') FROM seasons ORDER BY id DESC LIMIT 1"
+      )
+      val (clubName, homeStadium) = if (rsSeasonStadium.next())
+        (rsSeasonStadium.getString(1).toUpperCase, rsSeasonStadium.getString(2).toUpperCase)
+      else ("", "")
+
+      // Si no hay estadio propio, usamos la heurística: local = no hay "en" o "campo de" en el rival
+      val rsLocal = conn.createStatement().executeQuery("""
+        SELECT
+          estadio,
+          AVG(nota) as nota_media,
+          AVG(goles_contra) as gc_media,
+          COUNT(*) as pj,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
+        FROM matches WHERE status='PLAYED'
+        GROUP BY estadio
+      """)
+      var localNota = 0.0; var localGC = 0.0; var localPJ = 0; var localLimpias = 0
+      var visitNota = 0.0; var visitGC  = 0.0; var visitPJ = 0; var visitLimpias = 0
+      var localCount = 0; var visitCount = 0
+      while (rsLocal.next()) {
+        val est = Option(rsLocal.getString("estadio")).getOrElse("").toUpperCase
+        val esLocal = homeStadium.nonEmpty && est.contains(homeStadium.take(6).filter(_.isLetter)) ||
+          est.contains("PROPIO") || est.contains("CASA") || est.contains("LOCAL")
+        val nota = rsLocal.getDouble("nota_media")
+        val gc   = rsLocal.getDouble("gc_media")
+        val pj   = rsLocal.getInt("pj")
+        val cs   = rsLocal.getInt("limpias")
+        if (esLocal) {
+          localNota += nota * pj; localGC += gc * pj; localPJ += pj; localLimpias += cs; localCount += 1
+        } else {
+          visitNota += nota * pj; visitGC += gc * pj; visitPJ += pj; visitLimpias += cs; visitCount += 1
+        }
+      }
+      val localNotaFinal = if (localPJ > 0) localNota / localPJ else 0.0
+      val visitNotaFinal = if (visitPJ > 0) visitNota / visitPJ else 0.0
+      val localGCFinal   = if (localPJ > 0) localGC   / localPJ else 0.0
+      val visitGCFinal   = if (visitPJ > 0) visitGC   / visitPJ else 0.0
+
+      // 4. POR DURACIÓN (franjas de minutos)
+      val rsDur = conn.createStatement().executeQuery("""
+        SELECT
+          CASE
+            WHEN minutos < 40 THEN 'Partido corto (<40 min)'
+            WHEN minutos < 60 THEN 'Media parte (40-59 min)'
+            WHEN minutos < 80 THEN 'Normal (60-79 min)'
+            ELSE 'Partido completo (80+ min)'
+          END as franja,
+          COUNT(*) as pj,
+          AVG(nota) as nota_media,
+          AVG(goles_contra) as gc_media,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
+        FROM matches WHERE status='PLAYED' AND minutos > 0
+        GROUP BY 1
+        ORDER BY nota_media DESC
+      """)
+      var porDuracion = List[Map[String, Any]]()
+      while (rsDur.next()) {
+        porDuracion = porDuracion :+ Map(
+          "franja"  -> rsDur.getString("franja"),
+          "pj"      -> rsDur.getInt("pj"),
+          "nota"    -> rsDur.getDouble("nota_media"),
+          "gc"      -> rsDur.getDouble("gc_media"),
+          "limpias" -> rsDur.getInt("limpias")
+        )
+      }
+
+      // 5. TENDENCIA MENSUAL (últimos 12 meses, para el gráfico de línea)
+      val rsTrend = conn.createStatement().executeQuery("""
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', fecha), 'MM/YY') as mes,
+          AVG(nota) as nota_media,
+          COUNT(*) as pj,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
+        FROM matches
+        WHERE status='PLAYED' AND fecha >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY DATE_TRUNC('month', fecha)
+        ORDER BY DATE_TRUNC('month', fecha) ASC
+      """)
+      var trendLabels = List[String]()
+      var trendNotas  = List[Double]()
+      var trendPJs    = List[Int]()
+      while (rsTrend.next()) {
+        trendLabels = trendLabels :+ rsTrend.getString("mes")
+        trendNotas  = trendNotas  :+ rsTrend.getDouble("nota_media")
+        trendPJs    = trendPJs    :+ rsTrend.getInt("pj")
+      }
+
+      // 6. MEJOR Y PEOR CONTEXTO (resumen ejecutivo)
+      val allContexts: List[(String, Double, Int)] = (
+        porTipo.map(m => (m("tipo").toString, m("nota").asInstanceOf[Double], m("pj").asInstanceOf[Int])) ++
+          porClima.map(m => (m("clima").toString, m("nota").asInstanceOf[Double], m("pj").asInstanceOf[Int]))
+        ).filter(_._3 >= 2) // mínimo 2 partidos para ser significativo
+
+      val mejorCtx = allContexts.sortBy(-_._2).headOption
+      val peorCtx  = allContexts.sortBy(_._2).headOption
+
+      // 7. Totales globales para referencia
+      val rsGlobal = conn.createStatement().executeQuery(
+        "SELECT COUNT(*) as pj, AVG(nota) as nota, AVG(goles_contra) as gc FROM matches WHERE status='PLAYED'"
+      )
+      val (totalPJ, notaGlobal, gcGlobal) = if (rsGlobal.next())
+        (rsGlobal.getInt("pj"), rsGlobal.getDouble("nota"), rsGlobal.getDouble("gc"))
+      else (0, 0.0, 0.0)
+
+      Map(
+        "porTipo"        -> porTipo,
+        "porClima"       -> porClima,
+        "porDuracion"    -> porDuracion,
+        "localNota"      -> localNotaFinal,
+        "localGC"        -> localGCFinal,
+        "localPJ"        -> localPJ,
+        "localLimpias"   -> localLimpias,
+        "visitNota"      -> visitNotaFinal,
+        "visitGC"        -> visitGCFinal,
+        "visitPJ"        -> visitPJ,
+        "visitLimpias"   -> visitLimpias,
+        "trendLabels"    -> trendLabels,
+        "trendNotas"     -> trendNotas,
+        "trendPJs"       -> trendPJs,
+        "mejorCtx"       -> mejorCtx,
+        "peorCtx"        -> peorCtx,
+        "totalPJ"        -> totalPJ,
+        "notaGlobal"     -> notaGlobal,
+        "gcGlobal"       -> gcGlobal
+      )
+    } finally { conn.close() }
+  }
+
+  // ── BYPASS RATE POR TEMPORADA (Fase 6.5 completion) ─────────────────────
+  def getBypassRateEvolution(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          EXTRACT(YEAR FROM fecha)::TEXT as anio,
+          AVG(lineas_superadas) as bp_media,
+          AVG(CASE WHEN acciones_pie > 0 THEN lineas_superadas::FLOAT / acciones_pie ELSE NULL END) as bp_efic,
+          COUNT(*) as pj,
+          SUM(lineas_superadas) as bp_total
+        FROM matches
+        WHERE status='PLAYED' AND lineas_superadas > 0
+        GROUP BY EXTRACT(YEAR FROM fecha)
+        ORDER BY anio ASC
+      """)
+      var rows = List[Map[String, Any]]()
+      while (rs.next()) {
+        rows = rows :+ Map(
+          "anio"     -> rs.getString("anio"),
+          "bpMedia"  -> rs.getDouble("bp_media"),
+          "bpEfic"   -> rs.getDouble("bp_efic"),
+          "pj"       -> rs.getInt("pj"),
+          "bpTotal"  -> rs.getInt("bp_total")
+        )
+      }
+      rows
+    } finally { conn.close() }
+  }
+
 }
