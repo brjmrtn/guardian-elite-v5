@@ -3652,50 +3652,58 @@ object HistoryController extends cask.Routes {
               div(cls:="card bg-dark border-success shadow h-100",
                 div(cls:="card-header text-success fw-bold small", "🏟️ Local vs Visitante"),
                 div(cls:="card-body p-3",
-                  if (localPJ + visitPJ < 3)
+                  if (localPJ + visitPJ == 0)
                     div(cls:="text-center text-muted small py-3",
                       div(style:="font-size:32px; opacity:0.3", "🏟️"),
-                      div(cls:="mt-2", "Añade el estadio en el Match Center"),
+                      div(cls:="mt-2", "Indica si es local o visitante al registrar el partido"),
                       div(cls:="xx-small text-secondary mt-1",
-                        "Guardian detecta si el partido es local usando el campo 'Estadio'")
+                        "El selector LOCAL / VISITANTE está en el Match Center, junto al campo Estadio")
                     )
                   else frag(
                     div(cls:="row g-2 text-center",
                       div(cls:="col-6",
-                        div(cls:="p-3 rounded",
+                        div(cls:="p-3 rounded h-100",
                           style:=s"border:2px solid #28a745; background:rgba(40,167,69,0.08);",
                           div(cls:="xx-small text-muted fw-bold mb-1", "LOCAL"),
-                          div(cls:=s"fw-black text-${notaColor(localNota)}",
-                            style:="font-size:2rem;", f"$localNota%.1f"),
-                          div(cls:="xx-small text-muted", "nota media"),
-                          div(cls:="mt-2 xx-small",
-                            span(cls:="text-muted", "GC: "),
-                            span(cls:=s"text-${gcColor(localGC)} fw-bold", f"$localGC%.1f")
-                          ),
-                          div(cls:="xx-small text-info mt-1",
-                            s"$localLimpias limpias / $localPJ PJ")
+                          if (localPJ == 0)
+                            div(cls:="text-muted small py-2", "Sin datos")
+                          else frag(
+                            div(cls:=s"fw-black text-${notaColor(localNota)}",
+                              style:="font-size:2rem;", f"$localNota%.1f"),
+                            div(cls:="xx-small text-muted", "nota media"),
+                            div(cls:="mt-2 xx-small",
+                              span(cls:="text-muted", "GC: "),
+                              span(cls:=s"text-${gcColor(localGC)} fw-bold", f"$localGC%.1f")
+                            ),
+                            div(cls:="xx-small text-info mt-1",
+                              s"$localLimpias limpias / $localPJ PJ")
+                          )
                         )
                       ),
                       div(cls:="col-6",
-                        div(cls:="p-3 rounded",
+                        div(cls:="p-3 rounded h-100",
                           style:="border:2px solid #0dcaf0; background:rgba(13,202,240,0.08);",
                           div(cls:="xx-small text-muted fw-bold mb-1", "VISITANTE"),
-                          div(cls:=s"fw-black text-${notaColor(visitNota)}",
-                            style:="font-size:2rem;", f"$visitNota%.1f"),
-                          div(cls:="xx-small text-muted", "nota media"),
-                          div(cls:="mt-2 xx-small",
-                            span(cls:="text-muted", "GC: "),
-                            span(cls:=s"text-${gcColor(visitGC)} fw-bold", f"$visitGC%.1f")
-                          ),
-                          div(cls:="xx-small text-info mt-1",
-                            s"$visitLimpias limpias / $visitPJ PJ")
+                          if (visitPJ == 0)
+                            div(cls:="text-muted small py-2", "Sin datos")
+                          else frag(
+                            div(cls:=s"fw-black text-${notaColor(visitNota)}",
+                              style:="font-size:2rem;", f"$visitNota%.1f"),
+                            div(cls:="xx-small text-muted", "nota media"),
+                            div(cls:="mt-2 xx-small",
+                              span(cls:="text-muted", "GC: "),
+                              span(cls:=s"text-${gcColor(visitGC)} fw-bold", f"$visitGC%.1f")
+                            ),
+                            div(cls:="xx-small text-info mt-1",
+                              s"$visitLimpias limpias / $visitPJ PJ")
+                          )
                         )
                       )
                     ),
                     if (localPJ >= 2 && visitPJ >= 2) {
-                      val diffLV = localNota - visitNota
-                      val msg = if (diffLV > 0.5) "Rinde claramente mejor en casa."
-                      else if (diffLV < -0.5) "Rinde mejor como visitante — inusual y positivo."
+                      val diff = localNota - visitNota
+                      val msg = if (diff > 0.5) "Rinde claramente mejor en casa."
+                      else if (diff < -0.5) "Rinde mejor fuera de casa — inusual y positivo."
                       else "Rendimiento equilibrado local/visitante."
                       div(cls:="mt-3 p-2 rounded xx-small text-center",
                         style:="background:rgba(255,255,255,0.04);",

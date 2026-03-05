@@ -301,6 +301,7 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS lineas_superadas INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS acciones_preventivas INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS scanning_rate INT DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS es_local BOOLEAN DEFAULT NULL")
 
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
@@ -694,7 +695,7 @@ object DatabaseManager {
                 reaccion: String, fechaStr: String, tipo: String,
                 pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
                 mapaCampo: String,
-                lineasSup: Int = 0, scanningRate: Int = 0
+                lineasSup: Int = 0, scanningRate: Int = 0, esLocal: Option[Boolean] = None
               ): Unit = {
     val conn = getConnection()
     try {
@@ -706,10 +707,10 @@ object DatabaseManager {
           paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
           acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
           reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
-          torneo_nombre, fase, mapa_campo, lineas_superadas, scanning_rate
+          torneo_nombre, fase, mapa_campo, lineas_superadas, scanning_rate, es_local
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          'PLAYED', ?, ?, ?, ?, ?, '', '', ?, ?, ?
+          'PLAYED', ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?
         )
       """)
         s.setInt(1, rs.getInt("id"))
@@ -741,6 +742,10 @@ object DatabaseManager {
         s.setString(27, mapaCampo)
         s.setInt(28, lineasSup)
         s.setInt(29, scanningRate)
+        esLocal match {
+          case Some(v) => s.setBoolean(30, v)
+          case None    => s.setNull(30, java.sql.Types.BOOLEAN)
+        }
         s.executeUpdate()
       }
     } finally {
@@ -3139,46 +3144,36 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         )
       }
 
-      // 3. LOCAL vs VISITANTE (heurística: si el estadio contiene el nombre del club → LOCAL)
-      val rsSeasonStadium = conn.createStatement().executeQuery(
-        "SELECT COALESCE(nombre_club,'') FROM seasons ORDER BY id DESC LIMIT 1"
-      )
-      val (clubName, homeStadium) = if (rsSeasonStadium.next())
-        (rsSeasonStadium.getString(1).toUpperCase, rsSeasonStadium.getString(1).toUpperCase)
-      else ("", "")
-
-      // Si no hay estadio propio, usamos la heurística: local = no hay "en" o "campo de" en el rival
-      val rsLocal = conn.createStatement().executeQuery("""
+      // 3. LOCAL vs VISITANTE — campo es_local de la tabla matches
+      val rsLV = conn.createStatement().executeQuery("""
         SELECT
-          estadio,
+          es_local,
+          COUNT(*) as pj,
           AVG(nota) as nota_media,
           AVG(goles_contra) as gc_media,
-          COUNT(*) as pj,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
-        FROM matches WHERE status='PLAYED'
-        GROUP BY estadio
+        FROM matches
+        WHERE status='PLAYED' AND es_local IS NOT NULL
+        GROUP BY es_local
       """)
       var localNota = 0.0; var localGC = 0.0; var localPJ = 0; var localLimpias = 0
       var visitNota = 0.0; var visitGC  = 0.0; var visitPJ = 0; var visitLimpias = 0
-      var localCount = 0; var visitCount = 0
-      while (rsLocal.next()) {
-        val est = Option(rsLocal.getString("estadio")).getOrElse("").toUpperCase
-        val esLocal = homeStadium.nonEmpty && est.contains(homeStadium.take(6).filter(_.isLetter)) ||
-          est.contains("PROPIO") || est.contains("CASA") || est.contains("LOCAL")
-        val nota = rsLocal.getDouble("nota_media")
-        val gc   = rsLocal.getDouble("gc_media")
-        val pj   = rsLocal.getInt("pj")
-        val cs   = rsLocal.getInt("limpias")
+      while (rsLV.next()) {
+        val esLocal = rsLV.getBoolean("es_local")
+        val nota = rsLV.getDouble("nota_media")
+        val gc   = rsLV.getDouble("gc_media")
+        val pj   = rsLV.getInt("pj")
+        val cs   = rsLV.getInt("limpias")
         if (esLocal) {
-          localNota += nota * pj; localGC += gc * pj; localPJ += pj; localLimpias += cs; localCount += 1
+          localNota = nota; localGC = gc; localPJ = pj; localLimpias = cs
         } else {
-          visitNota += nota * pj; visitGC += gc * pj; visitPJ += pj; visitLimpias += cs; visitCount += 1
+          visitNota = nota; visitGC = gc; visitPJ = pj; visitLimpias = cs
         }
       }
-      val localNotaFinal = if (localPJ > 0) localNota / localPJ else 0.0
-      val visitNotaFinal = if (visitPJ > 0) visitNota / visitPJ else 0.0
-      val localGCFinal   = if (localPJ > 0) localGC   / localPJ else 0.0
-      val visitGCFinal   = if (visitPJ > 0) visitGC   / visitPJ else 0.0
+      val localNotaFinal = localNota
+      val visitNotaFinal = visitNota
+      val localGCFinal   = localGC
+      val visitGCFinal   = visitGC
 
       // 4. POR DURACIÓN (franjas de minutos)
       val rsDur = conn.createStatement().executeQuery("""
