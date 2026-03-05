@@ -1,10 +1,10 @@
-# 🛡️ GUARDIAN ELITE v7.0 | Borja Martín R&D Edition
+# 🛡️ GUARDIAN ELITE v7.1 | Borja Martín R&D Edition
 
 > **"El talento te lleva al área, el carácter te mantiene en la historia."**
 
 **Guardian Elite** es un ecosistema de alto rendimiento diseñado para la monitorización longitudinal (de los 5 a los 20 años) del desarrollo de **Héctor**. Esta plataforma integra Big Data, Machine Learning e IA Generativa para transformar el crecimiento biológico, técnico y cognitivo en un activo estratégico.
 
-![Version](https://img.shields.io/badge/Version-7.0_Deep_Analytics-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4-COMPLETADA-brightgreen?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6](https://img.shields.io/badge/Fase_6-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6.5](https://img.shields.io/badge/Fase_6.5-85%25-yellow?style=for-the-badge) ![Fase7](https://img.shields.io/badge/Fase_7-60%25-yellow?style=for-the-badge) ![Fase8](https://img.shields.io/badge/Fase_8-50%25-yellow?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-7.1_Match_Context-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4-COMPLETADA-brightgreen?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6](https://img.shields.io/badge/Fase_6-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6.5](https://img.shields.io/badge/Fase_6.5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase7](https://img.shields.io/badge/Fase_7-75%25-yellow?style=for-the-badge) ![Fase8](https://img.shields.io/badge/Fase_8-50%25-yellow?style=for-the-badge)
 
 ---
 
@@ -28,6 +28,7 @@
 * **Análisis de Goles Encajados:** Registro contextual por gol: origen, situación (1v1/2v1/error defensivo), responsabilidad del portero y zona de portería (grid 3×3). Base para PSxG y nota ajustada.
 * **Bypass Rate:** Campo de registro de líneas superadas en salida con pie (botones +/−). URL: `/match-center`.
 * **Scanning Rate:** Campo de registro de escaneos de campo antes de recibir una cesión (botones +/−). URL: `/match-center`.
+* **Local / Visitante:** Selector de tres opciones (sin especificar / 🏠 Local / ✈️ Visitante) que se guarda en la columna `es_local` de la tabla `matches`. Alimenta el análisis de contexto `/match-context`.
 * **Bracket Torneo Visual:** Cuadro de fases interactivo por torneo con resultados y KPIs. URL: `/tournament/bracket`.
 
 ### Módulo Médico (Vault)
@@ -115,7 +116,7 @@
 
 ---
 
-## FASE 6.5 — Moneyball & Deep Influence Analytics *(85%)*
+## FASE 6.5 — Moneyball & Deep Influence Analytics *(100%)* ✅
 
 * **xT_GK** — Expected Threat del portero en distribución con el pie. ✅
 * **xPoints / Clutch Factor** — Valor de paradas según tensión del marcador y minuto. ✅
@@ -123,13 +124,14 @@
 * **ROI de Entrenamiento** — Correlación Pearson entre calidad/atención/RPE y nota partido. ✅
 * **PSxG** — Nota ajustada descontando goles por error ajeno. ✅
 * **Bypass Rate** — Registro en Match Center + visualización en Moneyball. ✅
+* **Bypass Rate Histórico** — Gráfico de evolución por temporada: barras (líneas/partido) + línea (eficiencia %). Tabla con tendencia ↑/↓/→ año a año. ✅ *(nuevo en v7.1)*
 * **Sinergia de Roster** — ❌ Descartado: rotación excesiva a esta edad, datos insuficientes.
 
 URL: `/moneyball`.
 
 ---
 
-## FASE 7 — Career Management Hub *(60%)*
+## FASE 7 — Career Management Hub *(75%)*
 
 ### Red-Zone Analytics ✅ Implementado
 * **Resilience Index 0-100:** Rendimiento bajo asedio (GC ≥ 2) vs media global. ÉLITE / SÓLIDO / EN PROCESO / VULNERABLE.
@@ -146,6 +148,14 @@ URL: `/moneyball`.
 * **Campo nuevo en Match Center** (botones +/−) para registrar escaneos de campo antes de recibir cesión.
 * **Correlación de Pearson** automática entre escaneos y nota del partido.
 * **Gráfico dual** barras/línea con doble eje Y. URL: `/scanning-rate`.
+
+### Match Context Analytics ✅ Implementado *(nuevo en v7.1)*
+* **Por tipo de partido:** Nota media, GC y limpias en LIGA vs TORNEO vs AMISTOSO. Columna "vs media global" con badge verde/rojo.
+* **Por clima:** Rendimiento cruzado con la condición meteorológica registrada en cada partido.
+* **Local vs Visitante:** Selector explícito en el Match Center (`es_local BOOLEAN`). Dos cajas comparativas con nota, GC, limpias y conclusión automática cuando hay ≥2 partidos en cada categoría.
+* **Por duración:** Franjas de minutos (<40 / 40-59 / 60-79 / 80+) para detectar si los partidos completos benefician o perjudican el rendimiento.
+* **Tendencia mensual:** Gráfico línea + barras de los últimos 12 meses con línea de media global de referencia.
+* Sin nuevos campos requeridos — usa datos ya registrados en el Match Center. URL: `/match-context`.
 
 ---
 
@@ -174,12 +184,6 @@ URL: `/moneyball`.
 * **Pose-Estimation Analyst:** Detección de errores de sustentación y Paso Negativo en video.
 * **Goal Coverage Mapping:** Superficie de portería cubierta según biotipo vs. dimensiones reglamentarias.
 * **Reaction Time Tracker:** Milisegundos exactos desde el disparo hasta la estirada.
-
----
-
-## FASE 6.5 — Moneyball *(Pendiente)*
-
-* Análisis visual de Bypass Rate en histórico de temporadas.
 
 ---
 
@@ -249,8 +253,8 @@ FASE 3  — Computer Vision            ░░░░░░░░░░   0%  (req
 FASE 4  — ML & Estrategia Pro        ██████████ 100%
 FASE 5  — Inteligencia Proactiva     ██████████ 100%  (Dojo + Dojo Entrenador + Bio-Banding)
 FASE 6  — Innovación Exclusiva       ██████████ 100%
-FASE 6.5— Moneyball Analytics        ████████░░  85%
-FASE 7  — Career Management 360      ██████░░░░  60%  (Red-Zone + Clustering + Scanning)
+FASE 6.5— Moneyball Analytics        ██████████ 100%  (Bypass Rate histórico completado)
+FASE 7  — Career Management 360      ███████░░░  75%  (+ Match Context en v7.1)
 FASE 8  — Deep Performance           █████░░░░░  50%  (Reset + PSxG + Pathway)
 FASE 9  — Elite Layer                ░░░░░░░░░░   0%
 FASE 10 — Quantum Performance        ░░░░░░░░░░   0%
@@ -261,7 +265,7 @@ FASE 13 — Biological & Social Core   ░░░░░░░░░░   0%
 
 ---
 
-## Rutas Desplegadas en Producción (22 rutas activas)
+## Rutas Desplegadas en Producción (23 rutas activas)
 
 | Módulo | URL | Fase |
 |--------|-----|------|
@@ -283,6 +287,7 @@ FASE 13 — Biological & Social Core   ░░░░░░░░░░   0%
 | Red-Zone | `/red-zone` | 7 |
 | Striker Clustering | `/striker-clustering` | 7 |
 | Scanning Rate | `/scanning-rate` | 7 |
+| Match Context | `/match-context` | 7 |
 | Cognitive Reset | `/cognitive-reset` | 8 |
 | PSxG Delta | `/psxg-delta` | 8 |
 | Development Pathway | `/pathway` | 8 |
