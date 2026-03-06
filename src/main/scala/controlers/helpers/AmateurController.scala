@@ -39,92 +39,121 @@ object AmateurController extends cask.Routes {
     userName: String,
     pageContent: scalatags.Text.Modifier
   ): cask.Response[Array[Byte]] = {
-    val page = "<!DOCTYPE html>" + html(lang := "es",
+    val page = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
+        meta(name := "color-scheme", content := "dark"),
         tags2.title("Guardian Amateur"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
         tags2.style(raw("""
           * { box-sizing: border-box; }
           body {
-            background: #0d0d0d;
-            color: #e0e0e0;
+            background: #f0f4f8;
+            color: #1a202c;
             font-family: 'Segoe UI', sans-serif;
             padding-bottom: 90px;
             min-height: 100vh;
           }
-          /* ── RESET INPUTS: sobreescribir el CSS global del Elite ── */
-          input, select, textarea,
-          .form-control, .form-select {
-            background-color: #1e1e1e !important;
-            color: #ffffff !important;
-            border: 1px solid #3a3a3a !important;
+          /* ── RESET COMPLETO — sobreescribe cualquier hoja externa ── */
+          body input, body select, body textarea,
+          body .form-control, body .form-select {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #1a202c !important;
+            border: 1px solid #cbd5e0 !important;
+            -webkit-text-fill-color: #1a202c !important;
             font-weight: 500 !important;
+            border-radius: 8px !important;
           }
-          input::placeholder, textarea::placeholder { color: #666 !important; opacity: 1; }
-          option { background: #1e1e1e; color: #fff; }
-          /* range track */
-          input[type=range] { background: transparent !important; border: none !important; }
-          /* date picker icon blanco en Chrome */
-          input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1); }
-          /* checkbox */
-          .form-check-input { background-color: #1e1e1e !important; border-color: #555 !important; }
-          .form-check-input:checked { background-color: #0d6efd !important; border-color: #0d6efd !important; }
+          body input:focus, body select:focus, body textarea:focus,
+          body .form-control:focus, body .form-select:focus {
+            background-color: #ffffff !important;
+            color: #1a202c !important;
+            -webkit-text-fill-color: #1a202c !important;
+            border-color: #0d6efd !important;
+            box-shadow: 0 0 0 3px rgba(13,110,253,0.15) !important;
+            outline: none !important;
+          }
+          body input:-webkit-autofill,
+          body input:-webkit-autofill:hover,
+          body input:-webkit-autofill:focus {
+            -webkit-box-shadow: 0 0 0px 1000px #ffffff inset !important;
+            -webkit-text-fill-color: #1a202c !important;
+          }
+          body input::placeholder, body textarea::placeholder {
+            color: #a0aec0 !important; opacity: 1 !important;
+          }
+          body option { background: #fff !important; color: #1a202c !important; }
+          body input[type=range] { background: transparent !important; border: none !important; box-shadow: none !important; }
+          body input[type=date]::-webkit-calendar-picker-indicator,
+          body input[type=time]::-webkit-calendar-picker-indicator { filter: none !important; }
+          body .form-check-input { background-color: #fff !important; border-color: #cbd5e0 !important; }
+          body .form-check-input:checked { background-color: #0d6efd !important; border-color: #0d6efd !important; }
+          body label { color: #4a5568 !important; }
 
+          /* ── LAYOUT ── */
           .bottom-nav {
             position: fixed; bottom: 0; left: 0; right: 0;
-            background: #111; border-top: 1px solid #2a2a2a;
+            background: #ffffff; border-top: 1px solid #e2e8f0;
             display: flex; z-index: 1000; padding-bottom: env(safe-area-inset-bottom);
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.07);
           }
           .nav-item {
             flex: 1; text-align: center; padding: 8px 2px 6px;
-            text-decoration: none; color: #666; font-size: 10px;
+            text-decoration: none; color: #a0aec0; font-size: 10px;
             display: flex; flex-direction: column; align-items: center;
           }
           .nav-item.active { color: #0d6efd; }
           .nav-item .nav-icon { font-size: 20px; display: block; margin-bottom: 2px; }
           .xx-small { font-size: 0.7rem; }
           .am-header {
-            background: linear-gradient(135deg, #0d6efd22, #0d0d0d);
-            border-bottom: 1px solid #1a3a6b;
+            background: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
             padding: 10px 16px;
             display: flex; align-items: center; justify-content: space-between;
             margin-bottom: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+          }
+          .card-am {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
           }
           .btn-goal-zone {
-            width: 100%; aspect-ratio: 1;
-            font-size: 11px; font-weight: 700;
-            border: 2px solid #333;
-            background: #1a1a1a; color: #aaa;
-            border-radius: 6px; cursor: pointer;
-            transition: all 0.15s;
+            width: 100%; aspect-ratio: 1; font-size: 11px; font-weight: 700;
+            border: 2px solid #e2e8f0; background: #f7fafc; color: #718096;
+            border-radius: 6px; cursor: pointer; transition: all 0.15s;
           }
           .btn-goal-zone.selected { background: #dc3545; color: white; border-color: #dc3545; }
-          .btn-dir { width: 100%; padding: 16px 8px; font-weight: 700;
-            font-size: 14px; border: 2px solid #333; background: #1a1a1a;
-            color: #aaa; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+          .btn-dir {
+            width: 100%; padding: 16px 8px; font-weight: 700; font-size: 14px;
+            border: 2px solid #e2e8f0; background: #f7fafc; color: #718096;
+            border-radius: 8px; cursor: pointer; transition: all 0.15s;
+          }
           .btn-dir.selected-tiro     { background: #dc3545; color: white; border-color: #dc3545; }
           .btn-dir.selected-estirada { background: #0d6efd; color: white; border-color: #0d6efd; }
-          .card-am { background: #141414; border: 1px solid #222; border-radius: 12px; }
           .nota-badge {
             width: 48px; height: 48px; border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
             font-weight: 900; font-size: 16px;
           }
-          .badge-green  { background: rgba(40,167,69,0.2);  color: #28a745; }
-          .badge-yellow { background: rgba(255,193,7,0.2);  color: #ffc107; }
-          .badge-red    { background: rgba(220,53,69,0.2);  color: #dc3545; }
-          /* calendario */
+          .badge-green  { background: #c6f6d5; color: #276749; }
+          .badge-yellow { background: #fefcbf; color: #744210; }
+          .badge-red    { background: #fed7d7; color: #9b2c2c; }
+          .text-muted   { color: #718096 !important; }
+          .border-bottom { border-bottom-color: #e2e8f0 !important; }
+          /* Calendario */
           .cal-day {
-            min-height: 56px; background: #141414; border: 1px solid #222;
-            border-radius: 8px; padding: 4px 6px; font-size: 11px;
+            min-height: 56px; background: #f7fafc; border: 1px solid #e2e8f0;
+            border-radius: 8px; padding: 4px 6px; font-size: 11px; color: #1a202c;
           }
-          .cal-day.today { border-color: #0d6efd; }
-          .cal-day.has-match { border-color: #28a745; background: #0d200f; }
-          .cal-day.has-schedule { border-color: #ffc107; background: #1e1500; }
-          .cal-day .day-num { font-weight: 700; font-size: 13px; }
+          .cal-day.today        { border-color: #0d6efd; background: #ebf8ff; }
+          .cal-day.has-match    { border-color: #38a169; background: #f0fff4; }
+          .cal-day.has-schedule { border-color: #d69e2e; background: #fffff0; }
+          .cal-day .day-num { font-weight: 700; font-size: 13px; color: #1a202c; }
           .cal-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin:1px; }
         """))
       ),
@@ -184,13 +213,14 @@ object AmateurController extends cask.Routes {
 
   @cask.get("/am/register")
   def registerPage(request: cask.Request, error: String = "") = {
-    val page = "<!DOCTYPE html>" + html(lang := "es",
+    val page = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
+        meta(name := "color-scheme", content := "dark"),
         tags2.title("Guardian Amateur - Registro"),
         link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        tags2.style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
+        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { border-color:#e2e8f0; }"))
       ),
       body(
         div(cls := "container d-flex justify-content-center align-items-center", style := "min-height:100vh;",

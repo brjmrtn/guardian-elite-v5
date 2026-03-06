@@ -17,7 +17,7 @@ object AuthController extends cask.Routes {
     if (cookieVal == "elite" || cookieVal == "active") return renderRedirect("/profiles")
     if (cookieVal.startsWith("am:"))                   return renderRedirect("/profiles")
 
-    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -25,7 +25,7 @@ object AuthController extends cask.Routes {
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
         tags2.style(raw("""
-          body { background: #0d0d0d; color: #e0e0e0; min-height: 100vh; }
+          body { background: #f0f4f8; color: #1a202c; min-height: 100vh; } .card { background: #fff !important; border-color: #e2e8f0 !important; } input, select { background: #fff !important; color: #1a202c !important; border-color: #cbd5e0 !important; } .text-muted { color: #718096 !important; } .text-warning { color: #d69e2e !important; } .text-primary { color: #0d6efd !important; } .text-danger { color: #e53e3e !important; }
         """))
       ),
       body(
@@ -106,7 +106,7 @@ object AuthController extends cask.Routes {
 
     val amUsers = AmateurDatabaseManager.listUsers()
 
-    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -114,22 +114,23 @@ object AuthController extends cask.Routes {
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
         tags2.style(raw("""
-          body { background: #0d0d0d; color: #e0e0e0; min-height: 100vh; }
+          body { background: #f0f4f8; color: #1a202c; min-height: 100vh; } .card { background: #fff !important; border-color: #e2e8f0 !important; } input, select { background: #fff !important; color: #1a202c !important; border-color: #cbd5e0 !important; } .text-muted { color: #718096 !important; } .text-warning { color: #d69e2e !important; } .text-primary { color: #0d6efd !important; } .text-danger { color: #e53e3e !important; }
           .profile-card {
             display: flex; align-items: center; gap: 14px;
-            background: #141414; border: 2px solid #222; border-radius: 14px;
-            padding: 14px 18px; color: white; text-decoration: none;
+            background: #ffffff; border: 2px solid #e2e8f0; border-radius: 14px;
+            padding: 14px 18px; color: #1a202c; text-decoration: none;
             width: 100%; margin-bottom: 10px; transition: all 0.15s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
           }
-          .profile-card:hover { color: white; background: #1a1a2e; border-color: #0d6efd; }
-          .profile-card.elite-card:hover { border-color: #ffc107; background: #1e1800; }
-          .profile-card.active-profile { border-color: #0d6efd; background: #0d1a2e; }
-          .profile-card.elite-card.active-profile { border-color: #ffc107; background: #1e1800; }
+          .profile-card:hover { color: #1a202c; background: #f0f4f8; border-color: #0d6efd; }
+          .profile-card.elite-card:hover { border-color: #d69e2e; background: #fffff0; }
+          .profile-card.active-profile { border-color: #0d6efd; background: #ebf8ff; }
+          .profile-card.elite-card.active-profile { border-color: #d69e2e; background: #fffff0; }
           .avatar { width: 48px; height: 48px; border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
             font-size: 22px; flex-shrink: 0; }
-          .av-elite { background: rgba(255,193,7,0.15); }
-          .av-am    { background: rgba(13,110,253,0.15); }
+          .av-elite { background: rgba(214,158,46,0.15); }
+          .av-am    { background: rgba(13,110,253,0.12); }
           .badge-on { font-size: 10px; padding: 2px 8px; border-radius: 10px; }
         """))
       ),
@@ -225,14 +226,14 @@ object AuthController extends cask.Routes {
   // Reautenticación Elite (cuando viene de una cuenta Amateur)
   @cask.get("/reauth/elite")
   def reauthElitePage(request: cask.Request, error: String = ""): cask.Response[Array[Byte]] = {
-    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
         tags2.title("Acceso Elite"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        tags2.style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
+        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; } .text-muted { color:#718096 !important; }"))
       ),
       body(
         div(cls := "container d-flex justify-content-center align-items-center",
@@ -283,14 +284,14 @@ object AuthController extends cask.Routes {
   @cask.get("/reauth/am/:userId")
   def reauthAmPage(request: cask.Request, userId: Int, error: String = ""): cask.Response[Array[Byte]] = {
     val nombre = AmateurDatabaseManager.getUserById(userId).map(_.nombre).getOrElse("portero")
-    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
         tags2.title(s"Entrar como $nombre"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        tags2.style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
+        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; } .text-muted { color:#718096 !important; }"))
       ),
       body(
         div(cls := "container d-flex justify-content-center align-items-center",
