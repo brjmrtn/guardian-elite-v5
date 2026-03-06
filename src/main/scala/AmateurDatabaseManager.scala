@@ -167,6 +167,31 @@ object AmateurDatabaseManager {
     } finally { conn.close() }
   }
 
+  def listUsers(): List[AmUser] = {
+    val conn = getConn()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, username, nombre FROM am_users ORDER BY nombre ASC"
+      )
+      var list = List[AmUser]()
+      while (rs.next())
+        list = list :+ AmUser(rs.getInt("id"), rs.getString("username"), rs.getString("nombre"))
+      list
+    } finally { conn.close() }
+  }
+
+  def checkPassword(userId: Int, password: String): Boolean = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT 1 FROM am_users WHERE id = ? AND password_hash = ?"
+      )
+      ps.setInt(1, userId)
+      ps.setString(2, md5(password))
+      ps.executeQuery().next()
+    } finally { conn.close() }
+  }
+
   // ── MATCHES ────────────────────────────────────────────────────────────────
   def logMatch(
     userId: Int, rival: String, gf: Int, gc: Int,

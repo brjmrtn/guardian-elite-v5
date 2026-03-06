@@ -9,11 +9,15 @@ import scalatags.Text.tags2
 // ─────────────────────────────────────────────────────────────────────────────
 object AmateurController extends cask.Routes {
 
-  private val AM_COOKIE = "am_session"
+  private val AM_COOKIE = SharedLayout.sessionCookieName  // cookie unificada
 
   // ── AUTH HELPERS ───────────────────────────────────────────────────────────
-  private def getAmUserId(request: cask.Request): Option[Int] =
-    request.cookies.get(AM_COOKIE).flatMap(c => scala.util.Try(c.value.toInt).toOption)
+  private def getAmUserId(request: cask.Request): Option[Int] = {
+    val cookieVal = request.cookies.get(AM_COOKIE).map(_.value).getOrElse("")
+    if (cookieVal.startsWith("am:"))
+      scala.util.Try(cookieVal.drop(3).toInt).toOption
+    else None
+  }
 
   private def withAmAuth(request: cask.Request)(
     f: AmUser => cask.Response[Array[Byte]]
@@ -24,7 +28,7 @@ object AmateurController extends cask.Routes {
         cask.Response(
           Array.emptyByteArray,
           statusCode = 302,
-          headers = Seq("Location" -> "/am/login")
+          headers = Seq("Location" -> "/login")
         )
     }
   }
@@ -106,7 +110,12 @@ object AmateurController extends cask.Routes {
             span(cls := "badge bg-primary ms-1", style := "font-size:9px;", "AMATEUR"),
             span(cls := "d-block xx-small text-muted", userName)
           ),
-          a(href := "/am/logout", cls := "btn btn-outline-secondary btn-sm xx-small", "Salir")
+          div(cls := "d-flex gap-2 align-items-center",
+            a(href := "/profiles",
+              cls := "btn btn-outline-warning btn-sm xx-small fw-bold",
+              "👤 Cambiar"),
+            a(href := "/logout", cls := "btn btn-outline-secondary btn-sm xx-small", "Salir")
+          )
         ),
 
         // Contenido
@@ -141,73 +150,8 @@ object AmateurController extends cask.Routes {
     )
   }
 
-  // ── LOGIN / REGISTER ───────────────────────────────────────────────────────
-  @cask.get("/am/login")
-  def loginPage(request: cask.Request, error: String = "") = {
-    val page = "<!DOCTYPE html>" + html(lang := "es",
-      head(
-        meta(charset := "UTF-8"),
-        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tag("title")("Guardian Amateur - Login"),
-        link(rel := "stylesheet",
-          href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
-      ),
-      body(
-        div(cls := "container d-flex justify-content-center align-items-center",
-          style := "min-height:100vh;",
-          div(style := "width:340px;",
-            div(cls := "text-center mb-4",
-              div(style := "font-size:48px;", "🛡"),
-              h3(cls := "fw-black text-primary", "GUARDIAN AMATEUR"),
-              span(cls := "text-muted small", "Tu rendimiento, registrado.")
-            ),
-            div(cls := "card bg-dark border-primary p-4 mb-3",
-              h5(cls := "text-white fw-bold mb-3", "Iniciar sesión"),
-              if (error.nonEmpty) div(cls := "alert alert-danger small p-2 mb-3", error) else span(),
-              form(action := "/am/login", method := "post",
-                div(cls := "mb-3",
-                  label(cls := "text-muted small fw-bold", "USUARIO"),
-                  input(tpe := "text", name := "username", cls := "form-control bg-dark text-white border-secondary mt-1", required := true, attr("autocomplete") := "username")
-                ),
-                div(cls := "mb-3",
-                  label(cls := "text-muted small fw-bold", "CONTRASEÑA"),
-                  input(tpe := "password", name := "password", cls := "form-control bg-dark text-white border-secondary mt-1", required := true)
-                ),
-                button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "ENTRAR")
-              )
-            ),
-            div(cls := "card bg-dark border-secondary p-3 text-center",
-              p(cls := "text-muted small mb-2", "¿Primera vez? Crea tu cuenta gratis"),
-              a(href := "/am/register", cls := "btn btn-outline-secondary w-100 btn-sm", "Registrarse")
-            )
-          )
-        )
-      )
-    ).render
-    cask.Response(page.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
-
-  @cask.postForm("/am/login")
-  def doLogin(request: cask.Request, username: String, password: String) = {
-    AmateurDatabaseManager.authenticate(username, password) match {
-      case Some(user) =>
-        cask.Response(
-          Array.emptyByteArray,
-          statusCode = 302,
-          headers = Seq(
-            "Location"   -> "/am/dashboard",
-            "Set-Cookie" -> s"$AM_COOKIE=${user.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
-          )
-        )
-      case None =>
-        cask.Response(
-          Array.emptyByteArray,
-          statusCode = 302,
-          headers = Seq("Location" -> "/am/login?error=Usuario+o+contraseña+incorrectos")
-        )
-    }
-  }
+  // ── REGISTRO AMATEUR (accesible desde /am/register) ───────────────────────
+  // El login y logout se gestionan desde AuthController (login unificado)
 
   @cask.get("/am/register")
   def registerPage(request: cask.Request, error: String = "") = {
@@ -264,7 +208,7 @@ object AmateurController extends cask.Routes {
           cask.Response(Array.emptyByteArray, 302,
             headers = Seq(
               "Location"   -> "/am/dashboard",
-              "Set-Cookie" -> s"$AM_COOKIE=$id; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
+              "Set-Cookie" -> s"${SharedLayout.sessionCookieName}=am:$id; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
             ))
         case Left(err) =>
           cask.Response(Array.emptyByteArray, 302,
@@ -274,12 +218,11 @@ object AmateurController extends cask.Routes {
   }
 
   @cask.get("/am/logout")
-  def doLogout(request: cask.Request) =
-    cask.Response(Array.emptyByteArray, 302,
-      headers = Seq(
-        "Location"   -> "/am/login",
-        "Set-Cookie" -> s"$AM_COOKIE=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
-      ))
+  def doAmLogout(request: cask.Request) =
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location"   -> "/login",
+      "Set-Cookie" -> s"${SharedLayout.sessionCookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
+    ))
 
   // ── DASHBOARD ──────────────────────────────────────────────────────────────
   @cask.get("/am/dashboard")
