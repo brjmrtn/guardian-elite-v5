@@ -55,6 +55,24 @@ object AmateurController extends cask.Routes {
             padding-bottom: 90px;
             min-height: 100vh;
           }
+          /* ── RESET INPUTS: sobreescribir el CSS global del Elite ── */
+          input, select, textarea,
+          .form-control, .form-select {
+            background-color: #1e1e1e !important;
+            color: #ffffff !important;
+            border: 1px solid #3a3a3a !important;
+            font-weight: 500 !important;
+          }
+          input::placeholder, textarea::placeholder { color: #666 !important; opacity: 1; }
+          option { background: #1e1e1e; color: #fff; }
+          /* range track */
+          input[type=range] { background: transparent !important; border: none !important; }
+          /* date picker icon blanco en Chrome */
+          input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1); }
+          /* checkbox */
+          .form-check-input { background-color: #1e1e1e !important; border-color: #555 !important; }
+          .form-check-input:checked { background-color: #0d6efd !important; border-color: #0d6efd !important; }
+
           .bottom-nav {
             position: fixed; bottom: 0; left: 0; right: 0;
             background: #111; border-top: 1px solid #2a2a2a;
@@ -83,13 +101,11 @@ object AmateurController extends cask.Routes {
             border-radius: 6px; cursor: pointer;
             transition: all 0.15s;
           }
-          .btn-goal-zone.selected {
-            background: #dc3545; color: white; border-color: #dc3545;
-          }
+          .btn-goal-zone.selected { background: #dc3545; color: white; border-color: #dc3545; }
           .btn-dir { width: 100%; padding: 16px 8px; font-weight: 700;
             font-size: 14px; border: 2px solid #333; background: #1a1a1a;
             color: #aaa; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
-          .btn-dir.selected-tiro { background: #dc3545; color: white; border-color: #dc3545; }
+          .btn-dir.selected-tiro     { background: #dc3545; color: white; border-color: #dc3545; }
           .btn-dir.selected-estirada { background: #0d6efd; color: white; border-color: #0d6efd; }
           .card-am { background: #141414; border: 1px solid #222; border-radius: 12px; }
           .nota-badge {
@@ -97,9 +113,19 @@ object AmateurController extends cask.Routes {
             display: flex; align-items: center; justify-content: center;
             font-weight: 900; font-size: 16px;
           }
-          .badge-green  { background: rgba(40,167,69,0.2); color: #28a745; }
-          .badge-yellow { background: rgba(255,193,7,0.2); color: #ffc107; }
-          .badge-red    { background: rgba(220,53,69,0.2); color: #dc3545; }
+          .badge-green  { background: rgba(40,167,69,0.2);  color: #28a745; }
+          .badge-yellow { background: rgba(255,193,7,0.2);  color: #ffc107; }
+          .badge-red    { background: rgba(220,53,69,0.2);  color: #dc3545; }
+          /* calendario */
+          .cal-day {
+            min-height: 56px; background: #141414; border: 1px solid #222;
+            border-radius: 8px; padding: 4px 6px; font-size: 11px;
+          }
+          .cal-day.today { border-color: #0d6efd; }
+          .cal-day.has-match { border-color: #28a745; background: #0d200f; }
+          .cal-day.has-schedule { border-color: #ffc107; background: #1e1500; }
+          .cal-day .day-num { font-weight: 700; font-size: 13px; }
+          .cal-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin:1px; }
         """))
       ),
       body(
@@ -129,6 +155,9 @@ object AmateurController extends cask.Routes {
           a(href := "/am/match-center",
             cls := s"nav-item ${if (activeLink == "match") "active" else ""}",
             span(cls := "nav-icon", "⚽"), span("Partido")),
+          a(href := "/am/calendar",
+            cls := s"nav-item ${if (activeLink == "calendar") "active" else ""}",
+            span(cls := "nav-icon", "📅"), span("Agenda")),
           a(href := "/am/penalties",
             cls := s"nav-item ${if (activeLink == "penalties") "active" else ""}",
             span(cls := "nav-icon", "🥅"), span("Penaltis")),
@@ -228,6 +257,7 @@ object AmateurController extends cask.Routes {
   @cask.get("/am/dashboard")
   def dashboardPage(request: cask.Request) = withAmAuth(request) { user =>
     val st = AmateurDatabaseManager.getDashboardStats(user.id)
+    val upcoming   = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
     val pj             = st("pj").asInstanceOf[Int]
     val notaMedia      = st("notaMedia").asInstanceOf[Double]
     val notaAjustada   = st("notaAjustada").asInstanceOf[Double]
@@ -259,6 +289,22 @@ object AmateurController extends cask.Routes {
             a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
           )
         else frag(
+
+          // Próximo partido programado
+          upcoming.headOption.map { s =>
+            div(cls := "card-am p-3 mb-3",
+              style := "border-color:#ffc107;",
+              div(cls := "xx-small text-warning fw-bold mb-1", "PRÓXIMO PARTIDO"),
+              div(cls := "fw-black text-white", s.rival),
+              div(cls := "xx-small text-muted",
+                s"📅 ${s.fecha}",
+                if (s.hora.nonEmpty) s" · ⏰ ${s.hora}" else "",
+                if (s.lugar.nonEmpty) s" · 📍 ${s.lugar}" else ""
+              ),
+              a(href := s"/am/match-center", cls := "btn btn-warning btn-sm fw-bold mt-2 w-100",
+                "⚽ Registrar este partido")
+            )
+          }.getOrElse(div()),
 
           // KPIs principales
           div(cls := "row g-2 mb-3",
@@ -1080,6 +1126,191 @@ object AmateurController extends cask.Routes {
     withAmAuth(request) { user =>
       AmateurDatabaseManager.toggleGearActive(gearId, user.id)
       cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
+    }
+
+  // ── CALENDARIO ─────────────────────────────────────────────────────────────
+  @cask.get("/am/calendar")
+  def calendarPage(request: cask.Request) = withAmAuth(request) { user =>
+    import java.time.{LocalDate, YearMonth}
+    import java.time.format.DateTimeFormatter
+
+    val today      = LocalDate.now()
+    val ym         = YearMonth.of(today.getYear, today.getMonthValue)
+    val firstDay   = ym.atDay(1)
+    val lastDay    = ym.atEndOfMonth()
+    val fromStr    = firstDay.toString
+    val toStr      = lastDay.toString
+
+    val schedules  = AmateurDatabaseManager.getScheduleRange(user.id, fromStr, toStr)
+    val matches    = AmateurDatabaseManager.getMatches(user.id)
+      .filter(m => m.fecha >= fromStr && m.fecha <= toStr)
+    val upcoming   = AmateurDatabaseManager.getUpcomingSchedule(user.id, 5)
+
+    // Mapas fecha → eventos
+    val schedByDate = schedules.groupBy(_.fecha)
+    val matchByDate = matches.groupBy(_.fecha)
+
+    val monthNames = Seq("","Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                         "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre")
+    val dayNames   = Seq("L","M","X","J","V","S","D")
+    val monthLabel = s"${monthNames(today.getMonthValue)} ${today.getYear}"
+
+    // Primer día de semana (1=Lun ... 7=Dom)
+    val startDow = firstDay.getDayOfWeek.getValue  // 1-7
+    val blancos  = startDow - 1  // celdas vacías al inicio
+    val totalDays = ym.lengthOfMonth()
+
+    val tipoColor = Map("LIGA"->"#0d6efd","TORNEO"->"#6f42c1","AMISTOSO"->"#20c997","CUP"->"#fd7e14")
+
+    renderAm("calendar", user.nombre,
+      div(
+        // Cabecera mes
+        div(cls := "d-flex justify-content-between align-items-center mb-3",
+          h5(cls := "fw-black text-white mb-0", s"📅 $monthLabel"),
+          a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
+        ),
+
+        // Próximos partidos
+        if (upcoming.nonEmpty)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small text-muted fw-bold mb-2", "PRÓXIMOS PARTIDOS"),
+            frag(upcoming.map { s =>
+              val col = tipoColor.getOrElse(s.tipo, "#0d6efd")
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid #1e1e1e;",
+                div(style := s"width:4px; height:36px; border-radius:2px; background:$col; flex-shrink:0;"),
+                div(cls := "flex-fill",
+                  div(cls := "fw-bold small text-white", s.rival),
+                  div(cls := "xx-small text-muted",
+                    s"${s.fecha}${if(s.hora.nonEmpty) " · "+s.hora else ""}${if(s.lugar.nonEmpty) " · "+s.lugar else ""}")
+                ),
+                span(cls := "badge xx-small", style := s"background:${col}33; color:$col;", s.tipo),
+                form(action := "/am/calendar/delete", method := "post",
+                  input(tpe := "hidden", name := "scheduleId", value := s.id.toString),
+                  button(tpe := "submit", cls := "btn btn-outline-secondary btn-sm", style := "padding:2px 6px; font-size:11px;", "✕")
+                )
+              )
+            }: _*)
+          )
+        else div(),
+
+        // Grid del mes
+        div(cls := "card-am p-3 mb-3",
+          // Cabeceras días
+          div(cls := "row g-1 mb-1",
+            frag(dayNames.map { d =>
+              div(cls := "col",
+                div(cls := "text-center xx-small text-muted fw-bold", d))
+            }: _*)
+          ),
+          // Celdas — 7 columnas con CSS grid
+          div(style := "display:grid; grid-template-columns:repeat(7,1fr); gap:4px;",
+            // Blancos iniciales
+            frag((1 to blancos).map(_ => div()): _*),
+            // Días del mes
+            frag((1 to totalDays).map { d =>
+              val dateStr  = LocalDate.of(today.getYear, today.getMonthValue, d).toString
+              val isToday  = d == today.getDayOfMonth
+              val hasSched = schedByDate.contains(dateStr)
+              val hasMatch = matchByDate.contains(dateStr)
+              val cls0 = "cal-day" +
+                (if (isToday) " today" else "") +
+                (if (hasMatch) " has-match" else if (hasSched) " has-schedule" else "")
+              div(cls := cls0,
+                div(cls := s"day-num ${if(isToday) "text-primary" else "text-white"}", d.toString),
+                if (hasMatch)
+                  frag(matchByDate(dateStr).map { m =>
+                    div(cls := "xx-small text-success", style := "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;",
+                      s"✅ ${m.rival}")
+                  }: _*)
+                else if (hasSched)
+                  frag(schedByDate(dateStr).map { s =>
+                    val col = tipoColor.getOrElse(s.tipo, "#ffc107")
+                    div(cls := "xx-small", style := s"color:$col; white-space:nowrap;overflow:hidden;text-overflow:ellipsis;",
+                      s"⚽ ${s.rival}")
+                  }: _*)
+                else div()
+              )
+            }: _*)
+          )
+        ),
+
+        // Leyenda
+        div(cls := "d-flex gap-3 xx-small text-muted mb-3",
+          div(span(cls := "cal-dot", style := "background:#28a745;"), " Jugado"),
+          div(span(cls := "cal-dot", style := "background:#ffc107;"), " Programado"),
+          div(span(cls := "cal-dot", style := s"background:#0d6efd;"), " Hoy")
+        )
+      )
+    )
+  }
+
+  @cask.get("/am/calendar/add")
+  def calendarAddPage(request: cask.Request) = withAmAuth(request) { user =>
+    renderAm("calendar", user.nombre,
+      div(
+        h5(cls := "fw-black text-white mb-3", "📅 Añadir partido"),
+        div(cls := "card-am p-3",
+          form(action := "/am/calendar/save", method := "post",
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "RIVAL"),
+              input(tpe := "text", name := "rival",
+                cls := "form-control mt-1",
+                placeholder := "Nombre del equipo rival", required := true)
+            ),
+            div(cls := "row g-2 mb-3",
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                input(tpe := "date", name := "fecha", cls := "form-control mt-1",
+                  value := java.time.LocalDate.now().toString, required := true)
+              ),
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "HORA (opcional)"),
+                input(tpe := "time", name := "hora", cls := "form-control mt-1")
+              )
+            ),
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "LUGAR / CAMPO"),
+              input(tpe := "text", name := "lugar", cls := "form-control mt-1",
+                placeholder := "Ej: Campo Municipal Norte")
+            ),
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "TIPO"),
+              select(name := "tipo", cls := "form-select mt-1",
+                option(value := "LIGA", "Liga"),
+                option(value := "TORNEO", "Torneo"),
+                option(value := "CUP", "Copa"),
+                option(value := "AMISTOSO", "Amistoso")
+              )
+            ),
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "NOTAS (opcional)"),
+              input(tpe := "text", name := "notas", cls := "form-control mt-1",
+                placeholder := "Árbitro, vestuario, instrucciones del míster...")
+            ),
+            button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold py-3", "GUARDAR"),
+            div(cls := "text-center mt-3",
+              a(href := "/am/calendar", cls := "text-muted small", "← Volver al calendario"))
+          )
+        )
+      )
+    )
+  }
+
+  @cask.postForm("/am/calendar/save")
+  def saveSchedule(request: cask.Request, rival: String, fecha: String,
+                   hora: String = "", lugar: String = "",
+                   tipo: String = "LIGA", notas: String = "") =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.saveSchedule(user.id, rival, fecha, hora, lugar, tipo, notas)
+      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
+    }
+
+  @cask.postForm("/am/calendar/delete")
+  def deleteSchedule(request: cask.Request, scheduleId: Int) =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.deleteSchedule(scheduleId, user.id)
+      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
     }
 
   // Redirect /am → /am/dashboard
