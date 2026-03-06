@@ -35,10 +35,10 @@ object AmateurController extends cask.Routes {
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
   private def renderAm(
-                        activeLink: String,
-                        userName: String,
-                        content: scalatags.Text.Modifier
-                      ): cask.Response[Array[Byte]] = {
+    activeLink: String,
+    userName: String,
+    pageContent: scalatags.Text.Modifier
+  ): cask.Response[Array[Byte]] = {
     val page = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
@@ -119,7 +119,7 @@ object AmateurController extends cask.Routes {
         ),
 
         // Contenido
-        div(cls := "container-fluid px-3", content),
+        div(cls := "container-fluid px-3", pageContent),
 
         // Nav inferior
         tags2.nav(cls := "bottom-nav",
@@ -248,7 +248,7 @@ object AmateurController extends cask.Routes {
         div(cls := "mb-3",
           h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} 👋"),
           span(cls := "text-muted small", if (pj == 0) "Registra tu primer partido para empezar."
-          else s"$pj partidos registrados")
+            else s"$pj partidos registrados")
         ),
 
         if (pj == 0)

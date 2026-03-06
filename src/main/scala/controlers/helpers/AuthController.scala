@@ -17,7 +17,7 @@ object AuthController extends cask.Routes {
     if (cookieVal == "elite" || cookieVal == "active") return renderRedirect("/profiles")
     if (cookieVal.startsWith("am:"))                   return renderRedirect("/profiles")
 
-    val content: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -68,7 +68,7 @@ object AuthController extends cask.Routes {
         )
       )
     ).render
-    cask.Response(content.getBytes("UTF-8"),
+    cask.Response(pageHtml.getBytes("UTF-8"),
       headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
@@ -100,13 +100,13 @@ object AuthController extends cask.Routes {
     val cookieVal = request.cookies.get(sessionCookieName).map(_.value).getOrElse("")
     val isElite   = cookieVal == "elite" || cookieVal == "active"
     val amIdOpt   = if (cookieVal.startsWith("am:"))
-      scala.util.Try(cookieVal.drop(3).toInt).toOption
-    else None
+                      scala.util.Try(cookieVal.drop(3).toInt).toOption
+                    else None
     if (!isElite && amIdOpt.isEmpty) return renderRedirect("/login")
 
     val amUsers = AmateurDatabaseManager.listUsers()
 
-    val content: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -191,7 +191,7 @@ object AuthController extends cask.Routes {
       )
     ).render
 
-    cask.Response(content.getBytes("UTF-8"),
+    cask.Response(pageHtml.getBytes("UTF-8"),
       headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
@@ -225,7 +225,7 @@ object AuthController extends cask.Routes {
   // Reautenticación Elite (cuando viene de una cuenta Amateur)
   @cask.get("/reauth/elite")
   def reauthElitePage(request: cask.Request, error: String = ""): cask.Response[Array[Byte]] = {
-    val content: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -261,7 +261,7 @@ object AuthController extends cask.Routes {
         )
       )
     ).render
-    cask.Response(content.getBytes("UTF-8"),
+    cask.Response(pageHtml.getBytes("UTF-8"),
       headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
@@ -283,7 +283,7 @@ object AuthController extends cask.Routes {
   @cask.get("/reauth/am/:userId")
   def reauthAmPage(request: cask.Request, userId: Int, error: String = ""): cask.Response[Array[Byte]] = {
     val nombre = AmateurDatabaseManager.getUserById(userId).map(_.nombre).getOrElse("portero")
-    val content: String = "<!DOCTYPE html>" + html(lang := "es",
+    val pageHtml: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -319,7 +319,7 @@ object AuthController extends cask.Routes {
         )
       )
     ).render
-    cask.Response(content.getBytes("UTF-8"),
+    cask.Response(pageHtml.getBytes("UTF-8"),
       headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
