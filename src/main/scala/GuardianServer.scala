@@ -1,26 +1,22 @@
 import cask._
 
-
-// *
-//  * GUARDIAN ELITE -- Punto de entrada del servidor.
-//  *
-//  * Este objeto solo se encarga de:
-//  *   1. Configurar host/puerto.
-//  *   2. Registrar todos los controladores en el router de Cask.
-//  *   3. Inicializar la base de datos al arrancar.
-//  *
-//  * Logica por controlador:
-//  *   - AuthController       -> /login, /logout
-//  *   - DashboardController  -> /
-//  *   - MatchController      -> /match-center, /match/, /video/, /tournament/
-//  *   - BioController        -> /bio/, /oracle, /distribution
-//  *   - HistoryController    -> /history, /scouting
-//  *   - CareerController     -> /career/, /gear, /penalties, /career/legacy
-//  *   - AdminController      -> /admin/, /settings, /tactics
-//  *
-//  * Utilidades compartidas -> SharedLayout
+// GUARDIAN ELITE -- Punto de entrada del servidor.
 //
+// Logica por controlador:
+//   - AuthController       -> /login, /logout
+//   - DashboardController  -> /
+//   - MatchController      -> /match-center, /match/:id, /video/:id, /tournament/:id
+//   - BioController        -> /bio/*, /oracle, /distribution
+//   - HistoryController    -> /history, /scouting
+//   - CareerController     -> /career/*, /gear, /penalties, /career/legacy
+//   - AdminController      -> /admin/*, /settings, /tactics
+//
+// Utilidades compartidas -> SharedLayout
+
 object GuardianServer extends cask.Main {
+
+  DatabaseManager.initDB()
+  AmateurDatabaseManager.initTables()
 
   override def host: String = "0.0.0.0"
   override def port: Int    = sys.env.getOrElse("PORT", "8081").toInt
@@ -32,9 +28,7 @@ object GuardianServer extends cask.Main {
     BioController,
     HistoryController,
     CareerController,
-    AdminController
+    AdminController,
+    AmateurController
   )
-
-  // Inicializar tablas de BD una sola vez al arrancar
-  DatabaseManager.initDB()
 }
