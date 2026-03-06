@@ -35,10 +35,10 @@ object AmateurController extends cask.Routes {
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
   private def renderAm(
-    activeLink: String,
-    userName: String,
-    content: scalatags.Text.Modifier
-  ): cask.Response[Array[Byte]] = {
+                        activeLink: String,
+                        userName: String,
+                        content: scalatags.Text.Modifier
+                      ): cask.Response[Array[Byte]] = {
     val page = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
@@ -248,7 +248,7 @@ object AmateurController extends cask.Routes {
         div(cls := "mb-3",
           h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} 👋"),
           span(cls := "text-muted small", if (pj == 0) "Registra tu primer partido para empezar."
-            else s"$pj partidos registrados")
+          else s"$pj partidos registrados")
         ),
 
         if (pj == 0)
@@ -439,7 +439,7 @@ object AmateurController extends cask.Routes {
                     label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
                       style := "cursor:pointer; background:#1a1a1a;",
                       input(tpe := "radio", name := "esLocal", value := v, cls := "d-none",
-                        if (v == "") attr("checked") := "checked" else span()),
+                        if (v == "") checked := true else span()),
                       span(lbl)
                     )
                 }: _*)
@@ -590,7 +590,7 @@ object AmateurController extends cask.Routes {
 
   @cask.post("/am/match/save")
   def saveMatch(request: cask.Request) = withAmAuth(request) { user =>
-    val body = request.body.mkString
+    val body = new String(request.data.readAllBytes(), "UTF-8")
     val params = body.split("&").map { pair =>
       val p = pair.split("=", 2)
       val k = java.net.URLDecoder.decode(p(0), "UTF-8")
@@ -861,7 +861,7 @@ object AmateurController extends cask.Routes {
                   label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
                     style := "cursor:pointer; background:#1a1a1a;",
                     input(tpe := "radio", name := "parada", value := v, cls := "d-none",
-                      if (v == "false") attr("checked") := "checked" else span()),
+                      if (v == "false") checked := true else span()),
                     span(lbl)
                   )
                 }: _*)

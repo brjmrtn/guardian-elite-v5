@@ -12,12 +12,12 @@ object AuthController extends cask.Routes {
   //   guardian_session=am:{id}   → modo Amateur, usuario {id}
 
   @cask.get("/login")
-  def loginPage(request: cask.Request, error: String = "", next: String = "/") = {
+  def loginPage(request: cask.Request, error: String = "", next: String = "/"): cask.Response[Array[Byte]] = {
     val cookieVal = request.cookies.get(sessionCookieName).map(_.value).getOrElse("")
     if (cookieVal == "elite" || cookieVal == "active") return renderRedirect("/profiles")
     if (cookieVal.startsWith("am:"))                   return renderRedirect("/profiles")
 
-    val content = "<!DOCTYPE html>" + html(lang := "es",
+    val content: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -96,17 +96,17 @@ object AuthController extends cask.Routes {
 
   // ── PÁGINA DE PERFILES ─────────────────────────────────────────────────────
   @cask.get("/profiles")
-  def profilesPage(request: cask.Request) = {
+  def profilesPage(request: cask.Request): cask.Response[Array[Byte]] = {
     val cookieVal = request.cookies.get(sessionCookieName).map(_.value).getOrElse("")
     val isElite   = cookieVal == "elite" || cookieVal == "active"
     val amIdOpt   = if (cookieVal.startsWith("am:"))
-                      scala.util.Try(cookieVal.drop(3).toInt).toOption
-                    else None
+      scala.util.Try(cookieVal.drop(3).toInt).toOption
+    else None
     if (!isElite && amIdOpt.isEmpty) return renderRedirect("/login")
 
     val amUsers = AmateurDatabaseManager.listUsers()
 
-    val content = "<!DOCTYPE html>" + html(lang := "es",
+    val content: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -197,7 +197,7 @@ object AuthController extends cask.Routes {
 
   // ── SWITCH DE PERFIL ───────────────────────────────────────────────────────
   @cask.get("/switch/elite")
-  def switchToElite(request: cask.Request) = {
+  def switchToElite(request: cask.Request): cask.Response[Array[Byte]] = {
     val cookieVal = request.cookies.get(sessionCookieName).map(_.value).getOrElse("")
     if (cookieVal == "elite" || cookieVal == "active") return renderRedirect("/")
     if (cookieVal.startsWith("am:"))                   return renderRedirect("/reauth/elite")
@@ -205,7 +205,7 @@ object AuthController extends cask.Routes {
   }
 
   @cask.get("/switch/am/:userId")
-  def switchToAm(request: cask.Request, userId: Int) = {
+  def switchToAm(request: cask.Request, userId: Int): cask.Response[Array[Byte]] = {
     val cookieVal = request.cookies.get(sessionCookieName).map(_.value).getOrElse("")
     val isElite   = cookieVal == "elite" || cookieVal == "active"
     val isAmSelf  = cookieVal == s"am:$userId"
@@ -224,8 +224,8 @@ object AuthController extends cask.Routes {
 
   // Reautenticación Elite (cuando viene de una cuenta Amateur)
   @cask.get("/reauth/elite")
-  def reauthElitePage(request: cask.Request, error: String = "") = {
-    val content = "<!DOCTYPE html>" + html(lang := "es",
+  def reauthElitePage(request: cask.Request, error: String = ""): cask.Response[Array[Byte]] = {
+    val content: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
@@ -281,9 +281,9 @@ object AuthController extends cask.Routes {
 
   // Reautenticación para cambiar entre cuentas Amateur distintas
   @cask.get("/reauth/am/:userId")
-  def reauthAmPage(request: cask.Request, userId: Int, error: String = "") = {
+  def reauthAmPage(request: cask.Request, userId: Int, error: String = ""): cask.Response[Array[Byte]] = {
     val nombre = AmateurDatabaseManager.getUserById(userId).map(_.nombre).getOrElse("portero")
-    val content = "<!DOCTYPE html>" + html(lang := "es",
+    val content: String = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
