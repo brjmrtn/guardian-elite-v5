@@ -21,10 +21,10 @@ object AuthController extends cask.Routes {
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tag("title")("Guardian — Login"),
+        tags2.title("Guardian — Login"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        style(raw("""
+        tags2.style(raw("""
           body { background: #0d0d0d; color: #e0e0e0; min-height: 100vh; }
         """))
       ),
@@ -110,10 +110,10 @@ object AuthController extends cask.Routes {
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tag("title")("Guardian — Perfiles"),
+        tags2.title("Guardian — Perfiles"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        style(raw("""
+        tags2.style(raw("""
           body { background: #0d0d0d; color: #e0e0e0; min-height: 100vh; }
           .profile-card {
             display: flex; align-items: center; gap: 14px;
@@ -229,10 +229,10 @@ object AuthController extends cask.Routes {
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tag("title")("Acceso Elite"),
+        tags2.title("Acceso Elite"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
+        tags2.style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
       ),
       body(
         div(cls := "container d-flex justify-content-center align-items-center",
@@ -287,10 +287,10 @@ object AuthController extends cask.Routes {
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tag("title")(s"Entrar como $nombre"),
+        tags2.title(s"Entrar como $nombre"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
+        tags2.style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
       ),
       body(
         div(cls := "container d-flex justify-content-center align-items-center",

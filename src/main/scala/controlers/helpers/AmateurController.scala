@@ -43,10 +43,10 @@ object AmateurController extends cask.Routes {
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tag("title")("Guardian Amateur"),
+        tags2.title("Guardian Amateur"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        style(raw("""
+        tags2.style(raw("""
           * { box-sizing: border-box; }
           body {
             background: #0d0d0d;
@@ -159,9 +159,9 @@ object AmateurController extends cask.Routes {
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tag("title")("Guardian Amateur - Registro"),
+        tags2.title("Guardian Amateur - Registro"),
         link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
+        tags2.style(raw("body { background:#0d0d0d; color:#e0e0e0; }"))
       ),
       body(
         div(cls := "container d-flex justify-content-center align-items-center", style := "min-height:100vh;",
