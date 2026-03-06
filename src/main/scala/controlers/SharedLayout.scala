@@ -12,11 +12,12 @@ object SharedLayout {
   val sessionCookieName = "guardian_session"
 
   def withAuth(request: cask.Request)(block: => cask.Response[Array[Byte]]): cask.Response[Array[Byte]] = {
-    val isAuthenticated = request.cookies.get(sessionCookieName).exists(_.value == "active")
+    val cookieVal = request.cookies.get(sessionCookieName).map(_.value).getOrElse("")
+    // Acepta "elite" (nuevo) o "active" (retrocompat)
+    val isAuthenticated = cookieVal == "elite" || cookieVal == "active"
     if (isAuthenticated) {
       block
     } else {
-      // Guardamos la ruta actual para volver despues del login
       val currentPath = request.exchange.getRequestPath
       val red = cask.Redirect(s"/login?next=$currentPath")
       cask.Response(Array.empty[Byte], red.statusCode, red.headers ++ Seq("Cache-Control" -> "no-store, no-cache, must-revalidate"), red.cookies)
@@ -56,6 +57,7 @@ object SharedLayout {
           div(cls := "app-header d-flex justify-content-between align-items-center px-3",
             div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"),
             div(cls:="d-flex align-items-center gap-3",
+              a(href:="/profiles", style:="text-decoration:none; color:#ffc107; font-size:11px; font-weight:bold; border: 1px solid #ffc107; padding: 2px 8px; border-radius: 4px;", "👤 PERFIL"),
               a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
               span(id:="themeToggle", onclick:="toggleTheme()", style:="cursor:pointer; font-size:20px; user-select:none;", "☀️"),
               a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
