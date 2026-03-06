@@ -33,6 +33,12 @@ case class AmGearItem(
   activo: Boolean, notas: String
 )
 
+case class AmSchedule(
+  id: Int, userId: Int, rival: String, fecha: String,
+  hora: String, lugar: String, tipo: String, notas: String,
+  matchId: Option[Int]
+)
+
 // ─────────────────────────────────────────────────────────────────────────────
 object AmateurDatabaseManager {
 
@@ -114,6 +120,19 @@ object AmateurDatabaseManager {
         partidos_usados INT DEFAULT 0,
         activo          BOOLEAN DEFAULT TRUE,
         notas           TEXT DEFAULT ''
+      )""")
+
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_schedule (
+        id          SERIAL PRIMARY KEY,
+        user_id     INT REFERENCES am_users(id) ON DELETE CASCADE,
+        rival       TEXT NOT NULL,
+        fecha       DATE NOT NULL,
+        hora        TEXT DEFAULT '',
+        lugar       TEXT DEFAULT '',
+        tipo        TEXT DEFAULT 'LIGA',
+        notas       TEXT DEFAULT '',
+        match_id    INT REFERENCES am_matches(id) ON DELETE SET NULL,
+        created_at  TIMESTAMP DEFAULT NOW()
       )""")
 
     } finally { conn.close() }
@@ -613,6 +632,97 @@ object AmateurDatabaseManager {
         "ganados" -> 0, "empatados" -> 0, "perdidos" -> 0,
         "rachaLimpias" -> 0, "ultimos" -> List.empty
       )
+    } finally { conn.close() }
+  }
+
+
+  // ── SCHEDULE / CALENDARIO ──────────────────────────────────────────────────
+
+  def saveSchedule(userId: Int, rival: String, fecha: String, hora: String,
+                   lugar: String, tipo: String, notas: String): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_schedule (user_id, rival, fecha, hora, lugar, tipo, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      """)
+      ps.setInt(1, userId)
+      ps.setString(2, fix(rival))
+      ps.setDate(3, Date.valueOf(fecha))
+      ps.setString(4, hora)
+      ps.setString(5, fix(lugar))
+      ps.setString(6, tipo)
+      ps.setString(7, fix(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def deleteSchedule(scheduleId: Int, userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("DELETE FROM am_schedule WHERE id = ? AND user_id = ?")
+      ps.setInt(1, scheduleId)
+      ps.setInt(2, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getScheduleRange(userId: Int, fromDate: String, toDate: String): List[AmSchedule] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT * FROM am_schedule
+        WHERE user_id = ? AND fecha BETWEEN ? AND ?
+        ORDER BY fecha ASC, hora ASC
+      """)
+      ps.setInt(1, userId)
+      ps.setDate(2, Date.valueOf(fromDate))
+      ps.setDate(3, Date.valueOf(toDate))
+      val rs = ps.executeQuery()
+      var list = List[AmSchedule]()
+      while (rs.next()) {
+        val mId = rs.getInt("match_id")
+        list = list :+ AmSchedule(
+          rs.getInt("id"), rs.getInt("user_id"),
+          rs.getString("rival"),
+          rs.getDate("fecha").toString,
+          Option(rs.getString("hora")).getOrElse(""),
+          Option(rs.getString("lugar")).getOrElse(""),
+          Option(rs.getString("tipo")).getOrElse("LIGA"),
+          Option(rs.getString("notas")).getOrElse(""),
+          if (rs.wasNull()) None else Some(mId)
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def getUpcomingSchedule(userId: Int, limit: Int = 3): List[AmSchedule] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT * FROM am_schedule
+        WHERE user_id = ? AND fecha >= CURRENT_DATE AND match_id IS NULL
+        ORDER BY fecha ASC, hora ASC
+        LIMIT ?
+      """)
+      ps.setInt(1, userId)
+      ps.setInt(2, limit)
+      val rs = ps.executeQuery()
+      var list = List[AmSchedule]()
+      while (rs.next()) {
+        list = list :+ AmSchedule(
+          rs.getInt("id"), rs.getInt("user_id"),
+          rs.getString("rival"),
+          rs.getDate("fecha").toString,
+          Option(rs.getString("hora")).getOrElse(""),
+          Option(rs.getString("lugar")).getOrElse(""),
+          Option(rs.getString("tipo")).getOrElse("LIGA"),
+          Option(rs.getString("notas")).getOrElse(""),
+          None
+        )
+      }
+      list
     } finally { conn.close() }
   }
 
