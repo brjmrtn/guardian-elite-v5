@@ -812,7 +812,20 @@ object DatabaseManager {
       var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString(1)}|${rs.getString(2)}|${rs.getDouble(3)}\n") };
       if(c<2) return "Pocos datos.";
       // Cambio aqui: Llamamos a AIProvider.ask
-      AIProvider.ask(sb.toString()+"\nDame HTML limpio: <h4>ANALISIS</h4>...").replace("```html","").replace("```","").trim
+      val prompt = s"""Eres un analista de rendimiento de porteros de élite.
+Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota:
+
+${sb.toString()}
+
+Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
+<h4>ANÁLISIS</h4>
+<p><strong>Tendencia general:</strong> [un párrafo describiendo la evolución de las notas a lo largo del tiempo, si va subiendo, bajando, o irregular]</p>
+<p><strong>Mejor racha:</strong> [describe el período de mejor rendimiento y contra qué rivales]</p>
+<p><strong>Punto de atención:</strong> [describe el momento más bajo y posibles causas]</p>
+<p><strong>Conclusión:</strong> [una frase motivadora y concreta sobre qué trabajar para la próxima semana]</p>
+
+No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda persona dirigiéndote a Hector directamente."""
+      AIProvider.ask(prompt).replace("```html","").replace("```","").trim
     } catch {
       case e:Exception =>
         e.printStackTrace() // Esto hara que el error aparezca en el log de Render/Consola
