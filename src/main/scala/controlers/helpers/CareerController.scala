@@ -629,5 +629,187 @@ object CareerController extends cask.Routes {
     renderHtml(content)
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FASE 7 v7.2 — MARKET ESTIMATOR
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/market-estimator")
+  def marketEstimatorPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getMarketEstimatorData()
+
+    val rawScore:      Double = d("rawScore").asInstanceOf[Double]
+    val valorEstimado: Int    = d("valorEstimado").asInstanceOf[Int]
+    val percentil:     Int    = d("percentil").asInstanceOf[Int]
+    val nivelLabel:    String = d("nivelLabel").asInstanceOf[String]
+    val nivelColor:    String = d("nivelColor").asInstanceOf[String]
+    val notaMedia:     Double = d("notaMedia").asInstanceOf[Double]
+    val spvEfic:       Double = d("spvEfic").asInstanceOf[Double]
+    val bypassEfic:    Double = d("bypassEfic").asInstanceOf[Double]
+    val psxgDelta:     Double = d("psxgDelta").asInstanceOf[Double]
+    val winRate:       Double = d("winRate").asInstanceOf[Double]
+    val bioFactor:     Double = d("bioFactor").asInstanceOf[Double]
+    val edad:          Int    = d("edad").asInstanceOf[Int]
+    val pj:            Int    = d("pj").asInstanceOf[Int]
+    val limpias:       Int    = d("limpias").asInstanceOf[Int]
+    val analisisIA:    String = d("analisisIA").asInstanceOf[String]
+    val evoLabels: List[String] = d("evoLabels").asInstanceOf[List[String]]
+    val evoScores: List[Double] = d("evoScores").asInstanceOf[List[Double]]
+    val refs:      List[Int]    = d("refs").asInstanceOf[List[Int]]
+
+    val valorStr   = if (valorEstimado >= 1000) s"${valorEstimado / 1000}K €" else s"$valorEstimado €"
+    val psxgStr    = (if (psxgDelta >= 0) "+" else "") + f"$psxgDelta%.2f"
+    val psxgColor  = if (psxgDelta >= 0.3) "success" else if (psxgDelta >= -0.3) "warning" else "danger"
+    val rawScoreStr = f"$rawScore%.1f"
+
+    // Barras de las 5 dimensiones (normalizadas 0-100)
+    val dims = List(
+      ("Nota Media",    math.min(100, ((notaMedia - 40.0) / 60.0 * 100).toInt), "primary"),
+      ("SPV Score",     math.min(100, spvEfic.toInt),                           "info"),
+      ("Bypass Efic.",  math.min(100, (bypassEfic * 100).toInt),                "warning"),
+      ("PSxG+",         math.min(100, math.max(0, ((psxgDelta + 2.0) / 4.0 * 100).toInt)), "success"),
+      ("Win Rate",      math.min(100, (winRate * 100).toInt),                   "danger")
+    )
+
+    val content = div(
+      h4(cls := "fw-black text-white mb-4", "💰 Market Estimator"),
+
+      // ── Valor principal ──
+      div(cls := "row g-3 mb-4",
+        div(cls := "col-md-4",
+          div(cls := "card bg-dark border-warning text-center p-4",
+            div(cls := "text-warning fw-bold small mb-1", "VALOR FORMATIVO ESTIMADO"),
+            div(cls := "display-4 fw-black text-warning", valorStr),
+            div(cls := "small text-muted mt-1", s"Basado en $pj partidos registrados")
+          )
+        ),
+        div(cls := "col-md-4",
+          div(cls := "card bg-dark border-secondary text-center p-4",
+            div(cls := s"text-$nivelColor fw-bold small mb-1", "NIVEL FORMATIVO"),
+            div(cls := s"h3 fw-black text-$nivelColor", nivelLabel),
+            div(cls := "small text-muted mt-1", s"Percentil $percentil% — porteros academia")
+          )
+        ),
+        div(cls := "col-md-4",
+          div(cls := "card bg-dark border-secondary text-center p-4",
+            div(cls := "text-muted fw-bold small mb-1", "PUNTUACION MODELO"),
+            div(cls := "display-4 fw-black text-white", rawScoreStr),
+            div(cls := "small text-muted mt-1", "/100 puntos")
+          )
+        )
+      ),
+
+      // ── Barra de percentil ──
+      div(cls := "card bg-dark border-secondary p-3 mb-4",
+        div(cls := "d-flex justify-content-between small text-muted mb-1",
+          span("P10"), span("P25"), span("P50"), span("P75"), span("P90")
+        ),
+        div(cls := "progress mb-1", style := "height:22px;",
+          div(cls := s"progress-bar bg-$nivelColor fw-bold",
+            style := s"width:$percentil%",
+            s"$percentil%")
+        ),
+        div(cls := "d-flex justify-content-between xx-small text-muted",
+          span(s"${refs(0)}"), span(s"${refs(1)}"), span(s"${refs(2)}"),
+          span(s"${refs(3)}"), span(s"${refs(4)}")
+        ),
+        div(cls := "xx-small text-muted mt-1 text-center",
+          "Referencia: porteros de academia española del mismo grupo de edad")
+      ),
+
+      // ── KPIs de las 5 dimensiones ──
+      div(cls := "card bg-dark border-secondary p-3 mb-4",
+        div(cls := "fw-bold text-muted small text-uppercase mb-3",
+          "Dimensiones del Valor"),
+        div(
+          frag(dims.map { case (label, score, color) =>
+            div(cls := "mb-2",
+              div(cls := "d-flex justify-content-between small mb-1",
+                span(cls := "text-white fw-bold", label),
+                span(cls := s"text-$color fw-bold", s"$score/100")
+              ),
+              div(cls := "progress", style := "height:10px; border-radius:5px;",
+                div(cls := s"progress-bar bg-$color",
+                  style := s"width:${score}%; border-radius:5px;")
+              )
+            )
+          }: _*)
+        )
+      ),
+
+      // ── Stats rápidas ──
+      div(cls := "row g-2 mb-4",
+        Seq(
+          (s"$edad años",      "Edad",             "secondary"),
+          (f"$notaMedia%.1f",  "Nota media",        "primary"),
+          (s"$limpias",        "Limpias",           "success"),
+          (f"$bioFactor%.2f",  "Factor bio",        "warning"),
+          (psxgStr,            "PSxG Delta",        psxgColor),
+          (f"${winRate*100}%.0f%%", "Win Rate",     "info")
+        ).map { case (v, l, c) =>
+          div(cls := "col-6 col-md-2",
+            div(cls := "card bg-dark border-secondary text-center p-2",
+              div(cls := s"h5 fw-black text-$c mb-0", v),
+              div(cls := "xx-small text-muted", l)
+            )
+          )
+        }: _*
+      ),
+
+      // ── Evolución por temporada ──
+      if (evoLabels.nonEmpty)
+        div(cls := "card bg-dark border-secondary p-3 mb-4",
+          div(cls := "fw-bold text-muted small text-uppercase mb-3",
+            "Evolución del Valor por Temporada"),
+          div(style := "height:180px;",
+            canvas(id := "chartEvoMarket")
+          )
+        )
+      else div(),
+
+      // ── Análisis IA ──
+      div(cls := "card bg-dark border-warning p-3 mb-4",
+        div(cls := "fw-bold text-warning small text-uppercase mb-2",
+          "🤖 Informe de Captación IA"),
+        div(cls := "text-white small", raw(analisisIA))
+      ),
+
+      // ── Nota metodológica ──
+      div(cls := "alert alert-secondary small",
+        raw("""<strong>Metodología:</strong> El valor se calcula mediante regresión lineal multivariable
+        ponderada sobre 5 dimensiones (nota media 35%, SPV 20%, bypass rate 15%, PSxG delta 15%, win rate 10%,
+        factor bio-banding 5%). Los percentiles se calculan contra una tabla de referencia calibrada
+        para porteros de academia española por grupo de edad. Este modelo es orientativo — el valor
+        real depende del mercado de transferencias, el interés de clubes concretos y factores no cuantificables.""")
+      ),
+
+      if (evoLabels.nonEmpty)
+        script(raw(s"""
+          new Chart(document.getElementById('chartEvoMarket'), {
+            type: 'line',
+            data: {
+              labels: [${evoLabels.map(l => s"'$l'").mkString(",")}],
+              datasets: [{
+                label: 'Score de valor',
+                data: [${evoScores.map(v => f"$v%.1f").mkString(",")}],
+                borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.15)',
+                tension: 0.3, fill: true, pointRadius: 5,
+                pointBackgroundColor: '#ffc107'
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { min: 0, max: 100, ticks: { color: '#aaa' },
+                     grid: { color: 'rgba(255,255,255,0.05)' } }
+              }
+            }
+          });
+        """))
+      else span()
+    )
+    renderHtml(content)
+  }
+
   initialize()
 }

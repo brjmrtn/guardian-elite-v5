@@ -4351,5 +4351,365 @@ object HistoryController extends cask.Routes {
     ))
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FASE 7 v7.2 — NLP SCOUTING AGGREGATOR
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/scouting/nlp")
+  def scoutingNlpPage(request: cask.Request) = withAuth(request) {
+    val reports = DatabaseManager.getScoutReports()
+
+    def proyColor(p: String): String = p match {
+      case "ELITE"     => "danger"
+      case "PRIMERA"   => "warning"
+      case "SEGUNDA"   => "info"
+      case "REGIONAL"  => "secondary"
+      case _           => "secondary"
+    }
+    def recColor(r: String): String = r match {
+      case "FICHAR_YA"       => "success"
+      case "SEGUIMIENTO_6M"  => "warning"
+      case "SEGUIMIENTO_12M" => "info"
+      case "DESCARTAR"       => "danger"
+      case _                 => "secondary"
+    }
+    def recLabel(r: String): String = r match {
+      case "FICHAR_YA"       => "✅ FICHAR YA"
+      case "SEGUIMIENTO_6M"  => "👁 SEGUIM. 6M"
+      case "SEGUIMIENTO_12M" => "👁 SEGUIM. 12M"
+      case "DESCARTAR"       => "❌ DESCARTAR"
+      case _                 => r
+    }
+
+    val content = div(
+      h4(cls := "fw-black text-white mb-1", "🕵️ NLP Scouting Aggregator"),
+      p(cls := "text-muted small mb-4",
+        "Pega el texto de cualquier informe de ojeador — Gemini extrae automáticamente valoraciones, proyección y recomendación."),
+
+      // ── Formulario ──────────────────────────────────────────────────────────
+      div(cls := "card bg-dark border-primary p-3 mb-4",
+        div(cls := "fw-bold text-primary small text-uppercase mb-3", "📝 Nuevo Informe"),
+        div(cls := "row g-2 mb-2",
+          div(cls := "col-md-4",
+            label(cls := "form-label text-muted small", "Ojeador (opcional)"),
+            input(`type` := "text", id := "inp-ojeador", cls := "form-control bg-dark text-white border-secondary",
+              placeholder := "Nombre del ojeador")
+          ),
+          div(cls := "col-md-4",
+            label(cls := "form-label text-muted small", "Club origen (opcional)"),
+            input(`type` := "text", id := "inp-club", cls := "form-control bg-dark text-white border-secondary",
+              placeholder := "Club o academia")
+          ),
+          div(cls := "col-md-4",
+            label(cls := "form-label text-muted small", "Fecha del informe"),
+            input(`type` := "date", id := "inp-fecha", cls := "form-control bg-dark text-white border-secondary")
+          )
+        ),
+        div(cls := "mb-2",
+          label(cls := "form-label text-muted small", "Texto del informe *"),
+          textarea(id := "inp-texto", cls := "form-control bg-dark text-white border-secondary",
+            rows := "8",
+            placeholder := "Pega aquí el texto completo del informe de scouting...")
+        ),
+        button(id := "btn-procesar", cls := "btn btn-primary fw-bold",
+          onclick := "procesarInforme()",
+          "⚡ Procesar con IA"
+        ),
+        div(id := "nlp-loading", cls := "d-none mt-3",
+          div(cls := "d-flex align-items-center gap-2 text-warning",
+            div(cls := "spinner-border spinner-border-sm"),
+            span("Analizando informe con Gemini...")
+          )
+        ),
+        div(id := "nlp-result", cls := "d-none mt-3")
+      ),
+
+      // ── Historial de informes ───────────────────────────────────────────────
+      if (reports.nonEmpty)
+        div(
+          h6(cls := "text-muted text-uppercase small mb-3", s"📋 Historial — ${reports.size} informes"),
+          div(cls := "row g-3",
+            frag(reports.map { r =>
+              val global = r("global").asInstanceOf[Int]
+              val proy   = r("proyeccion").asInstanceOf[String]
+              val rec    = r("recomendacion").asInstanceOf[String]
+              val pc     = proyColor(proy)
+              val rc     = recColor(rec)
+              div(cls := "col-md-6",
+                div(cls := s"card bg-dark border-$rc h-100",
+                  div(cls := "card-body p-3",
+                    div(cls := "d-flex justify-content-between align-items-start mb-2",
+                      div(
+                        div(cls := "fw-bold text-white small",
+                          r("ojeador").asInstanceOf[String].take(30).pipe(s => if (s.nonEmpty) s else "Ojeador anónimo")),
+                        div(cls := "xx-small text-muted",
+                          r("club").asInstanceOf[String].take(25).pipe(s => if (s.nonEmpty) s"$s · " else "") +
+                            r("fecha").asInstanceOf[String])
+                      ),
+                      div(cls := "text-end",
+                        div(cls := s"badge bg-$pc mb-1", proy),
+                        br(),
+                        div(cls := s"badge bg-$rc", recLabel(rec))
+                      )
+                    ),
+                    // Radar de 5 atributos
+                    div(cls := "d-flex gap-1 mb-2 flex-wrap",
+                      Seq(
+                        ("TEC", r("tec").asInstanceOf[Int]),
+                        ("TAC", r("tac").asInstanceOf[Int]),
+                        ("FIS", r("fis").asInstanceOf[Int]),
+                        ("MEN", r("men").asInstanceOf[Int]),
+                        ("DIS", r("dis").asInstanceOf[Int])
+                      ).map { case (lbl, val0) =>
+                        val barColor = if (val0 >= 8) "success" else if (val0 >= 6) "warning" else "secondary"
+                        div(cls := "text-center", style := "min-width:42px;",
+                          div(cls := s"small fw-bold text-$barColor", s"$val0"),
+                          div(cls := "progress mb-1", style := "height:6px;",
+                            div(cls := s"progress-bar bg-$barColor", style := s"width:${val0 * 10}%")
+                          ),
+                          div(cls := "xx-small text-muted", lbl)
+                        )
+                      }: _*
+                    ),
+                    div(cls := "d-flex align-items-center gap-2 mb-2",
+                      div(cls := "text-muted xx-small", "GLOBAL:"),
+                      div(cls := "progress flex-grow-1", style := "height:8px;",
+                        div(cls := s"progress-bar bg-${if (global >= 8) "success" else if (global >= 6) "warning" else "secondary"}",
+                          style := s"width:${global * 10}%")
+                      ),
+                      div(cls := s"fw-bold small text-${if (global >= 8) "success" else if (global >= 6) "warning" else "secondary"}",
+                        s"$global/10")
+                    ),
+                    if (r("resumen").asInstanceOf[String].nonEmpty)
+                      p(cls := "small text-muted mb-1 fst-italic",
+                        raw(r("resumen").asInstanceOf[String].take(200) + "..."))
+                    else span(),
+                    if (r("fortalezas").asInstanceOf[String].nonEmpty)
+                      div(cls := "xx-small",
+                        span(cls := "text-success me-1", "✚"),
+                        span(cls := "text-muted", r("fortalezas").asInstanceOf[String].take(120))
+                      )
+                    else span()
+                  )
+                )
+              )
+            }: _*)
+          )
+        )
+      else
+        div(cls := "alert alert-secondary text-center",
+          "No hay informes procesados todavía. Pega el primero arriba."),
+
+      // ── JS ──────────────────────────────────────────────────────────────────
+      script(raw(s"""
+        // Fecha por defecto = hoy
+        document.getElementById('inp-fecha').value = new Date().toISOString().split('T')[0];
+
+        async function procesarInforme() {
+          const texto  = document.getElementById('inp-texto').value.trim();
+          const ojeador = document.getElementById('inp-ojeador').value.trim();
+          const club    = document.getElementById('inp-club').value.trim();
+          const fecha   = document.getElementById('inp-fecha').value;
+          if (!texto || texto.length < 30) {
+            alert('El texto del informe es demasiado corto. Pega el informe completo.');
+            return;
+          }
+          document.getElementById('btn-procesar').disabled = true;
+          document.getElementById('nlp-loading').classList.remove('d-none');
+          document.getElementById('nlp-result').classList.add('d-none');
+
+          const params = new URLSearchParams();
+          params.append('texto', texto);
+          params.append('ojeador', ojeador);
+          params.append('club', club);
+          params.append('fecha', fecha);
+
+          try {
+            const res = await fetch('/scouting/nlp/process', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: params.toString()
+            });
+            const json = await res.json();
+            if (json.ok) {
+              const rc = json.rec === 'FICHAR_YA' ? 'success' :
+                         json.rec === 'SEGUIMIENTO_6M' ? 'warning' :
+                         json.rec === 'SEGUIMIENTO_12M' ? 'info' : 'danger';
+              const pc = json.proy === 'ELITE' ? 'danger' :
+                         json.proy === 'PRIMERA' ? 'warning' :
+                         json.proy === 'SEGUNDA' ? 'info' : 'secondary';
+              const dimHtml = [
+                ['Técnico', json.tec], ['Táctico', json.tac], ['Físico', json.fis],
+                ['Mental', json.men], ['Distribución', json.dis]
+              ].map(([l, v]) => {
+                const c = v >= 8 ? 'success' : v >= 6 ? 'warning' : 'secondary';
+                return '<div class="col-6 col-md"><div class="card bg-dark border-secondary text-center p-2">' +
+                       '<div class="h4 fw-black text-' + c + '">' + v + '/10</div>' +
+                       '<div class="xx-small text-muted">' + l + '</div></div></div>';
+              }).join('');
+              document.getElementById('nlp-result').innerHTML =
+                '<div class="card bg-dark border-success p-3">' +
+                '<div class="d-flex gap-2 mb-3 flex-wrap">' +
+                '<span class="badge bg-' + pc + ' fs-6">' + json.proy + '</span>' +
+                '<span class="badge bg-' + rc + ' fs-6">' + json.rec.replace(/_/g,' ') + '</span>' +
+                '<span class="badge bg-secondary fs-6">Global: ' + json.global + '/10</span></div>' +
+                '<div class="row g-2 mb-3">' + dimHtml + '</div>' +
+                '<p class="small text-muted fst-italic mb-2">' + json.resumen + '</p>' +
+                '<div class="small"><span class="text-success me-1">✚</span><span class="text-muted">' + json.fort + '</span></div>' +
+                '<div class="small mt-1"><span class="text-warning me-1">△</span><span class="text-muted">' + json.areas + '</span></div>' +
+                '<hr class="border-secondary"><a href="/scouting/nlp" class="btn btn-sm btn-outline-success">Ver en historial</a></div>';
+              document.getElementById('nlp-result').classList.remove('d-none');
+              document.getElementById('inp-texto').value = '';
+            } else {
+              document.getElementById('nlp-result').innerHTML =
+                '<div class="alert alert-danger">Error al procesar: ' + (json.error || 'desconocido') + '</div>';
+              document.getElementById('nlp-result').classList.remove('d-none');
+            }
+          } catch(e) {
+            document.getElementById('nlp-result').innerHTML =
+              '<div class="alert alert-danger">Error de red: ' + e.message + '</div>';
+            document.getElementById('nlp-result').classList.remove('d-none');
+          }
+          document.getElementById('btn-procesar').disabled = false;
+          document.getElementById('nlp-loading').classList.add('d-none');
+        }
+      """))
+    )
+    renderHtml(content)
+  }
+
+  @cask.postForm("/scouting/nlp/process")
+  def scoutingNlpProcess(
+                          request: cask.Request,
+                          texto: String, ojeador: String, club: String, fecha: String
+                        ) = withAuth(request) {
+    try {
+      val result = DatabaseManager.processScoutReport(texto, ojeador, club, fecha)
+      val json = ujson.Obj(
+        "ok"     -> ujson.True,
+        "tec"    -> result("nivel_tecnico").asInstanceOf[Int],
+        "tac"    -> result("nivel_tactico").asInstanceOf[Int],
+        "fis"    -> result("nivel_fisico").asInstanceOf[Int],
+        "men"    -> result("nivel_mental").asInstanceOf[Int],
+        "dis"    -> result("nivel_distribucion").asInstanceOf[Int],
+        "global" -> result("nivel_global").asInstanceOf[Int],
+        "proy"   -> result("proyeccion").asInstanceOf[String],
+        "rec"    -> result("recomendacion").asInstanceOf[String],
+        "fort"   -> result("fortalezas").asInstanceOf[String],
+        "areas"  -> result("areas_mejora").asInstanceOf[String],
+        "resumen"-> result("resumen_ia").asInstanceOf[String]
+      )
+      cask.Response(json.render(), headers = Seq("Content-Type" -> "application/json"))
+    } catch {
+      case e: Exception =>
+        val json = ujson.Obj("ok" -> ujson.False, "error" -> e.getMessage)
+        cask.Response(json.render(), statusCode = 500, headers = Seq("Content-Type" -> "application/json"))
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FASE 7 v7.2 — PERIODIZACION NUTRICIONAL REACTIVA
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/nutrition")
+  def nutritionPage(request: cask.Request) = withAuth(request) {
+    nutritionRender(request, forceRefresh = false)
+  }
+
+  @cask.get("/nutrition/refresh")
+  def nutritionRefreshPage(request: cask.Request) = withAuth(request) {
+    nutritionRender(request, forceRefresh = true)
+  }
+
+  private def nutritionRender(request: cask.Request, forceRefresh: Boolean) = {
+    val d        = DatabaseManager.getNutritionPlan(forceRefresh)
+    val plan     = d("plan").asInstanceOf[String]
+    val acwr     = d("acwr").asInstanceOf[Double]
+    val rpe      = d("rpe").asInstanceOf[Double]
+    val nota     = d("nota").asInstanceOf[Double]
+    val faseStr  = d("faseStr").asInstanceOf[String]
+    val altura   = d("altura").asInstanceOf[Double]
+    val peso     = d("peso").asInstanceOf[Double]
+    val cached   = d("cached").asInstanceOf[Boolean]
+
+    val acwrColor = if (acwr > 1.5) "danger" else if (acwr > 1.2) "warning" else if (acwr > 0.8) "success" else "info"
+    val acwrLabel = if (acwr > 1.5) "CARGA ALTA" else if (acwr > 1.2) "CARGA ELEVADA" else if (acwr > 0.8) "ÓPTIMO" else "DESCARGA"
+    val rpeColor  = if (rpe > 7.5) "danger" else if (rpe > 5.5) "warning" else "success"
+
+    val content = div(
+      // Header
+      div(cls := "d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2",
+        div(
+          h4(cls := "fw-black text-white mb-1", "🥗 Periodización Nutricional Reactiva"),
+          p(cls := "text-muted small mb-0",
+            "Plan semanal generado por IA en función de tu carga real de entrenamiento y rendimiento.")
+        ),
+        a(href := "/nutrition/refresh", cls := "btn btn-outline-warning btn-sm fw-bold",
+          "🔄 Regenerar plan")
+      ),
+
+      // KPIs contextuales
+      div(cls := "row g-2 mb-4",
+        div(cls := "col-6 col-md-3",
+          div(cls := s"card bg-dark border-$acwrColor text-center p-3",
+            div(cls := s"h4 fw-black text-$acwrColor", f"$acwr%.2f"),
+            div(cls := "small text-muted", "ACWR"),
+            div(cls := s"badge bg-$acwrColor mt-1", acwrLabel)
+          )
+        ),
+        div(cls := "col-6 col-md-3",
+          div(cls := s"card bg-dark border-$rpeColor text-center p-3",
+            div(cls := s"h4 fw-black text-$rpeColor", f"$rpe%.1f"),
+            div(cls := "small text-muted", "RPE media 7d"),
+            div(cls := s"badge bg-$rpeColor mt-1", if (rpe > 7.5) "ALTA INTENSIDAD" else if (rpe > 5.5) "MODERADO" else "SUAVE")
+          )
+        ),
+        div(cls := "col-6 col-md-3",
+          div(cls := "card bg-dark border-secondary text-center p-3",
+            div(cls := "h4 fw-black text-white", f"$nota%.0f"),
+            div(cls := "small text-muted", "Nota último partido"),
+            div(cls := s"badge bg-${if (nota >= 70) "success" else if (nota >= 50) "warning" else "danger"} mt-1",
+              if (nota >= 70) "BUEN NIVEL" else if (nota >= 50) "NORMAL" else "BAJO")
+          )
+        ),
+        div(cls := "col-6 col-md-3",
+          div(cls := "card bg-dark border-secondary text-center p-3",
+            div(cls := "h4 fw-black text-white", f"$peso%.1f kg"),
+            div(cls := "small text-muted", s"Peso / ${altura.toInt} cm"),
+            div(cls := "badge bg-secondary mt-1",
+              f"IMC ${peso / math.pow(altura / 100.0, 2)}%.1f")
+          )
+        )
+      ),
+
+      // Badge de cache
+      if (cached)
+        div(cls := "alert alert-secondary small d-flex align-items-center gap-2 mb-3",
+          span("ℹ️"),
+          span("Mostrando plan de esta semana en caché. Haz clic en ",
+            strong("Regenerar plan"), " para obtener uno nuevo con los datos actuales.")
+        )
+      else span(),
+
+      // Plan IA
+      div(cls := "card bg-dark border-secondary p-4 mb-4",
+        div(cls := "text-muted small mb-2",
+          span(cls := "me-2", "⚡ Generado por Gemini 2.0 Flash"),
+          span(cls := "text-muted", s"· $faseStr")
+        ),
+        div(cls := "text-white nutrition-plan",
+          raw(plan)
+        )
+      ),
+
+      // Nota metodológica
+      div(cls := "alert alert-secondary small",
+        raw("""<strong>Nota:</strong> Las recomendaciones nutricionales se generan automáticamente
+        en función de tu ACWR, RPE e historial de rendimiento. Consulta siempre con un nutricionista
+        deportivo antes de realizar cambios significativos en tu dieta. El plan se cachea 6 días —
+        usa "Regenerar" si cambias tu actividad sustancialmente.""")
+      )
+    )
+    renderHtml(content)
+  }
+
   initialize()
 }

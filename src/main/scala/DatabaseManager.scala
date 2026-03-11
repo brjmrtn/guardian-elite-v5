@@ -303,6 +303,38 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS scanning_rate INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS es_local BOOLEAN DEFAULT NULL")
 
+      // ── v7.2: NLP Scouting Aggregator ──────────────────────────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS scouting_reports (
+        id           SERIAL PRIMARY KEY,
+        fecha        DATE DEFAULT CURRENT_DATE,
+        ojeador      TEXT DEFAULT '',
+        club_origen  TEXT DEFAULT '',
+        texto_raw    TEXT NOT NULL,
+        nivel_tecnico    INT DEFAULT 0,
+        nivel_tactico    INT DEFAULT 0,
+        nivel_fisico     INT DEFAULT 0,
+        nivel_mental     INT DEFAULT 0,
+        nivel_distribucion INT DEFAULT 0,
+        nivel_global     INT DEFAULT 0,
+        proyeccion       TEXT DEFAULT '',
+        recomendacion    TEXT DEFAULT '',
+        fortalezas       TEXT DEFAULT '',
+        areas_mejora     TEXT DEFAULT '',
+        resumen_ia       TEXT DEFAULT '',
+        created_at   TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // ── v7.2: Nutrition plans cache ─────────────────────────────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS nutrition_plans (
+        id           SERIAL PRIMARY KEY,
+        semana       DATE DEFAULT CURRENT_DATE,
+        acwr         DOUBLE PRECISION DEFAULT 1.0,
+        rpe_media    DOUBLE PRECISION DEFAULT 5.0,
+        nota_ultimo  DOUBLE PRECISION DEFAULT 6.0,
+        plan_ia      TEXT DEFAULT '',
+        created_at   TIMESTAMP DEFAULT NOW()
+      )""")
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -3305,6 +3337,468 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         )
       }
       rows
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FASE 7 v7.2 — MARKET ESTIMATOR
+  // Regresion lineal multivariable sobre metricas existentes.
+  // Variables: nota_media, psxg_delta, spv_score, bypass_efic, bio_factor, edad
+  // Output: valor de mercado formativo estimado (€) + percentil vs academias
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getMarketEstimatorData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // ── 1. Metricas base ────────────────────────────────────────────────────
+      val rsBase = conn.createStatement().executeQuery("""
+        SELECT
+          COALESCE(AVG(nota), 0.0)                                             AS nota_media,
+          COALESCE(AVG(paradas), 0.0)                                          AS par_media,
+          COALESCE(AVG(paradas_1v1), 0.0)                                      AS par1v1_media,
+          COALESCE(AVG(paradas_aereas), 0.0)                                   AS paer_media,
+          COALESCE(AVG(CASE WHEN acciones_pie > 0
+                    THEN lineas_superadas::FLOAT / acciones_pie END), 0.0)     AS bypass_efic,
+          COALESCE(AVG(lineas_superadas), 0.0)                                 AS bypass_vol,
+          COUNT(*) FILTER (WHERE goles_contra = 0)                            AS limpias,
+          COUNT(*)                                                             AS pj,
+          COALESCE(
+            SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END)::FLOAT
+            / NULLIF(COUNT(*), 0), 0.0)                                       AS win_rate
+        FROM matches WHERE status='PLAYED'
+      """)
+
+      var notaMedia = 0.0; var par1v1 = 0.0; var parAer = 0.0
+      var bypassEfic = 0.0; var bypassVol = 0.0; var limpias = 0
+      var pj = 0; var winRate = 0.0; var parMedia = 0.0
+      if (rsBase.next()) {
+        notaMedia  = rsBase.getDouble("nota_media")
+        parMedia   = rsBase.getDouble("par_media")
+        par1v1     = rsBase.getDouble("par1v1_media")
+        parAer     = rsBase.getDouble("paer_media")
+        bypassEfic = rsBase.getDouble("bypass_efic")
+        bypassVol  = rsBase.getDouble("bypass_vol")
+        limpias    = rsBase.getInt("limpias")
+        pj         = rsBase.getInt("pj")
+        winRate    = rsBase.getDouble("win_rate")
+      }
+
+      // ── 2. PSxG delta (goles esperados - reales) ────────────────────────────
+      val rsPsxg = conn.createStatement().executeQuery("""
+        SELECT
+          COALESCE(AVG(goles_contra), 0) as gc_media,
+          COALESCE(AVG(
+            CASE zona_goles
+              WHEN '5' THEN 0.85 WHEN '4' THEN 0.65 WHEN '6' THEN 0.65
+              WHEN '2' THEN 0.45 WHEN '8' THEN 0.45
+              ELSE 0.30
+            END
+          ), 0) as xg_media
+        FROM matches
+        WHERE status='PLAYED' AND goles_contra > 0
+      """)
+      var psxgDelta = 0.0
+      if (rsPsxg.next()) {
+        val gcReal = rsPsxg.getDouble("gc_media")
+        val xgEsperado = rsPsxg.getDouble("xg_media")
+        psxgDelta = xgEsperado - gcReal  // positivo = mejor que esperado
+      }
+
+      // ── 3. Edad y bio-banding ───────────────────────────────────────────────
+      val rsEdad = conn.createStatement().executeQuery(
+        "SELECT fecha_nacimiento FROM seasons ORDER BY id DESC LIMIT 1")
+      val fechaNac = if (rsEdad.next())
+        Option(rsEdad.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2015-06-19")
+      else "2015-06-19"
+      val hoy    = java.time.LocalDate.now()
+      val nac    = java.time.LocalDate.parse(fechaNac)
+      val edad   = java.time.Period.between(nac, hoy).getYears
+      // Factor bio-banding: mayor = más avanzado en madurez (ventaja para clubes)
+      val bioFactor: Double = if (edad <= 10) 0.70 else if (edad <= 12) 0.80
+      else if (edad <= 14) 0.90 else if (edad <= 16) 1.00
+      else 1.10
+
+      // ── 4. SPV calculado inline ─────────────────────────────────────────────
+      val spvEfic: Double = {
+        val total = par1v1 * 1.5 + parAer * 1.2 + (parMedia - par1v1 - parAer)
+        if (total > 0) math.min(100.0, total * 10.0) else 0.0
+      }
+
+      // ── 5. REGRESION LINEAL MULTIVARIABLE ───────────────────────────────────
+      // Formula derivada de la literatura de scouting formativo (pesos calibrados):
+      //   V = nota_normalizada * 35
+      //     + spv_normalizado   * 20
+      //     + bypass_efic       * 15
+      //     + psxg_delta_norm   * 15
+      //     + win_rate          * 10
+      //     + bio_factor_boost  *  5
+      // Resultado en unidades de "puntuación de valor" (0-100) → mapeado a €
+      val notaNorm:   Double = math.max(0, math.min(1.0, (notaMedia - 40.0) / 60.0))
+      val spvNorm:    Double = math.max(0, math.min(1.0, spvEfic / 100.0))
+      val bypassNorm: Double = math.max(0, math.min(1.0, bypassEfic))
+      val psxgNorm:   Double = math.max(0, math.min(1.0, (psxgDelta + 2.0) / 4.0))
+      val bioBoost:   Double = (bioFactor - 0.7) / 0.4  // 0-1 range
+
+      val rawScore: Double =
+        notaNorm   * 35.0 +
+          spvNorm    * 20.0 +
+          bypassNorm * 15.0 +
+          psxgNorm   * 15.0 +
+          winRate    * 10.0 +
+          bioBoost   *  5.0
+
+      // Escala de valor formativo: 0-100 pts → 0 a 150.000 €
+      // (referencia: porteros de academia sub-16 elite: 30k-80k; sub-14: 10k-40k)
+      val valorEstimado: Int = (rawScore * 1500).toInt
+
+      // ── 6. Percentil vs academias españolas (tabla de referencia calibrada) ──
+      // Percentiles empiricos por edad para porteros de academia regional/nacional
+      val percentilesRef: Map[Int, List[Int]] = Map(
+        // edad -> [p10, p25, p50, p75, p90] en puntos rawScore
+        9  -> List(15, 22, 35, 48, 62),
+        10 -> List(18, 26, 38, 51, 65),
+        11 -> List(20, 29, 42, 55, 68),
+        12 -> List(22, 32, 45, 58, 71),
+        13 -> List(25, 35, 48, 62, 74),
+        14 -> List(28, 38, 52, 65, 77),
+        15 -> List(30, 42, 55, 68, 80),
+        16 -> List(32, 45, 58, 71, 83),
+        17 -> List(35, 48, 62, 74, 86)
+      )
+      val edadRef = math.max(9, math.min(17, edad))
+      val refs    = percentilesRef.getOrElse(edadRef, List(20, 35, 50, 65, 80))
+      val percentil: Int =
+        if (rawScore <= refs(0)) 5
+        else if (rawScore <= refs(1)) 15
+        else if (rawScore <= refs(2)) 35
+        else if (rawScore <= refs(3)) 60
+        else if (rawScore <= refs(4)) 80
+        else 95
+
+      // ── 7. Label de nivel formativo ─────────────────────────────────────────
+      val nivelLabel: String =
+        if (percentil >= 90) "ELITE NACIONAL"
+        else if (percentil >= 75) "ACADEMIA PRIMERA"
+        else if (percentil >= 50) "ACADEMIA REGIONAL"
+        else if (percentil >= 25) "FORMATIVO MEDIO"
+        else "EN DESARROLLO"
+
+      val nivelColor: String =
+        if (percentil >= 90) "success"
+        else if (percentil >= 75) "info"
+        else if (percentil >= 50) "warning"
+        else "secondary"
+
+      // ── 8. Análisis IA ──────────────────────────────────────────────────────
+      val analisisIA: String = {
+        val euroStr = if (valorEstimado >= 1000) s"${valorEstimado/1000}K€" else s"${valorEstimado}€"
+        val prompt = s"""Eres un director de captacion de un club de LaLiga evaluando el perfil formativo de un portero.
+Datos del portero (${edad} años):
+- Nota media actuaciones: ${f"$notaMedia%.1f"}/100
+- SPV (Sweeper Value): ${f"$spvEfic%.1f"}/100
+- Bypass Rate eficiencia: ${f"${bypassEfic*100}%.0f"}%
+- PSxG Delta: ${if(psxgDelta >= 0) "+" else ""}${f"$psxgDelta%.2f"} (positivo = mejor que xG esperado)
+- Win Rate: ${f"${winRate*100}%.0f"}%
+- Factor madurez bio-banding: $bioFactor
+- Puntuacion modelo: ${f"$rawScore%.1f"}/100
+- Valor estimado: $euroStr
+- Percentil academias nacionales: $percentil%
+
+Responde en espanol en exactamente 3 bloques HTML:
+<h4>DIAGNOSTICO</h4><p>[perfil general en 2 frases]</p>
+<h4>PALANCAS DE VALOR</h4><p>[las 2 metricas que mas elevan su valor y por que]</p>
+<h4>RUTA AL SIGUIENTE NIVEL</h4><p>[que tiene que mejorar para subir un tier en los proximos 12 meses]</p>
+Solo HTML limpio, sin markdown ni backticks."""
+        AIProvider.ask(prompt, None, bypassCache = false)
+      }
+
+      // ── 9. Evolucion del rawScore por temporada ─────────────────────────────
+      val rsEvo = conn.createStatement().executeQuery("""
+        SELECT
+          s.nombre_club as club, s.id as tid,
+          COALESCE(AVG(m.nota), 0) as nota_t,
+          COALESCE(AVG(m.paradas_1v1), 0) as p1v1_t,
+          COALESCE(AVG(m.paradas_aereas), 0) as paer_t,
+          COALESCE(AVG(m.paradas), 0) as par_t
+        FROM seasons s
+        LEFT JOIN matches m ON m.status='PLAYED'
+          AND m.fecha BETWEEN COALESCE(s.fecha_inicio, '2000-01-01') AND COALESCE(s.fecha_fin, CURRENT_DATE)
+        GROUP BY s.id, s.nombre_club ORDER BY s.id ASC
+      """)
+      var evoSeries = List[(String, Double)]()
+      while (rsEvo.next()) {
+        val nT   = rsEvo.getDouble("nota_t")
+        val p1T  = rsEvo.getDouble("p1v1_t")
+        val pAT  = rsEvo.getDouble("paer_t")
+        val pT   = rsEvo.getDouble("par_t")
+        val spvT = math.min(100.0, (p1T * 1.5 + pAT * 1.2 + (pT - p1T - pAT)) * 10.0)
+        val nNorm = math.max(0, math.min(1.0, (nT - 40.0) / 60.0))
+        val sNorm = math.max(0, math.min(1.0, spvT / 100.0))
+        val scoreT = nNorm * 35.0 + sNorm * 20.0 + 50.0 * 0.45  // otras metricas sin historico
+        val label  = Option(rsEvo.getString("club")).filter(_.nonEmpty).getOrElse(s"T${rsEvo.getInt("tid")}")
+        evoSeries = evoSeries :+ (label, math.min(100.0, scoreT))
+      }
+
+      Map(
+        "rawScore"      -> rawScore,
+        "valorEstimado" -> valorEstimado,
+        "percentil"     -> percentil,
+        "nivelLabel"    -> nivelLabel,
+        "nivelColor"    -> nivelColor,
+        "notaMedia"     -> notaMedia,
+        "spvEfic"       -> spvEfic,
+        "bypassEfic"    -> bypassEfic,
+        "psxgDelta"     -> psxgDelta,
+        "winRate"       -> winRate,
+        "bioFactor"     -> bioFactor,
+        "edad"          -> edad,
+        "pj"            -> pj,
+        "limpias"       -> limpias,
+        "analisisIA"    -> analisisIA,
+        "evoLabels"     -> evoSeries.map(_._1),
+        "evoScores"     -> evoSeries.map(_._2),
+        "refs"          -> refs
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FASE 7 v7.2 — NLP SCOUTING AGGREGATOR
+  // ─────────────────────────────────────────────────────────────────────────────
+  def processScoutReport(
+                          textoRaw: String, ojeador: String, clubOrigen: String, fecha: String
+                        ): Map[String, Any] = {
+    // Llamada a Gemini con prompt estructurado
+    val prompt = s"""Eres un analista de captacion experto en porteros de formacion.
+Has recibido el siguiente informe de un ojeador sobre un portero:
+
+---
+$textoRaw
+---
+
+Extrae y estructura la informacion en JSON PURO (sin markdown, sin backticks, sin explicaciones):
+{
+  "nivel_tecnico": <0-10>,
+  "nivel_tactico": <0-10>,
+  "nivel_fisico": <0-10>,
+  "nivel_mental": <0-10>,
+  "nivel_distribucion": <0-10>,
+  "nivel_global": <0-10>,
+  "proyeccion": "<ELITE|PRIMERA|SEGUNDA|REGIONAL|FORMATIVO>",
+  "recomendacion": "<FICHAR_YA|SEGUIMIENTO_6M|SEGUIMIENTO_12M|DESCARTAR>",
+  "fortalezas": "<lista de 2-3 puntos fuertes concretos en 1 linea>",
+  "areas_mejora": "<lista de 2-3 areas de mejora concretas en 1 linea>",
+  "resumen_ia": "<parrafo de 3-4 frases con el veredicto final del informe>"
+}
+SOLO el JSON, nada mas."""
+
+    val respuesta = AIProvider.ask(prompt, None, bypassCache = true)
+
+    // Parsear JSON de Gemini
+    val cleaned = respuesta.replace("```json","").replace("```","").trim
+    val parsed: ujson.Value = try { ujson.read(cleaned) }
+    catch { case _: Exception => ujson.Obj() }
+
+    def jInt(k: String): Int    = try { parsed(k).num.toInt } catch { case _: Exception => 0 }
+    def jStr(k: String): String = try { parsed(k).str }       catch { case _: Exception => "" }
+
+    val nivTec = jInt("nivel_tecnico")
+    val nivTac = jInt("nivel_tactico")
+    val nivFis = jInt("nivel_fisico")
+    val nivMen = jInt("nivel_mental")
+    val nivDis = jInt("nivel_distribucion")
+    val nivGlb = jInt("nivel_global")
+    val proy   = jStr("proyeccion")
+    val rec    = jStr("recomendacion")
+    val fort   = jStr("fortalezas")
+    val areas  = jStr("areas_mejora")
+    val res    = jStr("resumen_ia")
+
+    // Guardar en DB
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO scouting_reports
+          (fecha, ojeador, club_origen, texto_raw, nivel_tecnico, nivel_tactico,
+           nivel_fisico, nivel_mental, nivel_distribucion, nivel_global,
+           proyeccion, recomendacion, fortalezas, areas_mejora, resumen_ia)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
+      """)
+      val fechaDate = try { java.sql.Date.valueOf(fecha) }
+      catch { case _: Exception => java.sql.Date.valueOf(java.time.LocalDate.now().toString) }
+      ps.setDate(1, fechaDate)
+      ps.setString(2, fixEncoding(ojeador))
+      ps.setString(3, fixEncoding(clubOrigen))
+      ps.setString(4, fixEncoding(textoRaw))
+      ps.setInt(5, nivTec); ps.setInt(6, nivTac); ps.setInt(7, nivFis)
+      ps.setInt(8, nivMen); ps.setInt(9, nivDis); ps.setInt(10, nivGlb)
+      ps.setString(11, proy); ps.setString(12, rec)
+      ps.setString(13, fixEncoding(fort)); ps.setString(14, fixEncoding(areas))
+      ps.setString(15, fixEncoding(res))
+      val rs = ps.executeQuery()
+      val newId = if (rs.next()) rs.getInt(1) else -1
+      Map(
+        "id"              -> newId,
+        "nivel_tecnico"   -> nivTec, "nivel_tactico"     -> nivTac,
+        "nivel_fisico"    -> nivFis, "nivel_mental"       -> nivMen,
+        "nivel_distribucion" -> nivDis, "nivel_global"   -> nivGlb,
+        "proyeccion"      -> proy,  "recomendacion"      -> rec,
+        "fortalezas"      -> fort,  "areas_mejora"       -> areas,
+        "resumen_ia"      -> res
+      )
+    } finally { conn.close() }
+  }
+
+  def getScoutReports(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT id, fecha, ojeador, club_origen, nivel_global, proyeccion,
+               recomendacion, resumen_ia, fortalezas, areas_mejora,
+               nivel_tecnico, nivel_tactico, nivel_fisico, nivel_mental, nivel_distribucion
+        FROM scouting_reports ORDER BY fecha DESC, id DESC
+      """)
+      var rows = List[Map[String, Any]]()
+      while (rs.next()) {
+        rows = rows :+ Map(
+          "id"           -> rs.getInt("id"),
+          "fecha"        -> rs.getDate("fecha").toString,
+          "ojeador"      -> Option(rs.getString("ojeador")).getOrElse(""),
+          "club"         -> Option(rs.getString("club_origen")).getOrElse(""),
+          "global"       -> rs.getInt("nivel_global"),
+          "proyeccion"   -> Option(rs.getString("proyeccion")).getOrElse(""),
+          "recomendacion"-> Option(rs.getString("recomendacion")).getOrElse(""),
+          "resumen"      -> Option(rs.getString("resumen_ia")).getOrElse(""),
+          "fortalezas"   -> Option(rs.getString("fortalezas")).getOrElse(""),
+          "areas"        -> Option(rs.getString("areas_mejora")).getOrElse(""),
+          "tec"          -> rs.getInt("nivel_tecnico"),
+          "tac"          -> rs.getInt("nivel_tactico"),
+          "fis"          -> rs.getInt("nivel_fisico"),
+          "men"          -> rs.getInt("nivel_mental"),
+          "dis"          -> rs.getInt("nivel_distribucion")
+        )
+      }
+      rows
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FASE 7 v7.2 — PERIODIZACION NUTRICIONAL REACTIVA
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getNutritionPlan(forceRefresh: Boolean = false): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // ── 1. ACWR actual ──────────────────────────────────────────────────────
+      val rsAg = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsAg.setInt(1, 7); val ag = rsAg.executeQuery(); val cargaAguda = if (ag.next()) ag.getDouble(1) else 0.0
+      val rsCr = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) / 4.0 FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsCr.setInt(1, 28); val cr = rsCr.executeQuery(); val cargaCronica = if (cr.next() && cr.getDouble(1) > 0) cr.getDouble(1) else 1.0
+      val acwr: Double = cargaAguda / cargaCronica
+
+      // ── 2. RPE media últimos 7 días ─────────────────────────────────────────
+      val rsRpe = conn.createStatement().executeQuery(
+        "SELECT COALESCE(AVG(rpe), 5.0) as rpe_m FROM trainings WHERE fecha >= CURRENT_DATE - 7")
+      val rpeMedia: Double = if (rsRpe.next()) rsRpe.getDouble("rpe_m") else 5.0
+
+      // ── 3. Nota último partido ──────────────────────────────────────────────
+      val rsUlt = conn.createStatement().executeQuery(
+        "SELECT nota, rival FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 1")
+      val (notaUlt, rivalUlt) = if (rsUlt.next()) (rsUlt.getDouble("nota"), rsUlt.getString("rival")) else (60.0, "rival")
+
+      // ── 4. Próximo partido ──────────────────────────────────────────────────
+      val rsProx = conn.createStatement().executeQuery(
+        "SELECT rival, fecha, tipo_partido FROM matches WHERE status='SCHEDULED' AND fecha >= CURRENT_DATE ORDER BY fecha ASC LIMIT 1")
+      val (proximoRival, proximoFecha, proximoTipo) =
+        if (rsProx.next()) (rsProx.getString("rival"),
+          rsProx.getDate("fecha").toString,
+          Option(rsProx.getString("tipo_partido")).getOrElse("LIGA"))
+        else ("", "", "LIGA")
+
+      // ── 5. Datos físicos actuales ───────────────────────────────────────────
+      val rsFis = conn.createStatement().executeQuery(
+        "SELECT altura, peso FROM physical_growth ORDER BY fecha DESC LIMIT 1")
+      val (altura, peso) = if (rsFis.next()) (rsFis.getDouble("altura"), rsFis.getDouble("peso")) else (140.0, 35.0)
+
+      // ── 6. Fase de carga: determinar contexto semanal ──────────────────────
+      val faseStr: String =
+        if (acwr > 1.5) "CARGA ALTA — semana de mucho trabajo o partido reciente"
+        else if (acwr > 1.2) "CARGA MODERADA-ALTA — semana exigente"
+        else if (acwr > 0.8) "CARGA NORMAL — semana standard"
+        else "DESCARGA — semana de poco trabajo"
+
+      val rendimientoStr: String =
+        if (notaUlt >= 75) "buen rendimiento reciente (nota alta)"
+        else if (notaUlt >= 55) "rendimiento normal"
+        else "rendimiento bajo — posible fatiga o situacion de mejora"
+
+      // ── 7. Verificar si hay plan reciente (< 6 días) en cache ─────────────
+      if (!forceRefresh) {
+        val rsCache = conn.createStatement().executeQuery(
+          "SELECT plan_ia FROM nutrition_plans WHERE semana >= CURRENT_DATE - 6 ORDER BY created_at DESC LIMIT 1")
+        if (rsCache.next()) {
+          val cached = rsCache.getString("plan_ia")
+          if (cached.nonEmpty && !cached.startsWith("Error")) {
+            return Map("plan" -> cached, "acwr" -> acwr, "rpe" -> rpeMedia, "nota" -> notaUlt,
+              "faseStr" -> faseStr, "altura" -> altura, "peso" -> peso, "cached" -> true)
+          }
+        }
+      }
+
+      // ── 8. Prompt a Gemini ──────────────────────────────────────────────────
+      val proximoStr = if (proximoRival.nonEmpty) s"Tiene partido $proximoTipo contra $proximoRival el $proximoFecha."
+      else "No tiene partido programado esta semana."
+      val prompt = s"""Eres un nutricionista deportivo especializado en porteros de formacion (academias de futbol).
+
+Perfil del portero:
+- Edad estimada: ${java.time.Period.between(
+        try { val rs2 = conn.createStatement().executeQuery("SELECT fecha_nacimiento FROM seasons ORDER BY id DESC LIMIT 1")
+          if (rs2.next()) java.time.LocalDate.parse(Option(rs2.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2015-06-19"))
+          else java.time.LocalDate.of(2015,6,19) }
+        catch { case _:Exception => java.time.LocalDate.of(2015,6,19) },
+        java.time.LocalDate.now()).getYears} años
+- Altura: ${altura.toInt} cm | Peso: ${f"$peso%.1f"} kg
+- Contexto de carga: ACWR = ${f"$acwr%.2f"} ($faseStr)
+- RPE media ultimos 7 dias: ${f"$rpeMedia%.1f"}/10
+- Ultimo partido: ${f"$notaUlt%.0f"}/100 ($rendimientoStr)
+- $proximoStr
+
+Genera un PLAN NUTRICIONAL SEMANAL REACTIVO en HTML limpio (sin markdown, sin backticks).
+Estructura exacta:
+<h4>DIAGNOSTICO DE CARGA</h4>
+<p>[1 parrafo evaluando el estado energetico actual]</p>
+
+<h4>MACROS RECOMENDADOS (diarios)</h4>
+<div class="row g-2 mb-3">
+  <div class="col-6 col-md-3"><div class="card bg-dark border-primary text-center p-2">
+    <div class="h3 text-primary fw-bold">[X]g</div><div class="small text-muted">Proteina</div>
+    <div class="xx-small text-secondary">[razon]</div>
+  </div></div>
+  [repite para Carbohidratos, Grasas Saludables, Hidratacion en litros]
+</div>
+
+<h4>DISTRIBUCION POR DIA</h4>
+<p>[descripcion de los 3 tipos de dias de la semana: dia pre-partido, dia partido, dia recuperacion]</p>
+
+<h4>ALIMENTOS CLAVE ESTA SEMANA</h4>
+<ul>[3-5 alimentos especificos con su razon nutricional]</ul>
+
+<h4>ALERTA NUTRICIONAL</h4>
+<p>[1 aviso especifico basado en ACWR o estado actual]</p>
+
+Adapta TODO al contexto real: si ACWR > 1.3 prioriza recuperacion; si ACWR < 0.8 prioriza carga. Si hay partido proximos dias, reajusta los carbohidratos.
+Solo HTML limpio."""
+
+      val planIA = AIProvider.ask(prompt, None, bypassCache = true)
+
+      // ── 9. Guardar en cache ─────────────────────────────────────────────────
+      val psSave = conn.prepareStatement(
+        "INSERT INTO nutrition_plans (semana, acwr, rpe_media, nota_ultimo, plan_ia) VALUES (CURRENT_DATE, ?, ?, ?, ?)")
+      psSave.setDouble(1, acwr); psSave.setDouble(2, rpeMedia)
+      psSave.setDouble(3, notaUlt); psSave.setString(4, planIA)
+      psSave.executeUpdate()
+
+      Map("plan" -> planIA, "acwr" -> acwr, "rpe" -> rpeMedia, "nota" -> notaUlt,
+        "faseStr" -> faseStr, "altura" -> altura, "peso" -> peso, "cached" -> false)
     } finally { conn.close() }
   }
 

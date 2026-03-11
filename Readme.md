@@ -1,10 +1,10 @@
-# 🛡️ GUARDIAN ELITE v7.1 | Borja Martín R&D Edition
+# 🛡️ GUARDIAN ELITE v7.2 | Borja Martín R&D Edition
 
 > **"El talento te lleva al área, el carácter te mantiene en la historia."**
 
-**Guardian Elite** es un ecosistema de alto rendimiento diseñado para la monitorización longitudinal (de los 5 a los 20 años) del desarrollo de **Héctor**. Esta plataforma integra Big Data, Machine Learning e IA Generativa para transformar el crecimiento biológico, técnico y cognitivo en un activo estratégico.
+**Guardian Elite** es un ecosistema de alto rendimiento diseñado para la monitorización longitudinal (de los 5 a los 20 años) del desarrollo de **Héctor**. Esta plataforma integra Big Data, Machine Learning e IA Generativa para transformar el crecimiento biológico, técnico y cognitivo en un activo estratégico. Incluye **Guardian Amateur**, un sistema paralelo de seguimiento para jugadores de campo en fútbol amateur.
 
-![Version](https://img.shields.io/badge/Version-7.1_Match_Context-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4-COMPLETADA-brightgreen?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6](https://img.shields.io/badge/Fase_6-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6.5](https://img.shields.io/badge/Fase_6.5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase7](https://img.shields.io/badge/Fase_7-75%25-yellow?style=for-the-badge) ![Fase8](https://img.shields.io/badge/Fase_8-50%25-yellow?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-7.2_Market_NLP_Nutri-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4-COMPLETADA-brightgreen?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6](https://img.shields.io/badge/Fase_6-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6.5](https://img.shields.io/badge/Fase_6.5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase7](https://img.shields.io/badge/Fase_7-95%25-yellow?style=for-the-badge) ![Fase8](https://img.shields.io/badge/Fase_8-50%25-yellow?style=for-the-badge) ![Amateur](https://img.shields.io/badge/Guardian_Amateur-v7.2-blueviolet?style=for-the-badge)
 
 ---
 
@@ -133,6 +133,8 @@ URL: `/moneyball`.
 
 ## FASE 7 — Career Management Hub *(75%)*
 
+## FASE 7 — Career Management Hub *(95%)*
+
 ### Red-Zone Analytics ✅ Implementado
 * **Resilience Index 0-100:** Rendimiento bajo asedio (GC ≥ 2) vs media global. ÉLITE / SÓLIDO / EN PROCESO / VULNERABLE.
 * **Fatigue Index 0-100:** Rendimiento en partidos largos (≥ 70 min). SIN CAÍDA / AGUANTA / LEVE CAÍDA / FATIGA CLARA.
@@ -156,6 +158,27 @@ URL: `/moneyball`.
 * **Por duración:** Franjas de minutos (<40 / 40-59 / 60-79 / 80+) para detectar si los partidos completos benefician o perjudican el rendimiento.
 * **Tendencia mensual:** Gráfico línea + barras de los últimos 12 meses con línea de media global de referencia.
 * Sin nuevos campos requeridos — usa datos ya registrados en el Match Center. URL: `/match-context`.
+
+### Market Estimator ✅ Implementado *(nuevo en v7.2)*
+* **Regresión lineal multivariable** ponderada sobre 5 dimensiones: nota media (35%), SPV (20%), bypass rate eficiencia (15%), PSxG delta (15%), win rate (10%) + factor bio-banding (5%).
+* **Valor de mercado formativo estimado en €** con escala calibrada para porteros de academia sub-14 a sub-17.
+* **Percentil vs academias españolas** por grupo de edad: tabla de referencia P10/P25/P50/P75/P90.
+* **Niveles formativos:** EN DESARROLLO / FORMATIVO MEDIO / ACADEMIA REGIONAL / ACADEMIA PRIMERA / ELITE NACIONAL.
+* **Informe de captación IA** con diagnóstico, palancas de valor y ruta al siguiente nivel.
+* **Evolución del score por temporada** con gráfico de línea. URL: `/market-estimator`.
+
+### NLP Scouting Aggregator ✅ Implementado *(nuevo en v7.2)*
+* **Formulario de ingesta de texto libre:** Pega cualquier informe de ojeador en lenguaje natural.
+* **Gemini extrae automáticamente:** Valoración 0-10 por dimensión (técnica, táctica, física, mental, distribución), nivel global, proyección (ELITE / PRIMERA / SEGUNDA / REGIONAL / FORMATIVO) y recomendación (FICHAR YA / SEGUIMIENTO 6M / SEGUIMIENTO 12M / DESCARTAR).
+* **Fortalezas y áreas de mejora** estructuradas + resumen ejecutivo de 3-4 frases.
+* **Historial persistente** de todos los informes con radar de 5 atributos, badge de proyección y recomendación color-coded.
+* **Tabla `scouting_reports`** nueva en DB (texto raw + todos los campos estructurados). URL: `/scouting/nlp`.
+
+### Periodización Nutricional Reactiva ✅ Implementado *(nuevo en v7.2)*
+* **Contexto reactivo:** Lee ACWR actual, RPE media de los últimos 7 días, nota del último partido, próximo partido y datos físicos (altura/peso).
+* **Gemini genera un plan semanal completo** con macros diarios (proteína, carbohidratos, grasas, hidratación), distribución por tipo de día (pre-partido / partido / recuperación), alimentos clave y alerta nutricional específica.
+* **Cache de 6 días:** El plan no se regenera innecesariamente — botón "Regenerar" fuerza actualización.
+* **Tabla `nutrition_plans`** nueva en DB. URL: `/nutrition`.
 
 ---
 
@@ -192,9 +215,9 @@ URL: `/moneyball`.
 * **Set-Piece Control (Polígonos de Voronoi):** Radio de acción en córners y faltas.
 * **Impact Asymmetry Tracker:** Lateralidad de caídas cruzada con dureza de superficie.
 * **HRV Tracker:** Variabilidad de frecuencia cardíaca (requiere wearable).
-* **Periodización Nutricional Reactiva:** Ajuste de macronutrientes según estrés táctico.
-* **Market Estimator (Regresión Lineal):** Proyección de techos de rendimiento.
-* **NLP Scouting Aggregator:** Informes de ojeadores en texto → datos estructurados.
+* ~~**Periodización Nutricional Reactiva:** Ajuste de macronutrientes según estrés táctico.~~ ✅ **Implementado en v7.2** — `/nutrition`
+* ~~**Market Estimator (Regresión Lineal):** Proyección de techos de rendimiento.~~ ✅ **Implementado en v7.2** — `/market-estimator`
+* ~~**NLP Scouting Aggregator:** Informes de ojeadores en texto → datos estructurados.~~ ✅ **Implementado en v7.2** — `/scouting/nlp`
 
 ---
 
@@ -230,7 +253,81 @@ URL: `/moneyball`.
 
 ---
 
-## Stack Tecnológico
+# PARTE III: GUARDIAN AMATEUR — Sistema Paralelo
+
+**Guardian Amateur** es un sistema de seguimiento integrado dentro de la misma plataforma, pensado para jugadores de campo en fútbol amateur y semiprofesional. Comparte la infraestructura de autenticación con Guardian Elite pero opera con tablas de datos, métricas y lógica completamente independientes.
+
+## Arquitectura y Autenticación
+
+* **Autenticación unificada** con Guardian Elite: una sola cookie `guardian_session`, un solo login. Al autenticarse, la plataforma detecta el tipo de perfil (Elite o Amateur) y redirige al dashboard correspondiente.
+* **Profile Switcher:** Los usuarios con acceso a ambos sistemas pueden cambiar entre perfiles desde el header sin volver a autenticarse.
+* **Controladores independientes:** `AmateurController.scala` (1.600+ líneas) + `AmateurDatabaseManager.scala` (850+ líneas).
+
+## Base de Datos Amateur (5 tablas)
+
+| Tabla | Descripción |
+|-------|-------------|
+| `am_users` | Usuarios del sistema Amateur con datos de perfil (nombre, equipo, posición, dorsal, foto) |
+| `am_matches` | Partidos registrados con nota, goles favor/contra, posición jugada (portero/jugador de campo), goles marcados, asistencias |
+| `am_penalties` | Historial de penaltis (para jugadores que los lanzan) |
+| `am_gear` | Inventario de equipamiento (botas, guantes si porta, etc.) |
+| `am_calendar` | Agenda de próximos partidos con tipo (LIGA / TORNEO / CUP / AMISTOSO) y datos del rival |
+
+## Funcionalidades *(v7.2 — 100%)*
+
+### Dashboard Amateur
+* **Carta FUT Amateur** con nota media y estadísticas globales.
+* **Widget Próximo Partido** con cuenta atrás en tiempo real (JS countdown: "Xd Xh para el partido" / "HOY JUEGAS!"), badge de tipo de partido color-coded y botones de acción directos.
+* **Desglose portero/jugador de campo** según la posición registrada en cada partido.
+* **Estadísticas globales:** nota media, GC/partido, porterías a cero (%), partidos ganados/empatados/perdidos.
+* Último 5 partidos con badge de posición (PORTERO / JUGADOR).
+
+### Match Center Amateur
+* **Selector de posición por partido:** Dos botones — Portero (oculta goles/asistencias, muestra goles encajados) y Jugador de campo (muestra posición específica: Delantero / Centrocampista / Extremo / Defensa + goles marcados + asistencias).
+* Registro completo: rival, resultado, nota 0-100, minutos, tipo de partido, clima, estadio, notas.
+
+### Agenda / Calendario
+* **Vista mensual** (grid) y lista de próximos partidos.
+* Añadir, editar y eliminar entradas de agenda con tipo de partido, rival, fecha y hora.
+* Alimenta el widget de próximo partido del dashboard.
+
+### Historial Amateur
+* Tabla de todos los partidos con filtros, badges de posición y exportación.
+
+### Penaltis Amateur
+* Heatmap de lanzamientos propios (para delanteros/centrocampistas que lanzan penaltis).
+
+### Informe PDF Amateur
+* Exportación A4 print-optimized con: cabecera, próximo partido, estadísticas globales, desglose posición y tabla de los últimos 20 partidos. URL: `/am/report`.
+
+## Rutas Amateur (14 rutas activas)
+
+| Ruta | Método | Descripción |
+|------|--------|-------------|
+| `/am` | GET | Dashboard principal |
+| `/am/match` | GET | Match Center — registrar partido |
+| `/am/match/save` | POST | Guardar partido |
+| `/am/history` | GET | Historial de partidos |
+| `/am/penalties` | GET | Módulo de penaltis |
+| `/am/penalties/save` | POST | Guardar penalti |
+| `/am/gear` | GET | Inventario de equipamiento |
+| `/am/gear/add` | POST | Añadir equipamiento |
+| `/am/calendar` | GET | Agenda mensual |
+| `/am/calendar/add` | GET | Formulario añadir a agenda |
+| `/am/calendar/save` | POST | Guardar entrada de agenda |
+| `/am/calendar/delete` | POST | Eliminar entrada de agenda |
+| `/am/report` | GET | Exportar informe PDF (print HTML) |
+| `/am/profile` | GET/POST | Editar perfil de usuario |
+
+## ¿Tendrá el Amateur acceso a módulos Elite?
+
+En la versión actual, Guardian Amateur opera como sistema standalone. Las siguientes integraciones están planificadas para versiones futuras:
+
+* **Bio-Banding simplificado:** Factor de madurez para rendimiento en contexto formativo.
+* **Moneyball Amateur:** xGoals_scored, pases clave, participación en goles (goals + assists / partidos).
+* **Digital Twin Amateur:** Proyección de altura adulta (usa los mismos datos biométricos de `am_users`).
+
+---
 
 | Capa | Tecnología |
 |------|-----------|
@@ -254,18 +351,19 @@ FASE 4  — ML & Estrategia Pro        ██████████ 100%
 FASE 5  — Inteligencia Proactiva     ██████████ 100%  (Dojo + Dojo Entrenador + Bio-Banding)
 FASE 6  — Innovación Exclusiva       ██████████ 100%
 FASE 6.5— Moneyball Analytics        ██████████ 100%  (Bypass Rate histórico completado)
-FASE 7  — Career Management 360      ███████░░░  75%  (+ Match Context en v7.1)
+FASE 7  — Career Management 360      █████████░  95%  (+ Market Estimator + NLP Scouting + Nutrición en v7.2)
 FASE 8  — Deep Performance           █████░░░░░  50%  (Reset + PSxG + Pathway)
 FASE 9  — Elite Layer                ░░░░░░░░░░   0%
 FASE 10 — Quantum Performance        ░░░░░░░░░░   0%
 FASE 11 — Biological Intelligence    ░░░░░░░░░░   0%
 FASE 12 — Frontiers of Science       ░░░░░░░░░░   0%
 FASE 13 — Biological & Social Core   ░░░░░░░░░░   0%
+GUARDIAN AMATEUR                     ██████████ 100%  (v7.2: posición, PDF, calendario, countdown)
 ```
 
 ---
 
-## Rutas Desplegadas en Producción (23 rutas activas)
+## Rutas Desplegadas en Producción — Guardian Elite (26 rutas activas)
 
 | Módulo | URL | Fase |
 |--------|-----|------|
@@ -288,6 +386,9 @@ FASE 13 — Biological & Social Core   ░░░░░░░░░░   0%
 | Striker Clustering | `/striker-clustering` | 7 |
 | Scanning Rate | `/scanning-rate` | 7 |
 | Match Context | `/match-context` | 7 |
+| **Market Estimator** | **`/market-estimator`** | **7 — nuevo v7.2** |
+| **NLP Scouting** | **`/scouting/nlp`** | **7 — nuevo v7.2** |
+| **Nutrición Reactiva** | **`/nutrition`** | **7 — nuevo v7.2** |
 | Cognitive Reset | `/cognitive-reset` | 8 |
 | PSxG Delta | `/psxg-delta` | 8 |
 | Development Pathway | `/pathway` | 8 |
