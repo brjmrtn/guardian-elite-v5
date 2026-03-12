@@ -9,15 +9,14 @@ import scalatags.Text.tags2
 // ─────────────────────────────────────────────────────────────────────────────
 object AmateurController extends cask.Routes {
 
-  private val AM_COOKIE = SharedLayout.sessionCookieName  // cookie unificada
-
   // ── AUTH HELPERS ───────────────────────────────────────────────────────────
-  private def getAmUserId(request: cask.Request): Option[Int] = {
-    val cookieVal = request.cookies.get(AM_COOKIE).map(_.value).getOrElse("")
-    if (cookieVal.startsWith("am:"))
-      scala.util.Try(cookieVal.drop(3).toInt).toOption
-    else None
-  }
+  // Cookie unificada guardian_session=am:{id} — gestionada por AuthController
+  private def getAmUserId(request: cask.Request): Option[Int] =
+    request.cookies.get("guardian_session").flatMap { c =>
+      val v = c.value
+      if (v.startsWith("am:")) scala.util.Try(v.drop(3).toInt).toOption
+      else None
+    }
 
   private def withAmAuth(request: cask.Request)(
     f: AmUser => cask.Response[Array[Byte]]
@@ -35,15 +34,14 @@ object AmateurController extends cask.Routes {
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
   private def renderAm(
-    activeLink: String,
-    userName: String,
-    pageContent: scalatags.Text.Modifier
-  ): cask.Response[Array[Byte]] = {
-    val page = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
+                        activeLink: String,
+                        userName: String,
+                        pageContent: scalatags.Text.Modifier
+                      ): cask.Response[Array[Byte]] = {
+    val page = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        meta(name := "color-scheme", content := "dark"),
         tags2.title("Guardian Amateur"),
         link(rel := "stylesheet",
           href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
@@ -56,7 +54,7 @@ object AmateurController extends cask.Routes {
             padding-bottom: 90px;
             min-height: 100vh;
           }
-          /* ── RESET COMPLETO — sobreescribe cualquier hoja externa ── */
+          /* ── RESET INPUTS — sobreescribe CSS global Elite ── */
           body input, body select, body textarea,
           body .form-control, body .form-select {
             background-color: #ffffff !important;
@@ -92,7 +90,6 @@ object AmateurController extends cask.Routes {
           body .form-check-input { background-color: #fff !important; border-color: #cbd5e0 !important; }
           body .form-check-input:checked { background-color: #0d6efd !important; border-color: #0d6efd !important; }
           body label { color: #4a5568 !important; }
-
           /* ── LAYOUT ── */
           .bottom-nav {
             position: fixed; bottom: 0; left: 0; right: 0;
@@ -145,7 +142,6 @@ object AmateurController extends cask.Routes {
           .badge-red    { background: #fed7d7; color: #9b2c2c; }
           .text-muted   { color: #718096 !important; }
           .border-bottom { border-bottom-color: #e2e8f0 !important; }
-          /* Calendario */
           .cal-day {
             min-height: 56px; background: #f7fafc; border: 1px solid #e2e8f0;
             border-radius: 8px; padding: 4px 6px; font-size: 11px; color: #1a202c;
@@ -161,16 +157,11 @@ object AmateurController extends cask.Routes {
         // Header
         div(cls := "am-header",
           div(
-            span(cls := "fw-black text-primary", style := "font-size:15px;", "🛡 GUARDIAN"),
+            span(cls := "fw-black text-primary", style := "font-size:15px;", "?? GUARDIAN"),
             span(cls := "badge bg-primary ms-1", style := "font-size:9px;", "AMATEUR"),
             span(cls := "d-block xx-small text-muted", userName)
           ),
-          div(cls := "d-flex gap-2 align-items-center",
-            a(href := "/profiles",
-              cls := "btn btn-outline-warning btn-sm xx-small fw-bold",
-              "👤 Cambiar"),
-            a(href := "/logout", cls := "btn btn-outline-secondary btn-sm xx-small", "Salir")
-          )
+          a(href := "/profiles", cls := "btn btn-outline-secondary btn-sm xx-small", "Cambiar")
         ),
 
         // Contenido
@@ -180,22 +171,25 @@ object AmateurController extends cask.Routes {
         tags2.nav(cls := "bottom-nav",
           a(href := "/am/dashboard",
             cls := s"nav-item ${if (activeLink == "home") "active" else ""}",
-            span(cls := "nav-icon", "🏠"), span("Inicio")),
+            span(cls := "nav-icon", "&#127968;"), span("Inicio")),
           a(href := "/am/match-center",
             cls := s"nav-item ${if (activeLink == "match") "active" else ""}",
-            span(cls := "nav-icon", "⚽"), span("Partido")),
+            span(cls := "nav-icon", "&#9917;"), span("Partido")),
           a(href := "/am/calendar",
             cls := s"nav-item ${if (activeLink == "calendar") "active" else ""}",
-            span(cls := "nav-icon", "📅"), span("Agenda")),
+            span(cls := "nav-icon", "&#128197;"), span("Agenda")),
           a(href := "/am/penalties",
             cls := s"nav-item ${if (activeLink == "penalties") "active" else ""}",
-            span(cls := "nav-icon", "🥅"), span("Penaltis")),
+            span(cls := "nav-icon", "&#129349;"), span("Penaltis")),
           a(href := "/am/gear",
             cls := s"nav-item ${if (activeLink == "gear") "active" else ""}",
-            span(cls := "nav-icon", "🧤"), span("Guantes")),
+            span(cls := "nav-icon", "&#129508;"), span("Guantes")),
           a(href := "/am/history",
             cls := s"nav-item ${if (activeLink == "history") "active" else ""}",
-            span(cls := "nav-icon", "📋"), span("Historial"))
+            span(cls := "nav-icon", "&#128202;"), span("Historial")),
+          a(href := "/am/progression",
+            cls := s"nav-item ${if (activeLink == "progression") "active" else ""}",
+            span(cls := "nav-icon", "&#128200;"), span("Progreso"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -208,25 +202,89 @@ object AmateurController extends cask.Routes {
     )
   }
 
-  // ── REGISTRO AMATEUR (accesible desde /am/register) ───────────────────────
-  // El login y logout se gestionan desde AuthController (login unificado)
-
-  @cask.get("/am/register")
-  def registerPage(request: cask.Request, error: String = "") = {
-    val page = "<!DOCTYPE html>" + html(lang := "es", attr("data-bs-theme") := "dark",
+  // ── LOGIN / REGISTER ───────────────────────────────────────────────────────
+  @cask.get("/am/login")
+  def loginPage(request: cask.Request, error: String = "") = {
+    val page = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
         meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        meta(name := "color-scheme", content := "dark"),
+        tags2.title("Guardian Amateur - Login"),
+        link(rel := "stylesheet",
+          href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
+        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input, select { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; }"))
+      ),
+      body(
+        div(cls := "container d-flex justify-content-center align-items-center",
+          style := "min-height:100vh;",
+          div(style := "width:340px;",
+            div(cls := "text-center mb-4",
+              div(style := "font-size:48px;", "??"),
+              h3(cls := "fw-black text-primary", "GUARDIAN AMATEUR"),
+              span(cls := "text-muted small", "Tu rendimiento, registrado.")
+            ),
+            div(cls := "card bg-dark border-primary p-4 mb-3",
+              h5(cls := "text-white fw-bold mb-3", "Iniciar sesión"),
+              if (error.nonEmpty) div(cls := "alert alert-danger small p-2 mb-3", error) else span(),
+              form(action := "/am/login", method := "post",
+                div(cls := "mb-3",
+                  label(cls := "text-muted small fw-bold", "USUARIO"),
+                  input(tpe := "text", name := "username", cls := "form-control bg-dark text-white border-secondary mt-1", required := true, attr("autocomplete") := "username")
+                ),
+                div(cls := "mb-3",
+                  label(cls := "text-muted small fw-bold", "CONTRASEÑA"),
+                  input(tpe := "password", name := "password", cls := "form-control bg-dark text-white border-secondary mt-1", required := true)
+                ),
+                button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "ENTRAR")
+              )
+            ),
+            div(cls := "card bg-dark border-secondary p-3 text-center",
+              p(cls := "text-muted small mb-2", "¿Primera vez? Crea tu cuenta gratis"),
+              a(href := "/am/register", cls := "btn btn-outline-secondary w-100 btn-sm", "Registrarse")
+            )
+          )
+        )
+      )
+    ).render
+    cask.Response(page.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  @cask.postForm("/am/login")
+  def doLogin(request: cask.Request, username: String, password: String) = {
+    AmateurDatabaseManager.authenticate(username, password) match {
+      case Some(user) =>
+        cask.Response(
+          Array.emptyByteArray,
+          statusCode = 302,
+          headers = Seq(
+            "Location"   -> "/am/dashboard",
+            "Set-Cookie" -> s"$AM_COOKIE=${user.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
+          )
+        )
+      case None =>
+        cask.Response(
+          Array.emptyByteArray,
+          statusCode = 302,
+          headers = Seq("Location" -> "/am/login?error=Usuario+o+contraseña+incorrectos")
+        )
+    }
+  }
+
+  @cask.get("/am/register")
+  def registerPage(request: cask.Request, error: String = "") = {
+    val page = "<!DOCTYPE html>" + html(lang := "es",
+      head(
+        meta(charset := "UTF-8"),
+        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
         tags2.title("Guardian Amateur - Registro"),
         link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { border-color:#e2e8f0; }"))
+        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input, select { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; }"))
       ),
       body(
         div(cls := "container d-flex justify-content-center align-items-center", style := "min-height:100vh;",
           div(style := "width:340px;",
             div(cls := "text-center mb-4",
-              div(style := "font-size:48px;", "🛡"),
+              div(style := "font-size:48px;", "??"),
               h3(cls := "fw-black text-primary", "Crear cuenta")
             ),
             div(cls := "card bg-dark border-primary p-4",
@@ -267,7 +325,7 @@ object AmateurController extends cask.Routes {
           cask.Response(Array.emptyByteArray, 302,
             headers = Seq(
               "Location"   -> "/am/dashboard",
-              "Set-Cookie" -> s"${SharedLayout.sessionCookieName}=am:$id; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
+              "Set-Cookie" -> s"$AM_COOKIE=$id; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
             ))
         case Left(err) =>
           cask.Response(Array.emptyByteArray, 302,
@@ -276,18 +334,19 @@ object AmateurController extends cask.Routes {
     }
   }
 
-  @cask.get("/am/logout")
-  def doAmLogout(request: cask.Request) =
-    cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location"   -> "/login",
-      "Set-Cookie" -> s"${SharedLayout.sessionCookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
-    ))
+  @cask.get("/profiles")
+  def doLogout(request: cask.Request) =
+    cask.Response(Array.emptyByteArray, 302,
+      headers = Seq(
+        "Location"   -> "/am/login",
+        "Set-Cookie" -> s"$AM_COOKIE=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
+      ))
 
   // ── DASHBOARD ──────────────────────────────────────────────────────────────
   @cask.get("/am/dashboard")
   def dashboardPage(request: cask.Request) = withAmAuth(request) { user =>
-    val st = AmateurDatabaseManager.getDashboardStats(user.id)
-    val upcoming   = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
+    val st       = AmateurDatabaseManager.getDashboardStats(user.id)
+    val upcoming = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
     val pj             = st("pj").asInstanceOf[Int]
     val notaMedia      = st("notaMedia").asInstanceOf[Double]
     val notaAjustada   = st("notaAjustada").asInstanceOf[Double]
@@ -306,9 +365,9 @@ object AmateurController extends cask.Routes {
       div(
         // Bienvenida
         div(cls := "mb-3",
-          h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} 👋"),
+          h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} ??"),
           span(cls := "text-muted small", if (pj == 0) "Registra tu primer partido para empezar."
-            else s"$pj partidos registrados")
+          else s"$pj partidos registrados")
         ),
 
         if (pj == 0)
@@ -320,21 +379,70 @@ object AmateurController extends cask.Routes {
           )
         else frag(
 
-          // Próximo partido programado
+          // Próximo partido programado — Widget con cuenta atrás
           upcoming.headOption.map { s =>
+            val tipoColor = s.tipo match {
+              case "LIGA"     => "#0d6efd"
+              case "TORNEO"   => "#dc3545"
+              case "CUP"      => "#6f42c1"
+              case _          => "#20c997"
+            }
+            val tipoBadge = s.tipo match {
+              case "LIGA"     => "LIGA"
+              case "TORNEO"   => "TORNEO"
+              case "CUP"      => "CUP"
+              case _          => "AMISTOSO"
+            }
             div(cls := "card-am p-3 mb-3",
-              style := "border-color:#ffc107;",
-              div(cls := "xx-small text-warning fw-bold mb-1", "PRÓXIMO PARTIDO"),
-              div(cls := "fw-black text-white", s.rival),
-              div(cls := "xx-small text-muted",
-                s"📅 ${s.fecha}",
-                if (s.hora.nonEmpty) s" · ⏰ ${s.hora}" else "",
-                if (s.lugar.nonEmpty) s" · 📍 ${s.lugar}" else ""
+              style := s"border-left: 4px solid $tipoColor;",
+              div(cls := "d-flex justify-content-between align-items-start mb-1",
+                div(cls := "xx-small fw-bold text-muted", "PROXIMO PARTIDO"),
+                span(cls := "badge rounded-pill xx-small",
+                  style := s"background:${tipoColor}22; color:$tipoColor;",
+                  tipoBadge)
               ),
-              a(href := s"/am/match-center", cls := "btn btn-warning btn-sm fw-bold mt-2 w-100",
-                "⚽ Registrar este partido")
+              div(cls := "fw-black mb-1", style := "font-size:1.15rem;", s.rival),
+              div(cls := "xx-small text-muted mb-2",
+                s.fecha,
+                if (s.hora.nonEmpty) s" - ${s.hora}" else "",
+                if (s.lugar.nonEmpty) s" - ${s.lugar}" else ""
+              ),
+              div(id := "countdown-widget", cls := "fw-bold text-center mb-2",
+                style := s"font-size:1.05rem; color:$tipoColor;", "..."),
+              div(cls := "row g-1",
+                div(cls := "col-8",
+                  a(href := "/am/match-center", cls := "btn btn-sm fw-bold w-100",
+                    style := s"background:$tipoColor; color:#fff;", "Registrar partido")
+                ),
+                div(cls := "col-4",
+                  a(href := "/am/calendar", cls := "btn btn-sm btn-outline-secondary fw-bold w-100", "Agenda")
+                )
+              ),
+              script(raw(s"""
+                (function() {
+                  var target = new Date("${s.fecha}T${if (s.hora.nonEmpty && s.hora.length >= 5) s.hora else "10:00"}:00");
+                  function update() {
+                    var now = new Date(); var diff = target - now;
+                    var el = document.getElementById('countdown-widget');
+                    if (!el) return;
+                    if (diff <= 0) { el.textContent = "HOY JUEGAS!"; return; }
+                    var d = Math.floor(diff/86400000), h = Math.floor((diff%86400000)/3600000), m = Math.floor((diff%3600000)/60000);
+                    if (d > 0) el.textContent = d+"d "+h+"h para el partido";
+                    else if (h > 0) el.textContent = h+"h "+m+"m para el partido";
+                    else el.textContent = m+" minutos para el partido";
+                  }
+                  update(); setInterval(update, 60000);
+                })();
+              """))
             )
-          }.getOrElse(div()),
+          }.getOrElse(
+            div(cls := "card-am p-3 mb-3 text-center",
+              style := "border-style:dashed;",
+              div(cls := "xx-small text-muted mt-1", "Sin partidos programados"),
+              a(href := "/am/calendar/add", cls := "btn btn-outline-primary btn-sm mt-2 fw-bold",
+                "+ Añadir a la agenda")
+            )
+          ),
 
           // KPIs principales
           div(cls := "row g-2 mb-3",
@@ -376,7 +484,7 @@ object AmateurController extends cask.Routes {
             )
           ),
 
-          // Resultados
+          // Resultados + win rate
           div(cls := "card-am p-3 mb-3",
             div(cls := "d-flex justify-content-around text-center",
               div(
@@ -392,7 +500,16 @@ object AmateurController extends cask.Routes {
               div(
                 div(cls := "fw-black text-danger", style := "font-size:1.8rem;", perdidos.toString),
                 div(cls := "xx-small text-muted", "Perdidos")
-              )
+              ),
+              div(cls := "border-start border-secondary"),
+              {
+                val wr = if (pj > 0) (ganados.toDouble / pj * 100).toInt else 0
+                val wrColor = if (wr >= 60) "text-success" else if (wr >= 40) "text-warning" else "text-danger"
+                div(
+                  div(cls := s"fw-black $wrColor", style := "font-size:1.8rem;", s"$wr%"),
+                  div(cls := "xx-small text-muted", "Win rate")
+                )
+              }
             )
           ),
 
@@ -421,8 +538,8 @@ object AmateurController extends cask.Routes {
               a(href := "/am/match-center", cls := "btn btn-primary w-100 fw-bold py-3",
                 "⚽ Nuevo partido")),
             div(cls := "col-6",
-              a(href := "/am/penalties", cls := "btn btn-outline-info w-100 fw-bold py-3",
-                "🥅 Penalti"))
+              a(href := "/am/progression", cls := "btn btn-outline-info w-100 fw-bold py-3",
+                "📈 Mi progreso"))
           )
         )
       )
@@ -437,6 +554,50 @@ object AmateurController extends cask.Routes {
         h5(cls := "fw-black text-white mb-3", "⚽ Registrar partido"),
 
         form(action := "/am/match/save", method := "post", id := "matchForm",
+
+          // Selector de posición
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "DE QUE JUGASTE?"),
+            div(cls := "d-flex gap-2",
+              div(cls := "flex-fill",
+                input(tpe := "radio", name := "posicion_partido", id := "pos_portero",
+                  value := "portero", checked := true, style := "display:none;",
+                  attr("onchange") := "togglePosicion()"),
+                label(cls := "btn btn-primary w-100 fw-bold", attr("for") := "pos_portero",
+                  id := "lbl_portero", style := "font-size:13px;", "Portero")
+              ),
+              div(cls := "flex-fill",
+                input(tpe := "radio", name := "posicion_partido", id := "pos_jugador",
+                  value := "jugador", style := "display:none;",
+                  attr("onchange") := "togglePosicion()"),
+                label(cls := "btn btn-outline-secondary w-100 fw-bold", attr("for") := "pos_jugador",
+                  id := "lbl_jugador", style := "font-size:13px;", "Jugador de campo")
+              )
+            ),
+            div(id := "posicion_campo_div", style := "display:none;",
+              div(cls := "mt-2",
+                label(cls := "xx-small text-muted fw-bold", "POSICION EN CAMPO"),
+                select(name := "posicion_campo", cls := "form-select mt-1",
+                  option(value := "Delantero", "Delantero"),
+                  option(value := "Centrocampista", "Centrocampista"),
+                  option(value := "Extremo", "Extremo"),
+                  option(value := "Defensa", "Defensa")
+                )
+              ),
+              div(cls := "row g-2 mt-1",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "GOLES MARCADOS"),
+                  input(tpe := "number", name := "goles_marcados", value := "0",
+                    cls := "form-control mt-1", attr("min") := "0", attr("max") := "20")
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "ASISTENCIAS"),
+                  input(tpe := "number", name := "asistencias", value := "0",
+                    cls := "form-control mt-1", attr("min") := "0", attr("max") := "20")
+                )
+              )
+            )
+          ),
 
           // Rival y fecha
           div(cls := "card-am p-3 mb-3",
@@ -454,7 +615,7 @@ object AmateurController extends cask.Routes {
           ),
 
           // Resultado
-          div(cls := "card-am p-3 mb-3",
+          div(cls := "card-am p-3 mb-3", id := "gc_section",
             div(cls := "xx-small text-muted fw-bold mb-2", "RESULTADO"),
             div(cls := "row g-3 text-center",
               div(cls := "col-5",
@@ -496,9 +657,9 @@ object AmateurController extends cask.Routes {
                 select(name := "clima", cls := "form-select bg-dark text-white border-secondary mt-1",
                   option(value := "Sol", "☀️ Sol"),
                   option(value := "Nubes", "☁️ Nubes"),
-                  option(value := "Lluvia", "🌧️ Lluvia"),
-                  option(value := "Frio", "🥶 Frío"),
-                  option(value := "Viento", "💨 Viento")
+                  option(value := "Lluvia", "??️ Lluvia"),
+                  option(value := "Frio", "?? Frío"),
+                  option(value := "Viento", "?? Viento")
                 )
               ),
               div(cls := "col-6",
@@ -510,12 +671,12 @@ object AmateurController extends cask.Routes {
             div(cls := "mt-2",
               label(cls := "xx-small text-muted fw-bold", "¿LOCAL O VISITANTE?"),
               div(cls := "d-flex gap-2 mt-1",
-                frag(Seq(("", "— Sin especificar"), ("true", "🏠 Local"), ("false", "✈️ Visitante")).map {
+                frag(Seq(("", "— Sin especificar"), ("true", "?? Local"), ("false", "✈️ Visitante")).map {
                   case (v, lbl) =>
                     label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
                       style := "cursor:pointer; background:#1a1a1a;",
                       input(tpe := "radio", name := "esLocal", value := v, cls := "d-none",
-                        if (v == "") checked := true else span()),
+                        if (v == "") attr("checked") := "checked" else span()),
                       span(lbl)
                     )
                 }: _*)
@@ -666,7 +827,7 @@ object AmateurController extends cask.Routes {
 
   @cask.post("/am/match/save")
   def saveMatch(request: cask.Request) = withAmAuth(request) { user =>
-    val body = new String(request.data.readAllBytes(), "UTF-8")
+    val body = request.body.mkString
     val params = body.split("&").map { pair =>
       val p = pair.split("=", 2)
       val k = java.net.URLDecoder.decode(p(0), "UTF-8")
@@ -684,7 +845,15 @@ object AmateurController extends cask.Routes {
       case _       => None
     }
 
-    val matchId = AmateurDatabaseManager.logMatch(
+    val posicionPartido = str("posicion_partido") match {
+      case "jugador" => "jugador"
+      case _         => "portero"
+    }
+    val posicionCampo   = str("posicion_campo")
+    val golesMarcados   = int("goles_marcados")
+    val asistencias     = int("asistencias")
+
+    val matchId = AmateurDatabaseManager.saveMatch(
       userId   = user.id,
       rival    = str("rival"),
       gf       = int("gf"),
@@ -695,7 +864,11 @@ object AmateurController extends cask.Routes {
       esLocal  = esLocalOpt,
       fecha    = str("fecha"),
       videoUrl = str("video"),
-      notas    = str("notas")
+      notas    = str("notas"),
+      posicionPartido = posicionPartido,
+      posicionCampo   = posicionCampo,
+      golesMarcados   = golesMarcados,
+      asistencias     = asistencias
     )
 
     // Guardar goles
@@ -728,28 +901,28 @@ object AmateurController extends cask.Routes {
     def notaBadgeCls(n: Double) = if (n >= 7.0) "badge-green" else if (n >= 5.0) "badge-yellow" else "badge-red"
     def climaIcon(c: String) = c.toLowerCase match {
       case s if s.contains("sol")  => "☀️"
-      case s if s.contains("lluv") => "🌧️"
-      case s if s.contains("frio") => "🥶"
-      case s if s.contains("vient")=> "💨"
+      case s if s.contains("lluv") => "??️"
+      case s if s.contains("frio") => "??"
+      case s if s.contains("vient")=> "??"
       case _                       => "☁️"
     }
 
     renderAm("history", user.nombre,
       div(
         div(cls := "d-flex justify-content-between align-items-center mb-3",
-          h5(cls := "fw-black text-white mb-0", "📋 Historial"),
+          h5(cls := "fw-black text-white mb-0", "?? Historial"),
           a(href := "/am/match-center", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
         ),
 
         if (matches.isEmpty)
           div(cls := "card-am p-4 text-center",
-            div(style := "font-size:40px; opacity:0.3", "📋"),
+            div(style := "font-size:40px; opacity:0.3", "??"),
             p(cls := "text-muted mt-3", "Aún no has registrado ningún partido.")
           )
         else
           frag(matches.map { m =>
             val gcStr   = if (m.gc == 0) "✅" else m.gc.toString
-            val locStr  = m.esLocal match { case Some(true) => "🏠" case Some(false) => "✈️" case None => "" }
+            val locStr  = m.esLocal match { case Some(true) => "??" case Some(false) => "✈️" case None => "" }
             div(cls := "card-am p-3 mb-2",
               div(cls := "d-flex align-items-center gap-3",
                 div(cls := s"nota-badge ${notaBadgeCls(m.nota)}", f"${m.nota}%.1f"),
@@ -794,7 +967,7 @@ object AmateurController extends cask.Routes {
 
     renderAm("penalties", user.nombre,
       div(
-        h5(cls := "fw-black text-white mb-3", "🥅 Penaltis"),
+        h5(cls := "fw-black text-white mb-3", "?? Penaltis"),
 
         // Estadísticas
         if (total > 0) frag(
@@ -832,9 +1005,9 @@ object AmateurController extends cask.Routes {
                 s"✅ $parConInt paradas con intuición correcta (te tiraste al lado correcto Y la paraste)")
             else span(),
             div(cls := "xx-small text-muted mt-2 fst-italic",
-              if (pctIntuicion >= 60) "🔥 Buena lectura de penaltis. Confía en tu instinto."
-              else if (pctIntuicion >= 40) "📊 Intuición media. Estudia las tendencias del tiro."
-              else "📉 Trabajo de análisis de tendencias recomendado."
+              if (pctIntuicion >= 60) "?? Buena lectura de penaltis. Confía en tu instinto."
+              else if (pctIntuicion >= 40) "?? Intuición media. Estudia las tendencias del tiro."
+              else "?? Trabajo de análisis de tendencias recomendado."
             )
           ),
 
@@ -895,7 +1068,7 @@ object AmateurController extends cask.Routes {
 
             // Dirección del tiro
             div(cls := "mb-3",
-              div(cls := "xx-small text-muted fw-bold mb-2", "🎯 DIRECCIÓN DEL TIRO"),
+              div(cls := "xx-small text-muted fw-bold mb-2", "?? DIRECCIÓN DEL TIRO"),
               div(cls := "row g-2",
                 frag(Seq("Izquierda", "Centro", "Derecha").map { d =>
                   div(cls := "col-4",
@@ -913,7 +1086,7 @@ object AmateurController extends cask.Routes {
 
             // Dirección de la estirada
             div(cls := "mb-3",
-              div(cls := "xx-small text-muted fw-bold mb-2", "🧤 ¿DÓNDE TE TIRASTE?"),
+              div(cls := "xx-small text-muted fw-bold mb-2", "?? ¿DÓNDE TE TIRASTE?"),
               div(cls := "row g-2",
                 frag(Seq("Izquierda", "Centro", "Derecha").map { d =>
                   div(cls := "col-4",
@@ -937,7 +1110,7 @@ object AmateurController extends cask.Routes {
                   label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
                     style := "cursor:pointer; background:#1a1a1a;",
                     input(tpe := "radio", name := "parada", value := v, cls := "d-none",
-                      if (v == "false") checked := true else span()),
+                      if (v == "false") attr("checked") := "checked" else span()),
                     span(lbl)
                   )
                 }: _*)
@@ -954,7 +1127,7 @@ object AmateurController extends cask.Routes {
             div(cls := "xx-small text-muted fw-bold mb-2", "HISTORIAL"),
             frag(penalties.take(20).map { p =>
               val intuicion = p.direccionTiro == p.direccionEstirada
-              val icono = if (p.parada) "✅" else if (intuicion) "🤔" else "❌"
+              val icono = if (p.parada) "✅" else if (intuicion) "??" else "❌"
               div(cls := "d-flex align-items-center gap-2 py-2",
                 style := "border-bottom:1px solid #1e1e1e;",
                 span(style := "font-size:18px;", icono),
@@ -1043,7 +1216,7 @@ object AmateurController extends cask.Routes {
 
     renderAm("gear", user.nombre,
       div(
-        h5(cls := "fw-black text-white mb-3", "🧤 Mis Guantes"),
+        h5(cls := "fw-black text-white mb-3", "?? Mis Guantes"),
 
         // Lista
         if (items.nonEmpty)
@@ -1090,7 +1263,7 @@ object AmateurController extends cask.Routes {
           )
         else
           div(cls := "card-am p-4 text-center mb-3",
-            div(style := "font-size:40px; opacity:0.3", "🧤"),
+            div(style := "font-size:40px; opacity:0.3", "??"),
             p(cls := "text-muted mt-2 small", "Aún no has añadido guantes.")
           ),
 
@@ -1158,151 +1331,121 @@ object AmateurController extends cask.Routes {
       cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
     }
 
-  // ── CALENDARIO ─────────────────────────────────────────────────────────────
+  // ── AGENDA / CALENDARIO ─────────────────────────────────────────────────────
   @cask.get("/am/calendar")
   def calendarPage(request: cask.Request) = withAmAuth(request) { user =>
-    import java.time.{LocalDate, YearMonth}
-    import java.time.format.DateTimeFormatter
-
-    val today      = LocalDate.now()
-    val ym         = YearMonth.of(today.getYear, today.getMonthValue)
-    val firstDay   = ym.atDay(1)
-    val lastDay    = ym.atEndOfMonth()
-    val fromStr    = firstDay.toString
-    val toStr      = lastDay.toString
-
-    val schedules  = AmateurDatabaseManager.getScheduleRange(user.id, fromStr, toStr)
-    val matches    = AmateurDatabaseManager.getMatches(user.id)
-      .filter(m => m.fecha >= fromStr && m.fecha <= toStr)
-    val upcoming   = AmateurDatabaseManager.getUpcomingSchedule(user.id, 5)
-
-    // Mapas fecha → eventos
+    val today    = java.time.LocalDate.now()
+    val year     = today.getYear
+    val month    = today.getMonthValue
+    val firstDay = java.time.LocalDate.of(year, month, 1)
+    val lastDay  = firstDay.plusMonths(1).minusDays(1)
+    val fromStr  = firstDay.toString
+    val toStr    = lastDay.toString
+    val monthName = firstDay.getMonth.getDisplayName(
+      java.time.format.TextStyle.FULL, new java.util.Locale("es"))
+    val schedules   = AmateurDatabaseManager.getScheduleRange(user.id, fromStr, toStr)
+    val upcoming    = AmateurDatabaseManager.getUpcomingSchedule(user.id, 5)
     val schedByDate = schedules.groupBy(_.fecha)
-    val matchByDate = matches.groupBy(_.fecha)
-
-    val monthNames = Seq("","Enero","Febrero","Marzo","Abril","Mayo","Junio",
-                         "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre")
-    val dayNames   = Seq("L","M","X","J","V","S","D")
-    val monthLabel = s"${monthNames(today.getMonthValue)} ${today.getYear}"
-
-    // Primer día de semana (1=Lun ... 7=Dom)
-    val startDow = firstDay.getDayOfWeek.getValue  // 1-7
-    val blancos  = startDow - 1  // celdas vacías al inicio
-    val totalDays = ym.lengthOfMonth()
-
-    val tipoColor = Map("LIGA"->"#0d6efd","TORNEO"->"#6f42c1","AMISTOSO"->"#20c997","CUP"->"#fd7e14")
+    val startDow    = firstDay.getDayOfWeek.getValue
+    val blancos     = startDow - 1
+    val daysInMonth = lastDay.getDayOfMonth
+    val todayStr    = today.toString
 
     renderAm("calendar", user.nombre,
       div(
-        // Cabecera mes
         div(cls := "d-flex justify-content-between align-items-center mb-3",
-          h5(cls := "fw-black text-white mb-0", s"📅 $monthLabel"),
+          h5(cls := "fw-black mb-0", s"$monthName $year"),
           a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
         ),
-
-        // Próximos partidos
+        div(cls := "card-am p-2 mb-3",
+          div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
+            frag(Seq("L","M","X","J","V","S","D").map(d =>
+              div(cls := "text-center xx-small text-muted fw-bold py-1", d)
+            ): _*),
+            frag((1 to blancos).map(_ => div()): _*),
+            frag((1 to daysInMonth).map { d =>
+              val dateStr = f"$year-$month%02d-$d%02d"
+              val hasSched = schedByDate.contains(dateStr)
+              val isToday  = dateStr == todayStr
+              val dayCls   = "cal-day" + (if (isToday) " today" else if (hasSched) " has-schedule" else "")
+              div(cls := dayCls,
+                div(cls := "day-num", d.toString),
+                if (hasSched)
+                  frag(schedByDate(dateStr).map(s =>
+                    div(cls := "xx-small", style := "overflow:hidden;white-space:nowrap;text-overflow:ellipsis;",
+                      s.rival)
+                  ): _*)
+                else span()
+              )
+            }: _*)
+          )
+        ),
+        div(cls := "d-flex gap-3 mb-3 xx-small",
+          span(span(cls := "cal-dot", style := "background:#38a169;"), " Jugado"),
+          span(span(cls := "cal-dot", style := "background:#d69e2e;"), " Programado"),
+          span(span(cls := "cal-dot", style := "background:#0d6efd;"), " Hoy")
+        ),
         if (upcoming.nonEmpty)
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "xx-small text-muted fw-bold mb-2", "PRÓXIMOS PARTIDOS"),
+          div(cls := "card-am p-3",
+            div(cls := "fw-bold small text-muted mb-2", "PROXIMOS PARTIDOS"),
             frag(upcoming.map { s =>
-              val col = tipoColor.getOrElse(s.tipo, "#0d6efd")
+              val tipoColor = s.tipo match {
+                case "TORNEO" => "#dc3545"; case "CUP" => "#6f42c1"; case _ => "#0d6efd"
+              }
               div(cls := "d-flex align-items-center gap-2 py-2",
-                style := "border-bottom:1px solid #1e1e1e;",
-                div(style := s"width:4px; height:36px; border-radius:2px; background:$col; flex-shrink:0;"),
+                style := "border-bottom:1px solid #e2e8f0;",
+                div(style := s"width:4px;height:36px;background:$tipoColor;border-radius:2px;"),
                 div(cls := "flex-fill",
-                  div(cls := "fw-bold small text-white", s.rival),
+                  div(cls := "fw-bold small", s.rival),
                   div(cls := "xx-small text-muted",
-                    s"${s.fecha}${if(s.hora.nonEmpty) " · "+s.hora else ""}${if(s.lugar.nonEmpty) " · "+s.lugar else ""}")
+                    s.fecha,
+                    if (s.hora.nonEmpty) s" - ${s.hora}" else "",
+                    if (s.lugar.nonEmpty) s" - ${s.lugar}" else "")
                 ),
-                span(cls := "badge xx-small", style := s"background:${col}33; color:$col;", s.tipo),
                 form(action := "/am/calendar/delete", method := "post",
                   input(tpe := "hidden", name := "scheduleId", value := s.id.toString),
-                  button(tpe := "submit", cls := "btn btn-outline-secondary btn-sm", style := "padding:2px 6px; font-size:11px;", "✕")
+                  button(tpe := "submit", cls := "btn btn-outline-danger btn-sm",
+                    style := "font-size:10px;", "X")
                 )
               )
             }: _*)
           )
-        else div(),
-
-        // Grid del mes
-        div(cls := "card-am p-3 mb-3",
-          // Cabeceras días
-          div(cls := "row g-1 mb-1",
-            frag(dayNames.map { d =>
-              div(cls := "col",
-                div(cls := "text-center xx-small text-muted fw-bold", d))
-            }: _*)
-          ),
-          // Celdas — 7 columnas con CSS grid
-          div(style := "display:grid; grid-template-columns:repeat(7,1fr); gap:4px;",
-            // Blancos iniciales
-            frag((1 to blancos).map(_ => div()): _*),
-            // Días del mes
-            frag((1 to totalDays).map { d =>
-              val dateStr  = LocalDate.of(today.getYear, today.getMonthValue, d).toString
-              val isToday  = d == today.getDayOfMonth
-              val hasSched = schedByDate.contains(dateStr)
-              val hasMatch = matchByDate.contains(dateStr)
-              val cls0 = "cal-day" +
-                (if (isToday) " today" else "") +
-                (if (hasMatch) " has-match" else if (hasSched) " has-schedule" else "")
-              div(cls := cls0,
-                div(cls := s"day-num ${if(isToday) "text-primary" else "text-white"}", d.toString),
-                if (hasMatch)
-                  frag(matchByDate(dateStr).map { m =>
-                    div(cls := "xx-small text-success", style := "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;",
-                      s"✅ ${m.rival}")
-                  }: _*)
-                else if (hasSched)
-                  frag(schedByDate(dateStr).map { s =>
-                    val col = tipoColor.getOrElse(s.tipo, "#ffc107")
-                    div(cls := "xx-small", style := s"color:$col; white-space:nowrap;overflow:hidden;text-overflow:ellipsis;",
-                      s"⚽ ${s.rival}")
-                  }: _*)
-                else div()
-              )
-            }: _*)
+        else
+          div(cls := "card-am p-3 text-center", style := "border-style:dashed;",
+            div(cls := "text-muted small", "Sin partidos programados"),
+            a(href := "/am/calendar/add", cls := "btn btn-outline-primary btn-sm mt-2", "+ Añadir")
           )
-        ),
-
-        // Leyenda
-        div(cls := "d-flex gap-3 xx-small text-muted mb-3",
-          div(span(cls := "cal-dot", style := "background:#28a745;"), " Jugado"),
-          div(span(cls := "cal-dot", style := "background:#ffc107;"), " Programado"),
-          div(span(cls := "cal-dot", style := s"background:#0d6efd;"), " Hoy")
-        )
       )
     )
   }
 
   @cask.get("/am/calendar/add")
   def calendarAddPage(request: cask.Request) = withAmAuth(request) { user =>
+    val today = java.time.LocalDate.now().toString
     renderAm("calendar", user.nombre,
       div(
-        h5(cls := "fw-black text-white mb-3", "📅 Añadir partido"),
+        h5(cls := "fw-black mb-3", "Añadir partido a la agenda"),
         div(cls := "card-am p-3",
           form(action := "/am/calendar/save", method := "post",
             div(cls := "mb-3",
               label(cls := "xx-small text-muted fw-bold", "RIVAL"),
-              input(tpe := "text", name := "rival",
-                cls := "form-control mt-1",
-                placeholder := "Nombre del equipo rival", required := true)
+              input(tpe := "text", name := "rival", cls := "form-control mt-1",
+                placeholder := "Equipo rival", required := true)
             ),
             div(cls := "row g-2 mb-3",
               div(cls := "col-6",
                 label(cls := "xx-small text-muted fw-bold", "FECHA"),
                 input(tpe := "date", name := "fecha", cls := "form-control mt-1",
-                  value := java.time.LocalDate.now().toString, required := true)
+                  value := today, required := true)
               ),
               div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "HORA (opcional)"),
+                label(cls := "xx-small text-muted fw-bold", "HORA"),
                 input(tpe := "time", name := "hora", cls := "form-control mt-1")
               )
             ),
             div(cls := "mb-3",
-              label(cls := "xx-small text-muted fw-bold", "LUGAR / CAMPO"),
-              input(tpe := "text", name := "lugar", cls := "form-control mt-1",
-                placeholder := "Ej: Campo Municipal Norte")
+              label(cls := "xx-small text-muted fw-bold", "LUGAR"),
+              input(tpe := "text", name := "lugar", cls := "form-control mt-1", placeholder := "Campo / pabellon")
             ),
             div(cls := "mb-3",
               label(cls := "xx-small text-muted fw-bold", "TIPO"),
@@ -1314,39 +1457,423 @@ object AmateurController extends cask.Routes {
               )
             ),
             div(cls := "mb-3",
-              label(cls := "xx-small text-muted fw-bold", "NOTAS (opcional)"),
-              input(tpe := "text", name := "notas", cls := "form-control mt-1",
-                placeholder := "Árbitro, vestuario, instrucciones del míster...")
+              label(cls := "xx-small text-muted fw-bold", "NOTAS"),
+              textarea(name := "notas", cls := "form-control mt-1", rows := "2")
             ),
-            button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold py-3", "GUARDAR"),
-            div(cls := "text-center mt-3",
-              a(href := "/am/calendar", cls := "text-muted small", "← Volver al calendario"))
+            button(tpe := "submit", cls := "btn btn-primary fw-bold w-100", "Guardar")
           )
         )
       )
     )
   }
 
-  @cask.postForm("/am/calendar/save")
-  def saveSchedule(request: cask.Request, rival: String, fecha: String,
-                   hora: String = "", lugar: String = "",
-                   tipo: String = "LIGA", notas: String = "") =
-    withAmAuth(request) { user =>
-      AmateurDatabaseManager.saveSchedule(user.id, rival, fecha, hora, lugar, tipo, notas)
-      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
-    }
+  @cask.post("/am/calendar/save")
+  def calendarSave(request: cask.Request) = withAmAuth(request) { user =>
+    val body   = new String(request.data.readAllBytes(), "UTF-8")
+    val params = body.split("&").map { pair =>
+      val p = pair.split("=", 2)
+      java.net.URLDecoder.decode(p(0), "UTF-8") -> (if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else "")
+    }.toMap
+    AmateurDatabaseManager.saveSchedule(
+      user.id,
+      params.getOrElse("rival", ""),
+      params.getOrElse("fecha", java.time.LocalDate.now().toString),
+      params.getOrElse("hora", ""),
+      params.getOrElse("lugar", ""),
+      params.getOrElse("tipo", "LIGA"),
+      params.getOrElse("notas", "")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
+  }
 
-  @cask.postForm("/am/calendar/delete")
-  def deleteSchedule(request: cask.Request, scheduleId: Int) =
-    withAmAuth(request) { user =>
-      AmateurDatabaseManager.deleteSchedule(scheduleId, user.id)
-      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
-    }
+  @cask.post("/am/calendar/delete")
+  def calendarDelete(request: cask.Request) = withAmAuth(request) { user =>
+    val body   = new String(request.data.readAllBytes(), "UTF-8")
+    val params = body.split("&").map { pair =>
+      val p = pair.split("=", 2)
+      java.net.URLDecoder.decode(p(0), "UTF-8") -> (if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else "")
+    }.toMap
+    val sid = params.getOrElse("scheduleId", "0").toIntOption.getOrElse(0)
+    AmateurDatabaseManager.deleteSchedule(sid, user.id)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
+  }
+
+  // ── INFORME PDF ──────────────────────────────────────────────────────────────
+  @cask.get("/am/report")
+  def reportPage(request: cask.Request) = withAmAuth(request) { user =>
+    val data          = AmateurDatabaseManager.getReportData(user.id)
+    val pj            = data.getOrElse("pj", 0).asInstanceOf[Int]
+    val pjP           = data.getOrElse("pjPortero", 0).asInstanceOf[Int]
+    val pjJ           = data.getOrElse("pjJugador", 0).asInstanceOf[Int]
+    val notaM         = data.getOrElse("notaMedia", 0.0).asInstanceOf[Double]
+    val notaP         = data.getOrElse("notaPortero", 0.0).asInstanceOf[Double]
+    val notaJ         = data.getOrElse("notaJugador", 0.0).asInstanceOf[Double]
+    val gcMedia       = data.getOrElse("gcMedia", 0.0).asInstanceOf[Double]
+    val limpias       = data.getOrElse("limpias", 0).asInstanceOf[Int]
+    val ganados       = data.getOrElse("ganados", 0).asInstanceOf[Int]
+    val empatados     = data.getOrElse("empatados", 0).asInstanceOf[Int]
+    val perdidos      = data.getOrElse("perdidos", 0).asInstanceOf[Int]
+    val golesMarcados = data.getOrElse("golesMarcados", 0).asInstanceOf[Int]
+    val asistencias   = data.getOrElse("asistencias", 0).asInstanceOf[Int]
+    val totalPen      = data.getOrElse("totalPen", 0).asInstanceOf[Int]
+    val paradasPen    = data.getOrElse("paradasPen", 0).asInstanceOf[Int]
+    val historial     = data.getOrElse("historial", List.empty).asInstanceOf[List[Map[String, String]]]
+    val nextMatch     = data.getOrElse("nextMatch", None).asInstanceOf[Option[Map[String, String]]]
+    val pctLimpias    = if (pjP > 0) (limpias * 100) / pjP else 0
+    val pctParadas    = if (totalPen > 0) (paradasPen * 100) / totalPen else 0
+    val today         = java.time.LocalDate.now().toString
+
+    val histRows = historial.map { m =>
+      val nota   = m.getOrElse("nota","5").toDoubleOption.getOrElse(5.0)
+      val notaCls = if(nota>=7)"nota-green" else if(nota>=5)"nota-yellow" else "nota-red"
+      val esP    = m.getOrElse("posicion","Portero").startsWith("Portero")
+      s"""<tr>
+        <td>${m.getOrElse("fecha","")}</td>
+        <td style="font-weight:600">${m.getOrElse("rival","")}</td>
+        <td style="text-align:center">${m.getOrElse("res","")}</td>
+        <td><span class="${if(esP) "badge-portero" else "badge-jugador"}">${m.getOrElse("posicion","Portero")}</span></td>
+        <td style="text-align:center"><span class="nota-pill $notaCls">${m.getOrElse("nota","")}</span></td>
+        <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("goles","0")}</td>
+        <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("asist","0")}</td>
+      </tr>"""
+    }.mkString("
+    ")
+
+    val nextHtml = nextMatch.map { nm =>
+      s"""<div class="mb-3 p-2" style="border-left:4px solid #f59e0b;background:#fffbeb;border-radius:4px;">
+        <div style="font-size:9px;font-weight:700;color:#92400e;">PROXIMO &middot; ${nm.getOrElse("tipo","LIGA")}</div>
+        <div style="font-weight:900;font-size:1rem;">${nm.getOrElse("rival","")}</div>
+        <div style="font-size:10px;color:#718096;">${nm.getOrElse("fecha","")}${if(nm.getOrElse("hora","").nonEmpty) " &middot; " + nm("hora") else ""}</div>
+      </div>"""
+    }.getOrElse("")
+
+    val rolSection = if (pjJ > 0)
+      s"""<div class="section-title">Desglose por posicion</div>
+      <div class="row g-2 mb-2">
+        <div class="col-6"><div class="stat-box" style="border-color:#bfdbfe;">
+          <div style="font-size:9px;font-weight:700;color:#1e40af;margin-bottom:6px;">PORTERO</div>
+          <div class="d-flex justify-content-around">
+            <div><div class="stat-val text-primary">$pjP</div><div class="stat-lbl">Partidos</div></div>
+            <div><div class="stat-val text-primary">${f"$notaP%.1f"}</div><div class="stat-lbl">Nota</div></div>
+            <div><div class="stat-val text-success">$limpias</div><div class="stat-lbl">Limpias</div></div>
+          </div></div></div>
+        <div class="col-6"><div class="stat-box" style="border-color:#ddd6fe;">
+          <div style="font-size:9px;font-weight:700;color:#5b21b6;margin-bottom:6px;">JUGADOR</div>
+          <div class="d-flex justify-content-around">
+            <div><div class="stat-val" style="color:#5b21b6;">$pjJ</div><div class="stat-lbl">Partidos</div></div>
+            <div><div class="stat-val" style="color:#5b21b6;">${f"$notaJ%.1f"}</div><div class="stat-lbl">Nota</div></div>
+            <div><div class="stat-val" style="color:#5b21b6;">$golesMarcados</div><div class="stat-lbl">Goles</div></div>
+            <div><div class="stat-val" style="color:#5b21b6;">$asistencias</div><div class="stat-lbl">Asist.</div></div>
+          </div></div></div>
+      </div>"""
+    else ""
+
+    val penSection = if (totalPen > 0)
+      s"""<div class="section-title">Penaltis</div>
+      <div class="row g-2 mb-2">
+        <div class="col-3"><div class="stat-box"><div class="stat-val">$totalPen</div><div class="stat-lbl">Total</div></div></div>
+        <div class="col-3"><div class="stat-box"><div class="stat-val text-success">$paradasPen</div><div class="stat-lbl">Parados</div></div></div>
+        <div class="col-3"><div class="stat-box"><div class="stat-val text-danger">${totalPen-paradasPen}</div><div class="stat-lbl">Encajados</div></div></div>
+        <div class="col-3"><div class="stat-box"><div class="stat-val">$pctParadas%</div><div class="stat-lbl">% parada</div></div></div>
+      </div>"""
+    else ""
+
+    val html =
+      s"""<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<title>Informe Guardian Amateur - ${user.nombre}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<style>
+@page{size:A4;margin:16mm}
+body{font-family:'Segoe UI',sans-serif;background:#fff;color:#1a202c;font-size:12px}
+@media screen{body{max-width:800px;margin:0 auto;padding:20px}}
+@media print{.no-print{display:none!important}}
+.stat-box{border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center}
+.stat-val{font-size:1.4rem;font-weight:900;line-height:1}
+.stat-lbl{font-size:9px;color:#718096;text-transform:uppercase;margin-top:2px}
+.section-title{font-size:10px;font-weight:800;letter-spacing:.08em;color:#718096;text-transform:uppercase;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-bottom:10px;margin-top:14px}
+.badge-portero{background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700}
+.badge-jugador{background:#ede9fe;color:#5b21b6;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700}
+table{border-collapse:collapse;width:100%;font-size:10px}
+th{background:#f8fafc;font-weight:700;color:#4a5568;padding:5px 8px;border:1px solid #e2e8f0;text-align:left}
+td{padding:4px 8px;border:1px solid #e2e8f0}
+tr:nth-child(even){background:#f8fafc}
+.nota-pill{border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:10px}
+.nota-green{background:#d1fae5;color:#065f46}
+.nota-yellow{background:#fef3c7;color:#92400e}
+.nota-red{background:#fee2e2;color:#991b1b}
+</style></head>
+<body>
+<div class="no-print mb-3 d-flex gap-2">
+  <button class="btn btn-primary fw-bold" onclick="window.print()">Imprimir / Guardar PDF</button>
+  <a href="/am/dashboard" class="btn btn-outline-secondary">&larr; Volver</a>
+</div>
+<div class="d-flex align-items-center justify-content-between mb-3 pb-2" style="border-bottom:3px solid #0d6efd;">
+  <div>
+    <div style="font-size:1.2rem;font-weight:900;">&#128737; GUARDIAN AMATEUR</div>
+    <div style="font-size:10px;color:#718096;">Informe de rendimiento &mdash; ${user.nombre}</div>
+  </div>
+  <div class="text-end">
+    <div style="font-size:9px;color:#718096;">$today</div>
+    <div style="font-size:9px;color:#718096;">$pj partidos totales</div>
+  </div>
+</div>
+$nextHtml
+<div class="section-title">Estadisticas globales</div>
+<div class="row g-2 mb-2">
+  <div class="col"><div class="stat-box"><div class="stat-val text-primary">${f"$notaM%.1f"}</div><div class="stat-lbl">Nota media</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-danger">${f"$gcMedia%.1f"}</div><div class="stat-lbl">GC/partido</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-success">$limpias ($pctLimpias%)</div><div class="stat-lbl">Limpias</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val">$ganados</div><div class="stat-lbl">Ganados</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-warning">$empatados</div><div class="stat-lbl">Empates</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-danger">$perdidos</div><div class="stat-lbl">Perdidos</div></div></div>
+</div>
+$rolSection
+$penSection
+<div class="section-title">Ultimos ${historial.size} partidos</div>
+<table><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Posicion</th><th>Nota</th><th>Goles</th><th>Asist.</th></tr></thead>
+<tbody>$histRows</tbody></table>
+<div class="mt-3 text-center" style="font-size:9px;color:#a0aec0;border-top:1px solid #e2e8f0;padding-top:8px;">Guardian Amateur &copy; $today</div>
+</body></html>"""
+
+    cask.Response(html, headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
 
   // Redirect /am → /am/dashboard
   @cask.get("/am")
   def amRoot(request: cask.Request) =
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/dashboard"))
+
+  // ── PROGRESIÓN Y TENDENCIAS ────────────────────────────────────────────────
+  @cask.get("/am/progression")
+  def progressionPage(request: cask.Request) = withAmAuth(request) { user =>
+    val d = AmateurDatabaseManager.getProgressionData(user.id)
+
+    val totalPartidos  = d("totalPartidos").asInstanceOf[Int]
+    val tendencia      = d("tendencia").asInstanceOf[String]
+    val tendenciaDelta = d("tendenciaDelta").asInstanceOf[Double]
+    val labels         = d("labels").asInstanceOf[List[String]]
+    val notas          = d("notas").asInstanceOf[List[Double]]
+    val gcList         = d("gcList").asInstanceOf[List[Int]]
+    val resultados     = d("resultados").asInstanceOf[List[String]]
+    val mesList        = d("mesList").asInstanceOf[List[Map[String, Any]]]
+    val mejorPartido   = d("mejorPartido").asInstanceOf[Option[Map[String, String]]]
+    val peorPartido    = d("peorPartido").asInstanceOf[Option[Map[String, String]]]
+    val racha          = d("racha").asInstanceOf[List[String]]
+
+    val tendenciaColor = tendencia match {
+      case "MEJORANDO"    => "#20c997"
+      case "BAJANDO"      => "#dc3545"
+      case "ESTABLE"      => "#ffc107"
+      case _              => "#6c757d"
+    }
+    val tendenciaIcon = tendencia match {
+      case "MEJORANDO"    => "↑"
+      case "BAJANDO"      => "↓"
+      case "ESTABLE"      => "→"
+      case _              => "—"
+    }
+    val tendenciaLabel = tendencia match {
+      case "MEJORANDO"    => "Mejorando"
+      case "BAJANDO"      => "Bajando"
+      case "ESTABLE"      => "Estable"
+      case _              => "Pocos datos"
+    }
+
+    val labelsJson   = labels.map(l => s""""$l"""").mkString("[", ",", "]")
+    val notasJson    = notas.map(n => f"$n%.1f").mkString("[", ",", "]")
+    val gcJson       = gcList.mkString("[", ",", "]")
+
+    def mesLabel(m: String): String = {
+      val parts = m.split("-")
+      if (parts.length == 2) {
+        val mes = parts(1).toIntOption.getOrElse(0)
+        val meses = Array("", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+        if (mes >= 1 && mes <= 12) s"${meses(mes)} ${parts(0).takeRight(2)}" else m
+      } else m
+    }
+
+    renderAm("progression", user.nombre,
+      div(
+        // Header
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "📈 Progresión"),
+          span(cls := "text-muted small", s"$totalPartidos partidos registrados")
+        ),
+
+        if (totalPartidos == 0)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:48px; opacity:0.4", "📊"),
+            h5(cls := "text-muted mt-3", "Sin datos aún"),
+            p(cls := "text-secondary small", "Registra partidos para ver tu evolución."),
+            a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
+          )
+        else frag(
+
+          // Tendencia principal
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex align-items-center gap-3",
+              div(style := s"font-size:2.8rem; color:$tendenciaColor; font-weight:900; line-height:1;",
+                tendenciaIcon),
+              div(
+                div(cls := "fw-black text-white", style := "font-size:1.2rem;", tendenciaLabel),
+                div(cls := "xx-small text-muted",
+                  if (tendencia != "POCOS_DATOS")
+                    s"${if (tendenciaDelta >= 0) "+" else ""}${f"$tendenciaDelta%.2f"} puntos vs. 5 partidos anteriores"
+                  else "Necesitas al menos 6 partidos para calcular tendencia"
+                )
+              )
+            )
+          ),
+
+          // Racha actual (últimos 10)
+          if (racha.nonEmpty)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "FORMA RECIENTE"),
+              div(cls := "d-flex gap-1 flex-wrap",
+                frag(racha.reverse.map { r =>
+                  val (bg, txt) = r match {
+                    case "W" => ("#20c997", "G")
+                    case "D" => ("#ffc107", "E")
+                    case _   => ("#dc3545", "P")
+                  }
+                  span(style := s"background:$bg; color:#000; font-weight:900; font-size:11px; width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;",
+                    txt)
+                }: _*)
+              )
+            )
+          else span(),
+
+          // Gráfico evolución nota
+          if (notas.size >= 2)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "EVOLUCIÓN DE NOTA"),
+              div(style := "height:160px;",
+                canvas(id := "chartNota")
+              ),
+              script(raw(s"""
+                new Chart(document.getElementById('chartNota'), {
+                  type: 'line',
+                  data: {
+                    labels: $labelsJson,
+                    datasets: [{
+                      label: 'Nota',
+                      data: $notasJson,
+                      borderColor: '#0d6efd',
+                      backgroundColor: 'rgba(13,110,253,0.1)',
+                      tension: 0.3,
+                      fill: true,
+                      pointRadius: ${if (notas.size > 20) "0" else "3"},
+                      borderWidth: 2
+                    }]
+                  },
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                      y: { min: 0, max: 10, ticks: { color: '#888', stepSize: 2 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#888', maxTicksLimit: 8 }, grid: { display: false } }
+                    }
+                  }
+                });
+              """))
+            )
+          else span(),
+
+          // Gráfico GC por partido
+          if (gcList.size >= 2)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "GOLES ENCAJADOS POR PARTIDO"),
+              div(style := "height:120px;",
+                canvas(id := "chartGC")
+              ),
+              script(raw(s"""
+                new Chart(document.getElementById('chartGC'), {
+                  type: 'bar',
+                  data: {
+                    labels: $labelsJson,
+                    datasets: [{
+                      label: 'GC',
+                      data: $gcJson,
+                      backgroundColor: function(ctx) {
+                        var v = ctx.raw;
+                        return v === 0 ? '#20c997' : v <= 1 ? '#ffc107' : '#dc3545';
+                      },
+                      borderRadius: 3
+                    }]
+                  },
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                      y: { ticks: { color: '#888', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#888', maxTicksLimit: 8 }, grid: { display: false } }
+                    }
+                  }
+                });
+              """))
+            )
+          else span(),
+
+          // Stats por mes
+          if (mesList.nonEmpty)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "POR MES"),
+              frag(mesList.map { mes =>
+                val nota = mes("notaMedia").asInstanceOf[Double]
+                val pj   = mes("pj").asInstanceOf[Int]
+                val lim  = mes("limpias").asInstanceOf[Int]
+                val gan  = mes("ganados").asInstanceOf[Int]
+                val nc   = if (nota >= 7.0) "#20c997" else if (nota >= 5.0) "#ffc107" else "#dc3545"
+                div(cls := "d-flex align-items-center gap-2 py-2",
+                  style := "border-bottom:1px solid rgba(255,255,255,0.06);",
+                  div(style := s"min-width:52px; font-size:11px; font-weight:700; color:$nc;",
+                    mesLabel(mes("mes").asInstanceOf[String])),
+                  div(cls := "flex-fill",
+                    div(cls := "d-flex gap-2",
+                      span(cls := "xx-small text-muted", s"$pj PJ"),
+                      span(cls := "xx-small text-muted", s"$gan G"),
+                      span(cls := "xx-small text-muted", s"$lim LP")
+                    )
+                  ),
+                  div(style := s"font-size:1.3rem; font-weight:900; color:$nc;",
+                    f"$nota%.1f")
+                )
+              }: _*)
+            )
+          else span(),
+
+          // Mejor / peor partido
+          div(cls := "row g-2 mb-3",
+            mejorPartido.map { m =>
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top: 3px solid #20c997;",
+                  div(cls := "xx-small text-muted mb-1", "MEJOR"),
+                  div(cls := "fw-black text-success", style := "font-size:1.5rem;", m("nota")),
+                  div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
+                  div(cls := "xx-small text-muted", m("res"))
+                )
+              )
+            }.getOrElse(span()),
+            peorPartido.map { m =>
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top: 3px solid #dc3545;",
+                  div(cls := "xx-small text-muted mb-1", "PEOR"),
+                  div(cls := "fw-black text-danger", style := "font-size:1.5rem;", m("nota")),
+                  div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
+                  div(cls := "xx-small text-muted", m("res"))
+                )
+              )
+            }.getOrElse(span())
+          )
+        ),
+
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js")
+      )
+    )
+  }
 
   initialize()
 }
