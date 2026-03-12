@@ -4380,8 +4380,7 @@ object HistoryController extends cask.Routes {
       case _                 => r
     }
 
-    val content = div(
-      h4(cls := "fw-black text-white mb-1", "🕵️ NLP Scouting Aggregator"),
+    val pageContent = basePage("history", div(
       p(cls := "text-muted small mb-4",
         "Pega el texto de cualquier informe de ojeador — Gemini extrae automáticamente valoraciones, proyección y recomendación."),
 
@@ -4439,11 +4438,15 @@ object HistoryController extends cask.Routes {
                   div(cls := "card-body p-3",
                     div(cls := "d-flex justify-content-between align-items-start mb-2",
                       div(
-                        div(cls := "fw-bold text-white small",
-                          r("ojeador").asInstanceOf[String].take(30).pipe(s => if (s.nonEmpty) s else "Ojeador anónimo")),
-                        div(cls := "xx-small text-muted",
-                          r("club").asInstanceOf[String].take(25).pipe(s => if (s.nonEmpty) s"$s · " else "") +
-                            r("fecha").asInstanceOf[String])
+                        div(cls := "fw-bold text-white small", {
+                          val s = r("ojeador").asInstanceOf[String].take(30)
+                          if (s.nonEmpty) s else "Ojeador anónimo"
+                        }),
+                        div(cls := "xx-small text-muted", {
+                          val s = r("club").asInstanceOf[String].take(25)
+                          (if (s.nonEmpty) s"$s · " else "") +
+                            r("fecha").asInstanceOf[String]
+                        }),
                       ),
                       div(cls := "text-end",
                         div(cls := s"badge bg-$pc mb-1", proy),
@@ -4574,7 +4577,8 @@ object HistoryController extends cask.Routes {
         }
       """))
     )
-    renderHtml(content)
+    )
+    renderHtml(pageContent)
   }
 
   @cask.postForm("/scouting/nlp/process")
@@ -4598,11 +4602,11 @@ object HistoryController extends cask.Routes {
         "areas"  -> result("areas_mejora").asInstanceOf[String],
         "resumen"-> result("resumen_ia").asInstanceOf[String]
       )
-      cask.Response(json.render(), headers = Seq("Content-Type" -> "application/json"))
+      cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
     } catch {
       case e: Exception =>
         val json = ujson.Obj("ok" -> ujson.False, "error" -> e.getMessage)
-        cask.Response(json.render(), statusCode = 500, headers = Seq("Content-Type" -> "application/json"))
+        cask.Response(json.render().getBytes("UTF-8"), statusCode = 500, headers = Seq("Content-Type" -> "application/json"))
     }
   }
 
@@ -4634,7 +4638,7 @@ object HistoryController extends cask.Routes {
     val acwrLabel = if (acwr > 1.5) "CARGA ALTA" else if (acwr > 1.2) "CARGA ELEVADA" else if (acwr > 0.8) "ÓPTIMO" else "DESCARGA"
     val rpeColor  = if (rpe > 7.5) "danger" else if (rpe > 5.5) "warning" else "success"
 
-    val content = div(
+    val pageContent = basePage("history", div(
       // Header
       div(cls := "d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2",
         div(
@@ -4708,7 +4712,8 @@ object HistoryController extends cask.Routes {
         usa "Regenerar" si cambias tu actividad sustancialmente.""")
       )
     )
-    renderHtml(content)
+    )
+    renderHtml(pageContent)
   }
 
   initialize()
