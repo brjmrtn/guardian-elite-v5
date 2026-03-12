@@ -1536,8 +1536,7 @@ object AmateurController extends cask.Routes {
         <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("goles","0")}</td>
         <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("asist","0")}</td>
       </tr>"""
-    }.mkString("
-    ")
+    }.mkString("\n")
 
     val nextHtml = nextMatch.map { nm =>
       s"""<div class="mb-3 p-2" style="border-left:4px solid #f59e0b;background:#fffbeb;border-radius:4px;">
