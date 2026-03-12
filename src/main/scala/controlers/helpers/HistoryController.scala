@@ -4503,7 +4503,7 @@ object HistoryController extends cask.Routes {
           "No hay informes procesados todavía. Pega el primero arriba."),
 
       // ── JS ──────────────────────────────────────────────────────────────────
-      script(raw(s"""
+      script(raw("""
         // Fecha por defecto = hoy
         document.getElementById('inp-fecha').value = new Date().toISOString().split('T')[0];
 
@@ -4717,4 +4717,4 @@ object HistoryController extends cask.Routes {
   }
 
   initialize()
-}}
+}
