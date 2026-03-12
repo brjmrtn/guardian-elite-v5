@@ -4380,7 +4380,7 @@ object HistoryController extends cask.Routes {
       case _                 => r
     }
 
-    val pageContent = basePage("history", div(
+    val pageContent = basePage("scouting-nlp", div(
       p(cls := "text-muted small mb-4",
         "Pega el texto de cualquier informe de ojeador — Gemini extrae automáticamente valoraciones, proyección y recomendación."),
 
@@ -4638,7 +4638,7 @@ object HistoryController extends cask.Routes {
     val acwrLabel = if (acwr > 1.5) "CARGA ALTA" else if (acwr > 1.2) "CARGA ELEVADA" else if (acwr > 0.8) "ÓPTIMO" else "DESCARGA"
     val rpeColor  = if (rpe > 7.5) "danger" else if (rpe > 5.5) "warning" else "success"
 
-    val pageContent = basePage("history", div(
+    val pageContent = basePage("nutrition", div(
       // Header
       div(cls := "d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2",
         div(
@@ -4717,4 +4717,4 @@ object HistoryController extends cask.Routes {
   }
 
   initialize()
-}
+}}
