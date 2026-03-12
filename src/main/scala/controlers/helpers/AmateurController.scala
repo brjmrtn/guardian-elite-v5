@@ -337,11 +337,11 @@ object AmateurController extends cask.Routes {
     }
   }
 
-  @cask.get("/profiles")
+  @cask.get("/am/logout")
   def doLogout(request: cask.Request) =
     cask.Response(Array.emptyByteArray, 302,
       headers = Seq(
-        "Location"   -> "/am/login",
+        "Location"   -> "/profiles",
         "Set-Cookie" -> s"guardian_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
       ))
 
