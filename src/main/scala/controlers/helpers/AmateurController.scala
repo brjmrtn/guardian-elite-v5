@@ -853,7 +853,7 @@ object AmateurController extends cask.Routes {
     val golesMarcados   = int("goles_marcados")
     val asistencias     = int("asistencias")
 
-    val matchId = AmateurDatabaseManager.saveMatch(
+    val matchId = AmateurDatabaseManager.logMatch(
       userId   = user.id,
       rival    = str("rival"),
       gf       = int("gf"),

@@ -10,34 +10,38 @@ import java.security.MessageDigest
 case class AmUser(id: Int, username: String, nombre: String)
 
 case class AmMatch(
-  id: Int, rival: String, gf: Int, gc: Int,
-  nota: Double, clima: String, estadio: String,
-  esLocal: Option[Boolean], fecha: String,
-  videoUrl: String, notas: String, analisisVoz: String
-)
+                    id: Int, rival: String, gf: Int, gc: Int,
+                    nota: Double, clima: String, estadio: String,
+                    esLocal: Option[Boolean], fecha: String,
+                    videoUrl: String, notas: String, analisisVoz: String,
+                    posicionPartido: String,   // "portero" | "jugador"
+                    posicionCampo: String,     // "Delantero", "Centrocampista", "Defensa", "" si portero
+                    golesMarcados: Int,        // solo relevante si jugó de jugador de campo
+                    asistencias: Int           // solo relevante si jugó de jugador de campo
+                  )
 
 case class AmGoal(
-  id: Int, matchId: Int, zona: String, situacion: String,
-  errorDefensivo: Boolean, minuto: Int, notas: String
-)
+                   id: Int, matchId: Int, zona: String, situacion: String,
+                   errorDefensivo: Boolean, minuto: Int, notas: String
+                 )
 
 case class AmPenalty(
-  id: Int, userId: Int, fecha: String, rival: String,
-  direccionTiro: String, direccionEstirada: String, parada: Boolean,
-  matchId: Option[Int], notas: String
-)
+                      id: Int, userId: Int, fecha: String, rival: String,
+                      direccionTiro: String, direccionEstirada: String, parada: Boolean,
+                      matchId: Option[Int], notas: String
+                    )
 
 case class AmGearItem(
-  id: Int, userId: Int, nombre: String, marca: String,
-  tipoLatex: String, corte: String, partidosUsados: Int,
-  activo: Boolean, notas: String
-)
+                       id: Int, userId: Int, nombre: String, marca: String,
+                       tipoLatex: String, corte: String, partidosUsados: Int,
+                       activo: Boolean, notas: String
+                     )
 
 case class AmSchedule(
-  id: Int, userId: Int, rival: String, fecha: String,
-  hora: String, lugar: String, tipo: String, notas: String,
-  matchId: Option[Int]
-)
+                       id: Int, userId: Int, rival: String, fecha: String,
+                       hora: String, lugar: String, tipo: String, notas: String,
+                       matchId: Option[Int]
+                     )
 
 // ─────────────────────────────────────────────────────────────────────────────
 object AmateurDatabaseManager {
@@ -72,21 +76,31 @@ object AmateurDatabaseManager {
       )""")
 
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_matches (
-        id            SERIAL PRIMARY KEY,
-        user_id       INT REFERENCES am_users(id) ON DELETE CASCADE,
-        rival         TEXT NOT NULL,
-        goles_favor   INT DEFAULT 0,
-        goles_contra  INT DEFAULT 0,
-        nota          DOUBLE PRECISION DEFAULT 5.0,
-        clima         TEXT DEFAULT 'Sol',
-        estadio       TEXT DEFAULT '',
-        es_local      BOOLEAN DEFAULT NULL,
-        fecha         DATE DEFAULT CURRENT_DATE,
-        video_url     TEXT DEFAULT '',
-        notas         TEXT DEFAULT '',
-        analisis_voz  TEXT DEFAULT '',
-        created_at    TIMESTAMP DEFAULT NOW()
+        id               SERIAL PRIMARY KEY,
+        user_id          INT REFERENCES am_users(id) ON DELETE CASCADE,
+        rival            TEXT NOT NULL,
+        goles_favor      INT DEFAULT 0,
+        goles_contra     INT DEFAULT 0,
+        nota             DOUBLE PRECISION DEFAULT 5.0,
+        clima            TEXT DEFAULT 'Sol',
+        estadio          TEXT DEFAULT '',
+        es_local         BOOLEAN DEFAULT NULL,
+        fecha            DATE DEFAULT CURRENT_DATE,
+        video_url        TEXT DEFAULT '',
+        notas            TEXT DEFAULT '',
+        analisis_voz     TEXT DEFAULT '',
+        posicion_partido TEXT DEFAULT 'portero',
+        posicion_campo   TEXT DEFAULT '',
+        goles_marcados   INT DEFAULT 0,
+        asistencias      INT DEFAULT 0,
+        created_at       TIMESTAMP DEFAULT NOW()
       )""")
+
+      // Columnas añadidas en v7.2 — idempotentes
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS posicion_partido TEXT DEFAULT 'portero'")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS posicion_campo TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS goles_marcados INT DEFAULT 0")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS asistencias INT DEFAULT 0")
 
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_match_goals (
         id               SERIAL PRIMARY KEY,
@@ -213,18 +227,21 @@ object AmateurDatabaseManager {
 
   // ── MATCHES ────────────────────────────────────────────────────────────────
   def logMatch(
-    userId: Int, rival: String, gf: Int, gc: Int,
-    nota: Double, clima: String, estadio: String,
-    esLocal: Option[Boolean], fecha: String,
-    videoUrl: String, notas: String
-  ): Int = {
+                userId: Int, rival: String, gf: Int, gc: Int,
+                nota: Double, clima: String, estadio: String,
+                esLocal: Option[Boolean], fecha: String,
+                videoUrl: String, notas: String,
+                posicionPartido: String = "portero", posicionCampo: String = "",
+                golesMarcados: Int = 0, asistencias: Int = 0
+              ): Int = {
     val conn = getConn()
     try {
       val ps = conn.prepareStatement("""
         INSERT INTO am_matches
           (user_id, rival, goles_favor, goles_contra, nota, clima, estadio,
-           es_local, fecha, video_url, notas)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           es_local, fecha, video_url, notas,
+           posicion_partido, posicion_campo, goles_marcados, asistencias)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
       """)
       ps.setInt(1, userId)
@@ -241,6 +258,10 @@ object AmateurDatabaseManager {
       ps.setDate(9, Date.valueOf(if (fecha.nonEmpty) fecha else LocalDate.now().toString))
       ps.setString(10, videoUrl)
       ps.setString(11, fix(notas))
+      ps.setString(12, posicionPartido)
+      ps.setString(13, posicionCampo)
+      ps.setInt(14, golesMarcados)
+      ps.setInt(15, asistencias)
       val rs = ps.executeQuery()
       if (rs.next()) rs.getInt(1) else -1
     } finally { conn.close() }
@@ -251,7 +272,7 @@ object AmateurDatabaseManager {
     try {
       val ps = conn.prepareStatement(
         "SELECT * FROM am_matches WHERE user_id = ? ORDER BY fecha DESC, created_at DESC"
-      )
+      )  // posicion_partido, posicion_campo, goles_marcados, asistencias leídos vía mapRow
       ps.setInt(1, userId)
       val rs = ps.executeQuery()
       var list = List[AmMatch]()
@@ -371,10 +392,10 @@ object AmateurDatabaseManager {
 
   // ── PENALTIES ──────────────────────────────────────────────────────────────
   def savePenalty(
-    userId: Int, fecha: String, rival: String,
-    dirTiro: String, dirEstirada: String, parada: Boolean,
-    matchId: Option[Int], notas: String
-  ): Unit = {
+                   userId: Int, fecha: String, rival: String,
+                   dirTiro: String, dirEstirada: String, parada: Boolean,
+                   matchId: Option[Int], notas: String
+                 ): Unit = {
     val conn = getConn()
     try {
       val ps = conn.prepareStatement("""
@@ -473,9 +494,9 @@ object AmateurDatabaseManager {
           "estDer"             -> rs.getInt("est_der")
         )
       } else Map("total" -> 0, "paradas" -> 0, "adivinados" -> 0, "pctParada" -> 0,
-                 "pctIntuicion" -> 0, "paradasConIntuicion" -> 0,
-                 "tirIzq" -> 0, "tirCen" -> 0, "tirDer" -> 0,
-                 "estIzq" -> 0, "estCen" -> 0, "estDer" -> 0)
+        "pctIntuicion" -> 0, "paradasConIntuicion" -> 0,
+        "tirIzq" -> 0, "tirCen" -> 0, "tirDer" -> 0,
+        "estIzq" -> 0, "estCen" -> 0, "estDer" -> 0)
     } finally { conn.close() }
   }
 
@@ -601,16 +622,17 @@ object AmateurDatabaseManager {
 
       // Últimos 5 partidos
       val rsLast = conn.prepareStatement("""
-        SELECT rival, goles_favor, goles_contra, nota, fecha
+        SELECT rival, goles_favor, goles_contra, nota, fecha, posicion_partido
         FROM am_matches WHERE user_id = ? ORDER BY fecha DESC, id DESC LIMIT 5
       """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
       var ultimos = List[Map[String, String]]()
       while (rsLast.next()) {
         ultimos = ultimos :+ Map(
-          "rival"  -> rsLast.getString("rival"),
-          "res"    -> s"${rsLast.getInt("goles_favor")}-${rsLast.getInt("goles_contra")}",
-          "nota"   -> f"${rsLast.getDouble("nota")}%.1f",
-          "fecha"  -> rsLast.getDate("fecha").toString
+          "rival"    -> rsLast.getString("rival"),
+          "res"      -> s"${rsLast.getInt("goles_favor")}-${rsLast.getInt("goles_contra")}",
+          "nota"     -> f"${rsLast.getDouble("nota")}%.1f",
+          "fecha"    -> rsLast.getDate("fecha").toString,
+          "posicion" -> Option(rsLast.getString("posicion_partido")).getOrElse("portero")
         )
       }
 
@@ -723,6 +745,224 @@ object AmateurDatabaseManager {
         )
       }
       list
+    } finally { conn.close() }
+  }
+
+  // ── DATOS PARA INFORME PDF ────────────────────────────────────────────────
+  def getReportData(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Stats globales separadas por rol
+      val rsGlobal = conn.prepareStatement("""
+        SELECT
+          COUNT(*) as pj,
+          COUNT(*) FILTER (WHERE posicion_partido = 'portero') as pj_portero,
+          COUNT(*) FILTER (WHERE posicion_partido = 'jugador') as pj_jugador,
+          COALESCE(AVG(nota), 0) as nota_media,
+          COALESCE(AVG(nota) FILTER (WHERE posicion_partido = 'portero'), 0) as nota_portero,
+          COALESCE(AVG(nota) FILTER (WHERE posicion_partido = 'jugador'), 0) as nota_jugador,
+          COALESCE(AVG(goles_contra), 0) as gc_media,
+          SUM(CASE WHEN goles_contra = 0 AND posicion_partido = 'portero' THEN 1 ELSE 0 END) as limpias,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as ganados,
+          SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) as empatados,
+          SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) as perdidos,
+          COALESCE(SUM(goles_marcados), 0) as goles_marcados_total,
+          COALESCE(SUM(asistencias), 0) as asistencias_total
+        FROM am_matches WHERE user_id = ?
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      val statsMap = if (rsGlobal.next()) Map(
+        "pj"           -> rsGlobal.getInt("pj"),
+        "pjPortero"    -> rsGlobal.getInt("pj_portero"),
+        "pjJugador"    -> rsGlobal.getInt("pj_jugador"),
+        "notaMedia"    -> rsGlobal.getDouble("nota_media"),
+        "notaPortero"  -> rsGlobal.getDouble("nota_portero"),
+        "notaJugador"  -> rsGlobal.getDouble("nota_jugador"),
+        "gcMedia"      -> rsGlobal.getDouble("gc_media"),
+        "limpias"      -> rsGlobal.getInt("limpias"),
+        "ganados"      -> rsGlobal.getInt("ganados"),
+        "empatados"    -> rsGlobal.getInt("empatados"),
+        "perdidos"     -> rsGlobal.getInt("perdidos"),
+        "golesMarcados"-> rsGlobal.getInt("goles_marcados_total"),
+        "asistencias"  -> rsGlobal.getInt("asistencias_total")
+      ) else Map.empty[String, Any]
+
+      // Historial últimos 20 partidos
+      val rsH = conn.prepareStatement("""
+        SELECT rival, goles_favor, goles_contra, nota, fecha,
+               posicion_partido, posicion_campo, goles_marcados, asistencias
+        FROM am_matches WHERE user_id = ?
+        ORDER BY fecha DESC, id DESC LIMIT 20
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      var historial = List[Map[String, String]]()
+      while (rsH.next()) {
+        val pos = Option(rsH.getString("posicion_partido")).getOrElse("portero")
+        val posCampo = Option(rsH.getString("posicion_campo")).getOrElse("")
+        val posLabel = if (pos == "jugador") s"Jugador${if (posCampo.nonEmpty) s" ($posCampo)" else ""}" else "Portero"
+        historial = historial :+ Map(
+          "rival"    -> rsH.getString("rival"),
+          "res"      -> s"${rsH.getInt("goles_favor")}-${rsH.getInt("goles_contra")}",
+          "nota"     -> f"${rsH.getDouble("nota")}%.1f",
+          "fecha"    -> rsH.getDate("fecha").toString,
+          "posicion" -> posLabel,
+          "goles"    -> rsH.getInt("goles_marcados").toString,
+          "asist"    -> rsH.getInt("asistencias").toString
+        )
+      }
+
+      // Penaltis
+      val rsPen = conn.prepareStatement("""
+        SELECT COUNT(*) as total,
+               SUM(CASE WHEN parada = TRUE THEN 1 ELSE 0 END) as paradas
+        FROM am_penalties WHERE user_id = ?
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val (totalPen, paradasPen) = if (rsPen.next()) {
+        (rsPen.getInt("total"), rsPen.getInt("paradas"))
+      } else (0, 0)
+
+      // Próximo partido
+      val rsNext = conn.prepareStatement("""
+        SELECT rival, fecha, hora, lugar, tipo FROM am_schedule
+        WHERE user_id = ? AND fecha >= CURRENT_DATE AND match_id IS NULL
+        ORDER BY fecha ASC LIMIT 1
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val nextMatch = if (rsNext.next()) Some(Map(
+        "rival" -> rsNext.getString("rival"),
+        "fecha" -> rsNext.getDate("fecha").toString,
+        "hora"  -> Option(rsNext.getString("hora")).getOrElse(""),
+        "lugar" -> Option(rsNext.getString("lugar")).getOrElse(""),
+        "tipo"  -> Option(rsNext.getString("tipo")).getOrElse("LIGA")
+      )) else None
+
+      statsMap ++ Map(
+        "historial"   -> historial,
+        "totalPen"    -> totalPen,
+        "paradasPen"  -> paradasPen,
+        "nextMatch"   -> nextMatch
+      )
+    } finally { conn.close() }
+  }
+
+  // ── PROGRESION Y TENDENCIAS ───────────────────────────────────────────────
+  def getProgressionData(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Todos los partidos cronológicos para gráfico de evolución
+      val rsAll = conn.prepareStatement("""
+        SELECT fecha, nota, goles_contra, goles_favor,
+               CASE WHEN goles_favor > goles_contra THEN 'W'
+                    WHEN goles_favor = goles_contra THEN 'D'
+                    ELSE 'L' END as resultado
+        FROM am_matches WHERE user_id = ?
+        ORDER BY fecha ASC, id ASC
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      var labels    = List[String]()
+      var notas     = List[Double]()
+      var gcList    = List[Int]()
+      var resultados = List[String]()
+      var counter   = 1
+
+      while (rsAll.next()) {
+        labels     = labels     :+ s"P$counter"
+        notas      = notas      :+ rsAll.getDouble("nota")
+        gcList     = gcList     :+ rsAll.getInt("goles_contra")
+        resultados = resultados :+ rsAll.getString("resultado")
+        counter += 1
+      }
+
+      // Tendencia: comparar últimos 5 vs 5 anteriores (nota media)
+      val tendencia = if (notas.size >= 6) {
+        val last5 = notas.takeRight(5)
+        val prev5 = notas.dropRight(5).takeRight(5)
+        val avgLast = last5.sum / last5.size
+        val avgPrev = prev5.sum / prev5.size
+        val delta = avgLast - avgPrev
+        if (delta > 0.3) "MEJORANDO"
+        else if (delta < -0.3) "BAJANDO"
+        else "ESTABLE"
+      } else "POCOS_DATOS"
+
+      val tendenciaDelta = if (notas.size >= 6) {
+        val last5 = notas.takeRight(5)
+        val prev5 = notas.dropRight(5).takeRight(5)
+        last5.sum / last5.size - prev5.sum / prev5.size
+      } else 0.0
+
+      // Stats por mes
+      val rsMes = conn.prepareStatement("""
+        SELECT
+          TO_CHAR(fecha, 'YYYY-MM') as mes,
+          COUNT(*) as pj,
+          ROUND(AVG(nota)::numeric, 1) as nota_media,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as ganados
+        FROM am_matches WHERE user_id = ?
+        GROUP BY TO_CHAR(fecha, 'YYYY-MM')
+        ORDER BY mes DESC LIMIT 6
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      var mesList = List[Map[String, Any]]()
+      while (rsMes.next()) {
+        mesList = mesList :+ Map(
+          "mes"       -> rsMes.getString("mes"),
+          "pj"        -> rsMes.getInt("pj"),
+          "notaMedia" -> rsMes.getDouble("nota_media"),
+          "limpias"   -> rsMes.getInt("limpias"),
+          "ganados"   -> rsMes.getInt("ganados")
+        )
+      }
+
+      // Mejor y peor actuación
+      val rsBest = conn.prepareStatement("""
+        SELECT rival, nota, fecha, goles_favor, goles_contra
+        FROM am_matches WHERE user_id = ?
+        ORDER BY nota DESC, id DESC LIMIT 1
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val mejorPartido = if (rsBest.next()) Some(Map(
+        "rival" -> rsBest.getString("rival"),
+        "nota"  -> f"${rsBest.getDouble("nota")}%.1f",
+        "fecha" -> rsBest.getDate("fecha").toString,
+        "res"   -> s"${rsBest.getInt("goles_favor")}-${rsBest.getInt("goles_contra")}"
+      )) else None
+
+      val rsWorst = conn.prepareStatement("""
+        SELECT rival, nota, fecha, goles_favor, goles_contra
+        FROM am_matches WHERE user_id = ?
+        ORDER BY nota ASC, id DESC LIMIT 1
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val peorPartido = if (rsWorst.next()) Some(Map(
+        "rival" -> rsWorst.getString("rival"),
+        "nota"  -> f"${rsWorst.getDouble("nota")}%.1f",
+        "fecha" -> rsWorst.getDate("fecha").toString,
+        "res"   -> s"${rsWorst.getInt("goles_favor")}-${rsWorst.getInt("goles_contra")}"
+      )) else None
+
+      // Racha actual (W/D/L)
+      val rsRacha = conn.prepareStatement("""
+        SELECT goles_favor, goles_contra FROM am_matches
+        WHERE user_id = ? ORDER BY fecha DESC, id DESC LIMIT 10
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      var racha = List[String]()
+      while (rsRacha.next()) {
+        val gf = rsRacha.getInt("goles_favor")
+        val gc = rsRacha.getInt("goles_contra")
+        racha = racha :+ (if (gf > gc) "W" else if (gf == gc) "D" else "L")
+      }
+
+      Map(
+        "labels"         -> labels,
+        "notas"          -> notas,
+        "gcList"         -> gcList,
+        "resultados"     -> resultados,
+        "tendencia"      -> tendencia,
+        "tendenciaDelta" -> tendenciaDelta,
+        "mesList"        -> mesList,
+        "mejorPartido"   -> mejorPartido,
+        "peorPartido"    -> peorPartido,
+        "racha"          -> racha,
+        "totalPartidos"  -> notas.size
+      )
     } finally { conn.close() }
   }
 
