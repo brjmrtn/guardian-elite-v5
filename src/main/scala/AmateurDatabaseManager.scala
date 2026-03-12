@@ -289,7 +289,11 @@ object AmateurDatabaseManager {
           rs.getDate("fecha").toString,
           Option(rs.getString("video_url")).getOrElse(""),
           Option(rs.getString("notas")).getOrElse(""),
-          Option(rs.getString("analisis_voz")).getOrElse("")
+          Option(rs.getString("analisis_voz")).getOrElse(""),
+          Option(rs.getString("posicion_partido")).getOrElse("portero"),
+          Option(rs.getString("posicion_campo")).getOrElse(""),
+          rs.getInt("goles_marcados"),
+          rs.getInt("asistencias")
         )
       }
       list
@@ -318,7 +322,11 @@ object AmateurDatabaseManager {
           rs.getDate("fecha").toString,
           Option(rs.getString("video_url")).getOrElse(""),
           Option(rs.getString("notas")).getOrElse(""),
-          Option(rs.getString("analisis_voz")).getOrElse("")
+          Option(rs.getString("analisis_voz")).getOrElse(""),
+          Option(rs.getString("posicion_partido")).getOrElse("portero"),
+          Option(rs.getString("posicion_campo")).getOrElse(""),
+          rs.getInt("goles_marcados"),
+          rs.getInt("asistencias")
         ))
       } else None
     } finally { conn.close() }
