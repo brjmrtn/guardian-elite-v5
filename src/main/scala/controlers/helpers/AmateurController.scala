@@ -9,6 +9,9 @@ import scalatags.Text.tags2
 // ─────────────────────────────────────────────────────────────────────────────
 object AmateurController extends cask.Routes {
 
+  val AM_COOKIE = "guardian_session"
+  def amCookieValue(id: Int) = s"am:$id"
+
   // ── AUTH HELPERS ───────────────────────────────────────────────────────────
   // Cookie unificada guardian_session=am:{id} — gestionada por AuthController
   private def getAmUserId(request: cask.Request): Option[Int] =
@@ -258,7 +261,7 @@ object AmateurController extends cask.Routes {
           statusCode = 302,
           headers = Seq(
             "Location"   -> "/am/dashboard",
-            "Set-Cookie" -> s"$AM_COOKIE=${user.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
+            "Set-Cookie" -> s"guardian_session=${amCookieValue(user.id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
           )
         )
       case None =>
@@ -325,7 +328,7 @@ object AmateurController extends cask.Routes {
           cask.Response(Array.emptyByteArray, 302,
             headers = Seq(
               "Location"   -> "/am/dashboard",
-              "Set-Cookie" -> s"$AM_COOKIE=$id; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
+              "Set-Cookie" -> s"guardian_session=${amCookieValue(id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
             ))
         case Left(err) =>
           cask.Response(Array.emptyByteArray, 302,
@@ -339,7 +342,7 @@ object AmateurController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302,
       headers = Seq(
         "Location"   -> "/am/login",
-        "Set-Cookie" -> s"$AM_COOKIE=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
+        "Set-Cookie" -> s"guardian_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
       ))
 
   // ── DASHBOARD ──────────────────────────────────────────────────────────────
@@ -827,7 +830,7 @@ object AmateurController extends cask.Routes {
 
   @cask.post("/am/match/save")
   def saveMatch(request: cask.Request) = withAmAuth(request) { user =>
-    val body = request.body.mkString
+    val body = new String(request.data.readAllBytes(), "UTF-8")
     val params = body.split("&").map { pair =>
       val p = pair.split("=", 2)
       val k = java.net.URLDecoder.decode(p(0), "UTF-8")
@@ -1634,7 +1637,7 @@ $penSection
 <div class="mt-3 text-center" style="font-size:9px;color:#a0aec0;border-top:1px solid #e2e8f0;padding-top:8px;">Guardian Amateur &copy; $today</div>
 </body></html>"""
 
-    cask.Response(html, headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+    cask.Response(html.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
   // Redirect /am → /am/dashboard
