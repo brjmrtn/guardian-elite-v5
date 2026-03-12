@@ -4456,7 +4456,7 @@ object HistoryController extends cask.Routes {
                     ),
                     // Radar de 5 atributos
                     div(cls := "d-flex gap-1 mb-2 flex-wrap",
-                      Seq(
+                      frag(Seq(
                         ("TEC", r("tec").asInstanceOf[Int]),
                         ("TAC", r("tac").asInstanceOf[Int]),
                         ("FIS", r("fis").asInstanceOf[Int]),
@@ -4471,7 +4471,7 @@ object HistoryController extends cask.Routes {
                           ),
                           div(cls := "xx-small text-muted", lbl)
                         )
-                      }: _*
+                      }: _*)
                     ),
                     div(cls := "d-flex align-items-center gap-2 mb-2",
                       div(cls := "text-muted xx-small", "GLOBAL:"),
