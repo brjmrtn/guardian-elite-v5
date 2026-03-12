@@ -808,7 +808,7 @@ object CareerController extends cask.Routes {
         """))
       else span()
     )
-    renderHtml(content)
+    renderHtml(basePage("career", content))
   }
 
   initialize()
