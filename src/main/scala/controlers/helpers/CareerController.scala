@@ -737,7 +737,7 @@ object CareerController extends cask.Routes {
 
       // ── Stats rápidas ──
       div(cls := "row g-2 mb-4",
-        Seq(
+        frag(Seq(
           (s"$edad años",      "Edad",             "secondary"),
           (f"$notaMedia%.1f",  "Nota media",        "primary"),
           (s"$limpias",        "Limpias",           "success"),
@@ -751,7 +751,7 @@ object CareerController extends cask.Routes {
               div(cls := "xx-small text-muted", l)
             )
           )
-        }: _*
+        }: _*)
       ),
 
       // ── Evolución por temporada ──
