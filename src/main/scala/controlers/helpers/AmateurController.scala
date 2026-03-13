@@ -160,7 +160,7 @@ object AmateurController extends cask.Routes {
         // Header
         div(cls := "am-header",
           div(
-            span(cls := "fw-black text-primary", style := "font-size:15px;", "?? GUARDIAN"),
+            span(cls := "fw-black text-primary", style := "font-size:15px;", "🛡 GUARDIAN"),
             span(cls := "badge bg-primary ms-1", style := "font-size:9px;", "AMATEUR"),
             span(cls := "d-block xx-small text-muted", userName)
           ),
@@ -174,25 +174,25 @@ object AmateurController extends cask.Routes {
         tags2.nav(cls := "bottom-nav",
           a(href := "/am/dashboard",
             cls := s"nav-item ${if (activeLink == "home") "active" else ""}",
-            span(cls := "nav-icon", "&#127968;"), span("Inicio")),
+            span(cls := "nav-icon", "🏠"), span("Inicio")),
           a(href := "/am/match-center",
             cls := s"nav-item ${if (activeLink == "match") "active" else ""}",
-            span(cls := "nav-icon", "&#9917;"), span("Partido")),
+            span(cls := "nav-icon", "⚽"), span("Partido")),
           a(href := "/am/calendar",
             cls := s"nav-item ${if (activeLink == "calendar") "active" else ""}",
-            span(cls := "nav-icon", "&#128197;"), span("Agenda")),
+            span(cls := "nav-icon", "📅"), span("Agenda")),
           a(href := "/am/penalties",
             cls := s"nav-item ${if (activeLink == "penalties") "active" else ""}",
-            span(cls := "nav-icon", "&#129349;"), span("Penaltis")),
+            span(cls := "nav-icon", "🥅"), span("Penaltis")),
           a(href := "/am/gear",
             cls := s"nav-item ${if (activeLink == "gear") "active" else ""}",
-            span(cls := "nav-icon", "&#129508;"), span("Guantes")),
+            span(cls := "nav-icon", "🧤"), span("Guantes")),
           a(href := "/am/history",
             cls := s"nav-item ${if (activeLink == "history") "active" else ""}",
-            span(cls := "nav-icon", "&#128202;"), span("Historial")),
+            span(cls := "nav-icon", "📊"), span("Historial")),
           a(href := "/am/progression",
             cls := s"nav-item ${if (activeLink == "progression") "active" else ""}",
-            span(cls := "nav-icon", "&#128200;"), span("Progreso"))
+            span(cls := "nav-icon", "📈"), span("Progreso"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -1611,7 +1611,7 @@ tr:nth-child(even){background:#f8fafc}
 </div>
 <div class="d-flex align-items-center justify-content-between mb-3 pb-2" style="border-bottom:3px solid #0d6efd;">
   <div>
-    <div style="font-size:1.2rem;font-weight:900;">&#128737; GUARDIAN AMATEUR</div>
+    <div style="font-size:1.2rem;font-weight:900;">🛡 GUARDIAN AMATEUR</div>
     <div style="font-size:10px;color:#718096;">Informe de rendimiento &mdash; ${user.nombre}</div>
   </div>
   <div class="text-end">
