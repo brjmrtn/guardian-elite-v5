@@ -811,6 +811,20 @@ object AmateurController extends cask.Routes {
             document.getElementById('goalsData').value = data.join(';');
           });
 
+          // Toggle portero / jugador de campo
+          function togglePosicion() {
+            var esJugador = document.getElementById('pos_jugador').checked;
+            document.getElementById('posicion_campo_div').style.display = esJugador ? 'block' : 'none';
+            document.getElementById('lbl_portero').className = esJugador
+              ? 'btn btn-outline-secondary w-100 fw-bold'
+              : 'btn btn-primary w-100 fw-bold';
+            document.getElementById('lbl_jugador').className = esJugador
+              ? 'btn btn-primary w-100 fw-bold'
+              : 'btn btn-outline-secondary w-100 fw-bold';
+          }
+          // Inicializar estado
+          togglePosicion();
+
           // Radio buttons local/visitante visual
           document.querySelectorAll('input[name="esLocal"]').forEach(function(r) {
             r.addEventListener('change', function() {
