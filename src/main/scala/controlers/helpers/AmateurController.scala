@@ -880,6 +880,7 @@ object AmateurController extends cask.Routes {
           function togglePosicion() {
             var esJugador = document.getElementById('pos_jugador').checked;
             document.getElementById('posicion_campo_div').style.display = esJugador ? 'block' : 'none';
+            document.getElementById('goalsSection').style.display      = esJugador ? 'none'  : 'block';
             document.getElementById('lbl_portero').className = esJugador
               ? 'btn btn-outline-secondary w-100 fw-bold'
               : 'btn btn-primary w-100 fw-bold';

@@ -1,1969 +1,1108 @@
-import cask._
-import scalatags.Text.all._
-import scalatags.Text.tags2
+import java.sql.{Connection, Date}
+import java.time.LocalDate
+import java.security.MessageDigest
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GUARDIAN AMATEUR — Controller principal
-// Todas las rutas bajo /am/*
-// Auth por cookie independiente: am_session={userId}
+// AMATEUR DATA MODELS
+// Tablas propias, sin compartir nada con el sistema Elite.
 // ─────────────────────────────────────────────────────────────────────────────
-object AmateurController extends cask.Routes {
 
-  val AM_COOKIE = "guardian_session"
-  def amCookieValue(id: Int) = s"am:$id"
+case class AmUser(id: Int, username: String, nombre: String)
 
-  // ── AUTH HELPERS ───────────────────────────────────────────────────────────
-  // Cookie unificada guardian_session=am:{id} — gestionada por AuthController
-  private def getAmUserId(request: cask.Request): Option[Int] =
-    request.cookies.get("guardian_session").flatMap { c =>
-      val v = c.value
-      if (v.startsWith("am:")) scala.util.Try(v.drop(3).toInt).toOption
+case class AmMatch(
+                    id: Int, rival: String, gf: Int, gc: Int,
+                    nota: Double, clima: String, estadio: String,
+                    esLocal: Option[Boolean], fecha: String,
+                    videoUrl: String, notas: String, analisisVoz: String,
+                    posicionPartido: String,   // "portero" | "jugador"
+                    posicionCampo: String,     // "Delantero", "Centrocampista", "Defensa", "" si portero
+                    golesMarcados: Int,        // solo relevante si jugó de jugador de campo
+                    asistencias: Int           // solo relevante si jugó de jugador de campo
+                  )
+
+case class AmGoal(
+                   id: Int, matchId: Int, zona: String, situacion: String,
+                   errorDefensivo: Boolean, minuto: Int, notas: String
+                 )
+
+case class AmPenalty(
+                      id: Int, userId: Int, fecha: String, rival: String,
+                      direccionTiro: String, direccionEstirada: String, parada: Boolean,
+                      matchId: Option[Int], notas: String
+                    )
+
+case class AmGearItem(
+                       id: Int, userId: Int, nombre: String, marca: String,
+                       tipoLatex: String, corte: String, partidosUsados: Int,
+                       activo: Boolean, notas: String
+                     )
+
+case class AmSchedule(
+                       id: Int, userId: Int, rival: String, fecha: String,
+                       hora: String, lugar: String, tipo: String, notas: String,
+                       matchId: Option[Int]
+                     )
+
+// ─────────────────────────────────────────────────────────────────────────────
+object AmateurDatabaseManager {
+
+  // Reutilizamos el pool de conexiones existente — misma DB, tablas distintas
+  private def getConn(): Connection = DatabaseManager.getConnection()
+
+  private def md5(s: String): String =
+    MessageDigest.getInstance("MD5")
+      .digest(s.getBytes("UTF-8"))
+      .map("%02x".format(_)).mkString
+
+  private def fix(s: String): String =
+    if (s == null) "" else s
+      .replace("\u00e1","á").replace("\u00e9","é").replace("\u00ed","í")
+      .replace("\u00f3","ó").replace("\u00fa","ú").replace("\u00f1","ñ")
+      .replace("\u00c1","Á").replace("\u00c9","É").replace("\u00cd","Í")
+      .replace("\u00d3","Ó").replace("\u00da","Ú").replace("\u00d1","Ñ")
+
+  // ── INIT TABLES ────────────────────────────────────────────────────────────
+  def initTables(): Unit = {
+    val conn = getConn()
+    try {
+      val s = conn.createStatement()
+
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_users (
+        id            SERIAL PRIMARY KEY,
+        username      TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        nombre        TEXT DEFAULT '',
+        created_at    TIMESTAMP DEFAULT NOW()
+      )""")
+
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_matches (
+        id               SERIAL PRIMARY KEY,
+        user_id          INT REFERENCES am_users(id) ON DELETE CASCADE,
+        rival            TEXT NOT NULL,
+        goles_favor      INT DEFAULT 0,
+        goles_contra     INT DEFAULT 0,
+        nota             DOUBLE PRECISION DEFAULT 5.0,
+        clima            TEXT DEFAULT 'Sol',
+        estadio          TEXT DEFAULT '',
+        es_local         BOOLEAN DEFAULT NULL,
+        fecha            DATE DEFAULT CURRENT_DATE,
+        video_url        TEXT DEFAULT '',
+        notas            TEXT DEFAULT '',
+        analisis_voz     TEXT DEFAULT '',
+        posicion_partido TEXT DEFAULT 'portero',
+        posicion_campo   TEXT DEFAULT '',
+        goles_marcados   INT DEFAULT 0,
+        asistencias      INT DEFAULT 0,
+        current_season_num INT DEFAULT 1,
+        created_at       TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // Columnas añadidas en v7.2 — idempotentes
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS posicion_partido TEXT DEFAULT 'portero'")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS posicion_campo TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS goles_marcados INT DEFAULT 0")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS asistencias INT DEFAULT 0")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS current_season_num INT DEFAULT 1")
+
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_match_goals (
+        id               SERIAL PRIMARY KEY,
+        match_id         INT REFERENCES am_matches(id) ON DELETE CASCADE,
+        zona             TEXT DEFAULT 'MC',
+        situacion        TEXT DEFAULT 'Remate',
+        error_defensivo  BOOLEAN DEFAULT FALSE,
+        minuto           INT DEFAULT 0,
+        notas            TEXT DEFAULT ''
+      )""")
+
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_penalties (
+        id                  SERIAL PRIMARY KEY,
+        user_id             INT REFERENCES am_users(id) ON DELETE CASCADE,
+        fecha               DATE DEFAULT CURRENT_DATE,
+        rival               TEXT DEFAULT '',
+        direccion_tiro      TEXT NOT NULL,
+        direccion_estirada  TEXT NOT NULL,
+        parada              BOOLEAN DEFAULT FALSE,
+        match_id            INT REFERENCES am_matches(id) ON DELETE SET NULL,
+        notas               TEXT DEFAULT ''
+      )""")
+
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_gear (
+        id              SERIAL PRIMARY KEY,
+        user_id         INT REFERENCES am_users(id) ON DELETE CASCADE,
+        nombre          TEXT NOT NULL,
+        marca           TEXT DEFAULT '',
+        tipo_latex      TEXT DEFAULT '',
+        corte           TEXT DEFAULT '',
+        partidos_usados INT DEFAULT 0,
+        activo          BOOLEAN DEFAULT TRUE,
+        notas           TEXT DEFAULT ''
+      )""")
+
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_schedule (
+        id          SERIAL PRIMARY KEY,
+        user_id     INT REFERENCES am_users(id) ON DELETE CASCADE,
+        rival       TEXT NOT NULL,
+        fecha       DATE NOT NULL,
+        hora        TEXT DEFAULT '',
+        lugar       TEXT DEFAULT '',
+        tipo        TEXT DEFAULT 'LIGA',
+        notas       TEXT DEFAULT '',
+        match_id    INT REFERENCES am_matches(id) ON DELETE SET NULL,
+        created_at  TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // Temporadas — añadidas en v7.3
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS current_season INT DEFAULT 1")
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_seasons (
+        id          SERIAL PRIMARY KEY,
+        user_id     INT REFERENCES am_users(id) ON DELETE CASCADE,
+        season_num  INT NOT NULL,
+        ended_at    TIMESTAMP DEFAULT NOW(),
+        pj          INT DEFAULT 0,
+        ganados     INT DEFAULT 0,
+        empatados   INT DEFAULT 0,
+        perdidos    INT DEFAULT 0,
+        nota_media  DOUBLE PRECISION DEFAULT 0.0,
+        gc_media    DOUBLE PRECISION DEFAULT 0.0,
+        limpias     INT DEFAULT 0
+      )""")
+
+    } finally { conn.close() }
+  }
+
+  // ── USERS ──────────────────────────────────────────────────────────────────
+  def registerUser(username: String, password: String, nombre: String): Either[String, Int] = {
+    val conn = getConn()
+    try {
+      // Check if username exists
+      val check = conn.prepareStatement("SELECT id FROM am_users WHERE LOWER(username) = LOWER(?)")
+      check.setString(1, username)
+      val rs = check.executeQuery()
+      if (rs.next()) return Left("El nombre de usuario ya existe")
+
+      val ps = conn.prepareStatement(
+        "INSERT INTO am_users (username, password_hash, nombre) VALUES (?, ?, ?) RETURNING id"
+      )
+      ps.setString(1, username.trim.toLowerCase)
+      ps.setString(2, md5(password))
+      ps.setString(3, fix(nombre))
+      val rs2 = ps.executeQuery()
+      if (rs2.next()) Right(rs2.getInt(1)) else Left("Error al crear usuario")
+    } catch {
+      case e: Exception => Left(s"Error: ${e.getMessage}")
+    } finally { conn.close() }
+  }
+
+  def authenticate(username: String, password: String): Option[AmUser] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT id, username, nombre FROM am_users WHERE LOWER(username) = LOWER(?) AND password_hash = ?"
+      )
+      ps.setString(1, username.trim)
+      ps.setString(2, md5(password))
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(AmUser(rs.getInt("id"), rs.getString("username"), rs.getString("nombre")))
       else None
-    }
-
-  private def withAmAuth(request: cask.Request)(
-    f: AmUser => cask.Response[Array[Byte]]
-  ): cask.Response[Array[Byte]] = {
-    getAmUserId(request).flatMap(AmateurDatabaseManager.getUserById) match {
-      case Some(user) => f(user)
-      case None =>
-        cask.Response(
-          Array.emptyByteArray,
-          statusCode = 302,
-          headers = Seq("Location" -> "/login")
-        )
-    }
+    } finally { conn.close() }
   }
 
-  // ── RENDER ─────────────────────────────────────────────────────────────────
-  private def renderAm(
-                        activeLink: String,
-                        userName: String,
-                        pageContent: scalatags.Text.Modifier
-                      ): cask.Response[Array[Byte]] = {
-    val page = "<!DOCTYPE html>" + html(lang := "es",
-      head(
-        meta(charset := "UTF-8"),
-        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tags2.title("Guardian Amateur"),
-        link(rel := "stylesheet",
-          href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        tags2.style(raw("""
-          * { box-sizing: border-box; }
-          body {
-            background: #f0f4f8;
-            color: #1a202c;
-            font-family: 'Segoe UI', sans-serif;
-            padding-bottom: 90px;
-            min-height: 100vh;
-          }
-          /* ── RESET INPUTS — sobreescribe CSS global Elite ── */
-          body input, body select, body textarea,
-          body .form-control, body .form-select {
-            background-color: #ffffff !important;
-            background: #ffffff !important;
-            color: #1a202c !important;
-            border: 1px solid #cbd5e0 !important;
-            -webkit-text-fill-color: #1a202c !important;
-            font-weight: 500 !important;
-            border-radius: 8px !important;
-          }
-          body input:focus, body select:focus, body textarea:focus,
-          body .form-control:focus, body .form-select:focus {
-            background-color: #ffffff !important;
-            color: #1a202c !important;
-            -webkit-text-fill-color: #1a202c !important;
-            border-color: #0d6efd !important;
-            box-shadow: 0 0 0 3px rgba(13,110,253,0.15) !important;
-            outline: none !important;
-          }
-          body input:-webkit-autofill,
-          body input:-webkit-autofill:hover,
-          body input:-webkit-autofill:focus {
-            -webkit-box-shadow: 0 0 0px 1000px #ffffff inset !important;
-            -webkit-text-fill-color: #1a202c !important;
-          }
-          body input::placeholder, body textarea::placeholder {
-            color: #a0aec0 !important; opacity: 1 !important;
-          }
-          body option { background: #fff !important; color: #1a202c !important; }
-          body input[type=range] { background: transparent !important; border: none !important; box-shadow: none !important; }
-          body input[type=date]::-webkit-calendar-picker-indicator,
-          body input[type=time]::-webkit-calendar-picker-indicator { filter: none !important; }
-          body .form-check-input { background-color: #fff !important; border-color: #cbd5e0 !important; }
-          body .form-check-input:checked { background-color: #0d6efd !important; border-color: #0d6efd !important; }
-          body label { color: #4a5568 !important; }
-          /* ── LAYOUT ── */
-          .bottom-nav {
-            position: fixed; bottom: 0; left: 0; right: 0;
-            background: #ffffff; border-top: 1px solid #e2e8f0;
-            display: flex; z-index: 1000; padding-bottom: env(safe-area-inset-bottom);
-            box-shadow: 0 -2px 8px rgba(0,0,0,0.07);
-          }
-          .nav-item {
-            flex: 1; text-align: center; padding: 8px 2px 6px;
-            text-decoration: none; color: #a0aec0; font-size: 10px;
-            display: flex; flex-direction: column; align-items: center;
-          }
-          .nav-item.active { color: #0d6efd; }
-          .nav-item .nav-icon { font-size: 20px; display: block; margin-bottom: 2px; }
-          .xx-small { font-size: 0.7rem; }
-          .am-header {
-            background: #ffffff;
-            border-bottom: 1px solid #e2e8f0;
-            padding: 10px 16px;
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 16px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-          }
-          .card-am {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-          }
-          .btn-goal-zone {
-            width: 100%; aspect-ratio: 1; font-size: 11px; font-weight: 700;
-            border: 2px solid #e2e8f0; background: #f7fafc; color: #718096;
-            border-radius: 6px; cursor: pointer; transition: all 0.15s;
-          }
-          .btn-goal-zone.selected { background: #dc3545; color: white; border-color: #dc3545; }
-          .btn-dir {
-            width: 100%; padding: 16px 8px; font-weight: 700; font-size: 14px;
-            border: 2px solid #e2e8f0; background: #f7fafc; color: #718096;
-            border-radius: 8px; cursor: pointer; transition: all 0.15s;
-          }
-          .btn-dir.selected-tiro     { background: #dc3545; color: white; border-color: #dc3545; }
-          .btn-dir.selected-estirada { background: #0d6efd; color: white; border-color: #0d6efd; }
-          .nota-badge {
-            width: 48px; height: 48px; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: 900; font-size: 16px;
-          }
-          .badge-green  { background: #c6f6d5; color: #276749; }
-          .badge-yellow { background: #fefcbf; color: #744210; }
-          .badge-red    { background: #fed7d7; color: #9b2c2c; }
-          .text-muted   { color: #718096 !important; }
-          .border-bottom { border-bottom-color: #e2e8f0 !important; }
-          .cal-day {
-            min-height: 56px; background: #f7fafc; border: 1px solid #e2e8f0;
-            border-radius: 8px; padding: 4px 6px; font-size: 11px; color: #1a202c;
-          }
-          .cal-day.today        { border-color: #0d6efd; background: #ebf8ff; }
-          .cal-day.has-match    { border-color: #38a169; background: #f0fff4; }
-          .cal-day.has-schedule { border-color: #d69e2e; background: #fffff0; }
-          .cal-day .day-num { font-weight: 700; font-size: 13px; color: #1a202c; }
-          .cal-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin:1px; }
-        """))
-      ),
-      body(
-        // Header
-        div(cls := "am-header",
-          div(
-            span(cls := "fw-black text-primary", style := "font-size:15px;", "🛡 GUARDIAN"),
-            span(cls := "badge bg-primary ms-1", style := "font-size:9px;", "AMATEUR"),
-            span(cls := "d-block xx-small text-muted", userName)
-          ),
-          a(href := "/profiles", cls := "btn btn-outline-secondary btn-sm xx-small", "Cambiar")
-        ),
+  def getUserById(id: Int): Option[AmUser] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("SELECT id, username, nombre FROM am_users WHERE id = ?")
+      ps.setInt(1, id)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(AmUser(rs.getInt("id"), rs.getString("username"), rs.getString("nombre")))
+      else None
+    } finally { conn.close() }
+  }
 
-        // Contenido
-        div(cls := "container-fluid px-3", pageContent),
-
-        // Nav inferior
-        tags2.nav(cls := "bottom-nav",
-          a(href := "/am/dashboard",
-            cls := s"nav-item ${if (activeLink == "home") "active" else ""}",
-            span(cls := "nav-icon", "🏠"), span("Inicio")),
-          a(href := "/am/match-center",
-            cls := s"nav-item ${if (activeLink == "match") "active" else ""}",
-            span(cls := "nav-icon", "⚽"), span("Partido")),
-          a(href := "/am/calendar",
-            cls := s"nav-item ${if (activeLink == "calendar") "active" else ""}",
-            span(cls := "nav-icon", "📅"), span("Agenda")),
-          a(href := "/am/penalties",
-            cls := s"nav-item ${if (activeLink == "penalties") "active" else ""}",
-            span(cls := "nav-icon", "🥅"), span("Penaltis")),
-          a(href := "/am/gear",
-            cls := s"nav-item ${if (activeLink == "gear") "active" else ""}",
-            span(cls := "nav-icon", "🧤"), span("Guantes")),
-          a(href := "/am/history",
-            cls := s"nav-item ${if (activeLink == "history") "active" else ""}",
-            span(cls := "nav-icon", "📊"), span("Historial")),
-          a(href := "/am/progression",
-            cls := s"nav-item ${if (activeLink == "progression") "active" else ""}",
-            span(cls := "nav-icon", "📈"), span("Progreso"))
-        ),
-
-        script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
+  def listUsers(): List[AmUser] = {
+    val conn = getConn()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, username, nombre FROM am_users ORDER BY nombre ASC"
       )
-    ).render
-
-    cask.Response(
-      page.getBytes("UTF-8"),
-      headers = Seq("Content-Type" -> "text/html; charset=utf-8")
-    )
+      var list = List[AmUser]()
+      while (rs.next())
+        list = list :+ AmUser(rs.getInt("id"), rs.getString("username"), rs.getString("nombre"))
+      list
+    } finally { conn.close() }
   }
 
-  // ── LOGIN / REGISTER ───────────────────────────────────────────────────────
-  @cask.get("/am/login")
-  def loginPage(request: cask.Request, error: String = "") = {
-    val page = "<!DOCTYPE html>" + html(lang := "es",
-      head(
-        meta(charset := "UTF-8"),
-        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tags2.title("Guardian Amateur - Login"),
-        link(rel := "stylesheet",
-          href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input, select { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; }"))
-      ),
-      body(
-        div(cls := "container d-flex justify-content-center align-items-center",
-          style := "min-height:100vh;",
-          div(style := "width:340px;",
-            div(cls := "text-center mb-4",
-              div(style := "font-size:48px;", "🛡"),
-              h3(cls := "fw-black text-primary", "GUARDIAN AMATEUR"),
-              span(cls := "text-muted small", "Tu rendimiento, registrado.")
-            ),
-            div(cls := "card bg-dark border-primary p-4 mb-3",
-              h5(cls := "text-white fw-bold mb-3", "Iniciar sesión"),
-              if (error.nonEmpty) div(cls := "alert alert-danger small p-2 mb-3", error) else span(),
-              form(action := "/am/login", method := "post",
-                div(cls := "mb-3",
-                  label(cls := "text-muted small fw-bold", "USUARIO"),
-                  input(tpe := "text", name := "username", cls := "form-control bg-dark text-white border-secondary mt-1", required := true, attr("autocomplete") := "username")
-                ),
-                div(cls := "mb-3",
-                  label(cls := "text-muted small fw-bold", "CONTRASEÑA"),
-                  input(tpe := "password", name := "password", cls := "form-control bg-dark text-white border-secondary mt-1", required := true)
-                ),
-                button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "ENTRAR")
-              )
-            ),
-            div(cls := "card bg-dark border-secondary p-3 text-center",
-              p(cls := "text-muted small mb-2", "¿Primera vez? Crea tu cuenta gratis"),
-              a(href := "/am/register", cls := "btn btn-outline-secondary w-100 btn-sm", "Registrarse")
-            )
-          )
-        )
+  def checkPassword(userId: Int, password: String): Boolean = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT 1 FROM am_users WHERE id = ? AND password_hash = ?"
       )
-    ).render
-    cask.Response(page.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+      ps.setInt(1, userId)
+      ps.setString(2, md5(password))
+      ps.executeQuery().next()
+    } finally { conn.close() }
   }
 
-  @cask.postForm("/am/login")
-  def doLogin(request: cask.Request, username: String, password: String) = {
-    AmateurDatabaseManager.authenticate(username, password) match {
-      case Some(user) =>
-        cask.Response(
-          Array.emptyByteArray,
-          statusCode = 302,
-          headers = Seq(
-            "Location"   -> "/am/dashboard",
-            "Set-Cookie" -> s"guardian_session=${amCookieValue(user.id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
-          )
-        )
-      case None =>
-        cask.Response(
-          Array.emptyByteArray,
-          statusCode = 302,
-          headers = Seq("Location" -> "/am/login?error=Usuario+o+contraseña+incorrectos")
-        )
-    }
-  }
-
-  @cask.get("/am/register")
-  def registerPage(request: cask.Request, error: String = "") = {
-    val page = "<!DOCTYPE html>" + html(lang := "es",
-      head(
-        meta(charset := "UTF-8"),
-        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
-        tags2.title("Guardian Amateur - Registro"),
-        link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
-        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input, select { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; }"))
-      ),
-      body(
-        div(cls := "container d-flex justify-content-center align-items-center", style := "min-height:100vh;",
-          div(style := "width:340px;",
-            div(cls := "text-center mb-4",
-              div(style := "font-size:48px;", "🛡"),
-              h3(cls := "fw-black text-primary", "Crear cuenta")
-            ),
-            div(cls := "card bg-dark border-primary p-4",
-              if (error.nonEmpty) div(cls := "alert alert-danger small p-2 mb-3", error) else span(),
-              form(action := "/am/register", method := "post",
-                div(cls := "mb-3",
-                  label(cls := "text-muted small fw-bold", "TU NOMBRE"),
-                  input(tpe := "text", name := "nombre", cls := "form-control bg-dark text-white border-secondary mt-1", placeholder := "Ej: Carlos López", required := true)
-                ),
-                div(cls := "mb-3",
-                  label(cls := "text-muted small fw-bold", "USUARIO"),
-                  input(tpe := "text", name := "username", cls := "form-control bg-dark text-white border-secondary mt-1", placeholder := "sin espacios, sin tildes", required := true, attr("autocomplete") := "username")
-                ),
-                div(cls := "mb-3",
-                  label(cls := "text-muted small fw-bold", "CONTRASEÑA"),
-                  input(tpe := "password", name := "password", cls := "form-control bg-dark text-white border-secondary mt-1", required := true, attr("minlength") := "4")
-                ),
-                button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "CREAR CUENTA"),
-                div(cls := "text-center mt-3",
-                  a(href := "/am/login", cls := "text-muted small", "Ya tengo cuenta"))
-              )
-            )
-          )
-        )
-      )
-    ).render
-    cask.Response(page.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
-
-  @cask.postForm("/am/register")
-  def doRegister(request: cask.Request, nombre: String, username: String, password: String) = {
-    if (username.trim.isEmpty || password.length < 4) {
-      cask.Response(Array.emptyByteArray, 302,
-        headers = Seq("Location" -> "/am/register?error=Usuario+y+contraseña+mínimo+4+caracteres"))
-    } else {
-      AmateurDatabaseManager.registerUser(username.trim.toLowerCase, password, nombre) match {
-        case Right(id) =>
-          cask.Response(Array.emptyByteArray, 302,
-            headers = Seq(
-              "Location"   -> "/am/dashboard",
-              "Set-Cookie" -> s"guardian_session=${amCookieValue(id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
-            ))
-        case Left(err) =>
-          cask.Response(Array.emptyByteArray, 302,
-            headers = Seq("Location" -> s"/am/register?error=${java.net.URLEncoder.encode(err, "UTF-8")}"))
+  // ── MATCHES ────────────────────────────────────────────────────────────────
+  def logMatch(
+                userId: Int, rival: String, gf: Int, gc: Int,
+                nota: Double, clima: String, estadio: String,
+                esLocal: Option[Boolean], fecha: String,
+                videoUrl: String, notas: String,
+                posicionPartido: String = "portero", posicionCampo: String = "",
+                golesMarcados: Int = 0, asistencias: Int = 0
+              ): Int = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_matches
+          (user_id, rival, goles_favor, goles_contra, nota, clima, estadio,
+           es_local, fecha, video_url, notas,
+           posicion_partido, posicion_campo, goles_marcados, asistencias,
+           current_season_num)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          COALESCE((SELECT current_season FROM am_users WHERE id = ?), 1))
+        RETURNING id
+      """)
+      ps.setInt(1, userId)
+      ps.setString(2, fix(rival))
+      ps.setInt(3, gf)
+      ps.setInt(4, gc)
+      ps.setDouble(5, nota)
+      ps.setString(6, clima)
+      ps.setString(7, fix(estadio))
+      esLocal match {
+        case Some(v) => ps.setBoolean(8, v)
+        case None    => ps.setNull(8, java.sql.Types.BOOLEAN)
       }
-    }
+      ps.setDate(9, Date.valueOf(if (fecha.nonEmpty) fecha else LocalDate.now().toString))
+      ps.setString(10, videoUrl)
+      ps.setString(11, fix(notas))
+      ps.setString(12, posicionPartido)
+      ps.setString(13, posicionCampo)
+      ps.setInt(14, golesMarcados)
+      ps.setInt(15, asistencias)
+      ps.setInt(16, userId)
+      val rs = ps.executeQuery()
+      if (rs.next()) rs.getInt(1) else -1
+    } finally { conn.close() }
   }
 
-  @cask.get("/am/logout")
-  def doLogout(request: cask.Request) =
-    cask.Response(Array.emptyByteArray, 302,
-      headers = Seq(
-        "Location"   -> "/profiles",
-        "Set-Cookie" -> s"guardian_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
-      ))
-
-  // ── DASHBOARD ──────────────────────────────────────────────────────────────
-  @cask.get("/am/dashboard")
-  def dashboardPage(request: cask.Request) = withAmAuth(request) { user =>
-    val st       = AmateurDatabaseManager.getDashboardStats(user.id)
-    val upcoming = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
-    val seasonInfo = AmateurDatabaseManager.getSeasonInfo(user.id)
-    val currentSeason = seasonInfo("currentSeason").asInstanceOf[Int]
-    val pastSeasons   = seasonInfo("pastSeasons").asInstanceOf[List[Map[String, String]]]
-    val pj             = st("pj").asInstanceOf[Int]
-    val notaMedia      = st("notaMedia").asInstanceOf[Double]
-    val notaAjustada   = st("notaAjustada").asInstanceOf[Double]
-    val gcMedia        = st("gcMedia").asInstanceOf[Double]
-    val limpias        = st("limpias").asInstanceOf[Int]
-    val ganados        = st("ganados").asInstanceOf[Int]
-    val empatados      = st("empatados").asInstanceOf[Int]
-    val perdidos       = st("perdidos").asInstanceOf[Int]
-    val rachaLimpias   = st("rachaLimpias").asInstanceOf[Int]
-    val ultimos        = st("ultimos").asInstanceOf[List[Map[String, String]]]
-
-    def notaColor(n: Double) = if (n >= 7.0) "success" else if (n >= 5.0) "warning" else "danger"
-    def notaBadgeCls(n: Double) = if (n >= 7.0) "badge-green" else if (n >= 5.0) "badge-yellow" else "badge-red"
-
-    renderAm("home", user.nombre,
-      div(
-        // Bienvenida
-        div(cls := "mb-3",
-          h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} 👋"),
-          span(cls := "text-muted small", if (pj == 0) "Registra tu primer partido para empezar."
-          else s"$pj partidos registrados")
-        ),
-
-        if (pj == 0)
-          div(cls := "card-am p-4 text-center mb-3",
-            div(style := "font-size:52px; opacity:0.4", "⚽"),
-            h5(cls := "text-muted mt-3", "Sin partidos aún"),
-            p(cls := "text-secondary small", "Pulsa en «Partido» para registrar tu primera actuación."),
-            a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
-          )
-        else frag(
-
-          // Próximo partido programado — Widget con cuenta atrás
-          upcoming.headOption.map { s =>
-            val tipoColor = s.tipo match {
-              case "LIGA"     => "#0d6efd"
-              case "TORNEO"   => "#dc3545"
-              case "CUP"      => "#6f42c1"
-              case _          => "#20c997"
-            }
-            val tipoBadge = s.tipo match {
-              case "LIGA"     => "LIGA"
-              case "TORNEO"   => "TORNEO"
-              case "CUP"      => "CUP"
-              case _          => "AMISTOSO"
-            }
-            div(cls := "card-am p-3 mb-3",
-              style := s"border-left: 4px solid $tipoColor;",
-              div(cls := "d-flex justify-content-between align-items-start mb-1",
-                div(cls := "xx-small fw-bold text-muted", "PROXIMO PARTIDO"),
-                span(cls := "badge rounded-pill xx-small",
-                  style := s"background:${tipoColor}22; color:$tipoColor;",
-                  tipoBadge)
-              ),
-              div(cls := "fw-black mb-1", style := "font-size:1.15rem;", s.rival),
-              div(cls := "xx-small text-muted mb-2",
-                s.fecha,
-                if (s.hora.nonEmpty) s" - ${s.hora}" else "",
-                if (s.lugar.nonEmpty) s" - ${s.lugar}" else ""
-              ),
-              div(id := "countdown-widget", cls := "fw-bold text-center mb-2",
-                style := s"font-size:1.05rem; color:$tipoColor;", "..."),
-              div(cls := "row g-1",
-                div(cls := "col-8",
-                  a(href := "/am/match-center", cls := "btn btn-sm fw-bold w-100",
-                    style := s"background:$tipoColor; color:#fff;", "Registrar partido")
-                ),
-                div(cls := "col-4",
-                  a(href := "/am/calendar", cls := "btn btn-sm btn-outline-secondary fw-bold w-100", "Agenda")
-                )
-              ),
-              script(raw(s"""
-                (function() {
-                  var target = new Date("${s.fecha}T${if (s.hora.nonEmpty && s.hora.length >= 5) s.hora else "10:00"}:00");
-                  function update() {
-                    var now = new Date(); var diff = target - now;
-                    var el = document.getElementById('countdown-widget');
-                    if (!el) return;
-                    if (diff <= 0) { el.textContent = "HOY JUEGAS!"; return; }
-                    var d = Math.floor(diff/86400000), h = Math.floor((diff%86400000)/3600000), m = Math.floor((diff%3600000)/60000);
-                    if (d > 0) el.textContent = d+"d "+h+"h para el partido";
-                    else if (h > 0) el.textContent = h+"h "+m+"m para el partido";
-                    else el.textContent = m+" minutos para el partido";
-                  }
-                  update(); setInterval(update, 60000);
-                })();
-              """))
-            )
-          }.getOrElse(
-            div(cls := "card-am p-3 mb-3 text-center",
-              style := "border-style:dashed;",
-              div(cls := "xx-small text-muted mt-1", "Sin partidos programados"),
-              a(href := "/am/calendar/add", cls := "btn btn-outline-primary btn-sm mt-2 fw-bold",
-                "+ Añadir a la agenda")
-            )
-          ),
-
-          // KPIs principales
-          div(cls := "row g-2 mb-3",
-            div(cls := "col-6",
-              div(cls := "card-am p-3 text-center",
-                div(cls := s"fw-black text-${notaColor(notaMedia)}", style := "font-size:2.4rem;",
-                  f"$notaMedia%.1f"),
-                div(cls := "xx-small text-muted", "Nota media"),
-                if (notaAjustada > notaMedia + 0.05)
-                  div(cls := "xx-small text-success mt-1",
-                    f"↑ $notaAjustada%.1f ajustada")
-                else span()
-              )
-            ),
-            div(cls := "col-6",
-              div(cls := "card-am p-3 text-center",
-                div(cls := "fw-black text-danger", style := "font-size:2.4rem;",
-                  f"$gcMedia%.1f"),
-                div(cls := "xx-small text-muted", "GC por partido")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-bold text-success", style := "font-size:1.6rem;", limpias.toString),
-                div(cls := "xx-small text-muted", "Limpias")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-bold text-info", style := "font-size:1.6rem;", pj.toString),
-                div(cls := "xx-small text-muted", "Partidos")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-bold text-warning", style := "font-size:1.6rem;", rachaLimpias.toString),
-                div(cls := "xx-small text-muted", "Racha 0 GC")
-              )
-            )
-          ),
-
-          // Resultados + win rate
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "d-flex justify-content-around text-center",
-              div(
-                div(cls := "fw-black text-success", style := "font-size:1.8rem;", ganados.toString),
-                div(cls := "xx-small text-muted", "Ganados")
-              ),
-              div(cls := "border-start border-secondary"),
-              div(
-                div(cls := "fw-black text-warning", style := "font-size:1.8rem;", empatados.toString),
-                div(cls := "xx-small text-muted", "Empates")
-              ),
-              div(cls := "border-start border-secondary"),
-              div(
-                div(cls := "fw-black text-danger", style := "font-size:1.8rem;", perdidos.toString),
-                div(cls := "xx-small text-muted", "Perdidos")
-              ),
-              div(cls := "border-start border-secondary"),
-              {
-                val wr = if (pj > 0) (ganados.toDouble / pj * 100).toInt else 0
-                val wrColor = if (wr >= 60) "text-success" else if (wr >= 40) "text-warning" else "text-danger"
-                div(
-                  div(cls := s"fw-black $wrColor", style := "font-size:1.8rem;", s"$wr%"),
-                  div(cls := "xx-small text-muted", "Win rate")
-                )
-              }
-            )
-          ),
-
-          // Últimos partidos
-          if (ultimos.nonEmpty)
-            div(cls := "card-am p-3 mb-3",
-              div(cls := "fw-bold small text-muted mb-2", "ÚLTIMOS PARTIDOS"),
-              frag(ultimos.map { m =>
-                val nota = m("nota").toDouble
-                div(cls := "d-flex align-items-center gap-2 py-2",
-                  style := "border-bottom:1px solid #1e1e1e;",
-                  div(cls := s"nota-badge ${notaBadgeCls(nota)}", m("nota")),
-                  div(cls := "flex-fill",
-                    div(cls := "fw-bold small text-white", m("rival")),
-                    div(cls := "xx-small text-muted", m("fecha"))
-                  ),
-                  div(cls := "fw-black text-white small", m("res"))
-                )
-              }: _*)
-            )
-          else span(),
-
-          // Acceso rápido
-          div(cls := "row g-2 mb-3",
-            div(cls := "col-6",
-              a(href := "/am/match-center", cls := "btn btn-primary w-100 fw-bold py-3",
-                "⚽ Nuevo partido")),
-            div(cls := "col-6",
-              a(href := "/am/progression", cls := "btn btn-outline-info w-100 fw-bold py-3",
-                "📈 Mi progreso"))
-          ),
-
-          // Temporada actual + historial
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "d-flex justify-content-between align-items-center mb-2",
-              div(
-                div(cls := "xx-small fw-bold text-muted", "TEMPORADA ACTUAL"),
-                div(cls := "fw-black text-white", style := "font-size:1.1rem;", s"Temporada $currentSeason")
-              ),
-              button(
-                tpe := "button",
-                cls := "btn btn-outline-warning btn-sm fw-bold",
-                style := "font-size:11px;",
-                attr("data-bs-toggle") := "modal",
-                attr("data-bs-target") := "#modalEndSeason",
-                "🏁 Finalizar temporada"
-              )
-            ),
-            if (pastSeasons.nonEmpty)
-              div(
-                div(cls := "xx-small fw-bold text-muted mb-2", "TEMPORADAS ANTERIORES"),
-                frag(pastSeasons.map { s =>
-                  div(cls := "d-flex justify-content-between align-items-center py-1",
-                    style := "border-bottom:1px solid #1e1e1e; font-size:11px;",
-                    div(cls := "text-muted", s"T${s("num")} · ${s("ended").take(7)}"),
-                    div(cls := "text-white",
-                      span(cls := "text-success me-1", s"${s("g")}G"),
-                      span(cls := "text-muted me-1", s"${s("e")}E"),
-                      span(cls := "text-danger me-1", s"${s("p")}P"),
-                      span(cls := "text-warning", s"★${s("nota")}")
-                    )
-                  )
-                }: _*)
-              )
-            else span()
-          ),
-
-          // Modal confirmación finalizar temporada
-          div(cls := "modal fade", id := "modalEndSeason",
-            attr("tabindex") := "-1",
-            div(cls := "modal-dialog modal-dialog-centered",
-              div(cls := "modal-content bg-dark border-warning",
-                div(cls := "modal-header border-warning",
-                  h5(cls := "modal-title text-warning fw-black", "🏁 Finalizar temporada"),
-                  button(tpe := "button", cls := "btn-close btn-close-white",
-                    attr("data-bs-dismiss") := "modal")
-                ),
-                div(cls := "modal-body text-white",
-                  p(s"¿Seguro que quieres cerrar la Temporada $currentSeason?"),
-                  p(cls := "text-muted small",
-                    "Se guardará un resumen de la temporada y todos los partidos nuevos contarán para la Temporada ",
-                    strong(cls := "text-warning", s"${currentSeason + 1}"),
-                    ". Los datos históricos se conservan.")
-                ),
-                div(cls := "modal-footer border-secondary",
-                  button(tpe := "button", cls := "btn btn-secondary",
-                    attr("data-bs-dismiss") := "modal", "Cancelar"),
-                  a(href := "/am/end-season", cls := "btn btn-warning fw-bold",
-                    "✅ Confirmar y nueva temporada")
-                )
-              )
-            )
-          )
+  def getMatches(userId: Int): List[AmMatch] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT * FROM am_matches WHERE user_id = ? ORDER BY fecha DESC, created_at DESC"
+      )  // posicion_partido, posicion_campo, goles_marcados, asistencias leídos vía mapRow
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var list = List[AmMatch]()
+      while (rs.next()) {
+        val esLocalRaw = rs.getBoolean("es_local")
+        val esLocalOpt = if (rs.wasNull()) None else Some(esLocalRaw)
+        list = list :+ AmMatch(
+          rs.getInt("id"), rs.getString("rival"),
+          rs.getInt("goles_favor"), rs.getInt("goles_contra"),
+          rs.getDouble("nota"),
+          Option(rs.getString("clima")).getOrElse("Sol"),
+          Option(rs.getString("estadio")).getOrElse(""),
+          esLocalOpt,
+          rs.getDate("fecha").toString,
+          Option(rs.getString("video_url")).getOrElse(""),
+          Option(rs.getString("notas")).getOrElse(""),
+          Option(rs.getString("analisis_voz")).getOrElse(""),
+          Option(rs.getString("posicion_partido")).getOrElse("portero"),
+          Option(rs.getString("posicion_campo")).getOrElse(""),
+          rs.getInt("goles_marcados"),
+          rs.getInt("asistencias")
         )
-      )
-    )
-  }
-
-  // ── MATCH CENTER ───────────────────────────────────────────────────────────
-  @cask.get("/am/match-center")
-  def matchCenterPage(request: cask.Request) = withAmAuth(request) { user =>
-    renderAm("match", user.nombre,
-      div(
-        h5(cls := "fw-black text-white mb-3", "⚽ Registrar partido"),
-
-        form(action := "/am/match/save", method := "post", id := "matchForm",
-
-          // Selector de posición
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "xx-small fw-bold text-muted mb-2", "DE QUE JUGASTE?"),
-            div(cls := "d-flex gap-2",
-              div(cls := "flex-fill",
-                input(tpe := "radio", name := "posicion_partido", id := "pos_portero",
-                  value := "portero", checked := true, style := "display:none;",
-                  attr("onchange") := "togglePosicion()"),
-                label(cls := "btn btn-primary w-100 fw-bold", attr("for") := "pos_portero",
-                  id := "lbl_portero", style := "font-size:13px;", "Portero")
-              ),
-              div(cls := "flex-fill",
-                input(tpe := "radio", name := "posicion_partido", id := "pos_jugador",
-                  value := "jugador", style := "display:none;",
-                  attr("onchange") := "togglePosicion()"),
-                label(cls := "btn btn-outline-secondary w-100 fw-bold", attr("for") := "pos_jugador",
-                  id := "lbl_jugador", style := "font-size:13px;", "Jugador de campo")
-              )
-            ),
-            div(id := "posicion_campo_div", style := "display:none;",
-              div(cls := "mt-2",
-                label(cls := "xx-small text-muted fw-bold", "POSICION EN CAMPO"),
-                select(name := "posicion_campo", cls := "form-select mt-1",
-                  option(value := "Delantero", "Delantero"),
-                  option(value := "Centrocampista", "Centrocampista"),
-                  option(value := "Extremo", "Extremo"),
-                  option(value := "Defensa", "Defensa")
-                )
-              ),
-              div(cls := "row g-2 mt-1",
-                div(cls := "col-6",
-                  label(cls := "xx-small text-muted fw-bold", "GOLES MARCADOS"),
-                  input(tpe := "number", name := "goles_marcados", value := "0",
-                    cls := "form-control mt-1", attr("min") := "0", attr("max") := "20")
-                ),
-                div(cls := "col-6",
-                  label(cls := "xx-small text-muted fw-bold", "ASISTENCIAS"),
-                  input(tpe := "number", name := "asistencias", value := "0",
-                    cls := "form-control mt-1", attr("min") := "0", attr("max") := "20")
-                )
-              )
-            )
-          ),
-
-          // Rival y fecha
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "row g-2",
-              div(cls := "col-8",
-                label(cls := "xx-small text-muted fw-bold", "RIVAL"),
-                input(tpe := "text", name := "rival", cls := "form-control bg-dark text-white border-secondary mt-1", placeholder := "Nombre del equipo rival", required := true)
-              ),
-              div(cls := "col-4",
-                label(cls := "xx-small text-muted fw-bold", "FECHA"),
-                input(tpe := "date", name := "fecha", cls := "form-control bg-dark text-white border-secondary mt-1",
-                  value := java.time.LocalDate.now().toString)
-              )
-            )
-          ),
-
-          // Resultado
-          div(cls := "card-am p-3 mb-3", id := "gc_section",
-            div(cls := "xx-small text-muted fw-bold mb-2", "RESULTADO"),
-            div(cls := "row g-3 text-center",
-              div(cls := "col-5",
-                label(cls := "small text-success fw-bold", "A FAVOR"),
-                input(tpe := "number", name := "gf", id := "inGF",
-                  cls := "form-control text-center bg-success bg-opacity-25 text-white border-0 fw-black mt-1",
-                  style := "font-size:2rem;", value := "0", min := "0", attr("inputmode") := "numeric")
-              ),
-              div(cls := "col-2 d-flex align-items-center justify-content-center",
-                span(cls := "text-muted fw-bold", style := "font-size:1.5rem;", "−")
-              ),
-              div(cls := "col-5",
-                label(cls := "small text-danger fw-bold", "EN CONTRA"),
-                input(tpe := "number", name := "gc", id := "inGC",
-                  cls := "form-control text-center bg-danger bg-opacity-25 text-white border-0 fw-black mt-1",
-                  style := "font-size:2rem;", value := "0", min := "0",
-                  attr("inputmode") := "numeric",
-                  attr("oninput") := "syncGoalCount(this.value)")
-              )
-            )
-          ),
-
-          // Nota
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "xx-small text-muted fw-bold mb-2", "TU NOTA (1-10)"),
-            div(cls := "d-flex align-items-center gap-3",
-              input(tpe := "range", name := "nota", id := "notaSlider",
-                cls := "form-range flex-fill", min := "1", max := "10", step := "0.5", value := "7",
-                attr("oninput") := "document.getElementById('notaVal').textContent=this.value"),
-              span(id := "notaVal", cls := "fw-black text-warning", style := "font-size:1.8rem; min-width:40px;", "7")
-            )
-          ),
-
-          // Clima + Local/Visitante
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "row g-2",
-              div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "CLIMA"),
-                select(name := "clima", cls := "form-select bg-dark text-white border-secondary mt-1",
-                  option(value := "Sol", "☀️ Sol"),
-                  option(value := "Nubes", "☁️ Nubes"),
-                  option(value := "Lluvia", "🌧️ Lluvia"),
-                  option(value := "Frio", "❄️ Frío"),
-                  option(value := "Viento", "💨 Viento")
-                )
-              ),
-              div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "ESTADIO"),
-                input(tpe := "text", name := "estadio", cls := "form-control bg-dark text-white border-secondary mt-1",
-                  placeholder := "Campo o pabellón")
-              )
-            ),
-            div(cls := "mt-2",
-              label(cls := "xx-small text-muted fw-bold", "¿LOCAL O VISITANTE?"),
-              div(cls := "d-flex gap-2 mt-1",
-                frag(Seq(("", "— Sin especificar"), ("true", "?? Local"), ("false", "✈️ Visitante")).map {
-                  case (v, lbl) =>
-                    label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
-                      style := "cursor:pointer; background:#1a1a1a;",
-                      input(tpe := "radio", name := "esLocal", value := v, cls := "d-none",
-                        if (v == "") attr("checked") := "checked" else span()),
-                      span(lbl)
-                    )
-                }: _*)
-              )
-            )
-          ),
-
-          // Mapa de goles encajados
-          div(cls := "card-am p-3 mb-3", id := "goalsSection",
-            div(cls := "d-flex justify-content-between align-items-center mb-2",
-              span(cls := "xx-small text-muted fw-bold", "GOLES ENCAJADOS — Zona y contexto"),
-              span(id := "goalCounter", cls := "badge bg-danger", "0 goles")
-            ),
-            div(id := "goalsList"),
-            div(cls := "text-center",
-              button(tpe := "button", cls := "btn btn-outline-danger btn-sm mt-2 fw-bold",
-                attr("onclick") := "addGoalRow()",
-                "+ Añadir gol encajado")
-            ),
-            input(tpe := "hidden", name := "goalsData", id := "goalsData")
-          ),
-
-          // Video (opcional)
-          div(cls := "card-am p-3 mb-3",
-            label(cls := "xx-small text-muted fw-bold", "ENLACE DE VÍDEO (opcional)"),
-            input(tpe := "url", name := "video", cls := "form-control bg-dark text-white border-secondary mt-1",
-              placeholder := "https://youtube.com/...")
-          ),
-
-          // Notas
-          div(cls := "card-am p-3 mb-3",
-            label(cls := "xx-small text-muted fw-bold", "NOTAS DEL PARTIDO"),
-            textarea(name := "notas", cls := "form-control bg-dark text-white border-secondary mt-1",
-              rows := "3", placeholder := "Qué salió bien, qué mejorar...")()
-          ),
-
-          button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold py-3 mb-2",
-            "GUARDAR PARTIDO")
-        ),
-
-        // JavaScript para el formulario
-        script(raw("""
-          var goalCount = 0;
-          var goals = [];
-          var zones = ['TL','TC','TR','ML','MC','MR','BL','BC','BR'];
-          var zoneLabels = {
-            'TL':'↖ Alto Izq','TC':'↑ Alto Cen','TR':'↗ Alto Der',
-            'ML':'← Med Izq','MC':'· Centro','MR':'→ Med Der',
-            'BL':'↙ Bajo Izq','BC':'↓ Bajo Cen','BR':'↘ Bajo Der'
-          };
-
-          function syncGoalCount(val) {
-            document.getElementById('goalCounter').textContent = val + ' goles';
-          }
-
-          function addGoalRow() {
-            goalCount++;
-            var id = 'goal_' + goalCount;
-            var html = '<div id="' + id + '" class="card bg-dark border-secondary p-2 mb-2 rounded">' +
-              '<div class="d-flex justify-content-between align-items-center mb-2">' +
-              '<span class="xx-small text-danger fw-bold">GOL ' + goalCount + '</span>' +
-              '<button type="button" class="btn btn-outline-secondary btn-sm xx-small" onclick="removeGoal(\'' + id + '\')">✕</button>' +
-              '</div>' +
-              '<div class="xx-small text-muted fw-bold mb-1">Zona de portería:</div>' +
-              '<div class="row g-1 mb-2" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">';
-
-            zones.forEach(function(z) {
-              html += '<button type="button" class="btn-goal-zone" id="' + id + '_zone_' + z + '"' +
-                ' onclick="selectZone(\'' + id + '\',\'' + z + '\')">' + zoneLabels[z] + '</button>';
-            });
-
-            html += '</div>' +
-              '<div class="xx-small text-muted fw-bold mb-1">Situación:</div>' +
-              '<select id="' + id + '_sit" class="form-select form-select-sm bg-dark text-white border-secondary mb-2">' +
-              '<option value="Remate">Remate</option>' +
-              '<option value="1v1">1 vs 1</option>' +
-              '<option value="2v1">2 vs 1</option>' +
-              '<option value="Cabezazo">Cabezazo</option>' +
-              '<option value="Tiro libre">Tiro libre</option>' +
-              '<option value="Penalti">Penalti</option>' +
-              '</select>' +
-              '<div class="form-check">' +
-              '<input class="form-check-input" type="checkbox" id="' + id + '_errdef">' +
-              '<label class="form-check-label xx-small text-warning" for="' + id + '_errdef">' +
-              '⚠️ Error defensivo del equipo (no cuenta para mi nota)' +
-              '</label>' +
-              '</div>' +
-              '</div>';
-
-            document.getElementById('goalsList').insertAdjacentHTML('beforeend', html);
-            // Select center by default
-            selectZone(id, 'MC');
-            syncGoalCount(document.getElementById('inGC').value);
-          }
-
-          function selectZone(goalId, zone) {
-            zones.forEach(function(z) {
-              var btn = document.getElementById(goalId + '_zone_' + z);
-              if (btn) btn.classList.toggle('selected', z === zone);
-            });
-          }
-
-          function removeGoal(id) {
-            var el = document.getElementById(id);
-            if (el) el.remove();
-          }
-
-          function getSelectedZone(goalId) {
-            var selected = 'MC';
-            zones.forEach(function(z) {
-              var btn = document.getElementById(goalId + '_zone_' + z);
-              if (btn && btn.classList.contains('selected')) selected = z;
-            });
-            return selected;
-          }
-
-          // Serializar antes de enviar
-          document.getElementById('matchForm').addEventListener('submit', function() {
-            var rows = document.getElementById('goalsList').querySelectorAll('[id^="goal_"]');
-            var data = [];
-            rows.forEach(function(row) {
-              var gid = row.id;
-              data.push(
-                getSelectedZone(gid) + '|' +
-                document.getElementById(gid + '_sit').value + '|' +
-                (document.getElementById(gid + '_errdef').checked ? '1' : '0')
-              );
-            });
-            document.getElementById('goalsData').value = data.join(';');
-          });
-
-          // Toggle portero / jugador de campo
-          function togglePosicion() {
-            var esJugador = document.getElementById('pos_jugador').checked;
-            document.getElementById('posicion_campo_div').style.display = esJugador ? 'block' : 'none';
-            document.getElementById('goalsSection').style.display      = esJugador ? 'none'  : 'block';
-            document.getElementById('lbl_portero').className = esJugador
-              ? 'btn btn-outline-secondary w-100 fw-bold'
-              : 'btn btn-primary w-100 fw-bold';
-            document.getElementById('lbl_jugador').className = esJugador
-              ? 'btn btn-primary w-100 fw-bold'
-              : 'btn btn-outline-secondary w-100 fw-bold';
-          }
-          // Inicializar estado
-          togglePosicion();
-
-          // Radio buttons local/visitante visual
-          document.querySelectorAll('input[name="esLocal"]').forEach(function(r) {
-            r.addEventListener('change', function() {
-              document.querySelectorAll('input[name="esLocal"]').forEach(function(x) {
-                x.parentElement.style.background = '#1a1a1a';
-                x.parentElement.style.color = '';
-              });
-              this.parentElement.style.background =
-                this.value === 'true' ? 'rgba(40,167,69,0.2)' :
-                this.value === 'false' ? 'rgba(13,202,240,0.2)' : '#1a1a1a';
-            });
-          });
-        """))
-      )
-    )
-  }
-
-  @cask.post("/am/match/save")
-  def saveMatch(request: cask.Request) = withAmAuth(request) { user =>
-    val body = new String(request.data.readAllBytes(), "UTF-8")
-    val params = body.split("&").map { pair =>
-      val p = pair.split("=", 2)
-      val k = java.net.URLDecoder.decode(p(0), "UTF-8")
-      val v = if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else ""
-      k -> v
-    }.toMap
-
-    def str(k: String) = params.getOrElse(k, "")
-    def int(k: String) = try str(k).toInt catch { case _: Exception => 0 }
-    def dbl(k: String) = try str(k).toDouble catch { case _: Exception => 0.0 }
-
-    val esLocalOpt: Option[Boolean] = str("esLocal") match {
-      case "true"  => Some(true)
-      case "false" => Some(false)
-      case _       => None
-    }
-
-    val posicionPartido = str("posicion_partido") match {
-      case "jugador" => "jugador"
-      case _         => "portero"
-    }
-    val posicionCampo   = str("posicion_campo")
-    val golesMarcados   = int("goles_marcados")
-    val asistencias     = int("asistencias")
-
-    val matchId = AmateurDatabaseManager.logMatch(
-      userId   = user.id,
-      rival    = str("rival"),
-      gf       = int("gf"),
-      gc       = int("gc"),
-      nota     = dbl("nota"),
-      clima    = str("clima"),
-      estadio  = str("estadio"),
-      esLocal  = esLocalOpt,
-      fecha    = str("fecha"),
-      videoUrl = str("video"),
-      notas    = str("notas"),
-      posicionPartido = posicionPartido,
-      posicionCampo   = posicionCampo,
-      golesMarcados   = golesMarcados,
-      asistencias     = asistencias
-    )
-
-    // Guardar goles
-    val goalsData = str("goalsData")
-    if (goalsData.nonEmpty && matchId > 0) {
-      goalsData.split(";").foreach { row =>
-        val parts = row.split("\\|")
-        if (parts.length >= 3) {
-          AmateurDatabaseManager.saveGoal(
-            matchId        = matchId,
-            zona           = parts(0),
-            situacion      = parts(1),
-            errorDefensivo = parts(2) == "1",
-            minuto         = 0,
-            notas          = ""
-          )
-        }
       }
-    }
-
-    cask.Response(Array.emptyByteArray, 302,
-      headers = Seq("Location" -> "/am/dashboard"))
+      list
+    } finally { conn.close() }
   }
 
-  // ── HISTORIAL ──────────────────────────────────────────────────────────────
-  @cask.get("/am/history")
-  def historyPage(request: cask.Request) = withAmAuth(request) { user =>
-    val matches = AmateurDatabaseManager.getMatches(user.id)
-
-    def notaBadgeCls(n: Double) = if (n >= 7.0) "badge-green" else if (n >= 5.0) "badge-yellow" else "badge-red"
-    def climaIcon(c: String) = c.toLowerCase match {
-      case s if s.contains("sol")  => "☀️"
-      case s if s.contains("lluv") => "??️"
-      case s if s.contains("frio") => "??"
-      case s if s.contains("vient")=> "??"
-      case _                       => "☁️"
-    }
-
-    renderAm("history", user.nombre,
-      div(
-        div(cls := "d-flex justify-content-between align-items-center mb-3",
-          h5(cls := "fw-black text-white mb-0", "?? Historial"),
-          a(href := "/am/match-center", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
-        ),
-
-        if (matches.isEmpty)
-          div(cls := "card-am p-4 text-center",
-            div(style := "font-size:40px; opacity:0.3", "??"),
-            p(cls := "text-muted mt-3", "Aún no has registrado ningún partido.")
-          )
-        else
-          frag(matches.map { m =>
-            val gcStr   = if (m.gc == 0) "✅" else m.gc.toString
-            val locStr  = m.esLocal match { case Some(true) => "??" case Some(false) => "✈️" case None => "" }
-            div(cls := "card-am p-3 mb-2",
-              div(cls := "d-flex align-items-center gap-3",
-                div(cls := s"nota-badge ${notaBadgeCls(m.nota)}", f"${m.nota}%.1f"),
-                div(cls := "flex-fill",
-                  div(cls := "fw-bold text-white small",
-                    span(locStr, " "), m.rival),
-                  div(cls := "xx-small text-muted",
-                    s"${m.fecha}  ${climaIcon(m.clima)}")
-                ),
-                div(cls := "text-end",
-                  div(cls := "fw-black text-white", s"${m.gf}—${m.gc}"),
-                  div(cls := "xx-small text-muted", s"GC: $gcStr")
-                )
-              )
-            )
-          }: _*)
+  def getMatch(userId: Int, matchId: Int): Option[AmMatch] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT * FROM am_matches WHERE id = ? AND user_id = ?"
       )
-    )
+      ps.setInt(1, matchId)
+      ps.setInt(2, userId)
+      val rs = ps.executeQuery()
+      if (rs.next()) {
+        val esLocalRaw = rs.getBoolean("es_local")
+        val esLocalOpt = if (rs.wasNull()) None else Some(esLocalRaw)
+        Some(AmMatch(
+          rs.getInt("id"), rs.getString("rival"),
+          rs.getInt("goles_favor"), rs.getInt("goles_contra"),
+          rs.getDouble("nota"),
+          Option(rs.getString("clima")).getOrElse("Sol"),
+          Option(rs.getString("estadio")).getOrElse(""),
+          esLocalOpt,
+          rs.getDate("fecha").toString,
+          Option(rs.getString("video_url")).getOrElse(""),
+          Option(rs.getString("notas")).getOrElse(""),
+          Option(rs.getString("analisis_voz")).getOrElse(""),
+          Option(rs.getString("posicion_partido")).getOrElse("portero"),
+          Option(rs.getString("posicion_campo")).getOrElse(""),
+          rs.getInt("goles_marcados"),
+          rs.getInt("asistencias")
+        ))
+      } else None
+    } finally { conn.close() }
   }
 
-  // ── PENALTIS ───────────────────────────────────────────────────────────────
-  @cask.get("/am/penalties")
-  def penaltiesPage(request: cask.Request) = withAmAuth(request) { user =>
-    val penalties = AmateurDatabaseManager.getPenalties(user.id)
-    val stats     = AmateurDatabaseManager.getPenaltyStats(user.id)
-
-    val total          = stats("total").asInstanceOf[Int]
-    val paradas        = stats("paradas").asInstanceOf[Int]
-    val adivinados     = stats("adivinados").asInstanceOf[Int]
-    val pctParada      = stats("pctParada").asInstanceOf[Int]
-    val pctIntuicion   = stats("pctIntuicion").asInstanceOf[Int]
-    val parConInt      = stats("paradasConIntuicion").asInstanceOf[Int]
-    val tirIzq         = stats("tirIzq").asInstanceOf[Int]
-    val tirCen         = stats("tirCen").asInstanceOf[Int]
-    val tirDer         = stats("tirDer").asInstanceOf[Int]
-    val estIzq         = stats("estIzq").asInstanceOf[Int]
-    val estCen         = stats("estCen").asInstanceOf[Int]
-    val estDer         = stats("estDer").asInstanceOf[Int]
-
-    def pct(n: Int, d: Int) = if (d > 0) n * 100 / d else 0
-    def barWidth(n: Int, d: Int) = s"${pct(n, d)}%"
-
-    renderAm("penalties", user.nombre,
-      div(
-        h5(cls := "fw-black text-white mb-3", "?? Penaltis"),
-
-        // Estadísticas
-        if (total > 0) frag(
-          div(cls := "row g-2 mb-3",
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-black text-white", style := "font-size:1.8rem;", total.toString),
-                div(cls := "xx-small text-muted", "Totales")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-black text-success", style := "font-size:1.8rem;", s"$pctParada%"),
-                div(cls := "xx-small text-muted", "Parados")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-black text-warning", style := "font-size:1.8rem;", s"$pctIntuicion%"),
-                div(cls := "xx-small text-muted", "Intuición")
-              )
-            )
-          ),
-
-          // Desglose intuición
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "xx-small text-muted fw-bold mb-2", "ANÁLISIS DE INTUICIÓN"),
-            div(cls := "small text-white mb-1",
-              s"Adivinaste el lado $adivinados de $total veces ($pctIntuicion%)"),
-            div(cls := "progress mb-2", style := "height:8px;",
-              div(cls := "progress-bar bg-warning", style := s"width:$pctIntuicion%;")
-            ),
-            if (parConInt > 0)
-              div(cls := "xx-small text-success",
-                s"✅ $parConInt paradas con intuición correcta (te tiraste al lado correcto Y la paraste)")
-            else span(),
-            div(cls := "xx-small text-muted mt-2 fst-italic",
-              if (pctIntuicion >= 60) "?? Buena lectura de penaltis. Confía en tu instinto."
-              else if (pctIntuicion >= 40) "?? Intuición media. Estudia las tendencias del tiro."
-              else "?? Trabajo de análisis de tendencias recomendado."
-            )
-          ),
-
-          // Tendencias
-          div(cls := "row g-2 mb-3",
-            div(cls := "col-6",
-              div(cls := "card-am p-3",
-                div(cls := "xx-small text-muted fw-bold mb-2", "DÓNDE TIRAN"),
-                frag(Seq(("Izquierda", tirIzq), ("Centro", tirCen), ("Derecha", tirDer)).map { case (lbl, n) =>
-                  div(cls := "mb-2",
-                    div(cls := "d-flex justify-content-between xx-small mb-1",
-                      span(cls := "text-white", lbl),
-                      span(cls := "text-danger fw-bold", n.toString)
-                    ),
-                    div(cls := "progress", style := "height:6px;",
-                      div(cls := "progress-bar bg-danger", style := s"width:${barWidth(n, total)};")
-                    )
-                  )
-                }: _*)
-              )
-            ),
-            div(cls := "col-6",
-              div(cls := "card-am p-3",
-                div(cls := "xx-small text-muted fw-bold mb-2", "DÓNDE TE TIRAS"),
-                frag(Seq(("Izquierda", estIzq), ("Centro", estCen), ("Derecha", estDer)).map { case (lbl, n) =>
-                  div(cls := "mb-2",
-                    div(cls := "d-flex justify-content-between xx-small mb-1",
-                      span(cls := "text-white", lbl),
-                      span(cls := "text-primary fw-bold", n.toString)
-                    ),
-                    div(cls := "progress", style := "height:6px;",
-                      div(cls := "progress-bar bg-primary", style := s"width:${barWidth(n, total)};")
-                    )
-                  )
-                }: _*)
-              )
-            )
-          )
-        ) else div(),
-
-        // Formulario registro
-        div(cls := "card-am p-3 mb-3",
-          div(cls := "fw-bold small text-white mb-3", "➕ Registrar penalti"),
-          form(action := "/am/penalties/save", method := "post",
-
-            div(cls := "row g-2 mb-3",
-              div(cls := "col-8",
-                label(cls := "xx-small text-muted fw-bold", "RIVAL"),
-                input(tpe := "text", name := "rival", cls := "form-control bg-dark text-white border-secondary mt-1",
-                  placeholder := "Nombre del tirador (opcional)")
-              ),
-              div(cls := "col-4",
-                label(cls := "xx-small text-muted fw-bold", "FECHA"),
-                input(tpe := "date", name := "fecha", cls := "form-control bg-dark text-white border-secondary mt-1",
-                  value := java.time.LocalDate.now().toString)
-              )
-            ),
-
-            // Dirección del tiro
-            div(cls := "mb-3",
-              div(cls := "xx-small text-muted fw-bold mb-2", "?? DIRECCIÓN DEL TIRO"),
-              div(cls := "row g-2",
-                frag(Seq("Izquierda", "Centro", "Derecha").map { d =>
-                  div(cls := "col-4",
-                    label(cls := "d-block",
-                      input(tpe := "radio", name := "dirTiro", value := d, cls := "d-none", required := true),
-                      div(cls := "btn-dir text-center", id := s"tiro_$d",
-                        attr("onclick") := s"selectDir('tiro','$d')",
-                        if (d == "Izquierda") "← Izq" else if (d == "Derecha") "Der →" else "● Cen"
-                      )
-                    )
-                  )
-                }: _*)
-              )
-            ),
-
-            // Dirección de la estirada
-            div(cls := "mb-3",
-              div(cls := "xx-small text-muted fw-bold mb-2", "?? ¿DÓNDE TE TIRASTE?"),
-              div(cls := "row g-2",
-                frag(Seq("Izquierda", "Centro", "Derecha").map { d =>
-                  div(cls := "col-4",
-                    label(cls := "d-block",
-                      input(tpe := "radio", name := "dirEstirada", value := d, cls := "d-none", required := true),
-                      div(cls := "btn-dir text-center", id := s"est_$d",
-                        attr("onclick") := s"selectDir('est','$d')",
-                        if (d == "Izquierda") "← Izq" else if (d == "Derecha") "Der →" else "● Cen"
-                      )
-                    )
-                  )
-                }: _*)
-              )
-            ),
-
-            // Resultado
-            div(cls := "mb-3",
-              div(cls := "xx-small text-muted fw-bold mb-2", "RESULTADO"),
-              div(cls := "d-flex gap-2",
-                frag(Seq(("true", "✅ Parada"), ("false", "❌ Gol")).map { case (v, lbl) =>
-                  label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
-                    style := "cursor:pointer; background:#1a1a1a;",
-                    input(tpe := "radio", name := "parada", value := v, cls := "d-none",
-                      if (v == "false") attr("checked") := "checked" else span()),
-                    span(lbl)
-                  )
-                }: _*)
-              )
-            ),
-
-            button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar penalti")
-          )
-        ),
-
-        // Historial de penaltis
-        if (penalties.nonEmpty)
-          div(cls := "card-am p-3",
-            div(cls := "xx-small text-muted fw-bold mb-2", "HISTORIAL"),
-            frag(penalties.take(20).map { p =>
-              val intuicion = p.direccionTiro == p.direccionEstirada
-              val icono = if (p.parada) "✅" else if (intuicion) "??" else "❌"
-              div(cls := "d-flex align-items-center gap-2 py-2",
-                style := "border-bottom:1px solid #1e1e1e;",
-                span(style := "font-size:18px;", icono),
-                div(cls := "flex-fill",
-                  div(cls := "xx-small text-white",
-                    if (p.rival.nonEmpty) p.rival else "Sin rival"),
-                  div(cls := "xx-small text-muted", p.fecha)
-                ),
-                div(cls := "text-end xx-small",
-                  div(cls := "text-danger", s"Tiro: ${p.direccionTiro}"),
-                  div(cls := "text-primary", s"Estirada: ${p.direccionEstirada}")
-                ),
-                form(action := "/am/penalties/delete", method := "post", cls := "ms-1",
-                  input(tpe := "hidden", name := "penaltyId", value := p.id.toString),
-                  button(tpe := "submit", cls := "btn btn-outline-secondary btn-sm xx-small", "✕")
-                )
-              )
-            }: _*)
-          )
-        else div(),
-
-        script(raw("""
-          function selectDir(group, dir) {
-            ['Izquierda','Centro','Derecha'].forEach(function(d) {
-              var el = document.getElementById(group + '_' + d);
-              if (el) {
-                el.classList.remove('selected-tiro', 'selected-estirada');
-                if (d === dir) el.classList.add(group === 'tiro' ? 'selected-tiro' : 'selected-estirada');
-              }
-              // también marcar el radio
-              var radio = document.querySelector('input[name="' + (group === 'tiro' ? 'dirTiro' : 'dirEstirada') + '"][value="' + d + '"]');
-              if (radio) radio.checked = (d === dir);
-            });
-          }
-          // visual para radio parada
-          document.querySelectorAll('input[name="parada"]').forEach(function(r) {
-            r.addEventListener('change', function() {
-              document.querySelectorAll('input[name="parada"]').forEach(function(x) {
-                x.parentElement.style.background = '#1a1a1a';
-              });
-              this.parentElement.style.background =
-                this.value === 'true' ? 'rgba(40,167,69,0.2)' : 'rgba(220,53,69,0.2)';
-            });
-          });
-        """))
-      )
-    )
+  def saveGoal(matchId: Int, zona: String, situacion: String,
+               errorDefensivo: Boolean, minuto: Int, notas: String): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_match_goals (match_id, zona, situacion, error_defensivo, minuto, notas)
+        VALUES (?, ?, ?, ?, ?, ?)
+      """)
+      ps.setInt(1, matchId)
+      ps.setString(2, zona)
+      ps.setString(3, situacion)
+      ps.setBoolean(4, errorDefensivo)
+      ps.setInt(5, minuto)
+      ps.setString(6, fix(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
   }
 
-  @cask.postForm("/am/penalties/save")
-  def savePenalty(request: cask.Request, rival: String = "", fecha: String = "",
-                  dirTiro: String, dirEstirada: String, parada: String = "false") =
-    withAmAuth(request) { user =>
-      AmateurDatabaseManager.savePenalty(
-        userId       = user.id,
-        fecha        = fecha,
-        rival        = rival,
-        dirTiro      = dirTiro,
-        dirEstirada  = dirEstirada,
-        parada       = parada == "true",
-        matchId      = None,
-        notas        = ""
-      )
-      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/penalties"))
-    }
+  def deleteGoal(goalId: Int, userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      // Ensure goal belongs to a match owned by this user
+      val ps = conn.prepareStatement("""
+        DELETE FROM am_match_goals
+        WHERE id = ?
+        AND match_id IN (SELECT id FROM am_matches WHERE user_id = ?)
+      """)
+      ps.setInt(1, goalId)
+      ps.setInt(2, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
 
-  @cask.postForm("/am/penalties/delete")
-  def deletePenalty(request: cask.Request, penaltyId: Int) =
-    withAmAuth(request) { user =>
-      AmateurDatabaseManager.deletePenalty(penaltyId, user.id)
-      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/penalties"))
-    }
+  def getGoals(matchId: Int): List[AmGoal] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT * FROM am_match_goals WHERE match_id = ? ORDER BY minuto ASC"
+      )
+      ps.setInt(1, matchId)
+      val rs = ps.executeQuery()
+      var list = List[AmGoal]()
+      while (rs.next()) {
+        list = list :+ AmGoal(
+          rs.getInt("id"), rs.getInt("match_id"),
+          Option(rs.getString("zona")).getOrElse("MC"),
+          Option(rs.getString("situacion")).getOrElse("Remate"),
+          rs.getBoolean("error_defensivo"),
+          rs.getInt("minuto"),
+          Option(rs.getString("notas")).getOrElse("")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def saveVoiceAnalysis(matchId: Int, analysis: String): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("UPDATE am_matches SET analisis_voz = ? WHERE id = ?")
+      ps.setString(1, fix(analysis))
+      ps.setInt(2, matchId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ── PENALTIES ──────────────────────────────────────────────────────────────
+  def savePenalty(
+                   userId: Int, fecha: String, rival: String,
+                   dirTiro: String, dirEstirada: String, parada: Boolean,
+                   matchId: Option[Int], notas: String
+                 ): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_penalties
+          (user_id, fecha, rival, direccion_tiro, direccion_estirada, parada, match_id, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      """)
+      ps.setInt(1, userId)
+      ps.setDate(2, Date.valueOf(if (fecha.nonEmpty) fecha else LocalDate.now().toString))
+      ps.setString(3, fix(rival))
+      ps.setString(4, dirTiro)
+      ps.setString(5, dirEstirada)
+      ps.setBoolean(6, parada)
+      matchId match {
+        case Some(id) => ps.setInt(7, id)
+        case None     => ps.setNull(7, java.sql.Types.INTEGER)
+      }
+      ps.setString(8, fix(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def deletePenalty(penaltyId: Int, userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("DELETE FROM am_penalties WHERE id = ? AND user_id = ?")
+      ps.setInt(1, penaltyId)
+      ps.setInt(2, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getPenalties(userId: Int): List[AmPenalty] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT * FROM am_penalties WHERE user_id = ? ORDER BY fecha DESC, id DESC"
+      )
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var list = List[AmPenalty]()
+      while (rs.next()) {
+        val mId = rs.getInt("match_id")
+        val mIdOpt = if (rs.wasNull()) None else Some(mId)
+        list = list :+ AmPenalty(
+          rs.getInt("id"), rs.getInt("user_id"),
+          rs.getDate("fecha").toString,
+          Option(rs.getString("rival")).getOrElse(""),
+          rs.getString("direccion_tiro"),
+          rs.getString("direccion_estirada"),
+          rs.getBoolean("parada"),
+          mIdOpt,
+          Option(rs.getString("notas")).getOrElse("")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  // Devuelve Map con todas las estadísticas de penaltis
+  def getPenaltyStats(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      val rs = conn.prepareStatement("""
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN parada THEN 1 ELSE 0 END) as paradas,
+          SUM(CASE WHEN direccion_tiro = direccion_estirada THEN 1 ELSE 0 END) as adivinados,
+          SUM(CASE WHEN direccion_tiro = 'Izquierda' THEN 1 ELSE 0 END) as tiros_izq,
+          SUM(CASE WHEN direccion_tiro = 'Centro'    THEN 1 ELSE 0 END) as tiros_cen,
+          SUM(CASE WHEN direccion_tiro = 'Derecha'   THEN 1 ELSE 0 END) as tiros_der,
+          SUM(CASE WHEN direccion_estirada = 'Izquierda' THEN 1 ELSE 0 END) as est_izq,
+          SUM(CASE WHEN direccion_estirada = 'Centro'    THEN 1 ELSE 0 END) as est_cen,
+          SUM(CASE WHEN direccion_estirada = 'Derecha'   THEN 1 ELSE 0 END) as est_der,
+          -- paradas con intuición correcta
+          SUM(CASE WHEN parada AND direccion_tiro = direccion_estirada THEN 1 ELSE 0 END) as paradas_con_intuicion
+        FROM am_penalties WHERE user_id = ?
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      if (rs.next()) {
+        val total  = rs.getInt("total")
+        val paradas = rs.getInt("paradas")
+        val adiv   = rs.getInt("adivinados")
+        Map(
+          "total"              -> total,
+          "paradas"            -> paradas,
+          "adivinados"         -> adiv,
+          "pctParada"          -> (if (total > 0) paradas * 100 / total else 0),
+          "pctIntuicion"       -> (if (total > 0) adiv * 100 / total else 0),
+          "paradasConIntuicion"-> rs.getInt("paradas_con_intuicion"),
+          "tirIzq"             -> rs.getInt("tiros_izq"),
+          "tirCen"             -> rs.getInt("tiros_cen"),
+          "tirDer"             -> rs.getInt("tiros_der"),
+          "estIzq"             -> rs.getInt("est_izq"),
+          "estCen"             -> rs.getInt("est_cen"),
+          "estDer"             -> rs.getInt("est_der")
+        )
+      } else Map("total" -> 0, "paradas" -> 0, "adivinados" -> 0, "pctParada" -> 0,
+        "pctIntuicion" -> 0, "paradasConIntuicion" -> 0,
+        "tirIzq" -> 0, "tirCen" -> 0, "tirDer" -> 0,
+        "estIzq" -> 0, "estCen" -> 0, "estDer" -> 0)
+    } finally { conn.close() }
+  }
 
   // ── GEAR ───────────────────────────────────────────────────────────────────
-  @cask.get("/am/gear")
-  def gearPage(request: cask.Request) = withAmAuth(request) { user =>
-    val items = AmateurDatabaseManager.getGear(user.id)
+  def saveGear(userId: Int, nombre: String, marca: String,
+               tipoLatex: String, corte: String, notas: String): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_gear (user_id, nombre, marca, tipo_latex, corte, notas)
+        VALUES (?, ?, ?, ?, ?, ?)
+      """)
+      ps.setInt(1, userId)
+      ps.setString(2, fix(nombre))
+      ps.setString(3, fix(marca))
+      ps.setString(4, tipoLatex)
+      ps.setString(5, corte)
+      ps.setString(6, fix(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
 
-    val tiposLatex = Seq("Garra", "Flat", "Roll Finger", "Negative Cut", "Hybrid", "Otro")
-    val tiposCorte = Seq("Roll", "Flat", "Negative", "Hybrid", "Gunn Cut", "Otro")
-
-    def estadoColor(usos: Int) =
-      if (usos < 15) "success" else if (usos < 30) "warning" else "danger"
-    def estadoLabel(usos: Int) =
-      if (usos < 15) "Nuevo" else if (usos < 30) "En uso" else "Desgastado"
-
-    renderAm("gear", user.nombre,
-      div(
-        h5(cls := "fw-black text-white mb-3", "?? Mis Guantes"),
-
-        // Lista
-        if (items.nonEmpty)
-          div(cls := "mb-3",
-            frag(items.map { g =>
-              val c = estadoColor(g.partidosUsados)
-              div(cls := s"card-am p-3 mb-2 border-start border-$c border-3",
-                div(cls := "d-flex justify-content-between align-items-start",
-                  div(
-                    div(cls := "fw-bold text-white small", g.nombre),
-                    if (g.marca.nonEmpty) div(cls := "xx-small text-muted", g.marca) else span(),
-                    div(cls := "xx-small text-muted mt-1",
-                      if (g.tipoLatex.nonEmpty) s"${g.tipoLatex}" else "",
-                      if (g.corte.nonEmpty) s" · Corte: ${g.corte}" else ""
-                    )
-                  ),
-                  div(cls := "text-end",
-                    span(cls := s"badge bg-$c bg-opacity-25 text-$c small fw-bold",
-                      s"${g.partidosUsados} PJ"),
-                    div(cls := "xx-small text-muted mt-1", estadoLabel(g.partidosUsados)),
-                    if (!g.activo)
-                      div(cls := "badge bg-secondary xx-small mt-1", "Retirado")
-                    else span()
-                  )
-                ),
-                div(cls := "d-flex gap-2 mt-2",
-                  form(action := "/am/gear/use", method := "post",
-                    input(tpe := "hidden", name := "gearId", value := g.id.toString),
-                    button(tpe := "submit", cls := "btn btn-outline-success btn-sm xx-small fw-bold",
-                      "+ Uso")
-                  ),
-                  form(action := "/am/gear/toggle", method := "post",
-                    input(tpe := "hidden", name := "gearId", value := g.id.toString),
-                    button(tpe := "submit",
-                      cls := s"btn btn-outline-secondary btn-sm xx-small",
-                      if (g.activo) "Retirar" else "Activar")
-                  )
-                ),
-                if (g.notas.nonEmpty)
-                  div(cls := "xx-small text-muted mt-2 fst-italic", g.notas)
-                else span()
-              )
-            }: _*)
-          )
-        else
-          div(cls := "card-am p-4 text-center mb-3",
-            div(style := "font-size:40px; opacity:0.3", "??"),
-            p(cls := "text-muted mt-2 small", "Aún no has añadido guantes.")
-          ),
-
-        // Formulario añadir
-        div(cls := "card-am p-3",
-          div(cls := "fw-bold small text-white mb-3", "➕ Añadir guantes"),
-          form(action := "/am/gear/save", method := "post",
-            div(cls := "mb-2",
-              label(cls := "xx-small text-muted fw-bold", "NOMBRE / MODELO"),
-              input(tpe := "text", name := "nombre", cls := "form-control bg-dark text-white border-secondary mt-1",
-                placeholder := "Ej: Reusch Attrakt Gold", required := true)
-            ),
-            div(cls := "row g-2 mb-2",
-              div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "MARCA"),
-                input(tpe := "text", name := "marca", cls := "form-control bg-dark text-white border-secondary mt-1",
-                  placeholder := "Reusch, Puma...")
-              ),
-              div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "TIPO LÁTEX"),
-                select(name := "tipoLatex", cls := "form-select bg-dark text-white border-secondary mt-1",
-                  frag(tiposLatex.map(t => option(value := t, t)): _*)
-                )
-              )
-            ),
-            div(cls := "row g-2 mb-2",
-              div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "CORTE"),
-                select(name := "corte", cls := "form-select bg-dark text-white border-secondary mt-1",
-                  frag(tiposCorte.map(t => option(value := t, t)): _*)
-                )
-              )
-            ),
-            div(cls := "mb-2",
-              label(cls := "xx-small text-muted fw-bold", "NOTAS (opcional)"),
-              input(tpe := "text", name := "notas", cls := "form-control bg-dark text-white border-secondary mt-1",
-                placeholder := "Para lluvia, para hierba...")
-            ),
-            button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold mt-1", "Guardar guantes")
-          )
+  def getGear(userId: Int): List[AmGearItem] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT * FROM am_gear WHERE user_id = ? ORDER BY activo DESC, id DESC"
+      )
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var list = List[AmGearItem]()
+      while (rs.next()) {
+        list = list :+ AmGearItem(
+          rs.getInt("id"), rs.getInt("user_id"),
+          rs.getString("nombre"),
+          Option(rs.getString("marca")).getOrElse(""),
+          Option(rs.getString("tipo_latex")).getOrElse(""),
+          Option(rs.getString("corte")).getOrElse(""),
+          rs.getInt("partidos_usados"),
+          rs.getBoolean("activo"),
+          Option(rs.getString("notas")).getOrElse("")
         )
-      )
-    )
+      }
+      list
+    } finally { conn.close() }
   }
 
-  @cask.postForm("/am/gear/save")
-  def saveGear(request: cask.Request, nombre: String, marca: String = "",
-               tipoLatex: String = "", corte: String = "", notas: String = "") =
-    withAmAuth(request) { user =>
-      AmateurDatabaseManager.saveGear(user.id, nombre, marca, tipoLatex, corte, notas)
-      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
-    }
-
-  @cask.postForm("/am/gear/use")
-  def gearUse(request: cask.Request, gearId: Int) =
-    withAmAuth(request) { user =>
-      AmateurDatabaseManager.incrementGearUsage(gearId, user.id)
-      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
-    }
-
-  @cask.postForm("/am/gear/toggle")
-  def gearToggle(request: cask.Request, gearId: Int) =
-    withAmAuth(request) { user =>
-      AmateurDatabaseManager.toggleGearActive(gearId, user.id)
-      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
-    }
-
-  // ── AGENDA / CALENDARIO ─────────────────────────────────────────────────────
-  @cask.get("/am/calendar")
-  def calendarPage(request: cask.Request) = withAmAuth(request) { user =>
-    val today    = java.time.LocalDate.now()
-    val year     = today.getYear
-    val month    = today.getMonthValue
-    val firstDay = java.time.LocalDate.of(year, month, 1)
-    val lastDay  = firstDay.plusMonths(1).minusDays(1)
-    val fromStr  = firstDay.toString
-    val toStr    = lastDay.toString
-    val monthName = firstDay.getMonth.getDisplayName(
-      java.time.format.TextStyle.FULL, new java.util.Locale("es"))
-    val schedules   = AmateurDatabaseManager.getScheduleRange(user.id, fromStr, toStr)
-    val upcoming    = AmateurDatabaseManager.getUpcomingSchedule(user.id, 5)
-    val schedByDate = schedules.groupBy(_.fecha)
-    val startDow    = firstDay.getDayOfWeek.getValue
-    val blancos     = startDow - 1
-    val daysInMonth = lastDay.getDayOfMonth
-    val todayStr    = today.toString
-
-    renderAm("calendar", user.nombre,
-      div(
-        div(cls := "d-flex justify-content-between align-items-center mb-3",
-          h5(cls := "fw-black mb-0", s"$monthName $year"),
-          a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
-        ),
-        div(cls := "card-am p-2 mb-3",
-          div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
-            frag(Seq("L","M","X","J","V","S","D").map(d =>
-              div(cls := "text-center xx-small text-muted fw-bold py-1", d)
-            ): _*),
-            frag((1 to blancos).map(_ => div()): _*),
-            frag((1 to daysInMonth).map { d =>
-              val dateStr = f"$year-$month%02d-$d%02d"
-              val hasSched = schedByDate.contains(dateStr)
-              val isToday  = dateStr == todayStr
-              val dayCls   = "cal-day" + (if (isToday) " today" else if (hasSched) " has-schedule" else "")
-              div(cls := dayCls,
-                div(cls := "day-num", d.toString),
-                if (hasSched)
-                  frag(schedByDate(dateStr).map(s =>
-                    div(cls := "xx-small", style := "overflow:hidden;white-space:nowrap;text-overflow:ellipsis;",
-                      s.rival)
-                  ): _*)
-                else span()
-              )
-            }: _*)
-          )
-        ),
-        div(cls := "d-flex gap-3 mb-3 xx-small",
-          span(span(cls := "cal-dot", style := "background:#38a169;"), " Jugado"),
-          span(span(cls := "cal-dot", style := "background:#d69e2e;"), " Programado"),
-          span(span(cls := "cal-dot", style := "background:#0d6efd;"), " Hoy")
-        ),
-        if (upcoming.nonEmpty)
-          div(cls := "card-am p-3",
-            div(cls := "fw-bold small text-muted mb-2", "PROXIMOS PARTIDOS"),
-            frag(upcoming.map { s =>
-              val tipoColor = s.tipo match {
-                case "TORNEO" => "#dc3545"; case "CUP" => "#6f42c1"; case _ => "#0d6efd"
-              }
-              div(cls := "d-flex align-items-center gap-2 py-2",
-                style := "border-bottom:1px solid #e2e8f0;",
-                div(style := s"width:4px;height:36px;background:$tipoColor;border-radius:2px;"),
-                div(cls := "flex-fill",
-                  div(cls := "fw-bold small", s.rival),
-                  div(cls := "xx-small text-muted",
-                    s.fecha,
-                    if (s.hora.nonEmpty) s" - ${s.hora}" else "",
-                    if (s.lugar.nonEmpty) s" - ${s.lugar}" else "")
-                ),
-                form(action := "/am/calendar/delete", method := "post",
-                  input(tpe := "hidden", name := "scheduleId", value := s.id.toString),
-                  button(tpe := "submit", cls := "btn btn-outline-danger btn-sm",
-                    style := "font-size:10px;", "X")
-                )
-              )
-            }: _*)
-          )
-        else
-          div(cls := "card-am p-3 text-center", style := "border-style:dashed;",
-            div(cls := "text-muted small", "Sin partidos programados"),
-            a(href := "/am/calendar/add", cls := "btn btn-outline-primary btn-sm mt-2", "+ Añadir")
-          )
+  def incrementGearUsage(gearId: Int, userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "UPDATE am_gear SET partidos_usados = partidos_usados + 1 WHERE id = ? AND user_id = ?"
       )
-    )
+      ps.setInt(1, gearId)
+      ps.setInt(2, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
   }
 
-  @cask.get("/am/calendar/add")
-  def calendarAddPage(request: cask.Request) = withAmAuth(request) { user =>
-    val today = java.time.LocalDate.now().toString
-    renderAm("calendar", user.nombre,
-      div(
-        h5(cls := "fw-black mb-3", "Añadir partido a la agenda"),
-        div(cls := "card-am p-3",
-          form(action := "/am/calendar/save", method := "post",
-            div(cls := "mb-3",
-              label(cls := "xx-small text-muted fw-bold", "RIVAL"),
-              input(tpe := "text", name := "rival", cls := "form-control mt-1",
-                placeholder := "Equipo rival", required := true)
-            ),
-            div(cls := "row g-2 mb-3",
-              div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "FECHA"),
-                input(tpe := "date", name := "fecha", cls := "form-control mt-1",
-                  value := today, required := true)
-              ),
-              div(cls := "col-6",
-                label(cls := "xx-small text-muted fw-bold", "HORA"),
-                input(tpe := "time", name := "hora", cls := "form-control mt-1")
-              )
-            ),
-            div(cls := "mb-3",
-              label(cls := "xx-small text-muted fw-bold", "LUGAR"),
-              input(tpe := "text", name := "lugar", cls := "form-control mt-1", placeholder := "Campo / pabellon")
-            ),
-            div(cls := "mb-3",
-              label(cls := "xx-small text-muted fw-bold", "TIPO"),
-              select(name := "tipo", cls := "form-select mt-1",
-                option(value := "LIGA", "Liga"),
-                option(value := "TORNEO", "Torneo"),
-                option(value := "CUP", "Copa"),
-                option(value := "AMISTOSO", "Amistoso")
-              )
-            ),
-            div(cls := "mb-3",
-              label(cls := "xx-small text-muted fw-bold", "NOTAS"),
-              textarea(name := "notas", cls := "form-control mt-1", rows := "2")
-            ),
-            button(tpe := "submit", cls := "btn btn-primary fw-bold w-100", "Guardar")
-          )
+  def toggleGearActive(gearId: Int, userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "UPDATE am_gear SET activo = NOT activo WHERE id = ? AND user_id = ?"
+      )
+      ps.setInt(1, gearId)
+      ps.setInt(2, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ── DASHBOARD STATS ────────────────────────────────────────────────────────
+  def getDashboardStats(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      val rs = conn.prepareStatement("""
+        SELECT
+          COUNT(*) as pj,
+          COALESCE(AVG(nota), 0) as nota_media,
+          COALESCE(AVG(goles_contra), 0) as gc_media,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as ganados,
+          SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) as empatados,
+          SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) as perdidos,
+          COALESCE(SUM(goles_contra), 0) as gc_total
+        FROM am_matches WHERE user_id = ?
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      // Nota ajustada: penaltis marcados como error defensivo no penalizan
+      val rsAdj = conn.prepareStatement("""
+        SELECT
+          m.id,
+          m.nota,
+          COUNT(g.id) FILTER (WHERE g.error_defensivo = TRUE) as errores_defensivos
+        FROM am_matches m
+        LEFT JOIN am_match_goals g ON g.match_id = m.id
+        WHERE m.user_id = ?
+        GROUP BY m.id, m.nota
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      var notaAjustadaTotal = 0.0
+      var matchCount = 0
+      while (rsAdj.next()) {
+        val notaPartido = rsAdj.getDouble("nota")
+        val errDef = rsAdj.getInt("errores_defensivos")
+        // Cada gol de error defensivo suma +0.3 a la nota del partido (máx 10)
+        val notaAdj = math.min(10.0, notaPartido + errDef * 0.3)
+        notaAjustadaTotal += notaAdj
+        matchCount += 1
+      }
+      val notaAjustada = if (matchCount > 0) notaAjustadaTotal / matchCount else 0.0
+
+      // Racha actual
+      val rsRacha = conn.prepareStatement("""
+        SELECT goles_contra FROM am_matches WHERE user_id = ? ORDER BY fecha DESC, id DESC LIMIT 10
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      var rachaLimpias = 0
+      var rachaRota = false
+      while (rsRacha.next() && !rachaRota) {
+        if (rsRacha.getInt("goles_contra") == 0) rachaLimpias += 1
+        else rachaRota = true
+      }
+
+      // Últimos 5 partidos
+      val rsLast = conn.prepareStatement("""
+        SELECT rival, goles_favor, goles_contra, nota, fecha, posicion_partido
+        FROM am_matches WHERE user_id = ? ORDER BY fecha DESC, id DESC LIMIT 5
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      var ultimos = List[Map[String, String]]()
+      while (rsLast.next()) {
+        ultimos = ultimos :+ Map(
+          "rival"    -> rsLast.getString("rival"),
+          "res"      -> s"${rsLast.getInt("goles_favor")}-${rsLast.getInt("goles_contra")}",
+          "nota"     -> f"${rsLast.getDouble("nota")}%.1f",
+          "fecha"    -> rsLast.getDate("fecha").toString,
+          "posicion" -> Option(rsLast.getString("posicion_partido")).getOrElse("portero")
         )
+      }
+
+      if (rs.next()) Map(
+        "pj"           -> rs.getInt("pj"),
+        "notaMedia"    -> rs.getDouble("nota_media"),
+        "notaAjustada" -> notaAjustada,
+        "gcMedia"      -> rs.getDouble("gc_media"),
+        "gcTotal"      -> rs.getInt("gc_total"),
+        "limpias"      -> rs.getInt("limpias"),
+        "ganados"      -> rs.getInt("ganados"),
+        "empatados"    -> rs.getInt("empatados"),
+        "perdidos"     -> rs.getInt("perdidos"),
+        "rachaLimpias" -> rachaLimpias,
+        "ultimos"      -> ultimos
+      ) else Map(
+        "pj" -> 0, "notaMedia" -> 0.0, "notaAjustada" -> 0.0,
+        "gcMedia" -> 0.0, "gcTotal" -> 0, "limpias" -> 0,
+        "ganados" -> 0, "empatados" -> 0, "perdidos" -> 0,
+        "rachaLimpias" -> 0, "ultimos" -> List.empty
       )
-    )
+    } finally { conn.close() }
   }
 
-  @cask.post("/am/calendar/save")
-  def calendarSave(request: cask.Request) = withAmAuth(request) { user =>
-    val body   = new String(request.data.readAllBytes(), "UTF-8")
-    val params = body.split("&").map { pair =>
-      val p = pair.split("=", 2)
-      java.net.URLDecoder.decode(p(0), "UTF-8") -> (if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else "")
-    }.toMap
-    AmateurDatabaseManager.saveSchedule(
-      user.id,
-      params.getOrElse("rival", ""),
-      params.getOrElse("fecha", java.time.LocalDate.now().toString),
-      params.getOrElse("hora", ""),
-      params.getOrElse("lugar", ""),
-      params.getOrElse("tipo", "LIGA"),
-      params.getOrElse("notas", "")
-    )
-    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
+
+  // ── SCHEDULE / CALENDARIO ──────────────────────────────────────────────────
+
+  def saveSchedule(userId: Int, rival: String, fecha: String, hora: String,
+                   lugar: String, tipo: String, notas: String): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_schedule (user_id, rival, fecha, hora, lugar, tipo, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      """)
+      ps.setInt(1, userId)
+      ps.setString(2, fix(rival))
+      ps.setDate(3, Date.valueOf(fecha))
+      ps.setString(4, hora)
+      ps.setString(5, fix(lugar))
+      ps.setString(6, tipo)
+      ps.setString(7, fix(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
   }
 
-  @cask.post("/am/calendar/delete")
-  def calendarDelete(request: cask.Request) = withAmAuth(request) { user =>
-    val body   = new String(request.data.readAllBytes(), "UTF-8")
-    val params = body.split("&").map { pair =>
-      val p = pair.split("=", 2)
-      java.net.URLDecoder.decode(p(0), "UTF-8") -> (if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else "")
-    }.toMap
-    val sid = params.getOrElse("scheduleId", "0").toIntOption.getOrElse(0)
-    AmateurDatabaseManager.deleteSchedule(sid, user.id)
-    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
+  def deleteSchedule(scheduleId: Int, userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("DELETE FROM am_schedule WHERE id = ? AND user_id = ?")
+      ps.setInt(1, scheduleId)
+      ps.setInt(2, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
   }
 
-  // ── INFORME PDF ──────────────────────────────────────────────────────────────
-  @cask.get("/am/report")
-  def reportPage(request: cask.Request) = withAmAuth(request) { user =>
-    val data          = AmateurDatabaseManager.getReportData(user.id)
-    val pj            = data.getOrElse("pj", 0).asInstanceOf[Int]
-    val pjP           = data.getOrElse("pjPortero", 0).asInstanceOf[Int]
-    val pjJ           = data.getOrElse("pjJugador", 0).asInstanceOf[Int]
-    val notaM         = data.getOrElse("notaMedia", 0.0).asInstanceOf[Double]
-    val notaP         = data.getOrElse("notaPortero", 0.0).asInstanceOf[Double]
-    val notaJ         = data.getOrElse("notaJugador", 0.0).asInstanceOf[Double]
-    val gcMedia       = data.getOrElse("gcMedia", 0.0).asInstanceOf[Double]
-    val limpias       = data.getOrElse("limpias", 0).asInstanceOf[Int]
-    val ganados       = data.getOrElse("ganados", 0).asInstanceOf[Int]
-    val empatados     = data.getOrElse("empatados", 0).asInstanceOf[Int]
-    val perdidos      = data.getOrElse("perdidos", 0).asInstanceOf[Int]
-    val golesMarcados = data.getOrElse("golesMarcados", 0).asInstanceOf[Int]
-    val asistencias   = data.getOrElse("asistencias", 0).asInstanceOf[Int]
-    val totalPen      = data.getOrElse("totalPen", 0).asInstanceOf[Int]
-    val paradasPen    = data.getOrElse("paradasPen", 0).asInstanceOf[Int]
-    val historial     = data.getOrElse("historial", List.empty).asInstanceOf[List[Map[String, String]]]
-    val nextMatch     = data.getOrElse("nextMatch", None).asInstanceOf[Option[Map[String, String]]]
-    val pctLimpias    = if (pjP > 0) (limpias * 100) / pjP else 0
-    val pctParadas    = if (totalPen > 0) (paradasPen * 100) / totalPen else 0
-    val today         = java.time.LocalDate.now().toString
-
-    val histRows = historial.map { m =>
-      val nota   = m.getOrElse("nota","5").toDoubleOption.getOrElse(5.0)
-      val notaCls = if(nota>=7)"nota-green" else if(nota>=5)"nota-yellow" else "nota-red"
-      val esP    = m.getOrElse("posicion","Portero").startsWith("Portero")
-      s"""<tr>
-        <td>${m.getOrElse("fecha","")}</td>
-        <td style="font-weight:600">${m.getOrElse("rival","")}</td>
-        <td style="text-align:center">${m.getOrElse("res","")}</td>
-        <td><span class="${if(esP) "badge-portero" else "badge-jugador"}">${m.getOrElse("posicion","Portero")}</span></td>
-        <td style="text-align:center"><span class="nota-pill $notaCls">${m.getOrElse("nota","")}</span></td>
-        <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("goles","0")}</td>
-        <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("asist","0")}</td>
-      </tr>"""
-    }.mkString("\n")
-
-    val nextHtml = nextMatch.map { nm =>
-      s"""<div class="mb-3 p-2" style="border-left:4px solid #f59e0b;background:#fffbeb;border-radius:4px;">
-        <div style="font-size:9px;font-weight:700;color:#92400e;">PROXIMO &middot; ${nm.getOrElse("tipo","LIGA")}</div>
-        <div style="font-weight:900;font-size:1rem;">${nm.getOrElse("rival","")}</div>
-        <div style="font-size:10px;color:#718096;">${nm.getOrElse("fecha","")}${if(nm.getOrElse("hora","").nonEmpty) " &middot; " + nm("hora") else ""}</div>
-      </div>"""
-    }.getOrElse("")
-
-    val rolSection = if (pjJ > 0)
-      s"""<div class="section-title">Desglose por posicion</div>
-      <div class="row g-2 mb-2">
-        <div class="col-6"><div class="stat-box" style="border-color:#bfdbfe;">
-          <div style="font-size:9px;font-weight:700;color:#1e40af;margin-bottom:6px;">PORTERO</div>
-          <div class="d-flex justify-content-around">
-            <div><div class="stat-val text-primary">$pjP</div><div class="stat-lbl">Partidos</div></div>
-            <div><div class="stat-val text-primary">${f"$notaP%.1f"}</div><div class="stat-lbl">Nota</div></div>
-            <div><div class="stat-val text-success">$limpias</div><div class="stat-lbl">Limpias</div></div>
-          </div></div></div>
-        <div class="col-6"><div class="stat-box" style="border-color:#ddd6fe;">
-          <div style="font-size:9px;font-weight:700;color:#5b21b6;margin-bottom:6px;">JUGADOR</div>
-          <div class="d-flex justify-content-around">
-            <div><div class="stat-val" style="color:#5b21b6;">$pjJ</div><div class="stat-lbl">Partidos</div></div>
-            <div><div class="stat-val" style="color:#5b21b6;">${f"$notaJ%.1f"}</div><div class="stat-lbl">Nota</div></div>
-            <div><div class="stat-val" style="color:#5b21b6;">$golesMarcados</div><div class="stat-lbl">Goles</div></div>
-            <div><div class="stat-val" style="color:#5b21b6;">$asistencias</div><div class="stat-lbl">Asist.</div></div>
-          </div></div></div>
-      </div>"""
-    else ""
-
-    val penSection = if (totalPen > 0)
-      s"""<div class="section-title">Penaltis</div>
-      <div class="row g-2 mb-2">
-        <div class="col-3"><div class="stat-box"><div class="stat-val">$totalPen</div><div class="stat-lbl">Total</div></div></div>
-        <div class="col-3"><div class="stat-box"><div class="stat-val text-success">$paradasPen</div><div class="stat-lbl">Parados</div></div></div>
-        <div class="col-3"><div class="stat-box"><div class="stat-val text-danger">${totalPen-paradasPen}</div><div class="stat-lbl">Encajados</div></div></div>
-        <div class="col-3"><div class="stat-box"><div class="stat-val">$pctParadas%</div><div class="stat-lbl">% parada</div></div></div>
-      </div>"""
-    else ""
-
-    val html =
-      s"""<!DOCTYPE html><html><head><meta charset="utf-8"/>
-<title>Informe Guardian Amateur - ${user.nombre}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
-<style>
-@page{size:A4;margin:16mm}
-body{font-family:'Segoe UI',sans-serif;background:#fff;color:#1a202c;font-size:12px}
-@media screen{body{max-width:800px;margin:0 auto;padding:20px}}
-@media print{.no-print{display:none!important}}
-.stat-box{border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center}
-.stat-val{font-size:1.4rem;font-weight:900;line-height:1}
-.stat-lbl{font-size:9px;color:#718096;text-transform:uppercase;margin-top:2px}
-.section-title{font-size:10px;font-weight:800;letter-spacing:.08em;color:#718096;text-transform:uppercase;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-bottom:10px;margin-top:14px}
-.badge-portero{background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700}
-.badge-jugador{background:#ede9fe;color:#5b21b6;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700}
-table{border-collapse:collapse;width:100%;font-size:10px}
-th{background:#f8fafc;font-weight:700;color:#4a5568;padding:5px 8px;border:1px solid #e2e8f0;text-align:left}
-td{padding:4px 8px;border:1px solid #e2e8f0}
-tr:nth-child(even){background:#f8fafc}
-.nota-pill{border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:10px}
-.nota-green{background:#d1fae5;color:#065f46}
-.nota-yellow{background:#fef3c7;color:#92400e}
-.nota-red{background:#fee2e2;color:#991b1b}
-</style></head>
-<body>
-<div class="no-print mb-3 d-flex gap-2">
-  <button class="btn btn-primary fw-bold" onclick="window.print()">Imprimir / Guardar PDF</button>
-  <a href="/am/dashboard" class="btn btn-outline-secondary">&larr; Volver</a>
-</div>
-<div class="d-flex align-items-center justify-content-between mb-3 pb-2" style="border-bottom:3px solid #0d6efd;">
-  <div>
-    <div style="font-size:1.2rem;font-weight:900;">🛡 GUARDIAN AMATEUR</div>
-    <div style="font-size:10px;color:#718096;">Informe de rendimiento &mdash; ${user.nombre}</div>
-  </div>
-  <div class="text-end">
-    <div style="font-size:9px;color:#718096;">$today</div>
-    <div style="font-size:9px;color:#718096;">$pj partidos totales</div>
-  </div>
-</div>
-$nextHtml
-<div class="section-title">Estadisticas globales</div>
-<div class="row g-2 mb-2">
-  <div class="col"><div class="stat-box"><div class="stat-val text-primary">${f"$notaM%.1f"}</div><div class="stat-lbl">Nota media</div></div></div>
-  <div class="col"><div class="stat-box"><div class="stat-val text-danger">${f"$gcMedia%.1f"}</div><div class="stat-lbl">GC/partido</div></div></div>
-  <div class="col"><div class="stat-box"><div class="stat-val text-success">$limpias ($pctLimpias%)</div><div class="stat-lbl">Limpias</div></div></div>
-  <div class="col"><div class="stat-box"><div class="stat-val">$ganados</div><div class="stat-lbl">Ganados</div></div></div>
-  <div class="col"><div class="stat-box"><div class="stat-val text-warning">$empatados</div><div class="stat-lbl">Empates</div></div></div>
-  <div class="col"><div class="stat-box"><div class="stat-val text-danger">$perdidos</div><div class="stat-lbl">Perdidos</div></div></div>
-</div>
-$rolSection
-$penSection
-<div class="section-title">Ultimos ${historial.size} partidos</div>
-<table><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Posicion</th><th>Nota</th><th>Goles</th><th>Asist.</th></tr></thead>
-<tbody>$histRows</tbody></table>
-<div class="mt-3 text-center" style="font-size:9px;color:#a0aec0;border-top:1px solid #e2e8f0;padding-top:8px;">Guardian Amateur &copy; $today</div>
-</body></html>"""
-
-    cask.Response(html.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  def getScheduleRange(userId: Int, fromDate: String, toDate: String): List[AmSchedule] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT * FROM am_schedule
+        WHERE user_id = ? AND fecha BETWEEN ? AND ?
+        ORDER BY fecha ASC, hora ASC
+      """)
+      ps.setInt(1, userId)
+      ps.setDate(2, Date.valueOf(fromDate))
+      ps.setDate(3, Date.valueOf(toDate))
+      val rs = ps.executeQuery()
+      var list = List[AmSchedule]()
+      while (rs.next()) {
+        val mId = rs.getInt("match_id")
+        list = list :+ AmSchedule(
+          rs.getInt("id"), rs.getInt("user_id"),
+          rs.getString("rival"),
+          rs.getDate("fecha").toString,
+          Option(rs.getString("hora")).getOrElse(""),
+          Option(rs.getString("lugar")).getOrElse(""),
+          Option(rs.getString("tipo")).getOrElse("LIGA"),
+          Option(rs.getString("notas")).getOrElse(""),
+          if (rs.wasNull()) None else Some(mId)
+        )
+      }
+      list
+    } finally { conn.close() }
   }
 
-  // ── FINALIZAR TEMPORADA ──────────────────────────────────────────────────
-  @cask.get("/am/end-season")
-  def endSeasonRoute(request: cask.Request) = withAmAuth(request) { user =>
-    AmateurDatabaseManager.endSeason(user.id)
-    cask.Response(Array.emptyByteArray, 302,
-      headers = Seq("Location" -> "/am/dashboard"))
+  def getUpcomingSchedule(userId: Int, limit: Int = 3): List[AmSchedule] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT * FROM am_schedule
+        WHERE user_id = ? AND fecha >= CURRENT_DATE AND match_id IS NULL
+        ORDER BY fecha ASC, hora ASC
+        LIMIT ?
+      """)
+      ps.setInt(1, userId)
+      ps.setInt(2, limit)
+      val rs = ps.executeQuery()
+      var list = List[AmSchedule]()
+      while (rs.next()) {
+        list = list :+ AmSchedule(
+          rs.getInt("id"), rs.getInt("user_id"),
+          rs.getString("rival"),
+          rs.getDate("fecha").toString,
+          Option(rs.getString("hora")).getOrElse(""),
+          Option(rs.getString("lugar")).getOrElse(""),
+          Option(rs.getString("tipo")).getOrElse("LIGA"),
+          Option(rs.getString("notas")).getOrElse(""),
+          None
+        )
+      }
+      list
+    } finally { conn.close() }
   }
 
-  // Redirect /am → /am/dashboard
-  @cask.get("/am")
-  def amRoot(request: cask.Request) =
-    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/dashboard"))
+  // ── DATOS PARA INFORME PDF ────────────────────────────────────────────────
+  def getSeasonInfo(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Current season number
+      val ps1 = conn.prepareStatement("SELECT COALESCE(current_season, 1) AS cs FROM am_users WHERE id = ?")
+      ps1.setInt(1, userId)
+      val rs1 = ps1.executeQuery()
+      val currentSeason = if (rs1.next()) rs1.getInt("cs") else 1
 
-  // ── PROGRESIÓN Y TENDENCIAS ────────────────────────────────────────────────
-  @cask.get("/am/progression")
-  def progressionPage(request: cask.Request) = withAmAuth(request) { user =>
-    val d = AmateurDatabaseManager.getProgressionData(user.id)
+      // Stats for current season matches
+      val ps2 = conn.prepareStatement("""
+        SELECT COUNT(*) AS pj,
+               SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) AS ganados,
+               SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) AS empatados,
+               SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) AS perdidos,
+               ROUND(AVG(nota)::numeric, 1) AS nota_media
+        FROM am_matches
+        WHERE user_id = ? AND current_season_num = ?
+      """)
+      ps2.setInt(1, userId)
+      ps2.setInt(2, currentSeason)
+      val rs2 = ps2.executeQuery()
+      val (pj, g, e, p, nm) = if (rs2.next())
+        (rs2.getInt("pj"), rs2.getInt("ganados"), rs2.getInt("empatados"),
+          rs2.getInt("perdidos"), rs2.getDouble("nota_media"))
+      else (0, 0, 0, 0, 0.0)
 
-    val totalPartidos  = d("totalPartidos").asInstanceOf[Int]
-    val tendencia      = d("tendencia").asInstanceOf[String]
-    val tendenciaDelta = d("tendenciaDelta").asInstanceOf[Double]
-    val labels         = d("labels").asInstanceOf[List[String]]
-    val notas          = d("notas").asInstanceOf[List[Double]]
-    val gcList         = d("gcList").asInstanceOf[List[Int]]
-    val resultados     = d("resultados").asInstanceOf[List[String]]
-    val mesList        = d("mesList").asInstanceOf[List[Map[String, Any]]]
-    val mejorPartido   = d("mejorPartido").asInstanceOf[Option[Map[String, String]]]
-    val peorPartido    = d("peorPartido").asInstanceOf[Option[Map[String, String]]]
-    val racha          = d("racha").asInstanceOf[List[String]]
+      // Past seasons
+      val ps3 = conn.prepareStatement(
+        "SELECT * FROM am_seasons WHERE user_id = ? ORDER BY season_num DESC LIMIT 5")
+      ps3.setInt(1, userId)
+      val rs3 = ps3.executeQuery()
+      var seasons = List[Map[String, String]]()
+      while (rs3.next()) {
+        seasons = seasons :+ Map(
+          "num"   -> rs3.getInt("season_num").toString,
+          "pj"    -> rs3.getInt("pj").toString,
+          "g"     -> rs3.getInt("ganados").toString,
+          "e"     -> rs3.getInt("empatados").toString,
+          "p"     -> rs3.getInt("perdidos").toString,
+          "nota"  -> f"${rs3.getDouble("nota_media")}%.1f",
+          "ended" -> rs3.getString("ended_at").take(10)
+        )
+      }
 
-    val tendenciaColor = tendencia match {
-      case "MEJORANDO"    => "#20c997"
-      case "BAJANDO"      => "#dc3545"
-      case "ESTABLE"      => "#ffc107"
-      case _              => "#6c757d"
-    }
-    val tendenciaIcon = tendencia match {
-      case "MEJORANDO"    => "↑"
-      case "BAJANDO"      => "↓"
-      case "ESTABLE"      => "→"
-      case _              => "—"
-    }
-    val tendenciaLabel = tendencia match {
-      case "MEJORANDO"    => "Mejorando"
-      case "BAJANDO"      => "Bajando"
-      case "ESTABLE"      => "Estable"
-      case _              => "Pocos datos"
-    }
-
-    val labelsJson   = labels.map(l => s""""$l"""").mkString("[", ",", "]")
-    val notasJson    = notas.map(n => f"$n%.1f").mkString("[", ",", "]")
-    val gcJson       = gcList.mkString("[", ",", "]")
-
-    def mesLabel(m: String): String = {
-      val parts = m.split("-")
-      if (parts.length == 2) {
-        val mes = parts(1).toIntOption.getOrElse(0)
-        val meses = Array("", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
-        if (mes >= 1 && mes <= 12) s"${meses(mes)} ${parts(0).takeRight(2)}" else m
-      } else m
-    }
-
-    renderAm("progression", user.nombre,
-      div(
-        // Header
-        div(cls := "mb-3",
-          h5(cls := "fw-black text-white mb-0", "📈 Progresión"),
-          span(cls := "text-muted small", s"$totalPartidos partidos registrados")
-        ),
-
-        if (totalPartidos == 0)
-          div(cls := "card-am p-4 text-center",
-            div(style := "font-size:48px; opacity:0.4", "📊"),
-            h5(cls := "text-muted mt-3", "Sin datos aún"),
-            p(cls := "text-secondary small", "Registra partidos para ver tu evolución."),
-            a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
-          )
-        else frag(
-
-          // Tendencia principal
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "d-flex align-items-center gap-3",
-              div(style := s"font-size:2.8rem; color:$tendenciaColor; font-weight:900; line-height:1;",
-                tendenciaIcon),
-              div(
-                div(cls := "fw-black text-white", style := "font-size:1.2rem;", tendenciaLabel),
-                div(cls := "xx-small text-muted",
-                  if (tendencia != "POCOS_DATOS")
-                    s"${if (tendenciaDelta >= 0) "+" else ""}${f"$tendenciaDelta%.2f"} puntos vs. 5 partidos anteriores"
-                  else "Necesitas al menos 6 partidos para calcular tendencia"
-                )
-              )
-            )
-          ),
-
-          // Racha actual (últimos 10)
-          if (racha.nonEmpty)
-            div(cls := "card-am p-3 mb-3",
-              div(cls := "fw-bold small text-muted mb-2", "FORMA RECIENTE"),
-              div(cls := "d-flex gap-1 flex-wrap",
-                frag(racha.reverse.map { r =>
-                  val (bg, txt) = r match {
-                    case "W" => ("#20c997", "G")
-                    case "D" => ("#ffc107", "E")
-                    case _   => ("#dc3545", "P")
-                  }
-                  span(style := s"background:$bg; color:#000; font-weight:900; font-size:11px; width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;",
-                    txt)
-                }: _*)
-              )
-            )
-          else span(),
-
-          // Gráfico evolución nota
-          if (notas.size >= 2)
-            div(cls := "card-am p-3 mb-3",
-              div(cls := "fw-bold small text-muted mb-2", "EVOLUCIÓN DE NOTA"),
-              div(style := "height:160px;",
-                canvas(id := "chartNota")
-              ),
-              script(raw(s"""
-                new Chart(document.getElementById('chartNota'), {
-                  type: 'line',
-                  data: {
-                    labels: $labelsJson,
-                    datasets: [{
-                      label: 'Nota',
-                      data: $notasJson,
-                      borderColor: '#0d6efd',
-                      backgroundColor: 'rgba(13,110,253,0.1)',
-                      tension: 0.3,
-                      fill: true,
-                      pointRadius: ${if (notas.size > 20) "0" else "3"},
-                      borderWidth: 2
-                    }]
-                  },
-                  options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                      y: { min: 0, max: 10, ticks: { color: '#888', stepSize: 2 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                      x: { ticks: { color: '#888', maxTicksLimit: 8 }, grid: { display: false } }
-                    }
-                  }
-                });
-              """))
-            )
-          else span(),
-
-          // Gráfico GC por partido
-          if (gcList.size >= 2)
-            div(cls := "card-am p-3 mb-3",
-              div(cls := "fw-bold small text-muted mb-2", "GOLES ENCAJADOS POR PARTIDO"),
-              div(style := "height:120px;",
-                canvas(id := "chartGC")
-              ),
-              script(raw(s"""
-                new Chart(document.getElementById('chartGC'), {
-                  type: 'bar',
-                  data: {
-                    labels: $labelsJson,
-                    datasets: [{
-                      label: 'GC',
-                      data: $gcJson,
-                      backgroundColor: function(ctx) {
-                        var v = ctx.raw;
-                        return v === 0 ? '#20c997' : v <= 1 ? '#ffc107' : '#dc3545';
-                      },
-                      borderRadius: 3
-                    }]
-                  },
-                  options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                      y: { ticks: { color: '#888', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                      x: { ticks: { color: '#888', maxTicksLimit: 8 }, grid: { display: false } }
-                    }
-                  }
-                });
-              """))
-            )
-          else span(),
-
-          // Stats por mes
-          if (mesList.nonEmpty)
-            div(cls := "card-am p-3 mb-3",
-              div(cls := "fw-bold small text-muted mb-2", "POR MES"),
-              frag(mesList.map { mes =>
-                val nota = mes("notaMedia").asInstanceOf[Double]
-                val pj   = mes("pj").asInstanceOf[Int]
-                val lim  = mes("limpias").asInstanceOf[Int]
-                val gan  = mes("ganados").asInstanceOf[Int]
-                val nc   = if (nota >= 7.0) "#20c997" else if (nota >= 5.0) "#ffc107" else "#dc3545"
-                div(cls := "d-flex align-items-center gap-2 py-2",
-                  style := "border-bottom:1px solid rgba(255,255,255,0.06);",
-                  div(style := s"min-width:52px; font-size:11px; font-weight:700; color:$nc;",
-                    mesLabel(mes("mes").asInstanceOf[String])),
-                  div(cls := "flex-fill",
-                    div(cls := "d-flex gap-2",
-                      span(cls := "xx-small text-muted", s"$pj PJ"),
-                      span(cls := "xx-small text-muted", s"$gan G"),
-                      span(cls := "xx-small text-muted", s"$lim LP")
-                    )
-                  ),
-                  div(style := s"font-size:1.3rem; font-weight:900; color:$nc;",
-                    f"$nota%.1f")
-                )
-              }: _*)
-            )
-          else span(),
-
-          // Mejor / peor partido
-          div(cls := "row g-2 mb-3",
-            mejorPartido.map { m =>
-              div(cls := "col-6",
-                div(cls := "card-am p-2 text-center",
-                  style := "border-top: 3px solid #20c997;",
-                  div(cls := "xx-small text-muted mb-1", "MEJOR"),
-                  div(cls := "fw-black text-success", style := "font-size:1.5rem;", m("nota")),
-                  div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
-                  div(cls := "xx-small text-muted", m("res"))
-                )
-              )
-            }.getOrElse(span()),
-            peorPartido.map { m =>
-              div(cls := "col-6",
-                div(cls := "card-am p-2 text-center",
-                  style := "border-top: 3px solid #dc3545;",
-                  div(cls := "xx-small text-muted mb-1", "PEOR"),
-                  div(cls := "fw-black text-danger", style := "font-size:1.5rem;", m("nota")),
-                  div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
-                  div(cls := "xx-small text-muted", m("res"))
-                )
-              )
-            }.getOrElse(span())
-          )
-        ),
-
-        script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js")
+      Map(
+        "currentSeason" -> currentSeason,
+        "pj"            -> pj,
+        "ganados"       -> g,
+        "empatados"     -> e,
+        "perdidos"      -> p,
+        "notaMedia"     -> nm,
+        "pastSeasons"   -> seasons
       )
-    )
+    } finally { conn.close() }
   }
 
-  initialize()
+  def endSeason(userId: Int): Int = {
+    val conn = getConn()
+    try {
+      // Get current season number
+      val ps1 = conn.prepareStatement("SELECT COALESCE(current_season, 1) AS cs FROM am_users WHERE id = ?")
+      ps1.setInt(1, userId)
+      val rs1 = ps1.executeQuery()
+      val currentSeason = if (rs1.next()) rs1.getInt("cs") else 1
+
+      // Compute season stats
+      val ps2 = conn.prepareStatement("""
+        SELECT COUNT(*) AS pj,
+               SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) AS g,
+               SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) AS e,
+               SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) AS p,
+               COALESCE(ROUND(AVG(nota)::numeric,1), 0) AS nm,
+               COALESCE(ROUND(AVG(goles_contra)::numeric,2), 0) AS gcm,
+               SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) AS lim
+        FROM am_matches WHERE user_id = ? AND current_season_num = ?
+      """)
+      ps2.setInt(1, userId)
+      ps2.setInt(2, currentSeason)
+      val rs2 = ps2.executeQuery()
+      val (pj, g, e, p, nm, gcm, lim) = if (rs2.next())
+        (rs2.getInt("pj"), rs2.getInt("g"), rs2.getInt("e"), rs2.getInt("p"),
+          rs2.getDouble("nm"), rs2.getDouble("gcm"), rs2.getInt("lim"))
+      else (0, 0, 0, 0, 0.0, 0.0, 0)
+
+      // Archive season
+      val ps3 = conn.prepareStatement("""
+        INSERT INTO am_seasons (user_id, season_num, pj, ganados, empatados, perdidos, nota_media, gc_media, limpias)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      """)
+      ps3.setInt(1, userId); ps3.setInt(2, currentSeason)
+      ps3.setInt(3, pj); ps3.setInt(4, g); ps3.setInt(5, e); ps3.setInt(6, p)
+      ps3.setDouble(7, nm); ps3.setDouble(8, gcm); ps3.setInt(9, lim)
+      ps3.executeUpdate()
+
+      // Bump season counter on user
+      val newSeason = currentSeason + 1
+      val ps4 = conn.prepareStatement("UPDATE am_users SET current_season = ? WHERE id = ?")
+      ps4.setInt(1, newSeason)
+      ps4.setInt(2, userId)
+      ps4.executeUpdate()
+
+      newSeason
+    } finally { conn.close() }
+  }
+
+  def getReportData(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Stats globales separadas por rol
+      val rsGlobal = conn.prepareStatement("""
+        SELECT
+          COUNT(*) as pj,
+          COUNT(*) FILTER (WHERE posicion_partido = 'portero') as pj_portero,
+          COUNT(*) FILTER (WHERE posicion_partido = 'jugador') as pj_jugador,
+          COALESCE(AVG(nota), 0) as nota_media,
+          COALESCE(AVG(nota) FILTER (WHERE posicion_partido = 'portero'), 0) as nota_portero,
+          COALESCE(AVG(nota) FILTER (WHERE posicion_partido = 'jugador'), 0) as nota_jugador,
+          COALESCE(AVG(goles_contra), 0) as gc_media,
+          SUM(CASE WHEN goles_contra = 0 AND posicion_partido = 'portero' THEN 1 ELSE 0 END) as limpias,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as ganados,
+          SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) as empatados,
+          SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) as perdidos,
+          COALESCE(SUM(goles_marcados), 0) as goles_marcados_total,
+          COALESCE(SUM(asistencias), 0) as asistencias_total
+        FROM am_matches WHERE user_id = ?
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      val statsMap = if (rsGlobal.next()) Map(
+        "pj"           -> rsGlobal.getInt("pj"),
+        "pjPortero"    -> rsGlobal.getInt("pj_portero"),
+        "pjJugador"    -> rsGlobal.getInt("pj_jugador"),
+        "notaMedia"    -> rsGlobal.getDouble("nota_media"),
+        "notaPortero"  -> rsGlobal.getDouble("nota_portero"),
+        "notaJugador"  -> rsGlobal.getDouble("nota_jugador"),
+        "gcMedia"      -> rsGlobal.getDouble("gc_media"),
+        "limpias"      -> rsGlobal.getInt("limpias"),
+        "ganados"      -> rsGlobal.getInt("ganados"),
+        "empatados"    -> rsGlobal.getInt("empatados"),
+        "perdidos"     -> rsGlobal.getInt("perdidos"),
+        "golesMarcados"-> rsGlobal.getInt("goles_marcados_total"),
+        "asistencias"  -> rsGlobal.getInt("asistencias_total")
+      ) else Map.empty[String, Any]
+
+      // Historial últimos 20 partidos
+      val rsH = conn.prepareStatement("""
+        SELECT rival, goles_favor, goles_contra, nota, fecha,
+               posicion_partido, posicion_campo, goles_marcados, asistencias
+        FROM am_matches WHERE user_id = ?
+        ORDER BY fecha DESC, id DESC LIMIT 20
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      var historial = List[Map[String, String]]()
+      while (rsH.next()) {
+        val pos = Option(rsH.getString("posicion_partido")).getOrElse("portero")
+        val posCampo = Option(rsH.getString("posicion_campo")).getOrElse("")
+        val posLabel = if (pos == "jugador") s"Jugador${if (posCampo.nonEmpty) s" ($posCampo)" else ""}" else "Portero"
+        historial = historial :+ Map(
+          "rival"    -> rsH.getString("rival"),
+          "res"      -> s"${rsH.getInt("goles_favor")}-${rsH.getInt("goles_contra")}",
+          "nota"     -> f"${rsH.getDouble("nota")}%.1f",
+          "fecha"    -> rsH.getDate("fecha").toString,
+          "posicion" -> posLabel,
+          "goles"    -> rsH.getInt("goles_marcados").toString,
+          "asist"    -> rsH.getInt("asistencias").toString
+        )
+      }
+
+      // Penaltis
+      val rsPen = conn.prepareStatement("""
+        SELECT COUNT(*) as total,
+               SUM(CASE WHEN parada = TRUE THEN 1 ELSE 0 END) as paradas
+        FROM am_penalties WHERE user_id = ?
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val (totalPen, paradasPen) = if (rsPen.next()) {
+        (rsPen.getInt("total"), rsPen.getInt("paradas"))
+      } else (0, 0)
+
+      // Próximo partido
+      val rsNext = conn.prepareStatement("""
+        SELECT rival, fecha, hora, lugar, tipo FROM am_schedule
+        WHERE user_id = ? AND fecha >= CURRENT_DATE AND match_id IS NULL
+        ORDER BY fecha ASC LIMIT 1
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val nextMatch = if (rsNext.next()) Some(Map(
+        "rival" -> rsNext.getString("rival"),
+        "fecha" -> rsNext.getDate("fecha").toString,
+        "hora"  -> Option(rsNext.getString("hora")).getOrElse(""),
+        "lugar" -> Option(rsNext.getString("lugar")).getOrElse(""),
+        "tipo"  -> Option(rsNext.getString("tipo")).getOrElse("LIGA")
+      )) else None
+
+      statsMap ++ Map(
+        "historial"   -> historial,
+        "totalPen"    -> totalPen,
+        "paradasPen"  -> paradasPen,
+        "nextMatch"   -> nextMatch
+      )
+    } finally { conn.close() }
+  }
+
+  // ── PROGRESION Y TENDENCIAS ───────────────────────────────────────────────
+  def getProgressionData(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Todos los partidos cronológicos para gráfico de evolución
+      val rsAll = conn.prepareStatement("""
+        SELECT fecha, nota, goles_contra, goles_favor,
+               CASE WHEN goles_favor > goles_contra THEN 'W'
+                    WHEN goles_favor = goles_contra THEN 'D'
+                    ELSE 'L' END as resultado
+        FROM am_matches WHERE user_id = ?
+        ORDER BY fecha ASC, id ASC
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      var labels    = List[String]()
+      var notas     = List[Double]()
+      var gcList    = List[Int]()
+      var resultados = List[String]()
+      var counter   = 1
+
+      while (rsAll.next()) {
+        labels     = labels     :+ s"P$counter"
+        notas      = notas      :+ rsAll.getDouble("nota")
+        gcList     = gcList     :+ rsAll.getInt("goles_contra")
+        resultados = resultados :+ rsAll.getString("resultado")
+        counter += 1
+      }
+
+      // Tendencia: comparar últimos 5 vs 5 anteriores (nota media)
+      val tendencia = if (notas.size >= 6) {
+        val last5 = notas.takeRight(5)
+        val prev5 = notas.dropRight(5).takeRight(5)
+        val avgLast = last5.sum / last5.size
+        val avgPrev = prev5.sum / prev5.size
+        val delta = avgLast - avgPrev
+        if (delta > 0.3) "MEJORANDO"
+        else if (delta < -0.3) "BAJANDO"
+        else "ESTABLE"
+      } else "POCOS_DATOS"
+
+      val tendenciaDelta = if (notas.size >= 6) {
+        val last5 = notas.takeRight(5)
+        val prev5 = notas.dropRight(5).takeRight(5)
+        last5.sum / last5.size - prev5.sum / prev5.size
+      } else 0.0
+
+      // Stats por mes
+      val rsMes = conn.prepareStatement("""
+        SELECT
+          TO_CHAR(fecha, 'YYYY-MM') as mes,
+          COUNT(*) as pj,
+          ROUND(AVG(nota)::numeric, 1) as nota_media,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as ganados
+        FROM am_matches WHERE user_id = ?
+        GROUP BY TO_CHAR(fecha, 'YYYY-MM')
+        ORDER BY mes DESC LIMIT 6
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      var mesList = List[Map[String, Any]]()
+      while (rsMes.next()) {
+        mesList = mesList :+ Map(
+          "mes"       -> rsMes.getString("mes"),
+          "pj"        -> rsMes.getInt("pj"),
+          "notaMedia" -> rsMes.getDouble("nota_media"),
+          "limpias"   -> rsMes.getInt("limpias"),
+          "ganados"   -> rsMes.getInt("ganados")
+        )
+      }
+
+      // Mejor y peor actuación
+      val rsBest = conn.prepareStatement("""
+        SELECT rival, nota, fecha, goles_favor, goles_contra
+        FROM am_matches WHERE user_id = ?
+        ORDER BY nota DESC, id DESC LIMIT 1
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val mejorPartido = if (rsBest.next()) Some(Map(
+        "rival" -> rsBest.getString("rival"),
+        "nota"  -> f"${rsBest.getDouble("nota")}%.1f",
+        "fecha" -> rsBest.getDate("fecha").toString,
+        "res"   -> s"${rsBest.getInt("goles_favor")}-${rsBest.getInt("goles_contra")}"
+      )) else None
+
+      val rsWorst = conn.prepareStatement("""
+        SELECT rival, nota, fecha, goles_favor, goles_contra
+        FROM am_matches WHERE user_id = ?
+        ORDER BY nota ASC, id DESC LIMIT 1
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val peorPartido = if (rsWorst.next()) Some(Map(
+        "rival" -> rsWorst.getString("rival"),
+        "nota"  -> f"${rsWorst.getDouble("nota")}%.1f",
+        "fecha" -> rsWorst.getDate("fecha").toString,
+        "res"   -> s"${rsWorst.getInt("goles_favor")}-${rsWorst.getInt("goles_contra")}"
+      )) else None
+
+      // Racha actual (W/D/L)
+      val rsRacha = conn.prepareStatement("""
+        SELECT goles_favor, goles_contra FROM am_matches
+        WHERE user_id = ? ORDER BY fecha DESC, id DESC LIMIT 10
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      var racha = List[String]()
+      while (rsRacha.next()) {
+        val gf = rsRacha.getInt("goles_favor")
+        val gc = rsRacha.getInt("goles_contra")
+        racha = racha :+ (if (gf > gc) "W" else if (gf == gc) "D" else "L")
+      }
+
+      Map(
+        "labels"         -> labels,
+        "notas"          -> notas,
+        "gcList"         -> gcList,
+        "resultados"     -> resultados,
+        "tendencia"      -> tendencia,
+        "tendenciaDelta" -> tendenciaDelta,
+        "mesList"        -> mesList,
+        "mejorPartido"   -> mejorPartido,
+        "peorPartido"    -> peorPartido,
+        "racha"          -> racha,
+        "totalPartidos"  -> notas.size
+      )
+    } finally { conn.close() }
+  }
+
+  // Extensión para PreparedStatement (sintaxis .also)
+  implicit class PSExt(ps: java.sql.PreparedStatement) {
+    def also(f: java.sql.PreparedStatement => java.sql.ResultSet): java.sql.ResultSet = f(ps)
+  }
 }
