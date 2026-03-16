@@ -222,7 +222,7 @@ object AmateurController extends cask.Routes {
           style := "min-height:100vh;",
           div(style := "width:340px;",
             div(cls := "text-center mb-4",
-              div(style := "font-size:48px;", "??"),
+              div(style := "font-size:48px;", "🛡"),
               h3(cls := "fw-black text-primary", "GUARDIAN AMATEUR"),
               span(cls := "text-muted small", "Tu rendimiento, registrado.")
             ),
@@ -287,7 +287,7 @@ object AmateurController extends cask.Routes {
         div(cls := "container d-flex justify-content-center align-items-center", style := "min-height:100vh;",
           div(style := "width:340px;",
             div(cls := "text-center mb-4",
-              div(style := "font-size:48px;", "??"),
+              div(style := "font-size:48px;", "🛡"),
               h3(cls := "fw-black text-primary", "Crear cuenta")
             ),
             div(cls := "card bg-dark border-primary p-4",
@@ -350,6 +350,9 @@ object AmateurController extends cask.Routes {
   def dashboardPage(request: cask.Request) = withAmAuth(request) { user =>
     val st       = AmateurDatabaseManager.getDashboardStats(user.id)
     val upcoming = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
+    val seasonInfo = AmateurDatabaseManager.getSeasonInfo(user.id)
+    val currentSeason = seasonInfo("currentSeason").asInstanceOf[Int]
+    val pastSeasons   = seasonInfo("pastSeasons").asInstanceOf[List[Map[String, String]]]
     val pj             = st("pj").asInstanceOf[Int]
     val notaMedia      = st("notaMedia").asInstanceOf[Double]
     val notaAjustada   = st("notaAjustada").asInstanceOf[Double]
@@ -368,7 +371,7 @@ object AmateurController extends cask.Routes {
       div(
         // Bienvenida
         div(cls := "mb-3",
-          h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} ??"),
+          h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} 👋"),
           span(cls := "text-muted small", if (pj == 0) "Registra tu primer partido para empezar."
           else s"$pj partidos registrados")
         ),
@@ -536,13 +539,75 @@ object AmateurController extends cask.Routes {
           else span(),
 
           // Acceso rápido
-          div(cls := "row g-2",
+          div(cls := "row g-2 mb-3",
             div(cls := "col-6",
               a(href := "/am/match-center", cls := "btn btn-primary w-100 fw-bold py-3",
                 "⚽ Nuevo partido")),
             div(cls := "col-6",
               a(href := "/am/progression", cls := "btn btn-outline-info w-100 fw-bold py-3",
                 "📈 Mi progreso"))
+          ),
+
+          // Temporada actual + historial
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex justify-content-between align-items-center mb-2",
+              div(
+                div(cls := "xx-small fw-bold text-muted", "TEMPORADA ACTUAL"),
+                div(cls := "fw-black text-white", style := "font-size:1.1rem;", s"Temporada $currentSeason")
+              ),
+              button(
+                tpe := "button",
+                cls := "btn btn-outline-warning btn-sm fw-bold",
+                style := "font-size:11px;",
+                attr("data-bs-toggle") := "modal",
+                attr("data-bs-target") := "#modalEndSeason",
+                "🏁 Finalizar temporada"
+              )
+            ),
+            if (pastSeasons.nonEmpty)
+              div(
+                div(cls := "xx-small fw-bold text-muted mb-2", "TEMPORADAS ANTERIORES"),
+                frag(pastSeasons.map { s =>
+                  div(cls := "d-flex justify-content-between align-items-center py-1",
+                    style := "border-bottom:1px solid #1e1e1e; font-size:11px;",
+                    div(cls := "text-muted", s"T${s("num")} · ${s("ended").take(7)}"),
+                    div(cls := "text-white",
+                      span(cls := "text-success me-1", s"${s("g")}G"),
+                      span(cls := "text-muted me-1", s"${s("e")}E"),
+                      span(cls := "text-danger me-1", s"${s("p")}P"),
+                      span(cls := "text-warning", s"★${s("nota")}")
+                    )
+                  )
+                }: _*)
+              )
+            else span()
+          ),
+
+          // Modal confirmación finalizar temporada
+          div(cls := "modal fade", id := "modalEndSeason",
+            attr("tabindex") := "-1",
+            div(cls := "modal-dialog modal-dialog-centered",
+              div(cls := "modal-content bg-dark border-warning",
+                div(cls := "modal-header border-warning",
+                  h5(cls := "modal-title text-warning fw-black", "🏁 Finalizar temporada"),
+                  button(tpe := "button", cls := "btn-close btn-close-white",
+                    attr("data-bs-dismiss") := "modal")
+                ),
+                div(cls := "modal-body text-white",
+                  p(s"¿Seguro que quieres cerrar la Temporada $currentSeason?"),
+                  p(cls := "text-muted small",
+                    "Se guardará un resumen de la temporada y todos los partidos nuevos contarán para la Temporada ",
+                    strong(cls := "text-warning", s"${currentSeason + 1}"),
+                    ". Los datos históricos se conservan.")
+                ),
+                div(cls := "modal-footer border-secondary",
+                  button(tpe := "button", cls := "btn btn-secondary",
+                    attr("data-bs-dismiss") := "modal", "Cancelar"),
+                  a(href := "/am/end-season", cls := "btn btn-warning fw-bold",
+                    "✅ Confirmar y nueva temporada")
+                )
+              )
+            )
           )
         )
       )
@@ -660,9 +725,9 @@ object AmateurController extends cask.Routes {
                 select(name := "clima", cls := "form-select bg-dark text-white border-secondary mt-1",
                   option(value := "Sol", "☀️ Sol"),
                   option(value := "Nubes", "☁️ Nubes"),
-                  option(value := "Lluvia", "??️ Lluvia"),
-                  option(value := "Frio", "?? Frío"),
-                  option(value := "Viento", "?? Viento")
+                  option(value := "Lluvia", "🌧️ Lluvia"),
+                  option(value := "Frio", "❄️ Frío"),
+                  option(value := "Viento", "💨 Viento")
                 )
               ),
               div(cls := "col-6",
@@ -1652,6 +1717,14 @@ $penSection
 </body></html>"""
 
     cask.Response(html.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // ── FINALIZAR TEMPORADA ──────────────────────────────────────────────────
+  @cask.get("/am/end-season")
+  def endSeasonRoute(request: cask.Request) = withAmAuth(request) { user =>
+    AmateurDatabaseManager.endSeason(user.id)
+    cask.Response(Array.emptyByteArray, 302,
+      headers = Seq("Location" -> "/am/dashboard"))
   }
 
   // Redirect /am → /am/dashboard
