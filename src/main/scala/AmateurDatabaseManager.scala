@@ -93,6 +93,7 @@ object AmateurDatabaseManager {
         posicion_campo   TEXT DEFAULT '',
         goles_marcados   INT DEFAULT 0,
         asistencias      INT DEFAULT 0,
+        current_season_num INT DEFAULT 1,
         created_at       TIMESTAMP DEFAULT NOW()
       )""")
 
@@ -101,6 +102,7 @@ object AmateurDatabaseManager {
       s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS posicion_campo TEXT DEFAULT ''")
       s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS goles_marcados INT DEFAULT 0")
       s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS asistencias INT DEFAULT 0")
+      s.executeUpdate("ALTER TABLE am_matches ADD COLUMN IF NOT EXISTS current_season_num INT DEFAULT 1")
 
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_match_goals (
         id               SERIAL PRIMARY KEY,
@@ -147,6 +149,22 @@ object AmateurDatabaseManager {
         notas       TEXT DEFAULT '',
         match_id    INT REFERENCES am_matches(id) ON DELETE SET NULL,
         created_at  TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // Temporadas — añadidas en v7.3
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS current_season INT DEFAULT 1")
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_seasons (
+        id          SERIAL PRIMARY KEY,
+        user_id     INT REFERENCES am_users(id) ON DELETE CASCADE,
+        season_num  INT NOT NULL,
+        ended_at    TIMESTAMP DEFAULT NOW(),
+        pj          INT DEFAULT 0,
+        ganados     INT DEFAULT 0,
+        empatados   INT DEFAULT 0,
+        perdidos    INT DEFAULT 0,
+        nota_media  DOUBLE PRECISION DEFAULT 0.0,
+        gc_media    DOUBLE PRECISION DEFAULT 0.0,
+        limpias     INT DEFAULT 0
       )""")
 
     } finally { conn.close() }
@@ -240,8 +258,10 @@ object AmateurDatabaseManager {
         INSERT INTO am_matches
           (user_id, rival, goles_favor, goles_contra, nota, clima, estadio,
            es_local, fecha, video_url, notas,
-           posicion_partido, posicion_campo, goles_marcados, asistencias)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           posicion_partido, posicion_campo, goles_marcados, asistencias,
+           current_season_num)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          COALESCE((SELECT current_season FROM am_users WHERE id = ?), 1))
         RETURNING id
       """)
       ps.setInt(1, userId)
@@ -262,6 +282,7 @@ object AmateurDatabaseManager {
       ps.setString(13, posicionCampo)
       ps.setInt(14, golesMarcados)
       ps.setInt(15, asistencias)
+      ps.setInt(16, userId)
       val rs = ps.executeQuery()
       if (rs.next()) rs.getInt(1) else -1
     } finally { conn.close() }
@@ -757,6 +778,112 @@ object AmateurDatabaseManager {
   }
 
   // ── DATOS PARA INFORME PDF ────────────────────────────────────────────────
+  def getSeasonInfo(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Current season number
+      val ps1 = conn.prepareStatement("SELECT COALESCE(current_season, 1) AS cs FROM am_users WHERE id = ?")
+      ps1.setInt(1, userId)
+      val rs1 = ps1.executeQuery()
+      val currentSeason = if (rs1.next()) rs1.getInt("cs") else 1
+
+      // Stats for current season matches
+      val ps2 = conn.prepareStatement("""
+        SELECT COUNT(*) AS pj,
+               SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) AS ganados,
+               SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) AS empatados,
+               SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) AS perdidos,
+               ROUND(AVG(nota)::numeric, 1) AS nota_media
+        FROM am_matches
+        WHERE user_id = ? AND current_season_num = ?
+      """)
+      ps2.setInt(1, userId)
+      ps2.setInt(2, currentSeason)
+      val rs2 = ps2.executeQuery()
+      val (pj, g, e, p, nm) = if (rs2.next())
+        (rs2.getInt("pj"), rs2.getInt("ganados"), rs2.getInt("empatados"),
+          rs2.getInt("perdidos"), rs2.getDouble("nota_media"))
+      else (0, 0, 0, 0, 0.0)
+
+      // Past seasons
+      val ps3 = conn.prepareStatement(
+        "SELECT * FROM am_seasons WHERE user_id = ? ORDER BY season_num DESC LIMIT 5")
+      ps3.setInt(1, userId)
+      val rs3 = ps3.executeQuery()
+      var seasons = List[Map[String, String]]()
+      while (rs3.next()) {
+        seasons = seasons :+ Map(
+          "num"   -> rs3.getInt("season_num").toString,
+          "pj"    -> rs3.getInt("pj").toString,
+          "g"     -> rs3.getInt("ganados").toString,
+          "e"     -> rs3.getInt("empatados").toString,
+          "p"     -> rs3.getInt("perdidos").toString,
+          "nota"  -> f"${rs3.getDouble("nota_media")}%.1f",
+          "ended" -> rs3.getString("ended_at").take(10)
+        )
+      }
+
+      Map(
+        "currentSeason" -> currentSeason,
+        "pj"            -> pj,
+        "ganados"       -> g,
+        "empatados"     -> e,
+        "perdidos"      -> p,
+        "notaMedia"     -> nm,
+        "pastSeasons"   -> seasons
+      )
+    } finally { conn.close() }
+  }
+
+  def endSeason(userId: Int): Int = {
+    val conn = getConn()
+    try {
+      // Get current season number
+      val ps1 = conn.prepareStatement("SELECT COALESCE(current_season, 1) AS cs FROM am_users WHERE id = ?")
+      ps1.setInt(1, userId)
+      val rs1 = ps1.executeQuery()
+      val currentSeason = if (rs1.next()) rs1.getInt("cs") else 1
+
+      // Compute season stats
+      val ps2 = conn.prepareStatement("""
+        SELECT COUNT(*) AS pj,
+               SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) AS g,
+               SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) AS e,
+               SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) AS p,
+               COALESCE(ROUND(AVG(nota)::numeric,1), 0) AS nm,
+               COALESCE(ROUND(AVG(goles_contra)::numeric,2), 0) AS gcm,
+               SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) AS lim
+        FROM am_matches WHERE user_id = ? AND current_season_num = ?
+      """)
+      ps2.setInt(1, userId)
+      ps2.setInt(2, currentSeason)
+      val rs2 = ps2.executeQuery()
+      val (pj, g, e, p, nm, gcm, lim) = if (rs2.next())
+        (rs2.getInt("pj"), rs2.getInt("g"), rs2.getInt("e"), rs2.getInt("p"),
+          rs2.getDouble("nm"), rs2.getDouble("gcm"), rs2.getInt("lim"))
+      else (0, 0, 0, 0, 0.0, 0.0, 0)
+
+      // Archive season
+      val ps3 = conn.prepareStatement("""
+        INSERT INTO am_seasons (user_id, season_num, pj, ganados, empatados, perdidos, nota_media, gc_media, limpias)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      """)
+      ps3.setInt(1, userId); ps3.setInt(2, currentSeason)
+      ps3.setInt(3, pj); ps3.setInt(4, g); ps3.setInt(5, e); ps3.setInt(6, p)
+      ps3.setDouble(7, nm); ps3.setDouble(8, gcm); ps3.setInt(9, lim)
+      ps3.executeUpdate()
+
+      // Bump season counter on user
+      val newSeason = currentSeason + 1
+      val ps4 = conn.prepareStatement("UPDATE am_users SET current_season = ? WHERE id = ?")
+      ps4.setInt(1, newSeason)
+      ps4.setInt(2, userId)
+      ps4.executeUpdate()
+
+      newSeason
+    } finally { conn.close() }
+  }
+
   def getReportData(userId: Int): Map[String, Any] = {
     val conn = getConn()
     try {
