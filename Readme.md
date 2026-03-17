@@ -1,10 +1,10 @@
-# 🛡️ GUARDIAN ELITE v7.2 | Borja Martín R&D Edition
+# 🛡️ GUARDIAN ELITE v7.3 | Borja Martín R&D Edition
 
 > **"El talento te lleva al área, el carácter te mantiene en la historia."**
 
 **Guardian Elite** es un ecosistema de alto rendimiento diseñado para la monitorización longitudinal (de los 5 a los 20 años) del desarrollo de **Héctor**. Esta plataforma integra Big Data, Machine Learning e IA Generativa para transformar el crecimiento biológico, técnico y cognitivo en un activo estratégico. Incluye **Guardian Amateur**, un sistema paralelo de seguimiento para jugadores de campo en fútbol amateur.
 
-![Version](https://img.shields.io/badge/Version-7.2_Market_NLP_Nutri-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4-COMPLETADA-brightgreen?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6](https://img.shields.io/badge/Fase_6-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6.5](https://img.shields.io/badge/Fase_6.5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase7](https://img.shields.io/badge/Fase_7-95%25-yellow?style=for-the-badge) ![Fase8](https://img.shields.io/badge/Fase_8-50%25-yellow?style=for-the-badge) ![Amateur](https://img.shields.io/badge/Guardian_Amateur-v7.2-blueviolet?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-7.3_Amateur_Season_UX-white?style=for-the-badge&logo=realmadrid&labelColor=00529F) ![Database](https://img.shields.io/badge/Database-PostgreSQL_Neon-green?style=for-the-badge&logo=postgresql) ![AI](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange?style=for-the-badge) ![Fase1](https://img.shields.io/badge/Fase_1-COMPLETADA-brightgreen?style=for-the-badge) ![Fase2](https://img.shields.io/badge/Fase_2-COMPLETADA-brightgreen?style=for-the-badge) ![Fase4](https://img.shields.io/badge/Fase_4-COMPLETADA-brightgreen?style=for-the-badge) ![Fase5](https://img.shields.io/badge/Fase_5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6](https://img.shields.io/badge/Fase_6-COMPLETADA-brightgreen?style=for-the-badge) ![Fase6.5](https://img.shields.io/badge/Fase_6.5-COMPLETADA-brightgreen?style=for-the-badge) ![Fase7](https://img.shields.io/badge/Fase_7-95%25-yellow?style=for-the-badge) ![Fase8](https://img.shields.io/badge/Fase_8-50%25-yellow?style=for-the-badge) ![Amateur](https://img.shields.io/badge/Guardian_Amateur-v7.3-blueviolet?style=for-the-badge)
 
 ---
 
@@ -130,8 +130,6 @@
 URL: `/moneyball`.
 
 ---
-
-## FASE 7 — Career Management Hub *(75%)*
 
 ## FASE 7 — Career Management Hub *(95%)*
 
@@ -272,8 +270,9 @@ URL: `/moneyball`.
 | `am_penalties` | Historial de penaltis (para jugadores que los lanzan) |
 | `am_gear` | Inventario de equipamiento (botas, guantes si porta, etc.) |
 | `am_calendar` | Agenda de próximos partidos con tipo (LIGA / TORNEO / CUP / AMISTOSO) y datos del rival |
+| `am_seasons` | Resumen archivado de temporadas cerradas: PJ, G/E/P, nota media, GC media, limpias |
 
-## Funcionalidades *(v7.2 — 100%)*
+## Funcionalidades *(v7.3 — 100%)*
 
 ### Dashboard Amateur
 * **Carta FUT Amateur** con nota media y estadísticas globales.
@@ -281,15 +280,26 @@ URL: `/moneyball`.
 * **Desglose portero/jugador de campo** según la posición registrada en cada partido.
 * **Estadísticas globales:** nota media, GC/partido, porterías a cero (%), partidos ganados/empatados/perdidos.
 * Último 5 partidos con badge de posición (PORTERO / JUGADOR).
+* **Win rate %** con código de color (verde ≥60%, amarillo ≥40%, rojo <40%).
+* **Sistema de temporadas:** indicador de temporada activa + botón "🏁 Finalizar temporada" con modal de confirmación + historial de temporadas anteriores (G/E/P + nota media).
 
 ### Match Center Amateur
 * **Selector de posición por partido:** Dos botones — Portero (oculta goles/asistencias, muestra goles encajados) y Jugador de campo (muestra posición específica: Delantero / Centrocampista / Extremo / Defensa + goles marcados + asistencias).
 * Registro completo: rival, resultado, nota 0-100, minutos, tipo de partido, clima, estadio, notas.
+* **Sección de goles encajados oculta automáticamente** cuando se selecciona "Jugador de campo" — solo visible en modo portero.
 
 ### Agenda / Calendario
 * **Vista mensual** (grid) y lista de próximos partidos.
 * Añadir, editar y eliminar entradas de agenda con tipo de partido, rival, fecha y hora.
 * Alimenta el widget de próximo partido del dashboard.
+
+### Progresión y Tendencias *(nuevo en v7.3)*
+* **Tendencia principal:** compara la media de los últimos 5 partidos vs los 5 anteriores → ↑ Mejorando / → Estable / ↓ Bajando.
+* **Forma reciente:** últimos 10 resultados como píldoras G/E/P con código de color.
+* **Gráfico de evolución de nota:** Chart.js línea cronológica de todos los partidos.
+* **Gráfico de goles encajados:** barras verdes (0 GC) / amarillo (1) / rojo (2+).
+* **Tabla por mes:** nota media, PJ, ganados, limpias — últimos 6 meses.
+* **Mejor y peor partido:** tarjetas con rival, resultado y nota. URL: `/am/progression`.
 
 ### Historial Amateur
 * Tabla de todos los partidos con filtros, badges de posición y exportación.
@@ -300,7 +310,7 @@ URL: `/moneyball`.
 ### Informe PDF Amateur
 * Exportación A4 print-optimized con: cabecera, próximo partido, estadísticas globales, desglose posición y tabla de los últimos 20 partidos. URL: `/am/report`.
 
-## Rutas Amateur (14 rutas activas)
+## Rutas Amateur (17 rutas activas)
 
 | Ruta | Método | Descripción |
 |------|--------|-------------|
@@ -317,7 +327,9 @@ URL: `/moneyball`.
 | `/am/calendar/save` | POST | Guardar entrada de agenda |
 | `/am/calendar/delete` | POST | Eliminar entrada de agenda |
 | `/am/report` | GET | Exportar informe PDF (print HTML) |
-| `/am/profile` | GET/POST | Editar perfil de usuario |
+| `/am/progression` | GET | Progresión y tendencias con gráficos |
+| `/am/end-season` | GET | Finalizar temporada activa y archivar resumen |
+| `/am/logout` | GET | Cerrar sesión (limpia cookie, redirige a selector de perfiles) |
 
 ## ¿Tendrá el Amateur acceso a módulos Elite?
 
@@ -358,7 +370,7 @@ FASE 10 — Quantum Performance        ░░░░░░░░░░   0%
 FASE 11 — Biological Intelligence    ░░░░░░░░░░   0%
 FASE 12 — Frontiers of Science       ░░░░░░░░░░   0%
 FASE 13 — Biological & Social Core   ░░░░░░░░░░   0%
-GUARDIAN AMATEUR                     ██████████ 100%  (v7.2: posición, PDF, calendario, countdown)
+GUARDIAN AMATEUR                     ██████████ 100%  (v7.3: temporadas, progresión, toggle portero/jugador, UX fixes)
 ```
 
 ---
@@ -389,10 +401,33 @@ GUARDIAN AMATEUR                     ██████████ 100%  (v7.2:
 | **Market Estimator** | **`/market-estimator`** | **7 — nuevo v7.2** |
 | **NLP Scouting** | **`/scouting/nlp`** | **7 — nuevo v7.2** |
 | **Nutrición Reactiva** | **`/nutrition`** | **7 — nuevo v7.2** |
+| **Progresión Amateur** | **`/am/progression`** | **Amateur — nuevo v7.3** |
+| **Sistema Temporadas** | **`/am/end-season`** | **Amateur — nuevo v7.3** |
 | Cognitive Reset | `/cognitive-reset` | 8 |
 | PSxG Delta | `/psxg-delta` | 8 |
 | Development Pathway | `/pathway` | 8 |
 | Distribution / Oracle | `/distribution` `/oracle` | 6 |
+
+---
+
+---
+
+## Changelog v7.3 *(17 Mar 2026)*
+
+### Guardian Amateur
+* **Sistema de temporadas completo:** nueva tabla `am_seasons`, columna `current_season_num` en `am_matches`, método `endSeason()` que archiva resumen estadístico y bumps el contador. Dashboard muestra temporada activa + historial de temporadas anteriores con G/E/P y nota media.
+* **Progresión y Tendencias** (`/am/progression`): página nueva con tendencia principal, forma reciente (últimos 10), gráfico de nota por Chart.js, gráfico de GC, tabla mensual y cards de mejor/peor partido.
+* **Toggle portero / jugador de campo mejorado:** `togglePosicion()` ahora oculta correctamente la sección "Goles encajados" cuando se juega de jugador de campo y la restaura al volver a portero.
+* **Win rate % en dashboard** con código de color dinámico.
+* **Emojis del nav corregidos:** se reemplazaron entidades HTML escapadas (`&#127968;` etc.) por caracteres UTF-8 directos para compatibilidad con ScalaTags.
+* **Fix ruta duplicada** `/profiles`: la ruta de logout de Amateur renombrada a `/am/logout`.
+* **Fix `logMatch`:** coma faltante en la firma del método que impedía compilar `getReportData` y `getProgressionData`.
+* **Fix `AmMatch`:** constructores en `getMatches` y `getMatch` actualizados con los 4 campos de v7.2 (`posicionPartido`, `posicionCampo`, `golesMarcados`, `asistencias`).
+
+### Fixes de compilación
+* `AmateurController:1539` — `mkString("↵")` con salto de línea literal → `mkString("\n")`.
+* `HistoryController:4506` — `s"""` en bloque JS sin interpolaciones → `"""` (sin prefijo `s`).
+* `AM_COOKIE` not found en rutas cask — inlineado como literal `"guardian_session"`.
 
 ---
 

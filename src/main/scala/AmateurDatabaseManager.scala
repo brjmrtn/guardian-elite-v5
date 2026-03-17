@@ -884,6 +884,81 @@ object AmateurDatabaseManager {
     } finally { conn.close() }
   }
 
+  def getGoalHeatmap(userId: Int, tipo: String = ""): Map[String, Int] = {
+    val conn = getConn()
+    try {
+      val sql = if (tipo.nonEmpty) """
+        SELECT g.zona, COUNT(*) as cnt
+        FROM am_match_goals g
+        JOIN am_matches m ON m.id = g.match_id
+        JOIN am_schedule s ON s.match_id = m.id
+        WHERE m.user_id = ? AND LOWER(s.tipo) = LOWER(?)
+          AND m.posicion_partido = 'portero'
+        GROUP BY g.zona
+      """ else """
+        SELECT g.zona, COUNT(*) as cnt
+        FROM am_match_goals g
+        JOIN am_matches m ON m.id = g.match_id
+        WHERE m.user_id = ? AND m.posicion_partido = 'portero'
+        GROUP BY g.zona
+      """
+      val ps = conn.prepareStatement(sql)
+      ps.setInt(1, userId)
+      if (tipo.nonEmpty) ps.setString(2, tipo)
+      val rs = ps.executeQuery()
+      var map = Map[String, Int]()
+      while (rs.next()) {
+        map = map + (rs.getString("zona") -> rs.getInt("cnt"))
+      }
+      // Ensure all 9 zones present
+      val zones = Seq("TL","TC","TR","ML","MC","MR","BL","BC","BR")
+      zones.foreach(z => if (!map.contains(z)) map = map + (z -> 0))
+      map
+    } finally { conn.close() }
+  }
+
+  def getGoalHeatmapByRival(userId: Int, rival: String): Map[String, Int] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT g.zona, COUNT(*) as cnt
+        FROM am_match_goals g
+        JOIN am_matches m ON m.id = g.match_id
+        WHERE m.user_id = ? AND LOWER(m.rival) LIKE LOWER(?)
+          AND m.posicion_partido = 'portero'
+        GROUP BY g.zona
+      """)
+      ps.setInt(1, userId)
+      ps.setString(2, s"%$rival%")
+      val rs = ps.executeQuery()
+      var map = Map[String, Int]()
+      while (rs.next()) {
+        map = map + (rs.getString("zona") -> rs.getInt("cnt"))
+      }
+      val zones = Seq("TL","TC","TR","ML","MC","MR","BL","BC","BR")
+      zones.foreach(z => if (!map.contains(z)) map = map + (z -> 0))
+      map
+    } finally { conn.close() }
+  }
+
+  def getRivalesConGoles(userId: Int): List[String] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT DISTINCT m.rival
+        FROM am_match_goals g
+        JOIN am_matches m ON m.id = g.match_id
+        WHERE m.user_id = ? AND m.posicion_partido = 'portero'
+        ORDER BY m.rival
+      """)
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var list = List[String]()
+      while (rs.next()) list = list :+ rs.getString("rival")
+      list
+    } finally { conn.close() }
+  }
+
   def getReportData(userId: Int): Map[String, Any] = {
     val conn = getConn()
     try {
