@@ -959,6 +959,130 @@ object AmateurDatabaseManager {
     } finally { conn.close() }
   }
 
+  def getRivalesList(userId: Int): List[Map[String, String]] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT
+          rival,
+          COUNT(*) AS pj,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) AS g,
+          SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) AS e,
+          SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) AS p,
+          ROUND(AVG(nota)::numeric, 1) AS nota_media,
+          SUM(goles_contra) AS gc_total,
+          MAX(fecha) AS ultimo
+        FROM am_matches
+        WHERE user_id = ?
+        GROUP BY rival
+        ORDER BY pj DESC, rival ASC
+      """)
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var list = List[Map[String, String]]()
+      while (rs.next()) {
+        val pj = rs.getInt("pj")
+        val g  = rs.getInt("g")
+        val e  = rs.getInt("e")
+        val p  = rs.getInt("p")
+        val resultado = if (g > p) "W" else if (g < p) "L" else "D"
+        list = list :+ Map(
+          "rival"      -> rs.getString("rival"),
+          "pj"         -> pj.toString,
+          "g"          -> g.toString,
+          "e"          -> e.toString,
+          "p"          -> p.toString,
+          "nota"       -> f"${rs.getDouble("nota_media")}%.1f",
+          "gc"         -> rs.getInt("gc_total").toString,
+          "ultimo"     -> Option(rs.getDate("ultimo")).map(_.toString).getOrElse(""),
+          "resultado"  -> resultado
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def getRivalDetail(userId: Int, rival: String): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Aggregate KPIs
+      val ps1 = conn.prepareStatement("""
+        SELECT
+          COUNT(*) AS pj,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) AS g,
+          SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) AS e,
+          SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) AS p,
+          ROUND(AVG(nota)::numeric, 1) AS nota_media,
+          ROUND(AVG(goles_contra)::numeric, 2) AS gc_media,
+          SUM(goles_marcados) AS goles_marcados_total,
+          SUM(asistencias) AS asistencias_total,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) AS limpias
+        FROM am_matches
+        WHERE user_id = ? AND LOWER(rival) = LOWER(?)
+      """)
+      ps1.setInt(1, userId); ps1.setString(2, rival)
+      val rs1 = ps1.executeQuery()
+      val (pj, g, e, p, nota, gcMedia, gmTotal, aTotal, limpias) =
+        if (rs1.next()) (
+          rs1.getInt("pj"), rs1.getInt("g"), rs1.getInt("e"), rs1.getInt("p"),
+          rs1.getDouble("nota_media"), rs1.getDouble("gc_media"),
+          rs1.getInt("goles_marcados_total"), rs1.getInt("asistencias_total"),
+          rs1.getInt("limpias")
+        ) else (0, 0, 0, 0, 0.0, 0.0, 0, 0, 0)
+
+      // Match history with notes
+      val ps2 = conn.prepareStatement("""
+        SELECT fecha, goles_favor, goles_contra, nota, posicion_partido,
+               posicion_campo, goles_marcados, asistencias, notas, es_local
+        FROM am_matches
+        WHERE user_id = ? AND LOWER(rival) = LOWER(?)
+        ORDER BY fecha DESC
+      """)
+      ps2.setInt(1, userId); ps2.setString(2, rival)
+      val rs2 = ps2.executeQuery()
+      var partidos = List[Map[String, String]]()
+      while (rs2.next()) {
+        val gf  = rs2.getInt("goles_favor")
+        val gc  = rs2.getInt("goles_contra")
+        val res = if (gf > gc) "G" else if (gf < gc) "P" else "E"
+        val esLocalRaw = rs2.getBoolean("es_local")
+        val loc = if (rs2.wasNull()) "—" else if (esLocalRaw) "Local" else "Visitante"
+        partidos = partidos :+ Map(
+          "fecha"    -> rs2.getDate("fecha").toString,
+          "res"      -> res,
+          "score"    -> s"$gf-$gc",
+          "nota"     -> f"${rs2.getDouble("nota")}%.1f",
+          "posicion" -> Option(rs2.getString("posicion_partido")).getOrElse("portero"),
+          "campo"    -> Option(rs2.getString("posicion_campo")).getOrElse(""),
+          "gm"       -> rs2.getInt("goles_marcados").toString,
+          "ast"      -> rs2.getInt("asistencias").toString,
+          "notas"    -> Option(rs2.getString("notas")).getOrElse(""),
+          "local"    -> loc
+        )
+      }
+
+      // Collect all tactical notes (non-empty)
+      val notasTacticas = partidos
+        .filter(_("notas").trim.nonEmpty)
+        .map(m => s"${m("fecha").take(7)}: ${m("notas")}")
+
+      Map(
+        "rival"         -> rival,
+        "pj"            -> pj,
+        "g"             -> g,
+        "e"             -> e,
+        "p"             -> p,
+        "notaMedia"     -> nota,
+        "gcMedia"       -> gcMedia,
+        "gmTotal"       -> gmTotal,
+        "aTotal"        -> aTotal,
+        "limpias"       -> limpias,
+        "partidos"      -> partidos,
+        "notasTacticas" -> notasTacticas
+      )
+    } finally { conn.close() }
+  }
+
   def getReportData(userId: Int): Map[String, Any] = {
     val conn = getConn()
     try {
