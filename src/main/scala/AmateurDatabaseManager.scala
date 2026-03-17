@@ -256,6 +256,9 @@ object AmateurDatabaseManager {
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS current_season INT DEFAULT 1")
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_url TEXT DEFAULT ''")
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS team_name TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_clasificacion_url TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_goleadores_url TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_resumen_url TEXT DEFAULT ''")
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_seasons (
         id          SERIAL PRIMARY KEY,
         user_id     INT REFERENCES am_users(id) ON DELETE CASCADE,
@@ -1165,14 +1168,20 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
     askCached(prompt)
   }
 
-  def saveLeagueConfig(userId: Int, leagueUrl: String, teamName: String): Unit = {
+  def saveLeagueConfig(userId: Int, leagueUrl: String, teamName: String,
+                       clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = ""): Unit = {
     val conn = getConn()
     try {
-      val ps = conn.prepareStatement(
-        "UPDATE am_users SET league_url = ?, team_name = ? WHERE id = ?")
+      val ps = conn.prepareStatement("""
+        UPDATE am_users SET league_url = ?, team_name = ?,
+          league_clasificacion_url = ?, league_goleadores_url = ?, league_resumen_url = ?
+        WHERE id = ?""")
       ps.setString(1, leagueUrl.trim)
       ps.setString(2, teamName.trim)
-      ps.setInt(3, userId)
+      ps.setString(3, clasificacionUrl.trim)
+      ps.setString(4, goleadoresUrl.trim)
+      ps.setString(5, resumenUrl.trim)
+      ps.setInt(6, userId)
       ps.executeUpdate()
     } finally { conn.close() }
   }
@@ -1187,6 +1196,111 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
       if (rs.next()) (rs.getString("lu"), rs.getString("tn"))
       else ("", "")
     } finally { conn.close() }
+  }
+
+  def getLeagueFullConfig(userId: Int): Map[String, String] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT COALESCE(league_url,'') as lu, COALESCE(team_name,'') as tn,
+               COALESCE(league_clasificacion_url,'') as cl,
+               COALESCE(league_goleadores_url,'') as go,
+               COALESCE(league_resumen_url,'') as re
+        FROM am_users WHERE id = ?""")
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      if (rs.next()) Map(
+        "calendarUrl"       -> rs.getString("lu"),
+        "teamName"          -> rs.getString("tn"),
+        "clasificacionUrl"  -> rs.getString("cl"),
+        "goleadoresUrl"     -> rs.getString("go"),
+        "resumenUrl"        -> rs.getString("re")
+      ) else Map("calendarUrl" -> "", "teamName" -> "", "clasificacionUrl" -> "",
+        "goleadoresUrl" -> "", "resumenUrl" -> "")
+    } finally { conn.close() }
+  }
+
+  def getLeagueStats(userId: Int): Map[String, Any] = {
+    val cfg      = getLeagueFullConfig(userId)
+    val teamName = cfg("teamName")
+    if (teamName.isEmpty) return Map("ok" -> false, "error" -> "Equipo no configurado")
+
+    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+    if (apiKey.isEmpty) return Map("ok" -> false, "error" -> "GEMINI_API_KEY no configurada")
+
+    def fetchAndAsk(url: String, promptFn: String => String): String = {
+      if (url.isEmpty) return ""
+      fetchLeagueUrl(url) match {
+        case Left(_)     => ""
+        case Right(text) => askCached(promptFn(text))
+      }
+    }
+
+    // Clasificación
+    val clasificacionRaw = fetchAndAsk(cfg("clasificacionUrl"), { text =>
+      val jsonTpl = """{"posicion":1,"puntos":0,"partidos":0,"ganados":0,"empatados":0,"perdidos":0,"goles_favor":0,"goles_contra":0,"tabla":[{"pos":1,"equipo":"nombre","pts":0,"pj":0}]}"""
+      s"""Extrae la posición en la tabla de clasificación del equipo "$teamName".
+El texto puede contener clasificaciones de varias divisiones — busca la que incluya a "$teamName".
+Texto: ${text.take(15000)}
+Devuelve SOLO este JSON sin markdown:
+$jsonTpl"""
+    })
+
+    // Goleadores
+    val goleadoresRaw = fetchAndAsk(cfg("goleadoresUrl"), { text =>
+      s"""Extrae los 10 máximos goleadores de la división donde juega "$teamName".
+El texto puede tener goleadores de varias divisiones — filtra solo los de la misma división que "$teamName".
+Para identificar la división correcta, busca primero en qué grupo/división aparece "$teamName" en el texto.
+Texto: ${text.take(15000)}
+Devuelve SOLO este JSON sin markdown:
+{"division":"nombre","goleadores":[{"nombre":"jugador","equipo":"club","goles":0}]}"""
+    })
+
+    // Resumen última jornada
+    val resumenRaw = fetchAndAsk(cfg("resumenUrl"), { text =>
+      s"""Extrae el resumen de la última jornada jugada de la división donde juega "$teamName".
+El texto puede tener resúmenes de varias divisiones — filtra solo los de la misma división que "$teamName".
+Texto: ${text.take(15000)}
+Devuelve SOLO este JSON sin markdown:
+{"jornada":0,"resultados":[{"local":"equipo","visitante":"equipo","goles_local":0,"goles_visitante":0}],"resultado_nuestro":{"rival":"","goles_favor":0,"goles_contra":0,"fue_local":true}}"""
+    })
+
+    def parseJson(raw: String): Option[ujson.Value] =
+      if (raw.isEmpty) None
+      else try {
+        val clean = raw.replaceAll("(?s)```json\s*", "").replaceAll("(?s)```\s*", "").trim
+        Some(ujson.read(clean))
+      } catch { case _: Exception => None }
+
+    // Análisis narrativo Gemini cruzando los 3 bloques
+    val analisisRaw = if (clasificacionRaw.nonEmpty || goleadoresRaw.nonEmpty || resumenRaw.nonEmpty) {
+      val contexto = List(
+        if (clasificacionRaw.nonEmpty) s"CLASIFICACION: $clasificacionRaw" else "",
+        if (goleadoresRaw.nonEmpty)    s"GOLEADORES: $goleadoresRaw" else "",
+        if (resumenRaw.nonEmpty)       s"ULTIMA JORNADA: $resumenRaw" else ""
+      ).filter(_.nonEmpty).mkString("
+
+      ")
+
+      val promptAnalisis = s"""Eres el analista deportivo de "$teamName". Con los siguientes datos de la liga, genera un análisis breve y directo en español.
+
+$contexto
+
+Escribe exactamente 3 insights en formato lista, cada uno en una línea, máximo 20 palabras por insight. Sin numeración, sin guiones. Incluye:
+1. Situación actual en la tabla y tendencia
+2. Amenaza principal del próximo rival (máximo goleador)
+3. Un consejo táctico concreto basado en los datos"""
+
+      askCached(promptAnalisis)
+    } else ""
+
+    Map(
+      "ok"            -> true,
+      "clasificacion" -> parseJson(clasificacionRaw).map(ujson.write(_)).getOrElse(""),
+      "goleadores"    -> parseJson(goleadoresRaw).map(ujson.write(_)).getOrElse(""),
+      "resumen"       -> parseJson(resumenRaw).map(ujson.write(_)).getOrElse(""),
+      "analisis"      -> analisisRaw
+    )
   }
 
   def syncCalendarFromConfig(userId: Int): Map[String, Any] = {
