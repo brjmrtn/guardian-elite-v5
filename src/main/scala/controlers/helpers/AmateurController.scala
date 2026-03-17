@@ -192,7 +192,10 @@ object AmateurController extends cask.Routes {
             span(cls := "nav-icon", "📊"), span("Historial")),
           a(href := "/am/progression",
             cls := s"nav-item ${if (activeLink == "progression") "active" else ""}",
-            span(cls := "nav-icon", "📈"), span("Progreso"))
+            span(cls := "nav-icon", "📈"), span("Progreso")),
+          a(href := "/am/mapa-goles",
+            cls := s"nav-item ${if (activeLink == "goals") "active" else ""}",
+            span(cls := "nav-icon", "🥅"), span("Mapa"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -1726,6 +1729,194 @@ $penSection
     AmateurDatabaseManager.endSeason(user.id)
     cask.Response(Array.emptyByteArray, 302,
       headers = Seq("Location" -> "/am/dashboard"))
+  }
+
+  // ── MAPA DE GOLES ─────────────────────────────────────────────────────────
+  @cask.get("/am/mapa-goles")
+  def mapaGolesPage(request: cask.Request, tipo: String = "", rival: String = "") = withAmAuth(request) { user =>
+    val heatmap    = if (rival.nonEmpty) AmateurDatabaseManager.getGoalHeatmapByRival(user.id, rival)
+    else               AmateurDatabaseManager.getGoalHeatmap(user.id, tipo)
+    val rivales    = AmateurDatabaseManager.getRivalesConGoles(user.id)
+    val totalGoles = heatmap.values.sum
+
+    val maxVal = { val m = heatmap.values.max; if (m > 0) m.toDouble else 1.0 }
+
+    def cellColor(count: Int): String = {
+      val i = count / maxVal
+      if (i == 0)        "rgba(255,255,255,0.04)"
+      else if (i < 0.25) "rgba(220,53,69,0.20)"
+      else if (i < 0.50) "rgba(220,53,69,0.45)"
+      else if (i < 0.75) "rgba(220,53,69,0.70)"
+      else               "rgba(220,53,69,0.92)"
+    }
+
+    def cellLabel(z: String) = z match {
+      case "TL" => "Arr Izq"; case "TC" => "Arr Cen"; case "TR" => "Arr Der"
+      case "ML" => "Med Izq"; case "MC" => "Med Cen"; case "MR" => "Med Der"
+      case "BL" => "Baj Izq"; case "BC" => "Baj Cen"; case "BR" => "Baj Der"
+      case _ => z
+    }
+
+    val zonaRows = Seq(Seq("TL","TC","TR"), Seq("ML","MC","MR"), Seq("BL","BC","BR"))
+
+    def renderCell(zone: String) = {
+      val count = heatmap.getOrElse(zone, 0)
+      val pct   = if (totalGoles > 0) (count * 100.0 / totalGoles).toInt else 0
+      div(
+        style := s"background:${cellColor(count)}; border:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:65px;",
+        attr("title") := s"${cellLabel(zone)}: $count goles ($pct%)",
+        if (count > 0) frag(
+          div(cls := "fw-bold text-white", style := "font-size:18px; line-height:1;", count.toString),
+          div(cls := "xx-small text-light", style := "opacity:.7;", s"$pct%")
+        ) else frag(
+          div(cls := "text-muted", style := "font-size:16px; opacity:.25;", "–")
+        )
+      )
+    }
+
+    val golsAlto  = Seq("TL","TC","TR").map(heatmap.getOrElse(_, 0)).sum
+    val golsMedio = Seq("ML","MC","MR").map(heatmap.getOrElse(_, 0)).sum
+    val golsBajo  = Seq("BL","BC","BR").map(heatmap.getOrElse(_, 0)).sum
+    val golsIzq   = Seq("TL","ML","BL").map(heatmap.getOrElse(_, 0)).sum
+    val golsCen   = Seq("TC","MC","BC").map(heatmap.getOrElse(_, 0)).sum
+    val golsDer   = Seq("TR","MR","BR").map(heatmap.getOrElse(_, 0)).sum
+
+    // Punto ciego: zona con más goles
+    val puntoCiego = if (totalGoles > 0) {
+      val worst = heatmap.maxBy(_._2)
+      val wpct  = (worst._2 * 100.0 / totalGoles).toInt
+      Some(cellLabel(worst._1).toUpperCase -> wpct)
+    } else None
+
+    val tituloFiltro = if (rival.nonEmpty) s"vs ${rival.toUpperCase}"
+    else if (tipo.nonEmpty) tipo
+    else "Todos los partidos"
+
+    renderAm("goals", user.nombre,
+      div(
+
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(
+            h5(cls := "fw-black text-white mb-0", "🥅 Mapa de Goles"),
+            span(cls := "text-muted small", s"$tituloFiltro — $totalGoles goles registrados")
+          ),
+          a(href := "/am/history", cls := "btn btn-outline-secondary btn-sm fw-bold xx-small", "← Historial")
+        ),
+
+        // Filtros
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "xx-small fw-bold text-muted mb-2", "FILTRAR POR TIPO"),
+          div(cls := "d-flex gap-2 flex-wrap mb-2",
+            a(href := "/am/mapa-goles",
+              cls := s"btn btn-sm fw-bold ${if (tipo.isEmpty && rival.isEmpty) "btn-danger" else "btn-outline-secondary"}",
+              "TODOS"),
+            Seq("LIGA","TORNEO","CUP","AMISTOSO").map { t =>
+              a(href := s"/am/mapa-goles?tipo=$t",
+                cls := s"btn btn-sm fw-bold ${if (tipo == t) "btn-danger" else "btn-outline-secondary"}",
+                t)
+            }
+          ),
+          if (rivales.nonEmpty)
+            div(
+              div(cls := "xx-small fw-bold text-muted mb-1 mt-2", "FILTRAR POR RIVAL"),
+              div(cls := "d-flex gap-1 flex-wrap",
+                rivales.take(8).map { r =>
+                  a(href := s"/am/mapa-goles?rival=${java.net.URLEncoder.encode(r, "UTF-8")}",
+                    cls := s"btn btn-sm fw-bold ${if (rival.toLowerCase == r.toLowerCase) "btn-warning" else "btn-outline-secondary"}",
+                    style := "font-size:10px;",
+                    if (r.length > 12) r.take(12) + "…" else r)
+                }
+              )
+            )
+          else span()
+        ),
+
+        if (totalGoles == 0)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:48px; opacity:.3;", "🥅"),
+            h5(cls := "text-muted mt-3", "Sin goles registrados"),
+            p(cls := "text-secondary small", "Los goles encajados solo se registran cuando juegas de portero")
+          )
+        else frag(
+
+          // Portería heatmap
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted text-center mb-2", "PORTERÍA — Vista frontal"),
+            // Poste superior
+            div(style := "height:5px; background:linear-gradient(90deg,#666,#bbb,#666); border-radius:3px; margin-bottom:2px;"),
+            div(cls := "d-flex align-items-stretch",
+              // Poste izq
+              div(style := "width:5px; background:linear-gradient(180deg,#666,#bbb,#666); border-radius:3px; flex-shrink:0;"),
+              // Grid 3x3
+              div(style := "flex:1; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; gap:2px; padding:2px;",
+                zonaRows.flatten.map(renderCell)
+              ),
+              // Poste der
+              div(style := "width:5px; background:linear-gradient(180deg,#666,#bbb,#666); border-radius:3px; flex-shrink:0;")
+            ),
+            // Línea de fondo
+            div(style := "height:4px; background:rgba(255,255,255,.12); border-radius:2px; margin-top:2px;"),
+            // Leyenda
+            div(cls := "d-flex justify-content-center align-items-center gap-2 mt-2",
+              span(cls := "xx-small text-muted", "0"),
+              div(style := "width:80px; height:6px; border-radius:3px; background:linear-gradient(90deg,rgba(220,53,69,.05),rgba(220,53,69,.9));"),
+              span(cls := "xx-small text-muted", s"${maxVal.toInt}")
+            )
+          ),
+
+          // Stats por altura y lado
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-6",
+              div(cls := "card-am p-2",
+                div(cls := "xx-small fw-bold text-muted mb-2 text-center", "POR ALTURA"),
+                Seq(("Alto", golsAlto, "#dc3545"), ("Medio", golsMedio, "#ffc107"), ("Bajo", golsBajo, "#0dcaf0")).map {
+                  case (lbl, n, color) =>
+                    val p = if (totalGoles > 0) (n * 100.0 / totalGoles).toInt else 0
+                    div(cls := "mb-1",
+                      div(cls := "d-flex justify-content-between xx-small mb-1",
+                        span(cls := "text-white", lbl),
+                        span(style := s"color:$color; font-weight:700;", s"$n ($p%)")
+                      ),
+                      div(style := "height:6px; background:rgba(255,255,255,.08); border-radius:3px;",
+                        div(style := s"height:6px; width:$p%; background:$color; border-radius:3px;")
+                      )
+                    )
+                }
+              )
+            ),
+            div(cls := "col-6",
+              div(cls := "card-am p-2",
+                div(cls := "xx-small fw-bold text-muted mb-2 text-center", "POR LADO"),
+                Seq(("Izq", golsIzq, "#dc3545"), ("Centro", golsCen, "#ffc107"), ("Der", golsDer, "#0dcaf0")).map {
+                  case (lbl, n, color) =>
+                    val p = if (totalGoles > 0) (n * 100.0 / totalGoles).toInt else 0
+                    div(cls := "mb-1",
+                      div(cls := "d-flex justify-content-between xx-small mb-1",
+                        span(cls := "text-white", lbl),
+                        span(style := s"color:$color; font-weight:700;", s"$n ($p%)")
+                      ),
+                      div(style := "height:6px; background:rgba(255,255,255,.08); border-radius:3px;",
+                        div(style := s"height:6px; width:$p%; background:$color; border-radius:3px;")
+                      )
+                    )
+                }
+              )
+            )
+          ),
+
+          // Punto ciego
+          puntoCiego.map { case (zona, wpct) =>
+            div(cls := "card-am p-3 text-center",
+              style := "border-top: 3px solid #dc3545;",
+              div(cls := "xx-small fw-bold text-muted mb-1", "⚠️ PUNTO CIEGO"),
+              div(cls := "fw-black text-danger", style := "font-size:1.4rem;", zona),
+              div(cls := "xx-small text-white", s"$wpct% de tus goles encajados"),
+              div(cls := "xx-small text-muted mt-1", "Trabaja el posicionamiento en esta zona")
+            )
+          }.getOrElse(span())
+        )
+      )
+    )
   }
 
   // Redirect /am → /am/dashboard
