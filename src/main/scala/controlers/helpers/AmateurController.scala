@@ -2141,8 +2141,7 @@ $penSection
     // Gemini insights (solo si hay datos suficientes)
     val insights: List[String] = if (rows.size >= 3) {
       val raw = AmateurDatabaseManager.callGeminiWellness(rows)
-      if (raw.nonEmpty) raw.split("
-      ").map(_.trim).filter(_.nonEmpty).toList else List.empty
+      if (raw.nonEmpty) raw.split("\n").map(_.trim).filter(_.nonEmpty).toList else List.empty
     } else List.empty
 
     renderAm("wellness", user.nombre,

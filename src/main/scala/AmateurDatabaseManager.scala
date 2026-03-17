@@ -1142,8 +1142,7 @@ object AmateurDatabaseManager {
     if (data.isEmpty) return ""
     val rows = data.take(15).map { r =>
       s"Fecha:${r("fecha")} Sueño:${r("sueno")}h Energía:${r("energia")}/5 Ánimo:${r("animo")}/5 Nota:${r("nota")} GC:${r("gc")}"
-    }.mkString("
-    ")
+    }.mkString("\n")
     val prompt = s"""Eres un analista de rendimiento deportivo amateur. Analiza estos datos de bienestar y rendimiento de un portero:
 
 $rows
@@ -1190,8 +1189,8 @@ Si no encuentras fecha en formato claro, usa null. Si no hay marcador, usa 0. Si
       val raw = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str.trim
       // Strip possible markdown code blocks
       val clean = raw
-        .replaceAll("(?s)```json\s*", "")
-        .replaceAll("(?s)```\s*", "")
+        .replaceAll("(?s)```json\\s*", "")
+        .replaceAll("(?s)```\\s*", "")
         .trim
 
       val json     = ujson.read(clean)
