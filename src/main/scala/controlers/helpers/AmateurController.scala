@@ -201,7 +201,10 @@ object AmateurController extends cask.Routes {
             span(cls := "nav-icon", "⚔️"), span("Rivales")),
           a(href := "/am/wellness",
             cls := s"nav-item ${if (activeLink == "wellness") "active" else ""}",
-            span(cls := "nav-icon", "🧠"), span("Wellness"))
+            span(cls := "nav-icon", "🧠"), span("Wellness")),
+          a(href := "/am/league",
+            cls := s"nav-item ${if (activeLink == "league") "active" else ""}",
+            span(cls := "nav-icon", "🏆"), span("Liga"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -2564,7 +2567,12 @@ $penSection
   // ── CONFIG LIGA + SYNC ────────────────────────────────────────────────────
   @cask.get("/am/league-config")
   def leagueConfigPage(request: cask.Request) = withAmAuth(request) { user =>
-    val (currentUrl, currentTeam) = AmateurDatabaseManager.getLeagueConfig(user.id)
+    val cfg         = AmateurDatabaseManager.getLeagueFullConfig(user.id)
+    val currentUrl  = cfg("calendarUrl")
+    val currentTeam = cfg("teamName")
+    val currentClas = cfg("clasificacionUrl")
+    val currentGol  = cfg("goleadoresUrl")
+    val currentRes  = cfg("resumenUrl")
     renderAm("calendar", user.nombre,
       div(
         div(cls := "mb-3 d-flex justify-content-between align-items-center",
@@ -2587,21 +2595,48 @@ $penSection
         ),
 
         div(cls := "card-am p-3",
-          div(cls := "mb-3",
-            label(cls := "xx-small fw-bold text-muted", "URL DEL CALENDARIO DE TU LIGA *"),
-            input(tpe := "url", id := "cfg-url",
-              cls := "form-control bg-dark text-white border-secondary mt-1",
-              value := currentUrl,
-              placeholder := "https://ligaelitefutbol.com/calendario/grupo-a",
-              style := "font-size:13px;")
-          ),
+          // Equipo
           div(cls := "mb-3",
             label(cls := "xx-small fw-bold text-muted", "NOMBRE EXACTO DE TU EQUIPO *"),
             input(tpe := "text", id := "cfg-team",
               cls := "form-control bg-dark text-white border-secondary mt-1",
               value := currentTeam,
-              placeholder := "MiniFlow FC",
+              placeholder := "ej. BIRRAS BRAVAS",
               style := "font-size:13px;")
+          ),
+          div(style := "height:1px; background:rgba(255,255,255,.08); margin:12px 0;"),
+          div(cls := "xx-small fw-bold text-muted mb-3", "URLS DE TU LIGA"),
+          div(cls := "mb-2",
+            label(cls := "xx-small text-muted", "📅 Calendario / Resultados"),
+            input(tpe := "url", id := "cfg-url",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              value := currentUrl,
+              placeholder := "https://ligaelitefutbol.com/.../resultados",
+              style := "font-size:12px;")
+          ),
+          div(cls := "mb-2",
+            label(cls := "xx-small text-muted", "🏆 Clasificación"),
+            input(tpe := "url", id := "cfg-clas",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              value := currentClas,
+              placeholder := "https://ligaelitefutbol.com/.../clasificacion",
+              style := "font-size:12px;")
+          ),
+          div(cls := "mb-2",
+            label(cls := "xx-small text-muted", "⚽ Goleadores"),
+            input(tpe := "url", id := "cfg-gol",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              value := currentGol,
+              placeholder := "https://ligaelitefutbol.com/.../goleadores",
+              style := "font-size:12px;")
+          ),
+          div(cls := "mb-3",
+            label(cls := "xx-small text-muted", "📋 Resumen jornada"),
+            input(tpe := "url", id := "cfg-res",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              value := currentRes,
+              placeholder := "https://ligaelitefutbol.com/.../resumen",
+              style := "font-size:12px;")
           ),
           div(id := "cfg-status"),
           div(cls := "d-flex gap-2",
@@ -2615,16 +2650,19 @@ $penSection
 
         script(raw("""
           function guardarConfig() {
-            var url  = document.getElementById('cfg-url').value.trim();
             var team = document.getElementById('cfg-team').value.trim();
-            if (!url || !team) { alert('Completa los dos campos.'); return; }
+            var url  = document.getElementById('cfg-url').value.trim();
+            if (!team) { alert('Escribe el nombre de tu equipo.'); return; }
             var params = new URLSearchParams();
-            params.append('leagueUrl', url);
             params.append('teamName', team);
+            params.append('leagueUrl', url);
+            params.append('clasificacionUrl', document.getElementById('cfg-clas').value.trim());
+            params.append('goleadoresUrl',    document.getElementById('cfg-gol').value.trim());
+            params.append('resumenUrl',       document.getElementById('cfg-res').value.trim());
             fetch('/am/league-config/save', { method:'POST', body: params,
               headers: {'Content-Type':'application/x-www-form-urlencoded'} })
               .then(function(r) {
-                if (r.ok) window.location.href = '/am/calendar?synced=✅ Configuración guardada';
+                if (r.ok) window.location.href = '/am/league?saved=1';
               });
           }
         """))
@@ -2633,9 +2671,11 @@ $penSection
   }
 
   @cask.postForm("/am/league-config/save")
-  def leagueConfigSave(request: cask.Request, leagueUrl: String, teamName: String) =
+  def leagueConfigSave(request: cask.Request, leagueUrl: String = "", teamName: String,
+                       clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = "") =
     withAmAuth(request) { user =>
-      AmateurDatabaseManager.saveLeagueConfig(user.id, leagueUrl, teamName)
+      AmateurDatabaseManager.saveLeagueConfig(user.id, leagueUrl, teamName,
+        clasificacionUrl, goleadoresUrl, resumenUrl)
       cask.Response(Array.emptyByteArray, 200)
     }
 
@@ -2718,6 +2758,226 @@ $geminiRaw"""
             headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
       } // case Right
     }
+  }
+
+  // ── PÁGINA DE LIGA ────────────────────────────────────────────────────────
+  @cask.get("/am/league")
+  def leaguePage(request: cask.Request, saved: String = "") = withAmAuth(request) { user =>
+    val cfg      = AmateurDatabaseManager.getLeagueFullConfig(user.id)
+    val teamName = cfg("teamName")
+    val hasStats = cfg("clasificacionUrl").nonEmpty || cfg("goleadoresUrl").nonEmpty || cfg("resumenUrl").nonEmpty
+
+    val stats = if (hasStats) AmateurDatabaseManager.getLeagueStats(user.id)
+    else Map("ok" -> false, "error" -> "")
+
+    // Parse clasificacion
+    val clasificacion: Option[ujson.Value] =
+      if (stats.getOrElse("ok", false).asInstanceOf[Boolean]) {
+        val raw = stats.getOrElse("clasificacion", "").asInstanceOf[String]
+        if (raw.nonEmpty) try Some(ujson.read(raw)) catch { case _: Exception => None }
+        else None
+      } else None
+
+    // Parse goleadores
+    val goleadores: Option[ujson.Value] =
+      if (stats.getOrElse("ok", false).asInstanceOf[Boolean]) {
+        val raw = stats.getOrElse("goleadores", "").asInstanceOf[String]
+        if (raw.nonEmpty) try Some(ujson.read(raw)) catch { case _: Exception => None }
+        else None
+      } else None
+
+    // Parse resumen
+    val resumen: Option[ujson.Value] =
+      if (stats.getOrElse("ok", false).asInstanceOf[Boolean]) {
+        val raw = stats.getOrElse("resumen", "").asInstanceOf[String]
+        if (raw.nonEmpty) try Some(ujson.read(raw)) catch { case _: Exception => None }
+        else None
+      } else None
+
+    // Análisis narrativo Gemini
+    val analisis: List[String] =
+      if (stats.getOrElse("ok", false).asInstanceOf[Boolean]) {
+        val raw = stats.getOrElse("analisis", "").asInstanceOf[String]
+        if (raw.nonEmpty) raw.split("
+        ").map(_.trim).filter(_.nonEmpty).toList
+        else List.empty
+      } else List.empty
+
+    renderAm("league", user.nombre,
+      div(
+        // Header
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(
+            h5(cls := "fw-black text-white mb-0", "🏆 Mi Liga"),
+            span(cls := "text-muted small", teamName)
+          ),
+          div(cls := "d-flex gap-2",
+            a(href := "/am/league-config", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "⚙️ Config"),
+            a(href := "/am/league?refresh=1", cls := "btn btn-outline-primary btn-sm xx-small fw-bold", "🔄 Actualizar")
+          )
+        ),
+
+        if (saved.nonEmpty)
+          div(cls := "alert alert-success py-2 px-3 mb-3 small", "✅ Configuración guardada")
+        else span(),
+
+        if (!hasStats)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:40px; opacity:.3;", "🏆"),
+            h5(cls := "text-muted mt-3", "Sin URLs configuradas"),
+            p(cls := "text-secondary small", "Configura las URLs de clasificación, goleadores y resumen"),
+            a(href := "/am/league-config", cls := "btn btn-primary mt-2 fw-bold", "⚙️ Configurar liga")
+          )
+        else frag(
+
+          // Análisis Gemini
+          if (analisis.nonEmpty)
+            div(cls := "card-am p-3 mb-3",
+              style := "border-left: 3px solid #a78bfa;",
+              div(cls := "d-flex align-items-center gap-2 mb-2",
+                span(style := "font-size:16px;", "✨"),
+                div(cls := "xx-small fw-bold text-muted", "ANÁLISIS IA")
+              ),
+              frag(analisis.map { insight =>
+                div(cls := "d-flex gap-2 py-2",
+                  style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                  div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0; margin-top:2px;"),
+                  div(cls := "small text-white", style := "font-size:12px; line-height:1.5;", insight)
+                )
+              }: _*)
+            )
+          else span(),
+
+          // Clasificación
+          clasificacion.map { cl =>
+            val pos  = try cl("posicion").num.toInt catch { case _: Exception => 0 }
+            val pts  = try cl("puntos").num.toInt   catch { case _: Exception => 0 }
+            val pj   = try cl("partidos").num.toInt catch { case _: Exception => 0 }
+            val gf   = try cl("goles_favor").num.toInt   catch { case _: Exception => 0 }
+            val gc   = try cl("goles_contra").num.toInt  catch { case _: Exception => 0 }
+            val posColor = if (pos <= 3) "#20c997" else if (pos <= 6) "#ffc107" else "#6c757d"
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "📊 CLASIFICACIÓN"),
+              div(cls := "d-flex align-items-center gap-3 mb-3",
+                div(style := s"font-size:3rem; font-weight:900; color:$posColor; line-height:1;",
+                  s"${pos}º"),
+                div(
+                  div(cls := "fw-black text-white", style := "font-size:1.1rem;", teamName),
+                  div(cls := "xx-small text-muted", s"$pts pts · $pj PJ · GF $gf · GC $gc")
+                )
+              ),
+              // Tabla mini
+              try {
+                val tabla = cl("tabla").arr.take(8)
+                div(
+                  frag(tabla.zipWithIndex.map { case (row, idx) =>
+                    val eq   = try row("equipo").str catch { case _: Exception => "" }
+                    val rpos = try row("pos").num.toInt catch { case _: Exception => idx + 1 }
+                    val rpts = try row("pts").num.toInt catch { case _: Exception => 0 }
+                    val rpj  = try row("pj").num.toInt  catch { case _: Exception => 0 }
+                    val isUs = eq.toUpperCase.contains(teamName.toUpperCase.take(6))
+                    div(cls := "d-flex align-items-center gap-2 py-1",
+                      style := s"border-bottom:1px solid rgba(255,255,255,.06); ${if (isUs) "background:rgba(13,110,253,.08); border-radius:4px;" else ""}",
+                      div(cls := "xx-small text-muted", style := "min-width:20px; text-align:right;", s"$rpos"),
+                      div(cls := s"flex-fill xx-small ${if (isUs) "fw-bold text-primary" else "text-white"}",
+                        eq),
+                      div(cls := "xx-small text-muted", style := "min-width:28px; text-align:right;",
+                        s"$rpj"),
+                      div(cls := s"xx-small fw-bold ${if (isUs) "text-primary" else "text-white"}",
+                        style := "min-width:28px; text-align:right;", s"$rpts")
+                    )
+                  }: _*),
+                  div(cls := "d-flex xx-small text-muted mt-1",
+                    div(style := "min-width:20px;"),
+                    div(cls := "flex-fill", "Equipo"),
+                    div(style := "min-width:28px; text-align:right;", "PJ"),
+                    div(style := "min-width:28px; text-align:right;", "Pts")
+                  )
+                )
+              } catch { case _: Exception => span() }
+            )
+          }.getOrElse(span()),
+
+          // Goleadores
+          goleadores.map { gol =>
+            val division = try gol("division").str catch { case _: Exception => "" }
+            val lista    = try gol("goleadores").arr catch { case _: Exception => ujson.Arr().arr }
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "d-flex justify-content-between align-items-center mb-2",
+                div(cls := "xx-small fw-bold text-muted", "⚽ PICHICHIS"),
+                if (division.nonEmpty)
+                  span(cls := "xx-small text-muted", division)
+                else span()
+              ),
+              frag(lista.zipWithIndex.map { case (g, idx) =>
+                val nombre = try g("nombre").str catch { case _: Exception => "" }
+                val equipo = try g("equipo").str catch { case _: Exception => "" }
+                val goles  = try g("goles").num.toInt catch { case _: Exception => 0 }
+                val isRival = !equipo.toUpperCase.contains(teamName.toUpperCase.take(6))
+                div(cls := "d-flex align-items-center gap-2 py-2",
+                  style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                  div(cls := "xx-small text-muted fw-bold", style := "min-width:20px;",
+                    s"${idx+1}"),
+                  div(cls := "flex-fill",
+                    div(cls := s"xx-small ${if (isRival) "text-warning fw-bold" else "text-white"}",
+                      nombre,
+                      if (isRival) span(cls := "badge ms-1",
+                        style := "background:#dc354533; color:#dc3545; font-size:9px;", "⚠️ RIVAL")
+                      else span()
+                    ),
+                    div(cls := "xx-small text-muted", equipo)
+                  ),
+                  div(cls := "fw-black text-white", style := "font-size:1.1rem;", goles.toString)
+                )
+              }: _*)
+            )
+          }.getOrElse(span()),
+
+          // Resumen última jornada
+          resumen.map { res =>
+            val jornada    = try res("jornada").num.toInt catch { case _: Exception => 0 }
+            val resultados = try res("resultados").arr    catch { case _: Exception => ujson.Arr().arr }
+            val nuestro    = try Some(res("resultado_nuestro")) catch { case _: Exception => None }
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2",
+                s"📋 ÚLTIMA JORNADA${if (jornada > 0) s" (J$jornada)" else ""}"),
+              nuestro.map { n =>
+                val rival  = try n("rival").str catch { case _: Exception => "" }
+                val gf2    = try n("goles_favor").num.toInt    catch { case _: Exception => 0 }
+                val gc2    = try n("goles_contra").num.toInt   catch { case _: Exception => 0 }
+                val local  = try n("fue_local").bool  catch { case _: Exception => true }
+                val resStr = if (gf2 > gc2) "G" else if (gf2 < gc2) "P" else "E"
+                val rc     = if (gf2 > gc2) "#20c997" else if (gf2 < gc2) "#dc3545" else "#ffc107"
+                div(cls := "card-am p-2 mb-2 text-center",
+                  style := s"border-left:4px solid $rc;",
+                  div(cls := "xx-small text-muted", if (local) "🏠 Local" else "✈️ Visitante"),
+                  div(cls := "fw-black text-white", style := "font-size:1.3rem;",
+                    s"$teamName $gf2 — $gc2 $rival"),
+                  div(cls := "fw-bold", style := s"color:$rc; font-size:.9rem;",
+                    resStr match { case "G" => "VICTORIA"; case "P" => "DERROTA"; case _ => "EMPATE" })
+                )
+              }.getOrElse(span()),
+              frag(resultados.take(8).map { r =>
+                val loc = try r("local").str catch { case _: Exception => "" }
+                val vis = try r("visitante").str catch { case _: Exception => "" }
+                val gl  = try r("goles_local").num.toInt    catch { case _: Exception => 0 }
+                val gv  = try r("goles_visitante").num.toInt catch { case _: Exception => 0 }
+                val isUs = loc.toUpperCase.contains(teamName.toUpperCase.take(6)) ||
+                  vis.toUpperCase.contains(teamName.toUpperCase.take(6))
+                div(cls := "d-flex align-items-center gap-2 py-1 xx-small",
+                  style := s"border-bottom:1px solid rgba(255,255,255,.06); ${if (isUs) "background:rgba(13,110,253,.08); border-radius:4px;" else ""}",
+                  div(cls := s"flex-fill text-end ${if (isUs) "fw-bold text-primary" else "text-white"}",
+                    loc),
+                  div(cls := "fw-bold text-white px-2", s"$gl — $gv"),
+                  div(cls := s"flex-fill ${if (isUs) "fw-bold text-primary" else "text-white"}",
+                    vis)
+                )
+              }: _*)
+            )
+          }.getOrElse(span())
+        )
+      )
+    )
   }
 
   // Redirect /am → /am/dashboard
