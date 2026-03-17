@@ -2670,20 +2670,20 @@ $penSection
       cask.Response("No hay URL configurada".getBytes("UTF-8"),
         headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
     } else {
-      val pageText = AmateurDatabaseManager.fetchLeagueUrl(leagueUrl) match {
-        case Right(t) => t
-        case Left(err) => return cask.Response(s"ERROR JSOUP: $err".getBytes("UTF-8"),
-          headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
-      }
+      AmateurDatabaseManager.fetchLeagueUrl(leagueUrl) match {
+        case Left(err) =>
+          cask.Response(s"ERROR JSOUP: $err".getBytes("UTF-8"),
+            headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
+        case Right(pageText) =>
 
-      // Run Gemini and show raw response
-      val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
-      val geminiRaw = if (apiKey.isEmpty) "NO API KEY" else {
-        try {
-          val jsonTemplate = """{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
-          val formatJugado   = "EQUIPO_LOCAL EQUIPO_VISITANTE (marcador) DD.MM.YYYY - CAMPO"
-          val formatPendiente = "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
-          val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga y extrae los partidos de "$teamName".
+          // Run Gemini and show raw response
+          val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+          val geminiRaw = if (apiKey.isEmpty) "NO API KEY" else {
+            try {
+              val jsonTemplate = """{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
+              val formatJugado   = "EQUIPO_LOCAL EQUIPO_VISITANTE (marcador) DD.MM.YYYY - CAMPO"
+              val formatPendiente = "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
+              val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga y extrae los partidos de "$teamName".
 
 FORMATO DEL TEXTO:
 - Partidos jugados: $formatJugado  (el marcador aparece entre parentesis)
@@ -2701,33 +2701,34 @@ ${pageText.take(5000)}
 RESPONDE UNICAMENTE con JSON (sin markdown):
 $jsonTemplate"""
 
-          val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
-            "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
-          val r = requests.post(
-            s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
-            data = ujson.write(payload),
-            headers = Map("Content-Type" -> "application/json"),
-            readTimeout = 30000
-          )
-          if (r.statusCode == 200)
-            ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
-          else s"HTTP ${r.statusCode}: ${r.text().take(500)}"
-        } catch { case e: Exception => s"EXCEPTION: ${e.getMessage}" }
-      }
+              val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
+                "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+              val r = requests.post(
+                s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+                data = ujson.write(payload),
+                headers = Map("Content-Type" -> "application/json"),
+                readTimeout = 30000
+              )
+              if (r.statusCode == 200)
+                ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+              else s"HTTP ${r.statusCode}: ${r.text().take(500)}"
+            } catch { case e: Exception => s"EXCEPTION: ${e.getMessage}" }
+          }
 
-      val result = s"""URL: $leagueUrl
+          val result = s"""URL: $leagueUrl
 EQUIPO: $teamName
 CHARS EXTRAÍDOS: ${pageText.length}
 
 === MUESTRA DEL TEXTO (líneas con $teamName) ===
 ${pageText.split(" ").sliding(20).map(_.mkString(" ")).filter(_.contains(teamName)).take(10).mkString("
-        ")}
+            ")}
 
-        === RESPUESTA RAW DE GEMINI ===
-          $geminiRaw"""
+            === RESPUESTA RAW DE GEMINI ===
+              $geminiRaw"""
 
       cask.Response(result.getBytes("UTF-8"),
         headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
+      } // case Right
     }
   }
 
@@ -2773,78 +2774,78 @@ ${pageText.split(" ").sliding(20).map(_.mkString(" ")).filter(_.contains(teamNam
     }
 
     val labelsJson   = labels.map(l => s""""$l"""").mkString("[", ",", "]")
-        val notasJson    = notas.map(n => f"$n%.1f").mkString("[", ",", "]")
-        val gcJson       = gcList.mkString("[", ",", "]")
+            val notasJson    = notas.map(n => f"$n%.1f").mkString("[", ",", "]")
+            val gcJson       = gcList.mkString("[", ",", "]")
 
-        def mesLabel(m: String): String = {
-          val parts = m.split("-")
-          if (parts.length == 2) {
-            val mes = parts(1).toIntOption.getOrElse(0)
-            val meses = Array("", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-              "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
-            if (mes >= 1 && mes <= 12) s"${meses(mes)} ${parts(0).takeRight(2)}" else m
-          } else m
-        }
+            def mesLabel(m: String): String = {
+              val parts = m.split("-")
+              if (parts.length == 2) {
+                val mes = parts(1).toIntOption.getOrElse(0)
+                val meses = Array("", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                  "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+                if (mes >= 1 && mes <= 12) s"${meses(mes)} ${parts(0).takeRight(2)}" else m
+              } else m
+            }
 
-        renderAm("progression", user.nombre,
-          div(
-            // Header
-            div(cls := "mb-3",
-              h5(cls := "fw-black text-white mb-0", "📈 Progresión"),
-              span(cls := "text-muted small", s"$totalPartidos partidos registrados")
-            ),
+            renderAm("progression", user.nombre,
+              div(
+                // Header
+                div(cls := "mb-3",
+                  h5(cls := "fw-black text-white mb-0", "📈 Progresión"),
+                  span(cls := "text-muted small", s"$totalPartidos partidos registrados")
+                ),
 
-            if (totalPartidos == 0)
-              div(cls := "card-am p-4 text-center",
-                div(style := "font-size:48px; opacity:0.4", "📊"),
-                h5(cls := "text-muted mt-3", "Sin datos aún"),
-                p(cls := "text-secondary small", "Registra partidos para ver tu evolución."),
-                a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
-              )
-            else frag(
+                if (totalPartidos == 0)
+                  div(cls := "card-am p-4 text-center",
+                    div(style := "font-size:48px; opacity:0.4", "📊"),
+                    h5(cls := "text-muted mt-3", "Sin datos aún"),
+                    p(cls := "text-secondary small", "Registra partidos para ver tu evolución."),
+                    a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
+                  )
+                else frag(
 
-              // Tendencia principal
-              div(cls := "card-am p-3 mb-3",
-                div(cls := "d-flex align-items-center gap-3",
-                  div(style := s"font-size:2.8rem; color:$tendenciaColor; font-weight:900; line-height:1;",
-                    tendenciaIcon),
-                  div(
-                    div(cls := "fw-black text-white", style := "font-size:1.2rem;", tendenciaLabel),
-                    div(cls := "xx-small text-muted",
-                      if (tendencia != "POCOS_DATOS")
-                        s"${if (tendenciaDelta >= 0) "+" else ""}${f"$tendenciaDelta%.2f"} puntos vs. 5 partidos anteriores"
-                      else "Necesitas al menos 6 partidos para calcular tendencia"
+                  // Tendencia principal
+                  div(cls := "card-am p-3 mb-3",
+                    div(cls := "d-flex align-items-center gap-3",
+                      div(style := s"font-size:2.8rem; color:$tendenciaColor; font-weight:900; line-height:1;",
+                        tendenciaIcon),
+                      div(
+                        div(cls := "fw-black text-white", style := "font-size:1.2rem;", tendenciaLabel),
+                        div(cls := "xx-small text-muted",
+                          if (tendencia != "POCOS_DATOS")
+                            s"${if (tendenciaDelta >= 0) "+" else ""}${f"$tendenciaDelta%.2f"} puntos vs. 5 partidos anteriores"
+                          else "Necesitas al menos 6 partidos para calcular tendencia"
+                        )
+                      )
                     )
-                  )
-                )
-              ),
-
-              // Racha actual (últimos 10)
-              if (racha.nonEmpty)
-                div(cls := "card-am p-3 mb-3",
-                  div(cls := "fw-bold small text-muted mb-2", "FORMA RECIENTE"),
-                  div(cls := "d-flex gap-1 flex-wrap",
-                    frag(racha.reverse.map { r =>
-                      val (bg, txt) = r match {
-                        case "W" => ("#20c997", "G")
-                        case "D" => ("#ffc107", "E")
-                        case _   => ("#dc3545", "P")
-                      }
-                      span(style := s"background:$bg; color:#000; font-weight:900; font-size:11px; width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;",
-                        txt)
-                    }: _*)
-                  )
-                )
-              else span(),
-
-              // Gráfico evolución nota
-              if (notas.size >= 2)
-                div(cls := "card-am p-3 mb-3",
-                  div(cls := "fw-bold small text-muted mb-2", "EVOLUCIÓN DE NOTA"),
-                  div(style := "height:160px;",
-                    canvas(id := "chartNota")
                   ),
-                  script(raw(s"""
+
+                  // Racha actual (últimos 10)
+                  if (racha.nonEmpty)
+                    div(cls := "card-am p-3 mb-3",
+                      div(cls := "fw-bold small text-muted mb-2", "FORMA RECIENTE"),
+                      div(cls := "d-flex gap-1 flex-wrap",
+                        frag(racha.reverse.map { r =>
+                          val (bg, txt) = r match {
+                            case "W" => ("#20c997", "G")
+                            case "D" => ("#ffc107", "E")
+                            case _   => ("#dc3545", "P")
+                          }
+                          span(style := s"background:$bg; color:#000; font-weight:900; font-size:11px; width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;",
+                            txt)
+                        }: _*)
+                      )
+                    )
+                  else span(),
+
+                  // Gráfico evolución nota
+                  if (notas.size >= 2)
+                    div(cls := "card-am p-3 mb-3",
+                      div(cls := "fw-bold small text-muted mb-2", "EVOLUCIÓN DE NOTA"),
+                      div(style := "height:160px;",
+                        canvas(id := "chartNota")
+                      ),
+                      script(raw(s"""
                 new Chart(document.getElementById('chartNota'), {
                   type: 'line',
                   data: {
@@ -2870,17 +2871,17 @@ ${pageText.split(" ").sliding(20).map(_.mkString(" ")).filter(_.contains(teamNam
                   }
                 });
               """))
-                )
-              else span(),
+                    )
+                  else span(),
 
-              // Gráfico GC por partido
-              if (gcList.size >= 2)
-                div(cls := "card-am p-3 mb-3",
-                  div(cls := "fw-bold small text-muted mb-2", "GOLES ENCAJADOS POR PARTIDO"),
-                  div(style := "height:120px;",
-                    canvas(id := "chartGC")
-                  ),
-                  script(raw(s"""
+                  // Gráfico GC por partido
+                  if (gcList.size >= 2)
+                    div(cls := "card-am p-3 mb-3",
+                      div(cls := "fw-bold small text-muted mb-2", "GOLES ENCAJADOS POR PARTIDO"),
+                      div(style := "height:120px;",
+                        canvas(id := "chartGC")
+                      ),
+                      script(raw(s"""
                 new Chart(document.getElementById('chartGC'), {
                   type: 'bar',
                   data: {
@@ -2905,68 +2906,68 @@ ${pageText.split(" ").sliding(20).map(_.mkString(" ")).filter(_.contains(teamNam
                   }
                 });
               """))
-                )
-              else span(),
+                    )
+                  else span(),
 
-              // Stats por mes
-              if (mesList.nonEmpty)
-                div(cls := "card-am p-3 mb-3",
-                  div(cls := "fw-bold small text-muted mb-2", "POR MES"),
-                  frag(mesList.map { mes =>
-                    val nota = mes("notaMedia").asInstanceOf[Double]
-                    val pj   = mes("pj").asInstanceOf[Int]
-                    val lim  = mes("limpias").asInstanceOf[Int]
-                    val gan  = mes("ganados").asInstanceOf[Int]
-                    val nc   = if (nota >= 7.0) "#20c997" else if (nota >= 5.0) "#ffc107" else "#dc3545"
-                    div(cls := "d-flex align-items-center gap-2 py-2",
-                      style := "border-bottom:1px solid rgba(255,255,255,0.06);",
-                      div(style := s"min-width:52px; font-size:11px; font-weight:700; color:$nc;",
-                        mesLabel(mes("mes").asInstanceOf[String])),
-                      div(cls := "flex-fill",
-                        div(cls := "d-flex gap-2",
-                          span(cls := "xx-small text-muted", s"$pj PJ"),
-                          span(cls := "xx-small text-muted", s"$gan G"),
-                          span(cls := "xx-small text-muted", s"$lim LP")
+                  // Stats por mes
+                  if (mesList.nonEmpty)
+                    div(cls := "card-am p-3 mb-3",
+                      div(cls := "fw-bold small text-muted mb-2", "POR MES"),
+                      frag(mesList.map { mes =>
+                        val nota = mes("notaMedia").asInstanceOf[Double]
+                        val pj   = mes("pj").asInstanceOf[Int]
+                        val lim  = mes("limpias").asInstanceOf[Int]
+                        val gan  = mes("ganados").asInstanceOf[Int]
+                        val nc   = if (nota >= 7.0) "#20c997" else if (nota >= 5.0) "#ffc107" else "#dc3545"
+                        div(cls := "d-flex align-items-center gap-2 py-2",
+                          style := "border-bottom:1px solid rgba(255,255,255,0.06);",
+                          div(style := s"min-width:52px; font-size:11px; font-weight:700; color:$nc;",
+                            mesLabel(mes("mes").asInstanceOf[String])),
+                          div(cls := "flex-fill",
+                            div(cls := "d-flex gap-2",
+                              span(cls := "xx-small text-muted", s"$pj PJ"),
+                              span(cls := "xx-small text-muted", s"$gan G"),
+                              span(cls := "xx-small text-muted", s"$lim LP")
+                            )
+                          ),
+                          div(style := s"font-size:1.3rem; font-weight:900; color:$nc;",
+                            f"$nota%.1f")
                         )
-                      ),
-                      div(style := s"font-size:1.3rem; font-weight:900; color:$nc;",
-                        f"$nota%.1f")
+                      }: _*)
                     )
-                  }: _*)
-                )
-              else span(),
+                  else span(),
 
-              // Mejor / peor partido
-              div(cls := "row g-2 mb-3",
-                mejorPartido.map { m =>
-                  div(cls := "col-6",
-                    div(cls := "card-am p-2 text-center",
-                      style := "border-top: 3px solid #20c997;",
-                      div(cls := "xx-small text-muted mb-1", "MEJOR"),
-                      div(cls := "fw-black text-success", style := "font-size:1.5rem;", m("nota")),
-                      div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
-                      div(cls := "xx-small text-muted", m("res"))
-                    )
+                  // Mejor / peor partido
+                  div(cls := "row g-2 mb-3",
+                    mejorPartido.map { m =>
+                      div(cls := "col-6",
+                        div(cls := "card-am p-2 text-center",
+                          style := "border-top: 3px solid #20c997;",
+                          div(cls := "xx-small text-muted mb-1", "MEJOR"),
+                          div(cls := "fw-black text-success", style := "font-size:1.5rem;", m("nota")),
+                          div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
+                          div(cls := "xx-small text-muted", m("res"))
+                        )
+                      )
+                    }.getOrElse(span()),
+                    peorPartido.map { m =>
+                      div(cls := "col-6",
+                        div(cls := "card-am p-2 text-center",
+                          style := "border-top: 3px solid #dc3545;",
+                          div(cls := "xx-small text-muted mb-1", "PEOR"),
+                          div(cls := "fw-black text-danger", style := "font-size:1.5rem;", m("nota")),
+                          div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
+                          div(cls := "xx-small text-muted", m("res"))
+                        )
+                      )
+                    }.getOrElse(span())
                   )
-                }.getOrElse(span()),
-                peorPartido.map { m =>
-                  div(cls := "col-6",
-                    div(cls := "card-am p-2 text-center",
-                      style := "border-top: 3px solid #dc3545;",
-                      div(cls := "xx-small text-muted mb-1", "PEOR"),
-                      div(cls := "fw-black text-danger", style := "font-size:1.5rem;", m("nota")),
-                      div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
-                      div(cls := "xx-small text-muted", m("res"))
-                    )
-                  )
-                }.getOrElse(span())
+                ),
+
+                script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js")
               )
-            ),
+            )
+          }
 
-            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js")
-          )
-        )
-      }
-
-        initialize()
-        }
+            initialize()
+            }
