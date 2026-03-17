@@ -198,7 +198,10 @@ object AmateurController extends cask.Routes {
             span(cls := "nav-icon", "🥅"), span("Mapa")),
           a(href := "/am/rivals",
             cls := s"nav-item ${if (activeLink == "rivals") "active" else ""}",
-            span(cls := "nav-icon", "⚔️"), span("Rivales"))
+            span(cls := "nav-icon", "⚔️"), span("Rivales")),
+          a(href := "/am/wellness",
+            cls := s"nav-item ${if (activeLink == "wellness") "active" else ""}",
+            span(cls := "nav-icon", "🧠"), span("Wellness"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -2118,6 +2121,246 @@ $penSection
       )
     )
   }
+
+  // ── WELLNESS PRE-PARTIDO ──────────────────────────────────────────────────
+  @cask.get("/am/wellness")
+  def wellnessPage(request: cask.Request) = withAmAuth(request) { user =>
+    val corr        = AmateurDatabaseManager.getWellnessCorrelation(user.id)
+    val rows        = corr("rows").asInstanceOf[List[Map[String, Any]]]
+    val lastW       = corr("lastWellness").asInstanceOf[Option[Map[String, Any]]]
+    val avgHigh     = corr("avgNotaHigh").asInstanceOf[Double]
+    val avgLow      = corr("avgNotaLow").asInstanceOf[Double]
+    val nHigh       = corr("nHighSleep").asInstanceOf[Int]
+    val nLow        = corr("nLowSleep").asInstanceOf[Int]
+    val today       = java.time.LocalDate.now().toString
+    val checkedToday = lastW.exists(_("fecha").asInstanceOf[String] == today)
+
+    // Gemini insights (solo si hay datos suficientes)
+    val insights: List[String] = if (rows.size >= 3) {
+      val raw = AmateurDatabaseManager.callGeminiWellness(rows)
+      if (raw.nonEmpty) raw.split("
+      ").map(_.trim).filter(_.nonEmpty).toList else List.empty
+    } else List.empty
+
+    renderAm("wellness", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "🧠 Wellness"),
+          span(cls := "text-muted small", "Bienestar pre-partido y correlación con rendimiento")
+        ),
+
+        // Check-in card
+        div(cls := "card-am p-3 mb-3",
+          style := s"border-top: 3px solid ${if (checkedToday) "#20c997" else "#ffc107"};",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(cls := "fw-bold text-white", "📋 Check-in de hoy"),
+            if (checkedToday)
+              span(cls := "badge", style := "background:#20c99733; color:#20c997; font-size:10px;", "✓ Registrado")
+            else
+              span(cls := "badge", style := "background:#ffc10733; color:#ffc107; font-size:10px;", "Pendiente")
+          ),
+          div(id := "wellness-form",
+            // Sueño
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "🌙 HORAS DE SUEÑO"),
+              div(cls := "d-flex gap-2 flex-wrap",
+                Seq(4,5,6,7,8,9,10).map { h =>
+                  div(cls := "text-center",
+                    input(tpe := "radio", name := "sueno", id := s"s$h", value := h.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"s$h",
+                      cls := "btn btn-sm fw-bold",
+                      id := s"lbl_s$h",
+                      style := "min-width:36px; font-size:12px;",
+                      s"${h}h")
+                  )
+                }
+              )
+            ),
+            // Energía
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "⚡ NIVEL DE ENERGÍA"),
+              div(cls := "d-flex gap-2",
+                Seq((1,"😴"),(2,"😪"),(3,"😐"),(4,"😊"),(5,"🔥")).map { case (v, emoji) =>
+                  div(cls := "text-center flex-fill",
+                    input(tpe := "radio", name := "energia", id := s"e$v", value := v.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"e$v",
+                      cls := "btn w-100 fw-bold",
+                      id := s"lbl_e$v",
+                      style := "font-size:16px; padding:8px 4px;",
+                      emoji)
+                  )
+                }
+              )
+            ),
+            // Ánimo
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "💭 ESTADO ANÍMICO"),
+              div(cls := "d-flex gap-2",
+                Seq((1,"😤"),(2,"😕"),(3,"😐"),(4,"🙂"),(5,"🤩")).map { case (v, emoji) =>
+                  div(cls := "text-center flex-fill",
+                    input(tpe := "radio", name := "animo", id := s"a$v", value := v.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"a$v",
+                      cls := "btn w-100 fw-bold",
+                      id := s"lbl_a$v",
+                      style := "font-size:16px; padding:8px 4px;",
+                      emoji)
+                  )
+                }
+              )
+            ),
+            // Nota rápida
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-1", "📝 NOTA RÁPIDA (opcional)"),
+              input(tpe := "text", id := "w-notas", cls := "form-control bg-dark text-white border-secondary",
+                style := "font-size:13px;",
+                placeholder := "ej. cansado del entreno, resfrío leve...")
+            ),
+            button(tpe := "button", id := "btn-wellness",
+              cls := "btn btn-warning w-100 fw-bold",
+              attr("onclick") := "guardarWellness()",
+              "💾 Guardar check-in")
+          )
+        ),
+
+        // Correlación sueño-nota (si hay datos)
+        if (nHigh + nLow >= 3)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "📊 CORRELACIÓN SUEÑO → RENDIMIENTO"),
+            div(cls := "row g-2 mb-2",
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top:2px solid #20c997;",
+                  div(cls := "fw-black text-success", style := "font-size:1.5rem;",
+                    f"$avgHigh%.1f"),
+                  div(cls := "xx-small text-muted", s"Nota · ≥7h sueño"),
+                  div(cls := "xx-small text-muted", s"($nHigh partidos)")
+                )
+              ),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top:2px solid #dc3545;",
+                  div(cls := "fw-black text-danger", style := "font-size:1.5rem;",
+                    f"$avgLow%.1f"),
+                  div(cls := "xx-small text-muted", s"Nota · <7h sueño"),
+                  div(cls := "xx-small text-muted", s"($nLow partidos)")
+                )
+              )
+            ),
+
+            // Insights Gemini
+            if (insights.nonEmpty)
+              div(cls := "mt-2",
+                div(cls := "xx-small fw-bold text-muted mb-2", "✨ PATRONES DETECTADOS POR IA"),
+                frag(insights.map { insight =>
+                  div(cls := "d-flex gap-2 py-2",
+                    style := "border-bottom:1px solid #1e1e1e;",
+                    div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0;"),
+                    div(cls := "small text-white", style := "font-size:11px; line-height:1.5;", insight)
+                  )
+                }: _*)
+              )
+            else span()
+          )
+        else
+          div(cls := "card-am p-3 mb-3 text-center",
+            style := "border-style:dashed; opacity:.6;",
+            div(cls := "xx-small text-muted", "Registra wellness en al menos 3 días de partido"),
+            div(cls := "xx-small text-muted", "para ver la correlación con tu rendimiento")
+          ),
+
+        // Historial reciente
+        if (rows.nonEmpty)
+          div(cls := "card-am p-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "HISTORIAL (días con partido)"),
+            frag(rows.take(8).map { r =>
+              val nota  = r("nota").asInstanceOf[Double]
+              val nc    = if (nota >= 7) "#20c997" else if (nota >= 5) "#ffc107" else "#dc3545"
+              val sueno = r("sueno").asInstanceOf[Int]
+              val en    = r("energia").asInstanceOf[Int]
+              val an    = r("animo").asInstanceOf[Int]
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid #1e1e1e;",
+                div(cls := "xx-small text-muted", style := "min-width:55px;",
+                  r("fecha").asInstanceOf[String].take(10)),
+                div(cls := "flex-fill d-flex gap-2",
+                  span(cls := "xx-small text-info", s"🌙${sueno}h"),
+                  span(cls := "xx-small text-warning", s"⚡$en"),
+                  span(cls := "xx-small text-info", s"💭$an")
+                ),
+                div(cls := "fw-bold xx-small", style := s"color:$nc;", f"★$nota%.1f")
+              )
+            }: _*)
+          )
+        else span(),
+
+        // JS
+        script(raw("""
+          function updateWellness() {
+            ['s4','s5','s6','s7','s8','s9','s10'].forEach(function(id) {
+              var el = document.getElementById('lbl_' + id);
+              var inp = document.getElementById(id);
+              if (el && inp) el.className = inp.checked
+                ? 'btn btn-sm fw-bold btn-warning'
+                : 'btn btn-sm fw-bold btn-outline-secondary';
+            });
+            [1,2,3,4,5].forEach(function(v) {
+              ['e','a'].forEach(function(prefix) {
+                var el  = document.getElementById('lbl_' + prefix + v);
+                var inp = document.getElementById(prefix + v);
+                if (el && inp) el.className = inp.checked
+                  ? 'btn w-100 fw-bold btn-warning'
+                  : 'btn w-100 fw-bold btn-outline-secondary';
+              });
+            });
+          }
+          function guardarWellness() {
+            var sueno   = document.querySelector('input[name="sueno"]:checked');
+            var energia = document.querySelector('input[name="energia"]:checked');
+            var animo   = document.querySelector('input[name="animo"]:checked');
+            if (!sueno || !energia || !animo) {
+              alert('Completa los tres campos antes de guardar.');
+              return;
+            }
+            var params = new URLSearchParams();
+            params.append('sueno',   sueno.value);
+            params.append('energia', energia.value);
+            params.append('animo',   animo.value);
+            params.append('notas',   document.getElementById('w-notas').value);
+            document.getElementById('btn-wellness').disabled = true;
+            document.getElementById('btn-wellness').textContent = 'Guardando...';
+            fetch('/am/wellness/save', { method:'POST', body: params,
+              headers: {'Content-Type':'application/x-www-form-urlencoded'} })
+              .then(function(r) { if (r.ok) window.location.reload(); })
+              .catch(function() {
+                document.getElementById('btn-wellness').disabled = false;
+                document.getElementById('btn-wellness').textContent = '💾 Guardar check-in';
+              });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/wellness/save")
+  def wellnessSave(request: cask.Request,
+                   sueno: String, energia: String, animo: String, notas: String = "") =
+    withAmAuth(request) { user =>
+      val today = java.time.LocalDate.now().toString
+      AmateurDatabaseManager.saveWellness(
+        user.id, today,
+        try sueno.toInt   catch { case _: Exception => 0 },
+        try energia.toInt catch { case _: Exception => 0 },
+        try animo.toInt   catch { case _: Exception => 0 },
+        notas
+      )
+      cask.Response(Array.emptyByteArray, 200)
+    }
 
   // Redirect /am → /am/dashboard
   @cask.get("/am")

@@ -151,6 +151,19 @@ object AmateurDatabaseManager {
         created_at  TIMESTAMP DEFAULT NOW()
       )""")
 
+      // Wellness — añadido en v7.4
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_wellness (
+        id        SERIAL PRIMARY KEY,
+        user_id   INT REFERENCES am_users(id) ON DELETE CASCADE,
+        fecha     DATE NOT NULL,
+        sueno     INT DEFAULT 0,
+        energia   INT DEFAULT 0,
+        animo     INT DEFAULT 0,
+        notas     TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, fecha)
+      )""")
+
       // Temporadas — añadidas en v7.3
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS current_season INT DEFAULT 1")
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_seasons (
@@ -957,6 +970,206 @@ object AmateurDatabaseManager {
       while (rs.next()) list = list :+ rs.getString("rival")
       list
     } finally { conn.close() }
+  }
+
+  // ── WELLNESS ───────────────────────────────────────────────────────────────
+  def saveWellness(userId: Int, fecha: String, sueno: Int, energia: Int, animo: Int, notas: String): Unit = {
+    val conn = getConn()
+    try {
+      conn.prepareStatement("""
+        INSERT INTO am_wellness (user_id, fecha, sueno, energia, animo, notas)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (user_id, fecha) DO UPDATE
+          SET sueno = EXCLUDED.sueno, energia = EXCLUDED.energia,
+              animo = EXCLUDED.animo, notas = EXCLUDED.notas
+      """).also { ps =>
+        ps.setInt(1, userId); ps.setString(2, fecha)
+        ps.setInt(3, sueno); ps.setInt(4, energia); ps.setInt(5, animo)
+        ps.setString(6, fix(notas))
+        ps.executeUpdate()
+      }
+    } finally { conn.close() }
+  }
+
+  def getWellnessCorrelation(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      // Join wellness with match of same date
+      val ps = conn.prepareStatement("""
+        SELECT w.fecha, w.sueno, w.energia, w.animo,
+               m.nota, m.goles_contra, m.goles_favor
+        FROM am_wellness w
+        JOIN am_matches m ON m.user_id = w.user_id AND m.fecha = w.fecha::date
+        WHERE w.user_id = ?
+        ORDER BY w.fecha DESC
+        LIMIT 20
+      """)
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var rows = List[Map[String, Any]]()
+      while (rs.next()) {
+        rows = rows :+ Map(
+          "fecha"   -> rs.getString("fecha").take(10),
+          "sueno"   -> rs.getInt("sueno"),
+          "energia" -> rs.getInt("energia"),
+          "animo"   -> rs.getInt("animo"),
+          "nota"    -> rs.getDouble("nota"),
+          "gc"      -> rs.getInt("goles_contra")
+        )
+      }
+
+      // Last wellness entry (for the check-in status indicator)
+      val ps2 = conn.prepareStatement(
+        "SELECT * FROM am_wellness WHERE user_id = ? ORDER BY fecha DESC LIMIT 1")
+      ps2.setInt(1, userId)
+      val rs2 = ps2.executeQuery()
+      val lastWellness: Option[Map[String, Any]] = if (rs2.next()) Some(Map(
+        "fecha"   -> rs2.getString("fecha").take(10),
+        "sueno"   -> rs2.getInt("sueno"),
+        "energia" -> rs2.getInt("energia"),
+        "animo"   -> rs2.getInt("animo"),
+        "notas"   -> Option(rs2.getString("notas")).getOrElse("")
+      )) else None
+
+      // Averages by sleep bucket
+      val highSleep = rows.filter(_("sueno").asInstanceOf[Int] >= 7)
+      val lowSleep  = rows.filter(_("sueno").asInstanceOf[Int] < 7)
+      val avgNotaHigh = if (highSleep.nonEmpty) highSleep.map(_("nota").asInstanceOf[Double]).sum / highSleep.size else 0.0
+      val avgNotaLow  = if (lowSleep.nonEmpty)  lowSleep.map(_("nota").asInstanceOf[Double]).sum  / lowSleep.size  else 0.0
+
+      Map(
+        "rows"         -> rows,
+        "lastWellness" -> lastWellness,
+        "avgNotaHigh"  -> avgNotaHigh,
+        "avgNotaLow"   -> avgNotaLow,
+        "nHighSleep"   -> highSleep.size,
+        "nLowSleep"    -> lowSleep.size
+      )
+    } finally { conn.close() }
+  }
+
+  def callGeminiWellness(data: List[Map[String, Any]]): String = {
+    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+    if (apiKey.isEmpty || data.isEmpty) return ""
+    try {
+      val rows = data.take(15).map { r =>
+        s"Fecha:${r("fecha")} Sueño:${r("sueno")}h Energía:${r("energia")}/5 Ánimo:${r("animo")}/5 Nota:${r("nota")} GC:${r("gc")}"
+      }.mkString("
+      ")
+      val prompt = s"""Eres un analista de rendimiento deportivo amateur. Analiza estos datos de bienestar y rendimiento de un portero:
+
+$rows
+
+Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada uno) sobre patrones detectados entre el bienestar (sueño, energía, ánimo) y el rendimiento (nota, goles encajados). Formato: una línea por insight, sin numeración, sin guiones."""
+
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
+        "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+      val r = requests.post(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        data = ujson.write(payload),
+        headers = Map("Content-Type" -> "application/json"),
+        readTimeout = 30000
+      )
+      if (r.statusCode == 200)
+        ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str.trim
+      else ""
+    } catch { case _: Exception => "" }
+  }
+
+  def processCalendarNLP(userId: Int, texto: String, teamName: String): Map[String, Any] = {
+    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+    if (apiKey.isEmpty) return Map("ok" -> false, "error" -> "GEMINI_API_KEY no configurada")
+
+    val prompt = s"""Actúa como un analista de datos deportivo para el equipo $teamName. Tu misión es procesar el siguiente texto pegado de una web de liga y extraer información exclusiva para el perfil de portero de $teamName.
+
+Tu equipo: $teamName.
+
+Tareas de extracción:
+1. Filtro de Partidos: Busca únicamente las líneas que mencionen a '$teamName'. Extrae el Rival, la Fecha, la Hora y el Marcador (si existe).
+2. Lógica Local/Visitante: Si $teamName aparece a la izquierda del marcador o primero en la línea, marca es_local: true. Si aparece a la derecha, marca es_local: false.
+3. Inteligencia de Rivales: Identifica el próximo rival de $teamName en el calendario. Si encuentras tabla de goleadores o estadísticas de jugadores en el texto, extrae los nombres de los delanteros más peligrosos de ese rival.
+
+Texto a procesar:
+$texto
+
+Salida obligatoria: Devuelve ÚNICAMENTE un JSON válido, sin texto adicional, sin bloques de código, sin explicaciones. El formato exacto debe ser:
+{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":["nombre1","nombre2"],"proximo_rival":"nombre"}
+
+Si no encuentras fecha en formato claro, usa null. Si no hay marcador, usa 0. Si no hay hora, usa "". Devuelve solo el JSON."""
+
+    try {
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
+        "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+      val r = requests.post(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        data = ujson.write(payload),
+        headers = Map("Content-Type" -> "application/json"),
+        readTimeout = 45000
+      )
+      if (r.statusCode != 200) return Map("ok" -> false, "error" -> s"Gemini error ${r.statusCode}")
+
+      val raw = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str.trim
+      // Strip possible markdown code blocks
+      val clean = raw
+        .replaceAll("(?s)```json\s*", "")
+        .replaceAll("(?s)```\s*", "")
+        .trim
+
+      val json     = ujson.read(clean)
+      val partidos = json("partidos").arr.toList
+      var inserted = 0
+      var skipped  = 0
+
+      partidos.foreach { p =>
+        try {
+          val rival    = p("rival").str
+          val fecha    = if (p("fecha").isNull) null else p("fecha").str
+          val hora     = try p("hora").str catch { case _: Exception => "" }
+          val esLocal  = try p("es_local").bool.toString catch { case _: Exception => "" }
+          val mf       = try p("marcador_favor").num.toInt catch { case _: Exception => 0 }
+          val mc       = try p("marcador_contra").num.toInt catch { case _: Exception => 0 }
+          val tipo     = try p("tipo").str catch { case _: Exception => "LIGA" }
+
+          if (rival.nonEmpty && fecha != null) {
+            val conn = getConn()
+            try {
+              // Check if already exists
+              val check = conn.prepareStatement(
+                "SELECT id FROM am_schedule WHERE user_id = ? AND rival = ? AND fecha = ?::date")
+              check.setInt(1, userId); check.setString(2, rival); check.setString(3, fecha)
+              val rs = check.executeQuery()
+              if (!rs.next()) {
+                val ps = conn.prepareStatement("""
+                  INSERT INTO am_schedule (user_id, rival, fecha, hora, tipo, notas)
+                  VALUES (?, ?, ?::date, ?, ?, ?)
+                """)
+                ps.setInt(1, userId); ps.setString(2, rival); ps.setString(3, fecha)
+                ps.setString(4, hora); ps.setString(5, tipo)
+                val nota = if (esLocal == "true") "Local" else if (esLocal == "false") "Visitante" else ""
+                ps.setString(6, nota)
+                ps.executeUpdate()
+                inserted += 1
+              } else skipped += 1
+            } finally { conn.close() }
+          }
+        } catch { case e: Exception => println(s"Skip partido: ${e.getMessage}") }
+      }
+
+      val amenazas = try json("amenazas_rival").arr.map(_.str).toList
+      catch { case _: Exception => List.empty[String] }
+      val proximo  = try json("proximo_rival").str catch { case _: Exception => "" }
+
+      Map(
+        "ok"        -> true,
+        "inserted"  -> inserted,
+        "skipped"   -> skipped,
+        "total"     -> partidos.size,
+        "amenazas"  -> amenazas,
+        "proximo"   -> proximo
+      )
+    } catch { case e: Exception =>
+      Map("ok" -> false, "error" -> e.getMessage)
+    }
   }
 
   def getRivalesList(userId: Int): List[Map[String, String]] = {
