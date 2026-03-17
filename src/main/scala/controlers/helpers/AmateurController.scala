@@ -1447,7 +1447,10 @@ object AmateurController extends cask.Routes {
       div(
         div(cls := "d-flex justify-content-between align-items-center mb-3",
           h5(cls := "fw-black mb-0", s"$monthName $year"),
-          a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
+          div(cls := "d-flex gap-2",
+            a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido"),
+            a(href := "/am/calendar/nlp", cls := "btn btn-outline-primary btn-sm fw-bold",
+              style := "font-size:10px;", "🤖 IA"))
         ),
         div(cls := "card-am p-2 mb-3",
           div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
@@ -2360,6 +2363,162 @@ $penSection
         notas
       )
       cask.Response(Array.emptyByteArray, 200)
+    }
+
+  // ── NLP CALENDARIO ────────────────────────────────────────────────────────
+  @cask.get("/am/calendar/nlp")
+  def calendarNlpPage(request: cask.Request) = withAmAuth(request) { user =>
+    renderAm("calendar", user.nombre,
+      div(
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(
+            h5(cls := "fw-black text-white mb-0", "🔍 Carga de Calendario IA"),
+            span(cls := "text-muted small", "Pega el texto de tu liga — Gemini extrae los partidos automáticamente")
+          ),
+          a(href := "/am/calendar", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Agenda")
+        ),
+
+        // Instrucciones
+        div(cls := "card-am p-3 mb-3",
+          style := "border-left: 3px solid #7c3aed;",
+          div(cls := "xx-small fw-bold text-muted mb-2", "📋 CÓMO USAR"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "1. Ve a la web de tu liga (ligaelitefutbol.com u otra)"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "2. Selecciona y copia toda la página de clasificación/resultados (Ctrl+A, Ctrl+C)"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "3. Pégalo en el campo de abajo"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "4. Escribe el nombre exacto de tu equipo"),
+          div(cls := "small text-warning mt-2", style := "font-size:11px;",
+            "⚠️ Los partidos duplicados se ignoran automáticamente")
+        ),
+
+        // Formulario
+        div(cls := "card-am p-3 mb-3",
+          // Nombre del equipo
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "NOMBRE DE TU EQUIPO *"),
+            input(tpe := "text", id := "team-name",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              placeholder := "ej. MiniFlow FC",
+              style := "font-size:13px;")
+          ),
+          // Texto de la web
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "TEXTO DE LA LIGA *"),
+            textarea(id := "league-text",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              rows := "10",
+              style := "font-size:12px; font-family:monospace;",
+              placeholder := "Pega aquí el texto completo copiado de la web de tu liga...")
+          ),
+          // Botón
+          div(cls := "d-flex gap-2",
+            button(tpe := "button", id := "btn-nlp",
+              cls := "btn btn-primary fw-bold flex-fill",
+              attr("onclick") := "procesarCalendario()",
+              "🤖 Procesar con IA"),
+            a(href := "/am/calendar",
+              cls := "btn btn-outline-secondary fw-bold",
+              "Cancelar")
+          )
+        ),
+
+        // Loading
+        div(id := "nlp-loading", cls := "card-am p-3 text-center d-none",
+          div(cls := "text-muted small", "⏳ Analizando con Gemini..."),
+          div(cls := "text-muted", style := "font-size:11px; margin-top:4px;",
+            "Esto puede tardar 5-10 segundos")
+        ),
+
+        // Resultado
+        div(id := "nlp-result", cls := "d-none"),
+
+        script(raw("""
+          function procesarCalendario() {
+            var team = document.getElementById('team-name').value.trim();
+            var text = document.getElementById('league-text').value.trim();
+            if (!team) { alert('Escribe el nombre de tu equipo.'); return; }
+            if (text.length < 50) { alert('El texto parece demasiado corto. Pega más contenido.'); return; }
+
+            document.getElementById('btn-nlp').disabled = true;
+            document.getElementById('nlp-loading').classList.remove('d-none');
+            document.getElementById('nlp-result').classList.add('d-none');
+
+            var params = new URLSearchParams();
+            params.append('teamName', team);
+            params.append('texto', text);
+
+            fetch('/am/calendar/nlp/process', {
+              method: 'POST',
+              body: params,
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            })
+            .then(r => r.json())
+            .then(function(json) {
+              document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('nlp-loading').classList.add('d-none');
+              var res = document.getElementById('nlp-result');
+              res.classList.remove('d-none');
+
+              if (json.ok) {
+                var amenazasHtml = '';
+                if (json.amenazas && json.amenazas.length > 0) {
+                  amenazasHtml = '<div class="xx-small fw-bold text-muted mt-3 mb-1">⚠️ AMENAZAS DEL PRÓXIMO RIVAL</div>' +
+                    json.amenazas.map(function(a) {
+                      return '<span class="badge me-1" style="background:#dc354533;color:#dc3545;border:1px solid #dc354555;font-size:10px;">' + a + '</span>';
+                    }).join('');
+                }
+                var proximoHtml = json.proximo ? '<div class="xx-small text-muted mt-1">Próximo rival detectado: <strong class="text-white">' + json.proximo + '</strong></div>' : '';
+                res.innerHTML =
+                  '<div class="card-am p-3" style="border-top:3px solid #20c997;">' +
+                  '<div class="fw-bold text-success mb-1">✅ ' + json.inserted + ' partidos añadidos a tu agenda</div>' +
+                  (json.skipped > 0 ? '<div class="xx-small text-muted">' + json.skipped + ' ya existían y se ignoraron</div>' : '') +
+                  proximoHtml + amenazasHtml +
+                  '<a href="/am/calendar" class="btn btn-success btn-sm fw-bold mt-3 w-100">Ver agenda actualizada →</a>' +
+                  '</div>';
+              } else {
+                res.innerHTML =
+                  '<div class="card-am p-3" style="border-top:3px solid #dc3545;">' +
+                  '<div class="text-danger fw-bold">❌ Error al procesar</div>' +
+                  '<div class="xx-small text-muted mt-1">' + (json.error || 'Error desconocido') + '</div>' +
+                  '</div>';
+              }
+            })
+            .catch(function(e) {
+              document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('nlp-loading').classList.add('d-none');
+              document.getElementById('nlp-result').classList.remove('d-none');
+              document.getElementById('nlp-result').innerHTML =
+                '<div class="card-am p-3" style="border-top:3px solid #dc3545;">' +
+                '<div class="text-danger">Error de red: ' + e.message + '</div></div>';
+            });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/calendar/nlp/process")
+  def calendarNlpProcess(request: cask.Request, teamName: String, texto: String) =
+    withAmAuth(request) { user =>
+      val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName)
+      val json = ujson.Obj(
+        "ok"       -> result.getOrElse("ok", false).asInstanceOf[Boolean],
+        "inserted" -> result.getOrElse("inserted", 0).asInstanceOf[Int],
+        "skipped"  -> result.getOrElse("skipped", 0).asInstanceOf[Int],
+        "total"    -> result.getOrElse("total", 0).asInstanceOf[Int],
+        "proximo"  -> result.getOrElse("proximo", "").asInstanceOf[String],
+        "amenazas" -> ujson.Arr.from(
+          result.getOrElse("amenazas", List.empty).asInstanceOf[List[String]].map(ujson.Str(_))
+        ),
+        "error"    -> result.getOrElse("error", "").asInstanceOf[String]
+      )
+      cask.Response(
+        ujson.write(json).getBytes("UTF-8"),
+        headers = Seq("Content-Type" -> "application/json")
+      )
     }
 
   // Redirect /am → /am/dashboard

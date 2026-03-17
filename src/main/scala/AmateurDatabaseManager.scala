@@ -61,6 +61,83 @@ object AmateurDatabaseManager {
       .replace("\u00c1","Á").replace("\u00c9","É").replace("\u00cd","Í")
       .replace("\u00d3","Ó").replace("\u00da","Ú").replace("\u00d1","Ñ")
 
+  private def md5am(s: String): String =
+    java.security.MessageDigest.getInstance("MD5")
+      .digest(s.getBytes("UTF-8"))
+      .map("%02x".format(_)).mkString
+
+  // Cache-aware Gemini call — solo llama a la API si el hash no existe
+  def askCached(prompt: String, invalidateCache: Boolean = false): String = {
+    val hash = md5am(prompt)
+    val conn = getConn()
+    try {
+      if (!invalidateCache) {
+        val ps = conn.prepareStatement("SELECT respuesta FROM am_ai_cache WHERE prompt_hash = ?")
+        ps.setString(1, hash)
+        val rs = ps.executeQuery()
+        if (rs.next()) return rs.getString("respuesta")
+      }
+
+      val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+      if (apiKey.isEmpty) return ""
+
+      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
+        "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
+      val r = requests.post(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        data = ujson.write(payload),
+        headers = Map("Content-Type" -> "application/json"),
+        readTimeout = 45000
+      )
+      val response = if (r.statusCode == 200)
+        ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str.trim
+      else ""
+
+      if (response.nonEmpty && !response.startsWith("Error")) {
+        val save = conn.prepareStatement(
+          "INSERT INTO am_ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta, creado_en = NOW()")
+        save.setString(1, hash); save.setString(2, response)
+        save.executeUpdate()
+      }
+      response
+    } catch { case _: Exception => "" }
+    finally { conn.close() }
+  }
+
+  // Invalida toda la cache IA de un usuario (llamar tras guardar partido)
+  def invalidateAiCache(userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      // Borramos entradas que contengan el userId en el hash source
+      // (borramos toda la cache del usuario — se recalcula con los nuevos datos)
+      conn.prepareStatement(s"DELETE FROM am_ai_cache WHERE prompt_hash IN (SELECT prompt_hash FROM am_ai_cache WHERE creado_en < NOW() - INTERVAL '5 minutes')").executeUpdate()
+      // Invalidación específica por usuario: guardamos un flag de "dirty"
+      val ps = conn.prepareStatement(
+        "INSERT INTO am_ai_cache (prompt_hash, respuesta) VALUES (?, 'INVALIDATED') ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = 'INVALIDATED', creado_en = NOW()")
+      ps.setString(1, s"dirty_user_$userId")
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  private def isUserCacheDirty(userId: Int): Boolean = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("SELECT respuesta FROM am_ai_cache WHERE prompt_hash = ?")
+      ps.setString(1, s"dirty_user_$userId")
+      val rs = ps.executeQuery()
+      rs.next() && rs.getString("respuesta") == "INVALIDATED"
+    } finally { conn.close() }
+  }
+
+  private def clearDirtyFlag(userId: Int): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("DELETE FROM am_ai_cache WHERE prompt_hash = ?")
+      ps.setString(1, s"dirty_user_$userId")
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
   // ── INIT TABLES ────────────────────────────────────────────────────────────
   def initTables(): Unit = {
     val conn = getConn()
@@ -150,6 +227,17 @@ object AmateurDatabaseManager {
         match_id    INT REFERENCES am_matches(id) ON DELETE SET NULL,
         created_at  TIMESTAMP DEFAULT NOW()
       )""")
+
+      // IA cache Amateur — añadido en v7.4
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_ai_cache (
+        prompt_hash TEXT PRIMARY KEY,
+        respuesta   TEXT,
+        creado_en   TIMESTAMP DEFAULT NOW()
+      )""")
+      // Limpiar errores cacheados al arrancar
+      s.executeUpdate("""DELETE FROM am_ai_cache WHERE
+        respuesta LIKE 'Error:%' OR respuesta LIKE '%status code%' OR respuesta = ''
+      """)
 
       // Wellness — añadido en v7.4
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_wellness (
@@ -297,7 +385,10 @@ object AmateurDatabaseManager {
       ps.setInt(15, asistencias)
       ps.setInt(16, userId)
       val rs = ps.executeQuery()
-      if (rs.next()) rs.getInt(1) else -1
+      val newId = if (rs.next()) rs.getInt(1) else -1
+      // Invalida la caché IA para que los insights se recalculen con el nuevo partido
+      if (newId > 0) invalidateAiCache(userId)
+      newId
     } finally { conn.close() }
   }
 
@@ -976,18 +1067,17 @@ object AmateurDatabaseManager {
   def saveWellness(userId: Int, fecha: String, sueno: Int, energia: Int, animo: Int, notas: String): Unit = {
     val conn = getConn()
     try {
-      conn.prepareStatement("""
+      val ps = conn.prepareStatement("""
         INSERT INTO am_wellness (user_id, fecha, sueno, energia, animo, notas)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT (user_id, fecha) DO UPDATE
           SET sueno = EXCLUDED.sueno, energia = EXCLUDED.energia,
               animo = EXCLUDED.animo, notas = EXCLUDED.notas
-      """).also { ps =>
-        ps.setInt(1, userId); ps.setString(2, fecha)
-        ps.setInt(3, sueno); ps.setInt(4, energia); ps.setInt(5, animo)
-        ps.setString(6, fix(notas))
-        ps.executeUpdate()
-      }
+      """)
+      ps.setInt(1, userId); ps.setString(2, fecha)
+      ps.setInt(3, sueno); ps.setInt(4, energia); ps.setInt(5, animo)
+      ps.setString(6, fix(notas))
+      ps.executeUpdate()
     } finally { conn.close() }
   }
 
@@ -1049,31 +1139,19 @@ object AmateurDatabaseManager {
   }
 
   def callGeminiWellness(data: List[Map[String, Any]]): String = {
-    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
-    if (apiKey.isEmpty || data.isEmpty) return ""
-    try {
-      val rows = data.take(15).map { r =>
-        s"Fecha:${r("fecha")} Sueño:${r("sueno")}h Energía:${r("energia")}/5 Ánimo:${r("animo")}/5 Nota:${r("nota")} GC:${r("gc")}"
-      }.mkString("
-      ")
-      val prompt = s"""Eres un analista de rendimiento deportivo amateur. Analiza estos datos de bienestar y rendimiento de un portero:
+    if (data.isEmpty) return ""
+    val rows = data.take(15).map { r =>
+      s"Fecha:${r("fecha")} Sueño:${r("sueno")}h Energía:${r("energia")}/5 Ánimo:${r("animo")}/5 Nota:${r("nota")} GC:${r("gc")}"
+    }.mkString("
+    ")
+    val prompt = s"""Eres un analista de rendimiento deportivo amateur. Analiza estos datos de bienestar y rendimiento de un portero:
 
 $rows
 
 Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada uno) sobre patrones detectados entre el bienestar (sueño, energía, ánimo) y el rendimiento (nota, goles encajados). Formato: una línea por insight, sin numeración, sin guiones."""
 
-      val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
-        "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
-      val r = requests.post(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
-        data = ujson.write(payload),
-        headers = Map("Content-Type" -> "application/json"),
-        readTimeout = 30000
-      )
-      if (r.statusCode == 200)
-        ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str.trim
-      else ""
-    } catch { case _: Exception => "" }
+    // Cache: el prompt incluye los datos reales → hash cambia automáticamente cuando hay nuevos partidos
+    askCached(prompt)
   }
 
   def processCalendarNLP(userId: Int, texto: String, teamName: String): Map[String, Any] = {
@@ -1098,6 +1176,7 @@ Salida obligatoria: Devuelve ÚNICAMENTE un JSON válido, sin texto adicional, s
 Si no encuentras fecha en formato claro, usa null. Si no hay marcador, usa 0. Si no hay hora, usa "". Devuelve solo el JSON."""
 
     try {
+      // NLP calendar — bypass cache (texto siempre distinto, no tiene sentido cachear)
       val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
         "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
       val r = requests.post(
