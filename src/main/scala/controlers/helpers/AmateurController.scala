@@ -1458,10 +1458,9 @@ object AmateurController extends cask.Routes {
             a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido"),
             if (leagueUrl.nonEmpty)
               a(href := "/am/calendar/sync", cls := "btn btn-success btn-sm fw-bold",
-                style := "font-size:11px;", "🔄 Sync liga")
-            else
-              a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
-                style := "font-size:11px;", "⚙️ Config liga"),
+                style := "font-size:11px;", "🔄 Sync"),
+            a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
+              style := "font-size:11px;", "⚙️ Liga"),
             a(href := "#", cls := "btn btn-outline-danger btn-sm fw-bold",
               style := "font-size:11px;",
               attr("onclick") := "if(confirm('¿Borrar todos los partidos pendientes de la agenda?')) window.location='/am/calendar/clear'",
