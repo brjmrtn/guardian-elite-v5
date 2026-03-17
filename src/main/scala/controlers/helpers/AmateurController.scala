@@ -2680,23 +2680,26 @@ $penSection
       val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
       val geminiRaw = if (apiKey.isEmpty) "NO API KEY" else {
         try {
-          val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga de fútbol sala/fútbol amateur y extrae los partidos de "$teamName".
+          val jsonTemplate = """{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
+          val formatJugado   = "EQUIPO_LOCAL EQUIPO_VISITANTE (marcador) DD.MM.YYYY - CAMPO"
+          val formatPendiente = "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
+          val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga y extrae los partidos de "$teamName".
 
 FORMATO DEL TEXTO:
-- Partidos jugados: "EQUIPO_LOCAL EQUIPO_VISITANTE ()X-Y() DD.MM.YYYY - CAMPO"
-- Partidos pendientes: "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
+- Partidos jugados: $formatJugado  (el marcador aparece entre parentesis)
+- Partidos pendientes: $formatPendiente
 
 INSTRUCCIONES:
-1. Busca TODAS las líneas que contengan "$teamName"
+1. Busca TODAS las lineas que contengan "$teamName"
 2. Para cada partido extrae: rival, fecha (YYYY-MM-DD), hora, es_local, marcador_favor, marcador_contra
 3. es_local: true si "$teamName" aparece PRIMERO, false si aparece SEGUNDO
-4. Devuelve máximo 5 partidos de ejemplo para verificar el formato
+4. Devuelve maximo 5 partidos de ejemplo para verificar el formato
 
 TEXTO (primeros 5000 chars):
 ${pageText.take(5000)}
 
-RESPONDE ÚNICAMENTE con JSON:
-{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
+RESPONDE UNICAMENTE con JSON (sin markdown):
+$jsonTemplate"""
 
           val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
             "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))

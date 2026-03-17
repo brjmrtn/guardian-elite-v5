@@ -1228,31 +1228,33 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
     if (apiKey.isEmpty) return Map("ok" -> false, "error" -> "GEMINI_API_KEY no configurada")
     if (textoFinal.trim.length < 50) return Map("ok" -> false, "error" -> "No hay suficiente texto para procesar")
 
-    val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga de fútbol sala/fútbol amateur y extrae los partidos de "$teamName".
+    val jsonTpl = """{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
+    val fmtJug  = "EQUIPO_LOCAL EQUIPO_VISITANTE (X-Y) DD.MM.YYYY - CAMPO (el marcador entre parentesis)"
+    val fmtPend = "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO (sin marcador, con hora)"
+    val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga y extrae los partidos de "$teamName".
 
 FORMATO DEL TEXTO:
-- Partidos jugados: "EQUIPO_LOCAL EQUIPO_VISITANTE ()X-Y() DD.MM.YYYY - CAMPO"
-- Partidos pendientes: "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
-- Los equipos se separan por espacio, el marcador aparece entre () o hay una hora antes de la fecha
+- Partidos jugados: $fmtJug
+- Partidos pendientes: $fmtPend
 
 INSTRUCCIONES:
-1. Busca TODAS las líneas que contengan "$teamName" (en mayúsculas exactamente)
+1. Busca TODAS las lineas que contengan "$teamName"
 2. Para cada partido de "$teamName":
-   - rival: el otro equipo (no "$teamName")
+   - rival: el otro equipo
    - fecha: convierte DD.MM.YYYY a YYYY-MM-DD
-   - hora: si aparece HH:MM antes de la fecha, úsala; si no, usa ""
-   - es_local: true si "$teamName" aparece PRIMERO en la línea, false si aparece SEGUNDO
-   - marcador_favor: goles de "$teamName" (del ()X-Y(), X si es local, Y si es visitante); 0 si no hay marcador
+   - hora: si aparece HH:MM antes de la fecha usala, si no usa ""
+   - es_local: true si "$teamName" aparece PRIMERO, false si aparece SEGUNDO
+   - marcador_favor: goles de "$teamName"; 0 si no hay marcador
    - marcador_contra: goles del rival; 0 si no hay marcador
    - tipo: "LIGA"
-3. Identifica el próximo partido pendiente de "$teamName" (sin marcador, con hora) y su rival
-4. Si hay sección de goleadores, extrae los nombres de los máximos goleadores del próximo rival
+3. Identifica el proximo partido pendiente de "$teamName" y su rival
+4. Si hay seccion de goleadores extrae los maximos goleadores del proximo rival
 
 TEXTO:
 $textoFinal
 
-RESPONDE ÚNICAMENTE con este JSON (sin markdown, sin explicaciones):
-{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
+RESPONDE UNICAMENTE con este JSON sin markdown ni explicaciones:
+$jsonTpl"""
 
     try {
       // NLP calendar — bypass cache (texto siempre distinto, no tiene sentido cachear)
