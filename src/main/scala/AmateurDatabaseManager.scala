@@ -1268,7 +1268,7 @@ Devuelve SOLO este JSON sin markdown:
     def parseJson(raw: String): Option[ujson.Value] =
       if (raw.isEmpty) None
       else try {
-        val clean = raw.replaceAll("(?s)```json\s*", "").replaceAll("(?s)```\s*", "").trim
+        val clean = raw.replaceAll("(?s)```json\\s*", "").replaceAll("(?s)```\\s*", "").trim
         Some(ujson.read(clean))
       } catch { case _: Exception => None }
 
@@ -1278,9 +1278,7 @@ Devuelve SOLO este JSON sin markdown:
         if (clasificacionRaw.nonEmpty) s"CLASIFICACION: $clasificacionRaw" else "",
         if (goleadoresRaw.nonEmpty)    s"GOLEADORES: $goleadoresRaw" else "",
         if (resumenRaw.nonEmpty)       s"ULTIMA JORNADA: $resumenRaw" else ""
-      ).filter(_.nonEmpty).mkString("
-
-      ")
+      ).filter(_.nonEmpty).mkString("\n\n")
 
       val promptAnalisis = s"""Eres el analista deportivo de "$teamName". Con los siguientes datos de la liga, genera un análisis breve y directo en español.
 

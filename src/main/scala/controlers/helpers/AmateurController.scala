@@ -2798,8 +2798,7 @@ $geminiRaw"""
     val analisis: List[String] =
       if (stats.getOrElse("ok", false).asInstanceOf[Boolean]) {
         val raw = stats.getOrElse("analisis", "").asInstanceOf[String]
-        if (raw.nonEmpty) raw.split("
-        ").map(_.trim).filter(_.nonEmpty).toList
+        if (raw.nonEmpty) raw.split("\n").map(_.trim).filter(_.nonEmpty).toList
         else List.empty
       } else List.empty
 
