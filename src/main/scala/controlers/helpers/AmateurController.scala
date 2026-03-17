@@ -1461,7 +1461,11 @@ object AmateurController extends cask.Routes {
                 style := "font-size:11px;", "🔄 Sync liga")
             else
               a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
-                style := "font-size:11px;", "⚙️ Config liga")
+                style := "font-size:11px;", "⚙️ Config liga"),
+            a(href := "#", cls := "btn btn-outline-danger btn-sm fw-bold",
+              style := "font-size:11px;",
+              attr("onclick") := "if(confirm('¿Borrar todos los partidos pendientes de la agenda?')) window.location='/am/calendar/clear'",
+              "🗑")
           )
         ),
         div(cls := "card-am p-2 mb-3",
@@ -2650,6 +2654,13 @@ $penSection
     }
     cask.Response(Array.emptyByteArray, 302,
       headers = Seq("Location" -> s"/am/calendar?synced=${java.net.URLEncoder.encode(msg, "UTF-8")}"))
+  }
+
+  @cask.get("/am/calendar/clear")
+  def calendarClear(request: cask.Request) = withAmAuth(request) { user =>
+    val n = AmateurDatabaseManager.clearSchedule(user.id)
+    cask.Response(Array.emptyByteArray, 302,
+      headers = Seq("Location" -> s"/am/calendar?synced=${java.net.URLEncoder.encode(s"🗑 Agenda vaciada ($n entradas borradas)", "UTF-8")}"))
   }
 
   // Redirect /am → /am/dashboard

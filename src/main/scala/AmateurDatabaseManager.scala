@@ -814,6 +814,16 @@ object AmateurDatabaseManager {
     } finally { conn.close() }
   }
 
+  def clearSchedule(userId: Int): Int = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "DELETE FROM am_schedule WHERE user_id = ? AND match_id IS NULL")
+      ps.setInt(1, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
   def deleteSchedule(scheduleId: Int, userId: Int): Unit = {
     val conn = getConn()
     try {
