@@ -1228,29 +1228,34 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
     if (apiKey.isEmpty) return Map("ok" -> false, "error" -> "GEMINI_API_KEY no configurada")
     if (textoFinal.trim.length < 50) return Map("ok" -> false, "error" -> "No hay suficiente texto para procesar")
 
+    val today = java.time.LocalDate.now().toString
     val jsonTpl = """{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
     val fmtJug  = "EQUIPO_LOCAL EQUIPO_VISITANTE (X-Y) DD.MM.YYYY - CAMPO (el marcador entre parentesis)"
     val fmtPend = "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO (sin marcador, con hora)"
-    val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga y extrae los partidos de "$teamName".
+    val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga y extrae los partidos FUTUROS de "$teamName".
+
+HOY ES: $today
+IMPORTANTE: Solo extrae partidos con fecha POSTERIOR a $today. Ignora los partidos ya jugados.
 
 FORMATO DEL TEXTO:
-- Partidos jugados: $fmtJug
-- Partidos pendientes: $fmtPend
+- Partidos jugados (IGNORAR): $fmtJug
+- Partidos pendientes (EXTRAER ESTOS): $fmtPend
 
 INSTRUCCIONES:
-1. Busca TODAS las lineas que contengan "$teamName"
-2. Para cada partido de "$teamName":
+1. Busca TODAS las lineas que contengan "$teamName" con fecha futura (posterior a $today)
+2. Los partidos pendientes NO tienen marcador entre parentesis, tienen hora HH:MM antes de la fecha
+3. Para cada partido futuro de "$teamName":
    - rival: el otro equipo
    - fecha: convierte DD.MM.YYYY a YYYY-MM-DD
-   - hora: si aparece HH:MM antes de la fecha usala, si no usa ""
+   - hora: el HH:MM que aparece antes de la fecha
    - es_local: true si "$teamName" aparece PRIMERO, false si aparece SEGUNDO
-   - marcador_favor: goles de "$teamName"; 0 si no hay marcador
-   - marcador_contra: goles del rival; 0 si no hay marcador
+   - marcador_favor: 0 (es futuro, no hay marcador)
+   - marcador_contra: 0
    - tipo: "LIGA"
-3. Identifica el proximo partido pendiente de "$teamName" y su rival
-4. Si hay seccion de goleadores extrae los maximos goleadores del proximo rival
+4. Identifica el proximo partido pendiente de "$teamName" y su rival
+5. Si hay seccion de goleadores extrae los maximos goleadores del proximo rival
 
-TEXTO:
+TEXTO COMPLETO:
 $textoFinal
 
 RESPONDE UNICAMENTE con este JSON sin markdown ni explicaciones:
