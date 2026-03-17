@@ -2680,26 +2680,15 @@ $penSection
           val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
           val geminiRaw = if (apiKey.isEmpty) "NO API KEY" else {
             try {
-              val jsonTemplate = """{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
-              val formatJugado   = "EQUIPO_LOCAL EQUIPO_VISITANTE (marcador) DD.MM.YYYY - CAMPO"
-              val formatPendiente = "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
-              val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga y extrae los partidos de "$teamName".
-
-FORMATO DEL TEXTO:
-- Partidos jugados: $formatJugado  (el marcador aparece entre parentesis)
-- Partidos pendientes: $formatPendiente
-
-INSTRUCCIONES:
-1. Busca TODAS las lineas que contengan "$teamName"
-2. Para cada partido extrae: rival, fecha (YYYY-MM-DD), hora, es_local, marcador_favor, marcador_contra
-3. es_local: true si "$teamName" aparece PRIMERO, false si aparece SEGUNDO
-4. Devuelve maximo 5 partidos de ejemplo para verificar el formato
-
-TEXTO (primeros 5000 chars):
-${pageText.take(5000)}
-
-RESPONDE UNICAMENTE con JSON (sin markdown):
-$jsonTemplate"""
+              val todayDbg = java.time.LocalDate.now().toString
+              val jsonTemplate = """{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
+              val fmtPend = "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
+              val prompt = s"""Extrae los partidos FUTUROS de "$teamName" del siguiente texto de liga.
+HOY ES: $todayDbg — solo partidos con fecha POSTERIOR a $todayDbg.
+Los partidos pendientes tienen formato: $fmtPend (HH:MM antes de la fecha, SIN marcador entre parentesis).
+Devuelve maximo 5 partidos futuros.
+TEXTO: ${pageText.takeRight(10000)}
+RESPONDE SOLO con JSON: $jsonTemplate"""
 
               val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
                 "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
@@ -2720,7 +2709,7 @@ EQUIPO: $teamName
 CHARS EXTRAÍDOS: ${pageText.length}
 
 === MUESTRA DEL TEXTO (líneas con $teamName) ===
-${pageText.split(" ").sliding(20).map(_.mkString(" ")).filter(_.contains(teamName)).take(10).mkString("\n")}
+${pageText.takeRight(3000)}
 
 === RESPUESTA RAW DE GEMINI ===
 $geminiRaw"""
