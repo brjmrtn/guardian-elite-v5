@@ -195,7 +195,10 @@ object AmateurController extends cask.Routes {
             span(cls := "nav-icon", "📈"), span("Progreso")),
           a(href := "/am/mapa-goles",
             cls := s"nav-item ${if (activeLink == "goals") "active" else ""}",
-            span(cls := "nav-icon", "🥅"), span("Mapa"))
+            span(cls := "nav-icon", "🥅"), span("Mapa")),
+          a(href := "/am/rivals",
+            cls := s"nav-item ${if (activeLink == "rivals") "active" else ""}",
+            span(cls := "nav-icon", "⚔️"), span("Rivales"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -1914,6 +1917,203 @@ $penSection
               div(cls := "xx-small text-muted mt-1", "Trabaja el posicionamiento en esta zona")
             )
           }.getOrElse(span())
+        )
+      )
+    )
+  }
+
+  // ── RIVALES H2H ────────────────────────────────────────────────────────────
+  @cask.get("/am/rivals")
+  def rivalsPage(request: cask.Request) = withAmAuth(request) { user =>
+    val rivales = AmateurDatabaseManager.getRivalesList(user.id)
+
+    renderAm("rivals", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "⚔️ Historial de Rivales"),
+          span(cls := "text-muted small", s"${rivales.size} equipos enfrentados")
+        ),
+
+        if (rivales.isEmpty)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:48px; opacity:.3;", "⚔️"),
+            h5(cls := "text-muted mt-3", "Sin rivales aún"),
+            p(cls := "text-secondary small", "Registra partidos para ver el historial por rival")
+          )
+        else frag(
+          rivales.map { r =>
+            val pj   = r("pj").toInt
+            val g    = r("g").toInt
+            val e    = r("e").toInt
+            val p    = r("p").toInt
+            val res  = r("resultado")
+            val (resColor, resBadge) = res match {
+              case "W" => ("#20c997", "DOMINAS")
+              case "L" => ("#dc3545", "PIERDES")
+              case _   => ("#ffc107", "IGUALADO")
+            }
+            a(href := s"/am/rivals/${java.net.URLEncoder.encode(r("rival"), "UTF-8")}",
+              style := "text-decoration:none;",
+              div(cls := "card-am p-3 mb-2",
+                style := s"border-left: 3px solid $resColor;",
+                div(cls := "d-flex justify-content-between align-items-start",
+                  div(
+                    div(cls := "fw-bold text-white", style := "font-size:.95rem;", r("rival")),
+                    div(cls := "xx-small text-muted mt-1",
+                      s"${pj} partidos · última vez ${r("ultimo").take(7)}")
+                  ),
+                  span(cls := "badge xx-small fw-bold",
+                    style := s"background:${resColor}22; color:$resColor; border:1px solid ${resColor}55;",
+                    resBadge)
+                ),
+                div(cls := "d-flex gap-3 mt-2",
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-success", style := "font-size:1.2rem;", g.toString),
+                    div(cls := "xx-small text-muted", "G")
+                  ),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-warning", style := "font-size:1.2rem;", e.toString),
+                    div(cls := "xx-small text-muted", "E")
+                  ),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-danger", style := "font-size:1.2rem;", p.toString),
+                    div(cls := "xx-small text-muted", "P")
+                  ),
+                  div(cls := "border-start border-secondary mx-1"),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-white", style := "font-size:1.2rem;", r("nota")),
+                    div(cls := "xx-small text-muted", "Nota")
+                  ),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-danger", style := "font-size:1.2rem;", r("gc")),
+                    div(cls := "xx-small text-muted", "GC")
+                  )
+                )
+              )
+            )
+          }: _*
+        )
+      )
+    )
+  }
+
+  @cask.get("/am/rivals/:rivalName")
+  def rivalDetailPage(request: cask.Request, rivalName: String) = withAmAuth(request) { user =>
+    val rival = java.net.URLDecoder.decode(rivalName, "UTF-8")
+    val d     = AmateurDatabaseManager.getRivalDetail(user.id, rival)
+
+    val pj      = d("pj").asInstanceOf[Int]
+    val g       = d("g").asInstanceOf[Int]
+    val e       = d("e").asInstanceOf[Int]
+    val p       = d("p").asInstanceOf[Int]
+    val nota    = d("notaMedia").asInstanceOf[Double]
+    val gcMedia = d("gcMedia").asInstanceOf[Double]
+    val gmTotal = d("gmTotal").asInstanceOf[Int]
+    val aTotal  = d("aTotal").asInstanceOf[Int]
+    val limpias = d("limpias").asInstanceOf[Int]
+    val partidos = d("partidos").asInstanceOf[List[Map[String, String]]]
+    val notasTac = d("notasTacticas").asInstanceOf[List[String]]
+
+    val resGeneral = if (g > p) ("DOMINAS", "#20c997") else if (g < p) ("PIERDES", "#dc3545") else ("IGUALADO", "#ffc107")
+    val notaColor  = if (nota >= 7) "#20c997" else if (nota >= 5) "#ffc107" else "#dc3545"
+
+    renderAm("rivals", user.nombre,
+      div(
+        // Header
+        div(cls := "d-flex justify-content-between align-items-center mb-3",
+          div(
+            div(cls := "xx-small text-muted fw-bold", "HISTORIAL VS"),
+            h5(cls := "fw-black text-white mb-0", rival.toUpperCase)
+          ),
+          a(href := "/am/rivals", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Rivales")
+        ),
+
+        // Banner resultado general
+        div(cls := "card-am p-3 mb-3 text-center",
+          style := s"border-top: 3px solid ${resGeneral._2};",
+          div(cls := "fw-black", style := s"font-size:1.1rem; color:${resGeneral._2};", resGeneral._1),
+          div(cls := "fw-bold text-white mt-1", s"$g G — $e E — $p P  ·  $pj partidos")
+        ),
+
+        // KPIs
+        div(cls := "row g-2 mb-3",
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black", style := s"font-size:1.6rem; color:$notaColor;", f"$nota%.1f"),
+              div(cls := "xx-small text-muted", "Nota media")
+            )
+          ),
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-danger", style := "font-size:1.6rem;", f"$gcMedia%.1f"),
+              div(cls := "xx-small text-muted", "GC/partido")
+            )
+          ),
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-success", style := "font-size:1.6rem;", limpias.toString),
+              div(cls := "xx-small text-muted", "Limpias")
+            )
+          ),
+          if (gmTotal > 0 || aTotal > 0)
+            frag(
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "fw-black text-info", style := "font-size:1.6rem;", gmTotal.toString),
+                  div(cls := "xx-small text-muted", "Goles marcados")
+                )
+              ),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "fw-black text-info", style := "font-size:1.6rem;", aTotal.toString),
+                  div(cls := "xx-small text-muted", "Asistencias")
+                )
+              )
+            )
+          else span()
+        ),
+
+        // Notas tácticas de partidos anteriores
+        if (notasTac.nonEmpty)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "📝 NOTAS DE PARTIDOS ANTERIORES"),
+            frag(notasTac.map { nota =>
+              div(cls := "d-flex gap-2 py-2",
+                style := "border-bottom:1px solid #1e1e1e;",
+                div(style := "width:4px; background:#ffc107; border-radius:2px; flex-shrink:0;"),
+                div(cls := "small text-white", style := "font-size:11px; line-height:1.4;", nota)
+              )
+            }: _*)
+          )
+        else span(),
+
+        // Historial de partidos
+        div(cls := "card-am p-3",
+          div(cls := "xx-small fw-bold text-muted mb-2", s"TODOS LOS PARTIDOS ($pj)"),
+          frag(partidos.map { m =>
+            val resColor = m("res") match {
+              case "G" => "#20c997"; case "P" => "#dc3545"; case _ => "#ffc107"
+            }
+            val esPortero = m("posicion") == "portero"
+            div(cls := "d-flex align-items-center gap-2 py-2",
+              style := "border-bottom:1px solid #1e1e1e;",
+              div(cls := "fw-bold text-white", style := s"font-size:.85rem; color:$resColor; min-width:18px;",
+                m("res")),
+              div(cls := "fw-bold text-white", style := "font-size:.85rem; min-width:32px;",
+                m("score")),
+              div(cls := "flex-fill",
+                div(cls := "xx-small text-muted", m("fecha")),
+                div(cls := "xx-small",
+                  style := "color:#888;",
+                  if (esPortero) "Portero" else s"${m("posicion").capitalize} · ${m("campo")}"
+                )
+              ),
+              div(cls := "text-center",
+                div(cls := "fw-bold text-white xx-small", s"★${m("nota")}"),
+                div(cls := "xx-small text-muted", m("local"))
+              )
+            )
+          }: _*)
         )
       )
     )
