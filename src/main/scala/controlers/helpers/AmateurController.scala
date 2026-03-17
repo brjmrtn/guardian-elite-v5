@@ -198,7 +198,10 @@ object AmateurController extends cask.Routes {
             span(cls := "nav-icon", "🥅"), span("Mapa")),
           a(href := "/am/rivals",
             cls := s"nav-item ${if (activeLink == "rivals") "active" else ""}",
-            span(cls := "nav-icon", "⚔️"), span("Rivales"))
+            span(cls := "nav-icon", "⚔️"), span("Rivales")),
+          a(href := "/am/wellness",
+            cls := s"nav-item ${if (activeLink == "wellness") "active" else ""}",
+            span(cls := "nav-icon", "🧠"), span("Wellness"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -1444,7 +1447,10 @@ object AmateurController extends cask.Routes {
       div(
         div(cls := "d-flex justify-content-between align-items-center mb-3",
           h5(cls := "fw-black mb-0", s"$monthName $year"),
-          a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
+          div(cls := "d-flex gap-2",
+            a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido"),
+            a(href := "/am/calendar/nlp", cls := "btn btn-outline-primary btn-sm fw-bold",
+              style := "font-size:10px;", "🤖 IA"))
         ),
         div(cls := "card-am p-2 mb-3",
           div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
@@ -2118,6 +2124,402 @@ $penSection
       )
     )
   }
+
+  // ── WELLNESS PRE-PARTIDO ──────────────────────────────────────────────────
+  @cask.get("/am/wellness")
+  def wellnessPage(request: cask.Request) = withAmAuth(request) { user =>
+    val corr        = AmateurDatabaseManager.getWellnessCorrelation(user.id)
+    val rows        = corr("rows").asInstanceOf[List[Map[String, Any]]]
+    val lastW       = corr("lastWellness").asInstanceOf[Option[Map[String, Any]]]
+    val avgHigh     = corr("avgNotaHigh").asInstanceOf[Double]
+    val avgLow      = corr("avgNotaLow").asInstanceOf[Double]
+    val nHigh       = corr("nHighSleep").asInstanceOf[Int]
+    val nLow        = corr("nLowSleep").asInstanceOf[Int]
+    val today       = java.time.LocalDate.now().toString
+    val checkedToday = lastW.exists(_("fecha").asInstanceOf[String] == today)
+
+    // Gemini insights (solo si hay datos suficientes)
+    val insights: List[String] = if (rows.size >= 3) {
+      val raw = AmateurDatabaseManager.callGeminiWellness(rows)
+      if (raw.nonEmpty) raw.split("
+      ").map(_.trim).filter(_.nonEmpty).toList else List.empty
+    } else List.empty
+
+    renderAm("wellness", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "🧠 Wellness"),
+          span(cls := "text-muted small", "Bienestar pre-partido y correlación con rendimiento")
+        ),
+
+        // Check-in card
+        div(cls := "card-am p-3 mb-3",
+          style := s"border-top: 3px solid ${if (checkedToday) "#20c997" else "#ffc107"};",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(cls := "fw-bold text-white", "📋 Check-in de hoy"),
+            if (checkedToday)
+              span(cls := "badge", style := "background:#20c99733; color:#20c997; font-size:10px;", "✓ Registrado")
+            else
+              span(cls := "badge", style := "background:#ffc10733; color:#ffc107; font-size:10px;", "Pendiente")
+          ),
+          div(id := "wellness-form",
+            // Sueño
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "🌙 HORAS DE SUEÑO"),
+              div(cls := "d-flex gap-2 flex-wrap",
+                Seq(4,5,6,7,8,9,10).map { h =>
+                  div(cls := "text-center",
+                    input(tpe := "radio", name := "sueno", id := s"s$h", value := h.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"s$h",
+                      cls := "btn btn-sm fw-bold",
+                      id := s"lbl_s$h",
+                      style := "min-width:36px; font-size:12px;",
+                      s"${h}h")
+                  )
+                }
+              )
+            ),
+            // Energía
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "⚡ NIVEL DE ENERGÍA"),
+              div(cls := "d-flex gap-2",
+                Seq((1,"😴"),(2,"😪"),(3,"😐"),(4,"😊"),(5,"🔥")).map { case (v, emoji) =>
+                  div(cls := "text-center flex-fill",
+                    input(tpe := "radio", name := "energia", id := s"e$v", value := v.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"e$v",
+                      cls := "btn w-100 fw-bold",
+                      id := s"lbl_e$v",
+                      style := "font-size:16px; padding:8px 4px;",
+                      emoji)
+                  )
+                }
+              )
+            ),
+            // Ánimo
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "💭 ESTADO ANÍMICO"),
+              div(cls := "d-flex gap-2",
+                Seq((1,"😤"),(2,"😕"),(3,"😐"),(4,"🙂"),(5,"🤩")).map { case (v, emoji) =>
+                  div(cls := "text-center flex-fill",
+                    input(tpe := "radio", name := "animo", id := s"a$v", value := v.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"a$v",
+                      cls := "btn w-100 fw-bold",
+                      id := s"lbl_a$v",
+                      style := "font-size:16px; padding:8px 4px;",
+                      emoji)
+                  )
+                }
+              )
+            ),
+            // Nota rápida
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-1", "📝 NOTA RÁPIDA (opcional)"),
+              input(tpe := "text", id := "w-notas", cls := "form-control bg-dark text-white border-secondary",
+                style := "font-size:13px;",
+                placeholder := "ej. cansado del entreno, resfrío leve...")
+            ),
+            button(tpe := "button", id := "btn-wellness",
+              cls := "btn btn-warning w-100 fw-bold",
+              attr("onclick") := "guardarWellness()",
+              "💾 Guardar check-in")
+          )
+        ),
+
+        // Correlación sueño-nota (si hay datos)
+        if (nHigh + nLow >= 3)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "📊 CORRELACIÓN SUEÑO → RENDIMIENTO"),
+            div(cls := "row g-2 mb-2",
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top:2px solid #20c997;",
+                  div(cls := "fw-black text-success", style := "font-size:1.5rem;",
+                    f"$avgHigh%.1f"),
+                  div(cls := "xx-small text-muted", s"Nota · ≥7h sueño"),
+                  div(cls := "xx-small text-muted", s"($nHigh partidos)")
+                )
+              ),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top:2px solid #dc3545;",
+                  div(cls := "fw-black text-danger", style := "font-size:1.5rem;",
+                    f"$avgLow%.1f"),
+                  div(cls := "xx-small text-muted", s"Nota · <7h sueño"),
+                  div(cls := "xx-small text-muted", s"($nLow partidos)")
+                )
+              )
+            ),
+
+            // Insights Gemini
+            if (insights.nonEmpty)
+              div(cls := "mt-2",
+                div(cls := "xx-small fw-bold text-muted mb-2", "✨ PATRONES DETECTADOS POR IA"),
+                frag(insights.map { insight =>
+                  div(cls := "d-flex gap-2 py-2",
+                    style := "border-bottom:1px solid #1e1e1e;",
+                    div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0;"),
+                    div(cls := "small text-white", style := "font-size:11px; line-height:1.5;", insight)
+                  )
+                }: _*)
+              )
+            else span()
+          )
+        else
+          div(cls := "card-am p-3 mb-3 text-center",
+            style := "border-style:dashed; opacity:.6;",
+            div(cls := "xx-small text-muted", "Registra wellness en al menos 3 días de partido"),
+            div(cls := "xx-small text-muted", "para ver la correlación con tu rendimiento")
+          ),
+
+        // Historial reciente
+        if (rows.nonEmpty)
+          div(cls := "card-am p-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "HISTORIAL (días con partido)"),
+            frag(rows.take(8).map { r =>
+              val nota  = r("nota").asInstanceOf[Double]
+              val nc    = if (nota >= 7) "#20c997" else if (nota >= 5) "#ffc107" else "#dc3545"
+              val sueno = r("sueno").asInstanceOf[Int]
+              val en    = r("energia").asInstanceOf[Int]
+              val an    = r("animo").asInstanceOf[Int]
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid #1e1e1e;",
+                div(cls := "xx-small text-muted", style := "min-width:55px;",
+                  r("fecha").asInstanceOf[String].take(10)),
+                div(cls := "flex-fill d-flex gap-2",
+                  span(cls := "xx-small text-info", s"🌙${sueno}h"),
+                  span(cls := "xx-small text-warning", s"⚡$en"),
+                  span(cls := "xx-small text-info", s"💭$an")
+                ),
+                div(cls := "fw-bold xx-small", style := s"color:$nc;", f"★$nota%.1f")
+              )
+            }: _*)
+          )
+        else span(),
+
+        // JS
+        script(raw("""
+          function updateWellness() {
+            ['s4','s5','s6','s7','s8','s9','s10'].forEach(function(id) {
+              var el = document.getElementById('lbl_' + id);
+              var inp = document.getElementById(id);
+              if (el && inp) el.className = inp.checked
+                ? 'btn btn-sm fw-bold btn-warning'
+                : 'btn btn-sm fw-bold btn-outline-secondary';
+            });
+            [1,2,3,4,5].forEach(function(v) {
+              ['e','a'].forEach(function(prefix) {
+                var el  = document.getElementById('lbl_' + prefix + v);
+                var inp = document.getElementById(prefix + v);
+                if (el && inp) el.className = inp.checked
+                  ? 'btn w-100 fw-bold btn-warning'
+                  : 'btn w-100 fw-bold btn-outline-secondary';
+              });
+            });
+          }
+          function guardarWellness() {
+            var sueno   = document.querySelector('input[name="sueno"]:checked');
+            var energia = document.querySelector('input[name="energia"]:checked');
+            var animo   = document.querySelector('input[name="animo"]:checked');
+            if (!sueno || !energia || !animo) {
+              alert('Completa los tres campos antes de guardar.');
+              return;
+            }
+            var params = new URLSearchParams();
+            params.append('sueno',   sueno.value);
+            params.append('energia', energia.value);
+            params.append('animo',   animo.value);
+            params.append('notas',   document.getElementById('w-notas').value);
+            document.getElementById('btn-wellness').disabled = true;
+            document.getElementById('btn-wellness').textContent = 'Guardando...';
+            fetch('/am/wellness/save', { method:'POST', body: params,
+              headers: {'Content-Type':'application/x-www-form-urlencoded'} })
+              .then(function(r) { if (r.ok) window.location.reload(); })
+              .catch(function() {
+                document.getElementById('btn-wellness').disabled = false;
+                document.getElementById('btn-wellness').textContent = '💾 Guardar check-in';
+              });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/wellness/save")
+  def wellnessSave(request: cask.Request,
+                   sueno: String, energia: String, animo: String, notas: String = "") =
+    withAmAuth(request) { user =>
+      val today = java.time.LocalDate.now().toString
+      AmateurDatabaseManager.saveWellness(
+        user.id, today,
+        try sueno.toInt   catch { case _: Exception => 0 },
+        try energia.toInt catch { case _: Exception => 0 },
+        try animo.toInt   catch { case _: Exception => 0 },
+        notas
+      )
+      cask.Response(Array.emptyByteArray, 200)
+    }
+
+  // ── NLP CALENDARIO ────────────────────────────────────────────────────────
+  @cask.get("/am/calendar/nlp")
+  def calendarNlpPage(request: cask.Request) = withAmAuth(request) { user =>
+    renderAm("calendar", user.nombre,
+      div(
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(
+            h5(cls := "fw-black text-white mb-0", "🔍 Carga de Calendario IA"),
+            span(cls := "text-muted small", "Pega el texto de tu liga — Gemini extrae los partidos automáticamente")
+          ),
+          a(href := "/am/calendar", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Agenda")
+        ),
+
+        // Instrucciones
+        div(cls := "card-am p-3 mb-3",
+          style := "border-left: 3px solid #7c3aed;",
+          div(cls := "xx-small fw-bold text-muted mb-2", "📋 CÓMO USAR"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "1. Ve a la web de tu liga (ligaelitefutbol.com u otra)"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "2. Selecciona y copia toda la página de clasificación/resultados (Ctrl+A, Ctrl+C)"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "3. Pégalo en el campo de abajo"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "4. Escribe el nombre exacto de tu equipo"),
+          div(cls := "small text-warning mt-2", style := "font-size:11px;",
+            "⚠️ Los partidos duplicados se ignoran automáticamente")
+        ),
+
+        // Formulario
+        div(cls := "card-am p-3 mb-3",
+          // Nombre del equipo
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "NOMBRE DE TU EQUIPO *"),
+            input(tpe := "text", id := "team-name",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              placeholder := "ej. MiniFlow FC",
+              style := "font-size:13px;")
+          ),
+          // Texto de la web
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "TEXTO DE LA LIGA *"),
+            textarea(id := "league-text",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              rows := "10",
+              style := "font-size:12px; font-family:monospace;",
+              placeholder := "Pega aquí el texto completo copiado de la web de tu liga...")
+          ),
+          // Botón
+          div(cls := "d-flex gap-2",
+            button(tpe := "button", id := "btn-nlp",
+              cls := "btn btn-primary fw-bold flex-fill",
+              attr("onclick") := "procesarCalendario()",
+              "🤖 Procesar con IA"),
+            a(href := "/am/calendar",
+              cls := "btn btn-outline-secondary fw-bold",
+              "Cancelar")
+          )
+        ),
+
+        // Loading
+        div(id := "nlp-loading", cls := "card-am p-3 text-center d-none",
+          div(cls := "text-muted small", "⏳ Analizando con Gemini..."),
+          div(cls := "text-muted", style := "font-size:11px; margin-top:4px;",
+            "Esto puede tardar 5-10 segundos")
+        ),
+
+        // Resultado
+        div(id := "nlp-result", cls := "d-none"),
+
+        script(raw("""
+          function procesarCalendario() {
+            var team = document.getElementById('team-name').value.trim();
+            var text = document.getElementById('league-text').value.trim();
+            if (!team) { alert('Escribe el nombre de tu equipo.'); return; }
+            if (text.length < 50) { alert('El texto parece demasiado corto. Pega más contenido.'); return; }
+
+            document.getElementById('btn-nlp').disabled = true;
+            document.getElementById('nlp-loading').classList.remove('d-none');
+            document.getElementById('nlp-result').classList.add('d-none');
+
+            var params = new URLSearchParams();
+            params.append('teamName', team);
+            params.append('texto', text);
+
+            fetch('/am/calendar/nlp/process', {
+              method: 'POST',
+              body: params,
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            })
+            .then(r => r.json())
+            .then(function(json) {
+              document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('nlp-loading').classList.add('d-none');
+              var res = document.getElementById('nlp-result');
+              res.classList.remove('d-none');
+
+              if (json.ok) {
+                var amenazasHtml = '';
+                if (json.amenazas && json.amenazas.length > 0) {
+                  amenazasHtml = '<div class="xx-small fw-bold text-muted mt-3 mb-1">⚠️ AMENAZAS DEL PRÓXIMO RIVAL</div>' +
+                    json.amenazas.map(function(a) {
+                      return '<span class="badge me-1" style="background:#dc354533;color:#dc3545;border:1px solid #dc354555;font-size:10px;">' + a + '</span>';
+                    }).join('');
+                }
+                var proximoHtml = json.proximo ? '<div class="xx-small text-muted mt-1">Próximo rival detectado: <strong class="text-white">' + json.proximo + '</strong></div>' : '';
+                res.innerHTML =
+                  '<div class="card-am p-3" style="border-top:3px solid #20c997;">' +
+                  '<div class="fw-bold text-success mb-1">✅ ' + json.inserted + ' partidos añadidos a tu agenda</div>' +
+                  (json.skipped > 0 ? '<div class="xx-small text-muted">' + json.skipped + ' ya existían y se ignoraron</div>' : '') +
+                  proximoHtml + amenazasHtml +
+                  '<a href="/am/calendar" class="btn btn-success btn-sm fw-bold mt-3 w-100">Ver agenda actualizada →</a>' +
+                  '</div>';
+              } else {
+                res.innerHTML =
+                  '<div class="card-am p-3" style="border-top:3px solid #dc3545;">' +
+                  '<div class="text-danger fw-bold">❌ Error al procesar</div>' +
+                  '<div class="xx-small text-muted mt-1">' + (json.error || 'Error desconocido') + '</div>' +
+                  '</div>';
+              }
+            })
+            .catch(function(e) {
+              document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('nlp-loading').classList.add('d-none');
+              document.getElementById('nlp-result').classList.remove('d-none');
+              document.getElementById('nlp-result').innerHTML =
+                '<div class="card-am p-3" style="border-top:3px solid #dc3545;">' +
+                '<div class="text-danger">Error de red: ' + e.message + '</div></div>';
+            });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/calendar/nlp/process")
+  def calendarNlpProcess(request: cask.Request, teamName: String, texto: String) =
+    withAmAuth(request) { user =>
+      val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName)
+      val json = ujson.Obj(
+        "ok"       -> result.getOrElse("ok", false).asInstanceOf[Boolean],
+        "inserted" -> result.getOrElse("inserted", 0).asInstanceOf[Int],
+        "skipped"  -> result.getOrElse("skipped", 0).asInstanceOf[Int],
+        "total"    -> result.getOrElse("total", 0).asInstanceOf[Int],
+        "proximo"  -> result.getOrElse("proximo", "").asInstanceOf[String],
+        "amenazas" -> ujson.Arr.from(
+          result.getOrElse("amenazas", List.empty).asInstanceOf[List[String]].map(ujson.Str(_))
+        ),
+        "error"    -> result.getOrElse("error", "").asInstanceOf[String]
+      )
+      cask.Response(
+        ujson.write(json).getBytes("UTF-8"),
+        headers = Seq("Content-Type" -> "application/json")
+      )
+    }
 
   // Redirect /am → /am/dashboard
   @cask.get("/am")
