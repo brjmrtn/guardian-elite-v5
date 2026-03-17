@@ -1203,10 +1203,10 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
         .timeout(15000)
         .get()
       // Extract meaningful text — tables + paragraphs, strip scripts/styles
-      doc.select("script, style, nav, footer, header").remove()
+      doc.select("script, style, nav, footer, header, meta, link").remove()
       val text = doc.body().text()
       if (text.length < 50) Left("La página no contiene texto suficiente")
-      else Right(text.take(12000)) // Limit to avoid huge Gemini prompts
+      else Right(text.take(20000)) // Increased limit to capture full season
     } catch {
       case e: org.jsoup.HttpStatusException =>
         Left(s"Error HTTP ${e.getStatusCode}: la web no permite acceso automático")
@@ -1228,22 +1228,31 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
     if (apiKey.isEmpty) return Map("ok" -> false, "error" -> "GEMINI_API_KEY no configurada")
     if (textoFinal.trim.length < 50) return Map("ok" -> false, "error" -> "No hay suficiente texto para procesar")
 
-    val prompt = s"""Actúa como un analista de datos deportivo para el equipo $teamName. Tu misión es procesar el siguiente texto pegado de una web de liga y extraer información exclusiva para el perfil de portero de $teamName.
+    val prompt = s"""Eres un extractor de datos deportivos experto. Procesa el siguiente texto de una web de liga de fútbol sala/fútbol amateur y extrae los partidos de "$teamName".
 
-Tu equipo: $teamName.
+FORMATO DEL TEXTO:
+- Partidos jugados: "EQUIPO_LOCAL EQUIPO_VISITANTE ()X-Y() DD.MM.YYYY - CAMPO"
+- Partidos pendientes: "EQUIPO_LOCAL EQUIPO_VISITANTE HH:MM DD.MM.YYYY - CAMPO"
+- Los equipos se separan por espacio, el marcador aparece entre () o hay una hora antes de la fecha
 
-Tareas de extracción:
-1. Filtro de Partidos: Busca únicamente las líneas que mencionen a '$teamName'. Extrae el Rival, la Fecha, la Hora y el Marcador (si existe). Incluye TODOS los partidos (pasados y futuros) para que el sistema pueda filtrar.
-2. Lógica Local/Visitante: Si $teamName aparece a la izquierda del marcador o primero en la línea, marca es_local: true. Si aparece a la derecha, marca es_local: false.
-3. Inteligencia de Rivales: Identifica el próximo rival de $teamName en el calendario. Si encuentras tabla de goleadores o estadísticas de jugadores en el texto, extrae los nombres de los delanteros más peligrosos de ese rival.
+INSTRUCCIONES:
+1. Busca TODAS las líneas que contengan "$teamName" (en mayúsculas exactamente)
+2. Para cada partido de "$teamName":
+   - rival: el otro equipo (no "$teamName")
+   - fecha: convierte DD.MM.YYYY a YYYY-MM-DD
+   - hora: si aparece HH:MM antes de la fecha, úsala; si no, usa ""
+   - es_local: true si "$teamName" aparece PRIMERO en la línea, false si aparece SEGUNDO
+   - marcador_favor: goles de "$teamName" (del ()X-Y(), X si es local, Y si es visitante); 0 si no hay marcador
+   - marcador_contra: goles del rival; 0 si no hay marcador
+   - tipo: "LIGA"
+3. Identifica el próximo partido pendiente de "$teamName" (sin marcador, con hora) y su rival
+4. Si hay sección de goleadores, extrae los nombres de los máximos goleadores del próximo rival
 
-Texto a procesar:
+TEXTO:
 $textoFinal
 
-Salida obligatoria: Devuelve ÚNICAMENTE un JSON válido, sin texto adicional, sin bloques de código, sin explicaciones. El formato exacto debe ser:
-{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":["nombre1","nombre2"],"proximo_rival":"nombre"}
-
-Si no encuentras fecha en formato claro, usa null. Si no hay marcador, usa 0. Si no hay hora, usa "". Devuelve solo el JSON."""
+RESPONDE ÚNICAMENTE con este JSON (sin markdown, sin explicaciones):
+{"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":[],"proximo_rival":""}"""
 
     try {
       // NLP calendar — bypass cache (texto siempre distinto, no tiene sentido cachear)
