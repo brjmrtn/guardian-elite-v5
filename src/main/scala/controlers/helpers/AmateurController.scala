@@ -2663,6 +2663,31 @@ $penSection
       headers = Seq("Location" -> s"/am/calendar?synced=${java.net.URLEncoder.encode(s"🗑 Agenda vaciada ($n entradas borradas)", "UTF-8")}"))
   }
 
+  // ── DEBUG CALENDAR (temporal) ────────────────────────────────────────────
+  @cask.get("/am/calendar/debug")
+  def calendarDebug(request: cask.Request) = withAmAuth(request) { user =>
+    val (leagueUrl, teamName) = AmateurDatabaseManager.getLeagueConfig(user.id)
+    if (leagueUrl.isEmpty) {
+      cask.Response("No hay URL configurada".getBytes("UTF-8"),
+        headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
+    } else {
+      val result = AmateurDatabaseManager.fetchLeagueUrl(leagueUrl) match {
+        case Right(text) =>
+          s"""URL: $leagueUrl
+EQUIPO: $teamName
+CHARS EXTRAÍDOS: ${text.length}
+PRIMEROS 3000 CHARS:
+${text.take(3000)}
+---
+ÚLTIMOS 500 CHARS:
+${text.takeRight(500)}"""
+        case Left(err) => s"ERROR JSOUP: $err"
+      }
+      cask.Response(result.getBytes("UTF-8"),
+        headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
+    }
+  }
+
   // Redirect /am → /am/dashboard
   @cask.get("/am")
   def amRoot(request: cask.Request) =
