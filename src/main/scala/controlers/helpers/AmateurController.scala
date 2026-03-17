@@ -1425,7 +1425,8 @@ object AmateurController extends cask.Routes {
 
   // ── AGENDA / CALENDARIO ─────────────────────────────────────────────────────
   @cask.get("/am/calendar")
-  def calendarPage(request: cask.Request) = withAmAuth(request) { user =>
+  def calendarPage(request: cask.Request, synced: String = "") = withAmAuth(request) { user =>
+    val (leagueUrl, teamName) = AmateurDatabaseManager.getLeagueConfig(user.id)
     val today    = java.time.LocalDate.now()
     val year     = today.getYear
     val month    = today.getMonthValue
@@ -1445,12 +1446,23 @@ object AmateurController extends cask.Routes {
 
     renderAm("calendar", user.nombre,
       div(
+        if (synced.nonEmpty)
+          div(cls := "alert alert-success alert-sm py-2 px-3 mb-2 small fw-bold",
+            style := "font-size:12px;",
+            synced)
+        else span(),
+
         div(cls := "d-flex justify-content-between align-items-center mb-3",
           h5(cls := "fw-black mb-0", s"$monthName $year"),
           div(cls := "d-flex gap-2",
             a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido"),
-            a(href := "/am/calendar/nlp", cls := "btn btn-outline-primary btn-sm fw-bold",
-              style := "font-size:10px;", "🤖 IA"))
+            if (leagueUrl.nonEmpty)
+              a(href := "/am/calendar/sync", cls := "btn btn-success btn-sm fw-bold",
+                style := "font-size:11px;", "🔄 Sync liga")
+            else
+              a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
+                style := "font-size:11px;", "⚙️ Config liga")
+          )
         ),
         div(cls := "card-am p-2 mb-3",
           div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
@@ -2382,15 +2394,13 @@ $penSection
           style := "border-left: 3px solid #7c3aed;",
           div(cls := "xx-small fw-bold text-muted mb-2", "📋 CÓMO USAR"),
           div(cls := "small text-white", style := "line-height:1.6;",
-            "1. Ve a la web de tu liga (ligaelitefutbol.com u otra)"),
+            "1. Opción rápida: copia la URL de la página de calendario de tu liga y pégala arriba"),
           div(cls := "small text-white", style := "line-height:1.6;",
-            "2. Selecciona y copia toda la página de clasificación/resultados (Ctrl+A, Ctrl+C)"),
+            "2. Si la web bloquea el acceso automático, copia el texto manualmente (Ctrl+A, Ctrl+C) y pégalo"),
           div(cls := "small text-white", style := "line-height:1.6;",
-            "3. Pégalo en el campo de abajo"),
-          div(cls := "small text-white", style := "line-height:1.6;",
-            "4. Escribe el nombre exacto de tu equipo"),
+            "3. Escribe el nombre exacto de tu equipo y pulsa Procesar"),
           div(cls := "small text-warning mt-2", style := "font-size:11px;",
-            "⚠️ Los partidos duplicados se ignoran automáticamente")
+            "⚠️ Solo se añaden partidos futuros — los ya jugados y los duplicados se ignoran")
         ),
 
         // Formulario
@@ -2403,17 +2413,32 @@ $penSection
               placeholder := "ej. MiniFlow FC",
               style := "font-size:13px;")
           ),
-          // Texto de la web
-          div(cls := "mb-3",
-            label(cls := "xx-small fw-bold text-muted", "TEXTO DE LA LIGA *"),
+          // URL — modo automático
+          div(cls := "mb-2",
+            label(cls := "xx-small fw-bold text-muted", "URL DE LA LIGA (recomendado)"),
+            input(tpe := "url", id := "league-url",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              placeholder := "https://ligaelitefutbol.com/calendario/...",
+              style := "font-size:13px;",
+              attr("oninput") := "toggleInputMode()")
+          ),
+          // Separador
+          div(cls := "d-flex align-items-center gap-2 my-2",
+            div(style := "flex:1; height:1px; background:rgba(255,255,255,.1);"),
+            span(cls := "xx-small text-muted", "o si la web bloquea el acceso"),
+            div(style := "flex:1; height:1px; background:rgba(255,255,255,.1);")
+          ),
+          // Texto manual — fallback
+          div(id := "manual-section",
+            label(cls := "xx-small fw-bold text-muted", "PEGA EL TEXTO MANUALMENTE"),
             textarea(id := "league-text",
               cls := "form-control bg-dark text-white border-secondary mt-1",
-              rows := "10",
+              rows := "6",
               style := "font-size:12px; font-family:monospace;",
-              placeholder := "Pega aquí el texto completo copiado de la web de tu liga...")
+              placeholder := "Ctrl+A en la web de la liga, Ctrl+C, y pega aquí...")
           ),
           // Botón
-          div(cls := "d-flex gap-2",
+          div(cls := "d-flex gap-2 mt-3",
             button(tpe := "button", id := "btn-nlp",
               cls := "btn btn-primary fw-bold flex-fill",
               attr("onclick") := "procesarCalendario()",
@@ -2435,18 +2460,28 @@ $penSection
         div(id := "nlp-result", cls := "d-none"),
 
         script(raw("""
+          function toggleInputMode() {
+            var url = document.getElementById('league-url').value.trim();
+            var manual = document.getElementById('manual-section');
+            manual.style.opacity = url ? '0.4' : '1';
+            manual.querySelector('textarea').required = !url;
+          }
+
           function procesarCalendario() {
             var team = document.getElementById('team-name').value.trim();
+            var url  = document.getElementById('league-url').value.trim();
             var text = document.getElementById('league-text').value.trim();
             if (!team) { alert('Escribe el nombre de tu equipo.'); return; }
-            if (text.length < 50) { alert('El texto parece demasiado corto. Pega más contenido.'); return; }
+            if (!url && text.length < 50) { alert('Introduce una URL o pega el texto de la liga.'); return; }
 
             document.getElementById('btn-nlp').disabled = true;
+            document.getElementById('btn-nlp').textContent = url ? '⏳ Descargando página...' : '⏳ Procesando...';
             document.getElementById('nlp-loading').classList.remove('d-none');
             document.getElementById('nlp-result').classList.add('d-none');
 
             var params = new URLSearchParams();
             params.append('teamName', team);
+            params.append('url', url);
             params.append('texto', text);
 
             fetch('/am/calendar/nlp/process', {
@@ -2457,6 +2492,7 @@ $penSection
             .then(r => r.json())
             .then(function(json) {
               document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('btn-nlp').textContent = '🤖 Procesar con IA';
               document.getElementById('nlp-loading').classList.add('d-none');
               var res = document.getElementById('nlp-result');
               res.classList.remove('d-none');
@@ -2487,6 +2523,7 @@ $penSection
             })
             .catch(function(e) {
               document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('btn-nlp').textContent = '🤖 Procesar con IA';
               document.getElementById('nlp-loading').classList.add('d-none');
               document.getElementById('nlp-result').classList.remove('d-none');
               document.getElementById('nlp-result').innerHTML =
@@ -2500,9 +2537,10 @@ $penSection
   }
 
   @cask.postForm("/am/calendar/nlp/process")
-  def calendarNlpProcess(request: cask.Request, teamName: String, texto: String) =
+  def calendarNlpProcess(request: cask.Request, teamName: String,
+                         texto: String = "", url: String = "") =
     withAmAuth(request) { user =>
-      val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName)
+      val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName, url)
       val json = ujson.Obj(
         "ok"       -> result.getOrElse("ok", false).asInstanceOf[Boolean],
         "inserted" -> result.getOrElse("inserted", 0).asInstanceOf[Int],
@@ -2519,6 +2557,100 @@ $penSection
         headers = Seq("Content-Type" -> "application/json")
       )
     }
+
+  // ── CONFIG LIGA + SYNC ────────────────────────────────────────────────────
+  @cask.get("/am/league-config")
+  def leagueConfigPage(request: cask.Request) = withAmAuth(request) { user =>
+    val (currentUrl, currentTeam) = AmateurDatabaseManager.getLeagueConfig(user.id)
+    renderAm("calendar", user.nombre,
+      div(
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(
+            h5(cls := "fw-black text-white mb-0", "⚙️ Configuración de Liga"),
+            span(cls := "text-muted small", "Sincronización automática del calendario")
+          ),
+          a(href := "/am/calendar", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Agenda")
+        ),
+
+        div(cls := "card-am p-3 mb-3",
+          style := "border-left: 3px solid #20c997;",
+          div(cls := "xx-small fw-bold text-muted mb-2", "💡 CÓMO FUNCIONA"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "Configura una vez la URL de tu liga y el nombre de tu equipo."),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "Después, con el botón 🔄 Sync en la agenda, el sistema descarga automáticamente los partidos pendientes."),
+          div(cls := "small text-warning mt-2", style := "font-size:11px;",
+            "⚠️ Solo añade partidos futuros — los ya jugados y duplicados se ignoran")
+        ),
+
+        div(cls := "card-am p-3",
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "URL DEL CALENDARIO DE TU LIGA *"),
+            input(tpe := "url", id := "cfg-url",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              value := currentUrl,
+              placeholder := "https://ligaelitefutbol.com/calendario/grupo-a",
+              style := "font-size:13px;")
+          ),
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "NOMBRE EXACTO DE TU EQUIPO *"),
+            input(tpe := "text", id := "cfg-team",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              value := currentTeam,
+              placeholder := "MiniFlow FC",
+              style := "font-size:13px;")
+          ),
+          div(id := "cfg-status"),
+          div(cls := "d-flex gap-2",
+            button(tpe := "button", cls := "btn btn-success fw-bold flex-fill",
+              attr("onclick") := "guardarConfig()",
+              "💾 Guardar configuración"),
+            a(href := "/am/calendar", cls := "btn btn-outline-secondary fw-bold",
+              "Cancelar")
+          )
+        ),
+
+        script(raw("""
+          function guardarConfig() {
+            var url  = document.getElementById('cfg-url').value.trim();
+            var team = document.getElementById('cfg-team').value.trim();
+            if (!url || !team) { alert('Completa los dos campos.'); return; }
+            var params = new URLSearchParams();
+            params.append('leagueUrl', url);
+            params.append('teamName', team);
+            fetch('/am/league-config/save', { method:'POST', body: params,
+              headers: {'Content-Type':'application/x-www-form-urlencoded'} })
+              .then(function(r) {
+                if (r.ok) window.location.href = '/am/calendar?synced=✅ Configuración guardada';
+              });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/league-config/save")
+  def leagueConfigSave(request: cask.Request, leagueUrl: String, teamName: String) =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.saveLeagueConfig(user.id, leagueUrl, teamName)
+      cask.Response(Array.emptyByteArray, 200)
+    }
+
+  @cask.get("/am/calendar/sync")
+  def calendarSync(request: cask.Request) = withAmAuth(request) { user =>
+    val result = AmateurDatabaseManager.syncCalendarFromConfig(user.id)
+    val msg = if (result.getOrElse("ok", false).asInstanceOf[Boolean]) {
+      val ins = result.getOrElse("inserted", 0).asInstanceOf[Int]
+      val ski = result.getOrElse("skipped", 0).asInstanceOf[Int]
+      val ame = result.getOrElse("amenazas", List.empty).asInstanceOf[List[String]]
+      val ameStr = if (ame.nonEmpty) s" · Amenazas: ${ame.mkString(", ")}" else ""
+      s"✅ $ins partidos añadidos, $ski ya existían$ameStr"
+    } else {
+      s"❌ ${result.getOrElse("error", "Error desconocido")}"
+    }
+    cask.Response(Array.emptyByteArray, 302,
+      headers = Seq("Location" -> s"/am/calendar?synced=${java.net.URLEncoder.encode(msg, "UTF-8")}"))
+  }
 
   // Redirect /am → /am/dashboard
   @cask.get("/am")

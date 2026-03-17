@@ -254,6 +254,8 @@ object AmateurDatabaseManager {
 
       // Temporadas — añadidas en v7.3
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS current_season INT DEFAULT 1")
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_url TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS team_name TEXT DEFAULT ''")
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_seasons (
         id          SERIAL PRIMARY KEY,
         user_id     INT REFERENCES am_users(id) ON DELETE CASCADE,
@@ -1153,21 +1155,80 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
     askCached(prompt)
   }
 
-  def processCalendarNLP(userId: Int, texto: String, teamName: String): Map[String, Any] = {
+  def saveLeagueConfig(userId: Int, leagueUrl: String, teamName: String): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "UPDATE am_users SET league_url = ?, team_name = ? WHERE id = ?")
+      ps.setString(1, leagueUrl.trim)
+      ps.setString(2, teamName.trim)
+      ps.setInt(3, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getLeagueConfig(userId: Int): (String, String) = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT COALESCE(league_url,'') as lu, COALESCE(team_name,'') as tn FROM am_users WHERE id = ?")
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      if (rs.next()) (rs.getString("lu"), rs.getString("tn"))
+      else ("", "")
+    } finally { conn.close() }
+  }
+
+  def syncCalendarFromConfig(userId: Int): Map[String, Any] = {
+    val (url, teamName) = getLeagueConfig(userId)
+    if (url.isEmpty)  return Map("ok" -> false, "error" -> "No hay URL de liga configurada. Configúrala en tu perfil.")
+    if (teamName.isEmpty) return Map("ok" -> false, "error" -> "No hay nombre de equipo configurado. Configúralo en tu perfil.")
+    processCalendarNLP(userId, "", teamName, url)
+  }
+
+  def fetchLeagueUrl(url: String): Either[String, String] = {
+    try {
+      val doc = org.jsoup.Jsoup.connect(url)
+        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .timeout(15000)
+        .get()
+      // Extract meaningful text — tables + paragraphs, strip scripts/styles
+      doc.select("script, style, nav, footer, header").remove()
+      val text = doc.body().text()
+      if (text.length < 50) Left("La página no contiene texto suficiente")
+      else Right(text.take(12000)) // Limit to avoid huge Gemini prompts
+    } catch {
+      case e: org.jsoup.HttpStatusException =>
+        Left(s"Error HTTP ${e.getStatusCode}: la web no permite acceso automático")
+      case e: Exception =>
+        Left(s"No se pudo acceder a la URL: ${e.getMessage.take(120)}")
+    }
+  }
+
+  def processCalendarNLP(userId: Int, texto: String, teamName: String, url: String = ""): Map[String, Any] = {
+    // If URL provided, fetch page content server-side
+    val textoFinal: String = if (url.nonEmpty) {
+      fetchLeagueUrl(url) match {
+        case Right(t) => t
+        case Left(err) => return Map("ok" -> false, "error" -> err)
+      }
+    } else texto
+
     val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
     if (apiKey.isEmpty) return Map("ok" -> false, "error" -> "GEMINI_API_KEY no configurada")
+    if (textoFinal.trim.length < 50) return Map("ok" -> false, "error" -> "No hay suficiente texto para procesar")
 
     val prompt = s"""Actúa como un analista de datos deportivo para el equipo $teamName. Tu misión es procesar el siguiente texto pegado de una web de liga y extraer información exclusiva para el perfil de portero de $teamName.
 
 Tu equipo: $teamName.
 
 Tareas de extracción:
-1. Filtro de Partidos: Busca únicamente las líneas que mencionen a '$teamName'. Extrae el Rival, la Fecha, la Hora y el Marcador (si existe).
+1. Filtro de Partidos: Busca únicamente las líneas que mencionen a '$teamName'. Extrae el Rival, la Fecha, la Hora y el Marcador (si existe). Incluye TODOS los partidos (pasados y futuros) para que el sistema pueda filtrar.
 2. Lógica Local/Visitante: Si $teamName aparece a la izquierda del marcador o primero en la línea, marca es_local: true. Si aparece a la derecha, marca es_local: false.
 3. Inteligencia de Rivales: Identifica el próximo rival de $teamName en el calendario. Si encuentras tabla de goleadores o estadísticas de jugadores en el texto, extrae los nombres de los delanteros más peligrosos de ese rival.
 
 Texto a procesar:
-$texto
+$textoFinal
 
 Salida obligatoria: Devuelve ÚNICAMENTE un JSON válido, sin texto adicional, sin bloques de código, sin explicaciones. El formato exacto debe ser:
 {"partidos":[{"rival":"nombre","fecha":"YYYY-MM-DD","hora":"HH:MM","es_local":true,"marcador_favor":0,"marcador_contra":0,"tipo":"LIGA"}],"amenazas_rival":["nombre1","nombre2"],"proximo_rival":"nombre"}
@@ -1209,26 +1270,35 @@ Si no encuentras fecha en formato claro, usa null. Si no hay marcador, usa 0. Si
           val tipo     = try p("tipo").str catch { case _: Exception => "LIGA" }
 
           if (rival.nonEmpty && fecha != null) {
-            val conn = getConn()
-            try {
-              // Check if already exists
-              val check = conn.prepareStatement(
-                "SELECT id FROM am_schedule WHERE user_id = ? AND rival = ? AND fecha = ?::date")
-              check.setInt(1, userId); check.setString(2, rival); check.setString(3, fecha)
-              val rs = check.executeQuery()
-              if (!rs.next()) {
-                val ps = conn.prepareStatement("""
+            // Skip past matches — only schedule future/today matches
+            val fechaDate = try java.time.LocalDate.parse(fecha) catch { case _: Exception => null }
+            val isUpcoming = fechaDate != null && !fechaDate.isBefore(java.time.LocalDate.now())
+            if (isUpcoming) {
+              val conn = getConn()
+              try {
+                // Check if already exists in schedule OR in played matches
+                val check = conn.prepareStatement("""
+                SELECT id FROM am_schedule WHERE user_id = ? AND rival = ? AND fecha = ?::date
+                UNION
+                SELECT id FROM am_matches WHERE user_id = ? AND LOWER(rival) = LOWER(?) AND fecha = ?::date
+              """)
+                check.setInt(1, userId); check.setString(2, rival); check.setString(3, fecha)
+                check.setInt(4, userId); check.setString(5, rival); check.setString(6, fecha)
+                val rs = check.executeQuery()
+                if (!rs.next()) {
+                  val ps = conn.prepareStatement("""
                   INSERT INTO am_schedule (user_id, rival, fecha, hora, tipo, notas)
                   VALUES (?, ?, ?::date, ?, ?, ?)
                 """)
-                ps.setInt(1, userId); ps.setString(2, rival); ps.setString(3, fecha)
-                ps.setString(4, hora); ps.setString(5, tipo)
-                val nota = if (esLocal == "true") "Local" else if (esLocal == "false") "Visitante" else ""
-                ps.setString(6, nota)
-                ps.executeUpdate()
-                inserted += 1
-              } else skipped += 1
-            } finally { conn.close() }
+                  ps.setInt(1, userId); ps.setString(2, rival); ps.setString(3, fecha)
+                  ps.setString(4, hora); ps.setString(5, tipo)
+                  val nota = if (esLocal == "true") "Local" else if (esLocal == "false") "Visitante" else ""
+                  ps.setString(6, nota)
+                  ps.executeUpdate()
+                  inserted += 1
+                } else skipped += 1
+              } finally { conn.close() }
+            } // isUpcoming
           }
         } catch { case e: Exception => println(s"Skip partido: ${e.getMessage}") }
       }

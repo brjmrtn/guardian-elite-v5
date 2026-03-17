@@ -1,1008 +1,2760 @@
 import cask._
 import scalatags.Text.all._
 import scalatags.Text.tags2
-import SharedLayout._
 
-import java.net.URLEncoder
+// ─────────────────────────────────────────────────────────────────────────────
+// GUARDIAN AMATEUR — Controller principal
+// Todas las rutas bajo /am/*
+// Auth por cookie independiente: am_session={userId}
+// ─────────────────────────────────────────────────────────────────────────────
+object AmateurController extends cask.Routes {
 
-object MatchController extends cask.Routes {
+  val AM_COOKIE = "guardian_session"
+  def amCookieValue(id: Int) = s"am:$id"
 
-  @cask.get("/match-center")
-  def matchCenterPage(request: cask.Request, scheduleId: Int = 0) = withAuth(request) {
-    val today = java.time.LocalDate.now().toString
-    var preRival = ""; var preFecha = today; var isScheduled = false; var preEstadio = ""
-
-    // Si venimos de un partido programado, cargamos datos
-    if(scheduleId > 0) {
-      val matches = DatabaseManager.getUpcomingMatches()
-      matches.find(_.id == scheduleId).foreach { m =>
-        preRival = m.rival
-        preFecha = m.fecha
-        preEstadio = m.estadio
-        isScheduled = true
-      }
+  // ── AUTH HELPERS ───────────────────────────────────────────────────────────
+  // Cookie unificada guardian_session=am:{id} — gestionada por AuthController
+  private def getAmUserId(request: cask.Request): Option[Int] =
+    request.cookies.get("guardian_session").flatMap { c =>
+      val v = c.value
+      if (v.startsWith("am:")) scala.util.Try(v.drop(3).toInt).toOption
+      else None
     }
 
-    // Celdas de la porteria
-    val gridCells = for(r <- Seq("T","M","B"); c <- Seq("L","C","R")) yield {
-      val zoneId = r + c
-      div(cls:=s"goal-cell zone-$zoneId", onclick:=s"registerAction('$zoneId')", span(cls:="action-marker", ""))
+  private def withAmAuth(request: cask.Request)(
+    f: AmUser => cask.Response[Array[Byte]]
+  ): cask.Response[Array[Byte]] = {
+    getAmUserId(request).flatMap(AmateurDatabaseManager.getUserById) match {
+      case Some(user) => f(user)
+      case None =>
+        cask.Response(
+          Array.emptyByteArray,
+          statusCode = 302,
+          headers = Seq("Location" -> "/login")
+        )
     }
+  }
 
-    val content = basePage("match-center",
-      div(cls := "row justify-content-center",
-        div(cls := "col-md-6 col-12",
-          div(cls := "card bg-dark text-white border-warning shadow",
-            div(cls := "card-header bg-warning text-dark fw-bold text-center", "MATCH TRACKER PRO"),
-            div(cls := "card-body p-3",
-              form(action := "/match-center/save", method := "post", attr("accept-charset") := "UTF-8",
+  // ── RENDER ─────────────────────────────────────────────────────────────────
+  private def renderAm(
+                        activeLink: String,
+                        userName: String,
+                        pageContent: scalatags.Text.Modifier
+                      ): cask.Response[Array[Byte]] = {
+    val page = "<!DOCTYPE html>" + html(lang := "es",
+      head(
+        meta(charset := "UTF-8"),
+        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
+        tags2.title("Guardian Amateur"),
+        link(rel := "stylesheet",
+          href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
+        tags2.style(raw("""
+          * { box-sizing: border-box; }
+          body {
+            background: #f0f4f8;
+            color: #1a202c;
+            font-family: 'Segoe UI', sans-serif;
+            padding-bottom: 90px;
+            min-height: 100vh;
+          }
+          /* ── RESET INPUTS — sobreescribe CSS global Elite ── */
+          body input, body select, body textarea,
+          body .form-control, body .form-select {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #1a202c !important;
+            border: 1px solid #cbd5e0 !important;
+            -webkit-text-fill-color: #1a202c !important;
+            font-weight: 500 !important;
+            border-radius: 8px !important;
+          }
+          body input:focus, body select:focus, body textarea:focus,
+          body .form-control:focus, body .form-select:focus {
+            background-color: #ffffff !important;
+            color: #1a202c !important;
+            -webkit-text-fill-color: #1a202c !important;
+            border-color: #0d6efd !important;
+            box-shadow: 0 0 0 3px rgba(13,110,253,0.15) !important;
+            outline: none !important;
+          }
+          body input:-webkit-autofill,
+          body input:-webkit-autofill:hover,
+          body input:-webkit-autofill:focus {
+            -webkit-box-shadow: 0 0 0px 1000px #ffffff inset !important;
+            -webkit-text-fill-color: #1a202c !important;
+          }
+          body input::placeholder, body textarea::placeholder {
+            color: #a0aec0 !important; opacity: 1 !important;
+          }
+          body option { background: #fff !important; color: #1a202c !important; }
+          body input[type=range] { background: transparent !important; border: none !important; box-shadow: none !important; }
+          body input[type=date]::-webkit-calendar-picker-indicator,
+          body input[type=time]::-webkit-calendar-picker-indicator { filter: none !important; }
+          body .form-check-input { background-color: #fff !important; border-color: #cbd5e0 !important; }
+          body .form-check-input:checked { background-color: #0d6efd !important; border-color: #0d6efd !important; }
+          body label { color: #4a5568 !important; }
+          /* ── LAYOUT ── */
+          .bottom-nav {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: #ffffff; border-top: 1px solid #e2e8f0;
+            display: flex; z-index: 1000; padding-bottom: env(safe-area-inset-bottom);
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.07);
+          }
+          .nav-item {
+            flex: 1; text-align: center; padding: 8px 2px 6px;
+            text-decoration: none; color: #a0aec0; font-size: 10px;
+            display: flex; flex-direction: column; align-items: center;
+          }
+          .nav-item.active { color: #0d6efd; }
+          .nav-item .nav-icon { font-size: 20px; display: block; margin-bottom: 2px; }
+          .xx-small { font-size: 0.7rem; }
+          .am-header {
+            background: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 10px 16px;
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+          }
+          .card-am {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+          }
+          .btn-goal-zone {
+            width: 100%; aspect-ratio: 1; font-size: 11px; font-weight: 700;
+            border: 2px solid #e2e8f0; background: #f7fafc; color: #718096;
+            border-radius: 6px; cursor: pointer; transition: all 0.15s;
+          }
+          .btn-goal-zone.selected { background: #dc3545; color: white; border-color: #dc3545; }
+          .btn-dir {
+            width: 100%; padding: 16px 8px; font-weight: 700; font-size: 14px;
+            border: 2px solid #e2e8f0; background: #f7fafc; color: #718096;
+            border-radius: 8px; cursor: pointer; transition: all 0.15s;
+          }
+          .btn-dir.selected-tiro     { background: #dc3545; color: white; border-color: #dc3545; }
+          .btn-dir.selected-estirada { background: #0d6efd; color: white; border-color: #0d6efd; }
+          .nota-badge {
+            width: 48px; height: 48px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 900; font-size: 16px;
+          }
+          .badge-green  { background: #c6f6d5; color: #276749; }
+          .badge-yellow { background: #fefcbf; color: #744210; }
+          .badge-red    { background: #fed7d7; color: #9b2c2c; }
+          .text-muted   { color: #718096 !important; }
+          .border-bottom { border-bottom-color: #e2e8f0 !important; }
+          .cal-day {
+            min-height: 56px; background: #f7fafc; border: 1px solid #e2e8f0;
+            border-radius: 8px; padding: 4px 6px; font-size: 11px; color: #1a202c;
+          }
+          .cal-day.today        { border-color: #0d6efd; background: #ebf8ff; }
+          .cal-day.has-match    { border-color: #38a169; background: #f0fff4; }
+          .cal-day.has-schedule { border-color: #d69e2e; background: #fffff0; }
+          .cal-day .day-num { font-weight: 700; font-size: 13px; color: #1a202c; }
+          .cal-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin:1px; }
+        """))
+      ),
+      body(
+        // Header
+        div(cls := "am-header",
+          div(
+            span(cls := "fw-black text-primary", style := "font-size:15px;", "🛡 GUARDIAN"),
+            span(cls := "badge bg-primary ms-1", style := "font-size:9px;", "AMATEUR"),
+            span(cls := "d-block xx-small text-muted", userName)
+          ),
+          a(href := "/profiles", cls := "btn btn-outline-secondary btn-sm xx-small", "Cambiar")
+        ),
 
-                // 1. DATOS GENERALES
-                input(tpe:="hidden", name:="scheduleId", value:=scheduleId.toString),
-                div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "TIPO DE PARTIDO"),
-                  if(isScheduled) {
-                    div(input(tpe:="hidden", name:="tipo", value:="LIGA"), input(tpe:="text", cls:="form-control bg-dark text-white border-primary fw-bold", value:="🏆 LIGA (OFICIAL RFFM)", readonly:=true))
-                  } else {
-                    div(cls:="d-flex", select(name:="tipo", cls:="form-select bg-dark text-white fw-bold flex-grow-1", option(value:="AMISTOSO", "🤝 AMISTOSO"), option(value:="TORNEO", "🏅 TORNEO"), option(value:="LIGA", "🏆 LIGA (Manual)")), a(href:="/tournament/new", cls:="btn btn-sm btn-outline-warning ms-2 d-flex align-items-center fw-bold", "+ CREAR TORNEO"))
-                  }
+        // Contenido
+        div(cls := "container-fluid px-3", pageContent),
+
+        // Nav inferior
+        tags2.nav(cls := "bottom-nav",
+          a(href := "/am/dashboard",
+            cls := s"nav-item ${if (activeLink == "home") "active" else ""}",
+            span(cls := "nav-icon", "🏠"), span("Inicio")),
+          a(href := "/am/match-center",
+            cls := s"nav-item ${if (activeLink == "match") "active" else ""}",
+            span(cls := "nav-icon", "⚽"), span("Partido")),
+          a(href := "/am/calendar",
+            cls := s"nav-item ${if (activeLink == "calendar") "active" else ""}",
+            span(cls := "nav-icon", "📅"), span("Agenda")),
+          a(href := "/am/penalties",
+            cls := s"nav-item ${if (activeLink == "penalties") "active" else ""}",
+            span(cls := "nav-icon", "🥅"), span("Penaltis")),
+          a(href := "/am/gear",
+            cls := s"nav-item ${if (activeLink == "gear") "active" else ""}",
+            span(cls := "nav-icon", "🧤"), span("Guantes")),
+          a(href := "/am/history",
+            cls := s"nav-item ${if (activeLink == "history") "active" else ""}",
+            span(cls := "nav-icon", "📊"), span("Historial")),
+          a(href := "/am/progression",
+            cls := s"nav-item ${if (activeLink == "progression") "active" else ""}",
+            span(cls := "nav-icon", "📈"), span("Progreso")),
+          a(href := "/am/mapa-goles",
+            cls := s"nav-item ${if (activeLink == "goals") "active" else ""}",
+            span(cls := "nav-icon", "🥅"), span("Mapa")),
+          a(href := "/am/rivals",
+            cls := s"nav-item ${if (activeLink == "rivals") "active" else ""}",
+            span(cls := "nav-icon", "⚔️"), span("Rivales")),
+          a(href := "/am/wellness",
+            cls := s"nav-item ${if (activeLink == "wellness") "active" else ""}",
+            span(cls := "nav-icon", "🧠"), span("Wellness"))
+        ),
+
+        script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
+      )
+    ).render
+
+    cask.Response(
+      page.getBytes("UTF-8"),
+      headers = Seq("Content-Type" -> "text/html; charset=utf-8")
+    )
+  }
+
+  // ── LOGIN / REGISTER ───────────────────────────────────────────────────────
+  @cask.get("/am/login")
+  def loginPage(request: cask.Request, error: String = "") = {
+    val page = "<!DOCTYPE html>" + html(lang := "es",
+      head(
+        meta(charset := "UTF-8"),
+        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
+        tags2.title("Guardian Amateur - Login"),
+        link(rel := "stylesheet",
+          href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
+        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input, select { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; }"))
+      ),
+      body(
+        div(cls := "container d-flex justify-content-center align-items-center",
+          style := "min-height:100vh;",
+          div(style := "width:340px;",
+            div(cls := "text-center mb-4",
+              div(style := "font-size:48px;", "🛡"),
+              h3(cls := "fw-black text-primary", "GUARDIAN AMATEUR"),
+              span(cls := "text-muted small", "Tu rendimiento, registrado.")
+            ),
+            div(cls := "card bg-dark border-primary p-4 mb-3",
+              h5(cls := "text-white fw-bold mb-3", "Iniciar sesión"),
+              if (error.nonEmpty) div(cls := "alert alert-danger small p-2 mb-3", error) else span(),
+              form(action := "/am/login", method := "post",
+                div(cls := "mb-3",
+                  label(cls := "text-muted small fw-bold", "USUARIO"),
+                  input(tpe := "text", name := "username", cls := "form-control bg-dark text-white border-secondary mt-1", required := true, attr("autocomplete") := "username")
                 ),
                 div(cls := "mb-3",
-                  label(cls := "form-label text-warning fw-bold small", "RIVAL"),
-                  input(
-                    tpe := "text",
-                    name := "rival",
-                    id := "rivalInput",
-                    cls := "form-control form-control-lg fw-bold text-white",
-                    value := (if (preRival.nonEmpty) fixEncoding(preRival) else ""),
-                    placeholder := "Ej: Rayo Vallecano",
-                    required := true,
-                    // CAMBIO CLAVE: Si scheduleId es 0, no se renderiza ningun atributo readonly
-                    if (scheduleId > 0) readonly := true else ()
-                  )
+                  label(cls := "text-muted small fw-bold", "CONTRASEÑA"),
+                  input(tpe := "password", name := "password", cls := "form-control bg-dark text-white border-secondary mt-1", required := true)
                 ),
-                div(cls := "mb-3", label(cls := "form-label text-white fw-bold small", "FECHA"), input(tpe := "date", name := "fecha", cls := "form-control", value := preFecha)),
-                div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "ESTADIO / CAMPO"), input(tpe:="text", name:="estadio", cls:="form-control bg-dark text-white", value:=fixEncoding(preEstadio), placeholder:="Ej: Valdebebas Campo 3")),
-                div(cls:="mb-3",
-                  label(cls:="form-label text-white fw-bold small", "¿LOCAL O VISITANTE?"),
-                  div(cls:="d-flex gap-2",
-                    label(cls:="flex-fill text-center border border-secondary rounded p-2 fw-bold small",
-                      style:="cursor:pointer;",
-                      input(tpe:="radio", name:="esLocal", value:="", cls:="d-none",
-                        attr("checked"):="checked"),
-                      span(id:="lblNeutro", "— Sin especificar")
-                    ),
-                    label(cls:="flex-fill text-center border border-success rounded p-2 fw-bold small text-success",
-                      style:="cursor:pointer;",
-                      input(tpe:="radio", name:="esLocal", value:="true", cls:="d-none"),
-                      span("🏠 Local")
-                    ),
-                    label(cls:="flex-fill text-center border border-info rounded p-2 fw-bold small text-info",
-                      style:="cursor:pointer;",
-                      input(tpe:="radio", name:="esLocal", value:="false", cls:="d-none"),
-                      span("✈️ Visitante")
-                    )
-                  ),
-                  script(raw("""
-                    (function() {
-                      var radios = document.querySelectorAll('input[name="esLocal"]');
-                      radios.forEach(function(r) {
-                        r.addEventListener('change', function() {
-                          radios.forEach(function(x) {
-                            var lbl = x.parentElement;
-                            lbl.style.background = '';
-                            lbl.style.opacity = '0.6';
-                          });
-                          var sel = this.parentElement;
-                          sel.style.opacity = '1';
-                          if (this.value === 'true')  sel.style.background = 'rgba(40,167,69,0.2)';
-                          if (this.value === 'false') sel.style.background = 'rgba(13,202,240,0.2)';
-                          if (this.value === '')      sel.style.background = 'rgba(255,255,255,0.05)';
-                        });
-                      });
-                    })();
-                  """))
-                ),
-
-                // 2. MARCADOR Y PARADAS
-                div(cls := "row mb-3 bg-secondary bg-opacity-25 p-2 rounded mx-0",
-                  div(cls := "col-4 text-center", label(cls := "small fw-bold", "GOLES (GC)"), input(tpe := "number", name := "gc", id:="gcInput", cls := "form-control text-center bg-danger text-white border-0 fw-bold fs-4", value := "0", readonly:=true)),
-                  div(cls := "col-4 text-center", label(cls := "small fw-bold", "PARADAS"), input(tpe := "number", name := "paradas", id:="parInput", cls := "form-control text-center bg-success text-white border-0 fw-bold fs-4", value := "0", readonly:=true)),
-                  div(cls := "col-4 text-center", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))
-                ),
-
-                // 3. DISTRIBUCION (EDERSON)
-                div(cls:="mb-4 p-2 border border-info rounded bg-info bg-opacity-10", label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCION"),
-                  div(cls:="row mb-2 align-items-center", div(cls:="col-4 text-end small fw-bold", "CORTO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pc', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pc', false)", "X"), input(tpe:="text", id:="display_pc", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)))),
-                  div(cls:="row align-items-center", div(cls:="col-4 text-end small fw-bold", "LARGO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pl', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pl', false)", "X"), input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true))))
-                ),
-                input(tpe:="hidden", name:="passData", id:="passData", value:="0,0,0,0"), input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"), input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0"),
-
-                // 4. PORTERIA (REJILLA 3x3)
-                div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
-                  div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success fw-bold", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger fw-bold", attr("for"):="modeGoal", "MODO GOL"))),
-                  div(cls:="goal-grid-3x3", gridCells),
-                  input(tpe:="hidden", name:="zonaGoles", id:="hiddenGoles"), input(tpe:="hidden", name:="zonaParadas", id:="hiddenParadas"),
-                  div(cls:="text-center mt-2 small text-muted", "Toca la zona para registrar la accion"),
-
-                  label(cls:="form-label text-white small fw-bold w-100 text-center mt-3 border-top pt-2", "ACCIONES"),
-                  div(cls:="row g-2",
-                    div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-info btn-sm", onclick:="incCounter('p1v1')", "1vs1"), input(tpe:="text", id:="disp_p1v1", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))),
-                    div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-warning btn-sm", onclick:="incCounter('pAir')", "Aereo"), input(tpe:="text", id:="disp_pAir", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true))),
-                    div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-light btn-sm", onclick:="incCounter('pPie')", "Pie"), input(tpe:="text", id:="disp_pPie", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true)))
-                  ),
-                  input(tpe:="hidden", name:="actionData", id:="actionData", value:="0,0,0"), input(tpe:="hidden", id:="cnt_p1v1", value:="0"), input(tpe:="hidden", id:="cnt_pAir", value:="0"), input(tpe:="hidden", id:="cnt_pPie", value:="0"),
-
-                  // SCANNING RATE — Escaneos antes de recibir el balon
-                  div(cls:="mb-2 mt-3 p-2 border border-info rounded bg-info bg-opacity-10",
-                    label(cls:="form-label text-info small fw-bold w-100 text-center mb-2", "👁️ SCANNING RATE — Escaneos de campo"),
-                    div(cls:="d-flex align-items-center justify-content-center gap-3",
-                      button(tpe:="button", cls:="btn btn-outline-info btn-sm px-3",
-                        onclick:="adjustScanning(-1)", "-"),
-                      div(cls:="text-center",
-                        input(tpe:="number", name:="scanningRate", id:="scanningRate",
-                          value:="0", cls:="form-control form-control-sm text-center bg-dark text-info fw-bold border-info",
-                          style:="width:70px; font-size:1.3rem;",
-                          attr("inputmode"):="numeric", attr("min"):="0"),
-                        div(cls:="xx-small text-muted mt-1", "escaneos")
-                      ),
-                      button(tpe:="button", cls:="btn btn-outline-info btn-sm px-3",
-                        onclick:="adjustScanning(1)", "+")
-                    ),
-                    div(cls:="text-center xx-small text-muted mt-1",
-                      "Nº de veces que mira al campo antes de recibir una cesion"
-                    )
-                  ),
-
-                  // BYPASS RATE — Lineas Superadas en salida con pie
-                  div(cls:="mb-2 mt-3 p-2 border border-success rounded bg-success bg-opacity-10",
-                    label(cls:="form-label text-success small fw-bold w-100 text-center mb-2", "⚡ BYPASS RATE — Lineas superadas"),
-                    div(cls:="d-flex align-items-center justify-content-center gap-3",
-                      button(tpe:="button", cls:="btn btn-outline-success btn-sm px-3",
-                        onclick:="adjustBypass(-1)", "-"),
-                      div(cls:="text-center",
-                        input(tpe:="number", name:="lineasSuperadas", id:="lineasSuperadas",
-                          value:="0", cls:="form-control form-control-sm text-center bg-dark text-success fw-bold border-success",
-                          style:="width:70px; font-size:1.3rem;",
-                          attr("inputmode"):="numeric", attr("min"):="0"),
-                        div(cls:="xx-small text-muted mt-1", "rivales superados")
-                      ),
-                      button(tpe:="button", cls:="btn btn-outline-success btn-sm px-3",
-                        onclick:="adjustBypass(1)", "+")
-                    ),
-                    div(cls:="text-center xx-small text-muted mt-1",
-                      "Nº de rivales que quedan por detras tras un pase en salida"
-                    )
-                  ),
-
-                  label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"),
-                  div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))
-                ),
-
-                // 5. NUEVO: MAPA DE CALOR DE CAMPO (AQUI ESTA LA INTEGRACION)
-                div(cls:="mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
-                  label(cls:="form-label text-success small fw-bold w-100 text-center", "MAPA DE CALOR (INTERVENCIONES)"),
-                  div(cls:="position-relative mx-auto shadow", style:="width: 280px; height: 380px; background-color: #2e7d32; border: 2px solid white; border-radius: 4px;",
-                    div(style:="position:absolute; top:0; left:50%; transform:translateX(-50%); width:60%; height:15%; border:2px solid rgba(255,255,255,0.6); border-top:none;"),
-                    div(style:="position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:60%; height:15%; border:2px solid rgba(255,255,255,0.6); border-bottom:none;"),
-                    div(style:="position:absolute; top:50%; width:100%; height:2px; background:rgba(255,255,255,0.4);"),
-                    div(style:="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:60px; height:60px; border:2px solid rgba(255,255,255,0.4); border-radius:50%;"),
-                    div(id:="fieldMap", style:="width:100%; height:100%; cursor:crosshair; z-index:10;", onclick:="regFieldPos(event)")
-                  ),
-                  div(cls:="text-center mt-1 small text-muted", "Toca donde intervino (Parada/Corte/Pase)"),
-                  input(tpe:="hidden", name:="mapaCampo", id:="hiddenFieldMap", value:="")
-                ),
-
-                // 6. ENTORNO Y NOTAS
-                div(cls:="mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
-                  label(cls:="form-label text-white small fw-bold w-100 text-center", "ENTORNO"),
-                  div(cls:="row mb-2",
-                    div(cls:="col-6", label(cls:="small text-muted fw-bold", "Clima"), select(name:="clima", cls:="form-select form-select-sm bg-dark text-white fw-bold", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Viento", "Viento"))),
-                    div(cls:="col-6", label(cls:="small text-muted fw-bold", "Temp (C)"), input(tpe:="number", name:="temp", cls:="form-control form-control-sm bg-dark text-white fw-bold", value:="20"))
-                  )
-                ),
-                div(cls:="mb-3 p-2 border border-danger rounded bg-danger bg-opacity-10", label(cls:="form-label text-danger small fw-bold w-100 text-center", "SALA DE VIDEO"), input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="Link Video (Youtube/Drive)")),
-                div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white fw-bold", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
-                input(tpe:="hidden", name:="reaccion", value:=""),  // campo legacy mantenido para DB
-                div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
-                div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
-
-                // ── REGISTRO DE GOLES ENCAJADOS ─────────────────────────
-                div(cls:="mb-4 p-3 border border-danger rounded",
-                  style:="background:rgba(220,53,69,0.05);",
-                  div(cls:="d-flex justify-content-between align-items-center mb-2",
-                    label(cls:="text-danger fw-bold small", "ANALISIS DE GOLES ENCAJADOS"),
-                    tag("button")(tpe:="button", cls:="btn btn-outline-danger btn-sm fw-bold",
-                      onclick:="addGoalRow()", "Añadir gol")
-                  ),
-                  div(cls:="xx-small text-muted mb-2",
-                    "Registra el contexto de cada gol para analisis avanzado (PSxG, Clutch, Nota ajustada)"),
-                  div(id:="goalsContainer"),
-                  input(tpe:="hidden", name:="goalsData", id:="goalsDataInput", value:="")
-                ),
-
-                div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
-              ) // fin form
+                button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "ENTRAR")
+              )
             ),
-
-            // SCRIPTS
-            script(raw("""
-              var currentMode='save';var goals=[];var saves=[];var origins=[];
-              function setMode(mode){currentMode=mode;}
-              function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
-              function incCounter(key){var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val; document.getElementById('disp_'+key).value=val; updateActionData();}
-              function adjustBypass(delta){var el=document.getElementById('lineasSuperadas'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
-              function adjustScanning(delta){var el=document.getElementById('scanningRate'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
-              function updateActionData(){var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value]; document.getElementById('actionData').value = d.join(',');}
-              function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
-              function pass(type, success) { var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type); var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0); totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t; updatePassData(); }
-              function updatePassData(){var d = [document.getElementById('pcTot').value, document.getElementById('pcOk').value, document.getElementById('plTot').value, document.getElementById('plOk').value]; document.getElementById('passData').value = d.join(',');}
-
-              // SCRIPT NUEVO MAPA CAMPO
-              var fieldPoints = [];
-              function regFieldPos(e) {
-                var rect = e.target.getBoundingClientRect();
-                var x = e.clientX - rect.left;
-                var y = e.clientY - rect.top;
-                var pctX = Math.round((x / rect.width) * 100);
-                var pctY = Math.round((y / rect.height) * 100);
-                fieldPoints.push(pctX + ":" + pctY);
-                document.getElementById('hiddenFieldMap').value = fieldPoints.join(',');
-                var dot = document.createElement('div');
-                dot.style.cssText = 'position:absolute; width:10px; height:10px; background:orange; border:1px solid white; border-radius:50%; transform:translate(-50%,-50%); pointer-events:none; left:'+x+'px; top:'+y+'px;';
-                e.target.appendChild(dot);
-              }
-
-              // ── GOLES ENCAJADOS ─────────────────────────────────────
-              var goalCount = 0;
-              function addGoalRow() {
-                goalCount++;
-                var n = goalCount;
-                var html = '<div id="goal_'+n+'" class="p-2 mb-2 rounded" style="background:rgba(220,53,69,0.1); border:1px solid rgba(220,53,69,0.3);">' +
-                  '<div class="d-flex justify-content-between mb-1"><span class="text-danger fw-bold xx-small">GOL '+n+'</span><button type="button" class="btn btn-link btn-sm text-danger p-0" onclick="removeGoal('+n+')">x</button></div>' +
-                  '<div class="row g-1">' +
-                  '<div class="col-3"><label class="xx-small text-muted">Minuto</label><input type="number" class="form-control form-control-sm bg-dark text-white border-secondary" id="gMin_'+n+'" value="0" min="0" max="90" onchange="updateGoalsData()"></div>' +
-                  '<div class="col-9"><label class="xx-small text-muted">Origen</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gOrigen_'+n+'" onchange="updateGoalsData()">' +
-                  '<option>Jugada elaborada</option><option>Contragolpe</option><option>Error defensivo</option>' +
-                  '<option>Corner</option><option>Falta directa</option><option>Penalti</option><option>Otro</option></select></div>' +
-                  '<div class="col-6"><label class="xx-small text-muted">Situacion</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gSit_'+n+'" onchange="updateGoalsData()">' +
-                  '<option>1 vs 1</option><option>2 vs 1</option><option>Tiro lejano</option>' +
-                  '<option>Remate cabeza</option><option>Penalti</option><option>Gol en propia</option><option>Otro</option></select></div>' +
-                  '<div class="col-6"><label class="xx-small text-muted">Responsabilidad portero</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gResp_'+n+'" onchange="updateGoalsData()">' +
-                  '<option>Ninguna</option><option>Media</option><option>Alta</option></select></div>' +
-                  '<div class="col-6"><label class="xx-small text-muted">Era parable</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gPar_'+n+'" onchange="updateGoalsData()">' +
-                  '<option>No</option><option>Dudoso</option><option>Si</option></select></div>' +
-                  '<div class="col-6"><label class="xx-small text-muted">Zona</label><select class="form-select form-select-sm bg-dark text-white border-secondary" id="gZona_'+n+'" onchange="updateGoalsData()">' +
-                  '<option value="">-</option><option>TL</option><option>TC</option><option>TR</option><option>ML</option><option>MC</option><option>MR</option><option>BL</option><option>BC</option><option>BR</option></select></div>' +
-                  '<div class="col-12"><input type="text" class="form-control form-control-sm bg-dark text-white border-secondary" id="gNota_'+n+'" placeholder="Nota breve..." onchange="updateGoalsData()"></div>' +
-                  '</div></div>';
-                document.getElementById('goalsContainer').insertAdjacentHTML('beforeend', html);
-                updateGoalsData();
-              }
-              function removeGoal(n) {
-                var el = document.getElementById('goal_'+n);
-                if (el) el.remove();
-                updateGoalsData();
-              }
-              function updateGoalsData() {
-                var rows = [];
-                for (var i = 1; i <= goalCount; i++) {
-                  var el = document.getElementById('goal_'+i);
-                  if (!el) continue;
-                  var min   = document.getElementById('gMin_'+i).value;
-                  var orig  = document.getElementById('gOrigen_'+i).value;
-                  var sit   = document.getElementById('gSit_'+i).value;
-                  var resp  = document.getElementById('gResp_'+i).value;
-                  var par   = document.getElementById('gPar_'+i).value;
-                  var zona  = document.getElementById('gZona_'+i).value;
-                  var nota2 = document.getElementById('gNota_'+i).value;
-                  rows.push([min,orig,sit,resp,par,zona,nota2].join('|'));
-                }
-                document.getElementById('goalsDataInput').value = rows.join(';');
-              }
-            """))
+            div(cls := "card bg-dark border-secondary p-3 text-center",
+              p(cls := "text-muted small mb-2", "¿Primera vez? Crea tu cuenta gratis"),
+              a(href := "/am/register", cls := "btn btn-outline-secondary w-100 btn-sm", "Registrarse")
+            )
           )
         )
       )
-    );
-    renderHtml(content)
+    ).render
+    cask.Response(page.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  @cask.post("/match-center/save")
-  def saveMatch(request: cask.Request) = withAuth(request) {
-    // CORRECCION: Usamos request.data para leer los bytes del cuerpo
-    val bodyBytes = request.data.readAllBytes()
-    val bodyString = new String(bodyBytes, "UTF-8")
+  @cask.postForm("/am/login")
+  def doLogin(request: cask.Request, username: String, password: String) = {
+    AmateurDatabaseManager.authenticate(username, password) match {
+      case Some(user) =>
+        cask.Response(
+          Array.emptyByteArray,
+          statusCode = 302,
+          headers = Seq(
+            "Location"   -> "/am/dashboard",
+            "Set-Cookie" -> s"guardian_session=${amCookieValue(user.id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
+          )
+        )
+      case None =>
+        cask.Response(
+          Array.emptyByteArray,
+          statusCode = 302,
+          headers = Seq("Location" -> "/am/login?error=Usuario+o+contraseña+incorrectos")
+        )
+    }
+  }
 
-    // Parseamos el string clave=valor&clave2=valor2
-    val formData = bodyString.split("&").map { part =>
-      val pair = part.split("=", 2)
-      val key = java.net.URLDecoder.decode(pair(0), "UTF-8")
-      val value = if (pair.length > 1) java.net.URLDecoder.decode(pair(1), "UTF-8") else ""
-      key -> value
+  @cask.get("/am/register")
+  def registerPage(request: cask.Request, error: String = "") = {
+    val page = "<!DOCTYPE html>" + html(lang := "es",
+      head(
+        meta(charset := "UTF-8"),
+        meta(name := "viewport", content := "width=device-width, initial-scale=1"),
+        tags2.title("Guardian Amateur - Registro"),
+        link(rel := "stylesheet", href := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"),
+        tags2.style(raw("body { background:#f0f4f8; color:#1a202c; } .card { background:#fff !important; border-color:#e2e8f0 !important; } input, select { background:#fff !important; color:#1a202c !important; border-color:#cbd5e0 !important; }"))
+      ),
+      body(
+        div(cls := "container d-flex justify-content-center align-items-center", style := "min-height:100vh;",
+          div(style := "width:340px;",
+            div(cls := "text-center mb-4",
+              div(style := "font-size:48px;", "🛡"),
+              h3(cls := "fw-black text-primary", "Crear cuenta")
+            ),
+            div(cls := "card bg-dark border-primary p-4",
+              if (error.nonEmpty) div(cls := "alert alert-danger small p-2 mb-3", error) else span(),
+              form(action := "/am/register", method := "post",
+                div(cls := "mb-3",
+                  label(cls := "text-muted small fw-bold", "TU NOMBRE"),
+                  input(tpe := "text", name := "nombre", cls := "form-control bg-dark text-white border-secondary mt-1", placeholder := "Ej: Carlos López", required := true)
+                ),
+                div(cls := "mb-3",
+                  label(cls := "text-muted small fw-bold", "USUARIO"),
+                  input(tpe := "text", name := "username", cls := "form-control bg-dark text-white border-secondary mt-1", placeholder := "sin espacios, sin tildes", required := true, attr("autocomplete") := "username")
+                ),
+                div(cls := "mb-3",
+                  label(cls := "text-muted small fw-bold", "CONTRASEÑA"),
+                  input(tpe := "password", name := "password", cls := "form-control bg-dark text-white border-secondary mt-1", required := true, attr("minlength") := "4")
+                ),
+                button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "CREAR CUENTA"),
+                div(cls := "text-center mt-3",
+                  a(href := "/am/login", cls := "text-muted small", "Ya tengo cuenta"))
+              )
+            )
+          )
+        )
+      )
+    ).render
+    cask.Response(page.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  @cask.postForm("/am/register")
+  def doRegister(request: cask.Request, nombre: String, username: String, password: String) = {
+    if (username.trim.isEmpty || password.length < 4) {
+      cask.Response(Array.emptyByteArray, 302,
+        headers = Seq("Location" -> "/am/register?error=Usuario+y+contraseña+mínimo+4+caracteres"))
+    } else {
+      AmateurDatabaseManager.registerUser(username.trim.toLowerCase, password, nombre) match {
+        case Right(id) =>
+          cask.Response(Array.emptyByteArray, 302,
+            headers = Seq(
+              "Location"   -> "/am/dashboard",
+              "Set-Cookie" -> s"guardian_session=${amCookieValue(id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
+            ))
+        case Left(err) =>
+          cask.Response(Array.emptyByteArray, 302,
+            headers = Seq("Location" -> s"/am/register?error=${java.net.URLEncoder.encode(err, "UTF-8")}"))
+      }
+    }
+  }
+
+  @cask.get("/am/logout")
+  def doLogout(request: cask.Request) =
+    cask.Response(Array.emptyByteArray, 302,
+      headers = Seq(
+        "Location"   -> "/profiles",
+        "Set-Cookie" -> s"guardian_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly"
+      ))
+
+  // ── DASHBOARD ──────────────────────────────────────────────────────────────
+  @cask.get("/am/dashboard")
+  def dashboardPage(request: cask.Request) = withAmAuth(request) { user =>
+    val st       = AmateurDatabaseManager.getDashboardStats(user.id)
+    val upcoming = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
+    val seasonInfo = AmateurDatabaseManager.getSeasonInfo(user.id)
+    val currentSeason = seasonInfo("currentSeason").asInstanceOf[Int]
+    val pastSeasons   = seasonInfo("pastSeasons").asInstanceOf[List[Map[String, String]]]
+    val pj             = st("pj").asInstanceOf[Int]
+    val notaMedia      = st("notaMedia").asInstanceOf[Double]
+    val notaAjustada   = st("notaAjustada").asInstanceOf[Double]
+    val gcMedia        = st("gcMedia").asInstanceOf[Double]
+    val limpias        = st("limpias").asInstanceOf[Int]
+    val ganados        = st("ganados").asInstanceOf[Int]
+    val empatados      = st("empatados").asInstanceOf[Int]
+    val perdidos       = st("perdidos").asInstanceOf[Int]
+    val rachaLimpias   = st("rachaLimpias").asInstanceOf[Int]
+    val ultimos        = st("ultimos").asInstanceOf[List[Map[String, String]]]
+
+    def notaColor(n: Double) = if (n >= 7.0) "success" else if (n >= 5.0) "warning" else "danger"
+    def notaBadgeCls(n: Double) = if (n >= 7.0) "badge-green" else if (n >= 5.0) "badge-yellow" else "badge-red"
+
+    renderAm("home", user.nombre,
+      div(
+        // Bienvenida
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} 👋"),
+          span(cls := "text-muted small", if (pj == 0) "Registra tu primer partido para empezar."
+          else s"$pj partidos registrados")
+        ),
+
+        if (pj == 0)
+          div(cls := "card-am p-4 text-center mb-3",
+            div(style := "font-size:52px; opacity:0.4", "⚽"),
+            h5(cls := "text-muted mt-3", "Sin partidos aún"),
+            p(cls := "text-secondary small", "Pulsa en «Partido» para registrar tu primera actuación."),
+            a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
+          )
+        else frag(
+
+          // Próximo partido programado — Widget con cuenta atrás
+          upcoming.headOption.map { s =>
+            val tipoColor = s.tipo match {
+              case "LIGA"     => "#0d6efd"
+              case "TORNEO"   => "#dc3545"
+              case "CUP"      => "#6f42c1"
+              case _          => "#20c997"
+            }
+            val tipoBadge = s.tipo match {
+              case "LIGA"     => "LIGA"
+              case "TORNEO"   => "TORNEO"
+              case "CUP"      => "CUP"
+              case _          => "AMISTOSO"
+            }
+            div(cls := "card-am p-3 mb-3",
+              style := s"border-left: 4px solid $tipoColor;",
+              div(cls := "d-flex justify-content-between align-items-start mb-1",
+                div(cls := "xx-small fw-bold text-muted", "PROXIMO PARTIDO"),
+                span(cls := "badge rounded-pill xx-small",
+                  style := s"background:${tipoColor}22; color:$tipoColor;",
+                  tipoBadge)
+              ),
+              div(cls := "fw-black mb-1", style := "font-size:1.15rem;", s.rival),
+              div(cls := "xx-small text-muted mb-2",
+                s.fecha,
+                if (s.hora.nonEmpty) s" - ${s.hora}" else "",
+                if (s.lugar.nonEmpty) s" - ${s.lugar}" else ""
+              ),
+              div(id := "countdown-widget", cls := "fw-bold text-center mb-2",
+                style := s"font-size:1.05rem; color:$tipoColor;", "..."),
+              div(cls := "row g-1",
+                div(cls := "col-8",
+                  a(href := "/am/match-center", cls := "btn btn-sm fw-bold w-100",
+                    style := s"background:$tipoColor; color:#fff;", "Registrar partido")
+                ),
+                div(cls := "col-4",
+                  a(href := "/am/calendar", cls := "btn btn-sm btn-outline-secondary fw-bold w-100", "Agenda")
+                )
+              ),
+              script(raw(s"""
+                (function() {
+                  var target = new Date("${s.fecha}T${if (s.hora.nonEmpty && s.hora.length >= 5) s.hora else "10:00"}:00");
+                  function update() {
+                    var now = new Date(); var diff = target - now;
+                    var el = document.getElementById('countdown-widget');
+                    if (!el) return;
+                    if (diff <= 0) { el.textContent = "HOY JUEGAS!"; return; }
+                    var d = Math.floor(diff/86400000), h = Math.floor((diff%86400000)/3600000), m = Math.floor((diff%3600000)/60000);
+                    if (d > 0) el.textContent = d+"d "+h+"h para el partido";
+                    else if (h > 0) el.textContent = h+"h "+m+"m para el partido";
+                    else el.textContent = m+" minutos para el partido";
+                  }
+                  update(); setInterval(update, 60000);
+                })();
+              """))
+            )
+          }.getOrElse(
+            div(cls := "card-am p-3 mb-3 text-center",
+              style := "border-style:dashed;",
+              div(cls := "xx-small text-muted mt-1", "Sin partidos programados"),
+              a(href := "/am/calendar/add", cls := "btn btn-outline-primary btn-sm mt-2 fw-bold",
+                "+ Añadir a la agenda")
+            )
+          ),
+
+          // KPIs principales
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-6",
+              div(cls := "card-am p-3 text-center",
+                div(cls := s"fw-black text-${notaColor(notaMedia)}", style := "font-size:2.4rem;",
+                  f"$notaMedia%.1f"),
+                div(cls := "xx-small text-muted", "Nota media"),
+                if (notaAjustada > notaMedia + 0.05)
+                  div(cls := "xx-small text-success mt-1",
+                    f"↑ $notaAjustada%.1f ajustada")
+                else span()
+              )
+            ),
+            div(cls := "col-6",
+              div(cls := "card-am p-3 text-center",
+                div(cls := "fw-black text-danger", style := "font-size:2.4rem;",
+                  f"$gcMedia%.1f"),
+                div(cls := "xx-small text-muted", "GC por partido")
+              )
+            ),
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-bold text-success", style := "font-size:1.6rem;", limpias.toString),
+                div(cls := "xx-small text-muted", "Limpias")
+              )
+            ),
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-bold text-info", style := "font-size:1.6rem;", pj.toString),
+                div(cls := "xx-small text-muted", "Partidos")
+              )
+            ),
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-bold text-warning", style := "font-size:1.6rem;", rachaLimpias.toString),
+                div(cls := "xx-small text-muted", "Racha 0 GC")
+              )
+            )
+          ),
+
+          // Resultados + win rate
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex justify-content-around text-center",
+              div(
+                div(cls := "fw-black text-success", style := "font-size:1.8rem;", ganados.toString),
+                div(cls := "xx-small text-muted", "Ganados")
+              ),
+              div(cls := "border-start border-secondary"),
+              div(
+                div(cls := "fw-black text-warning", style := "font-size:1.8rem;", empatados.toString),
+                div(cls := "xx-small text-muted", "Empates")
+              ),
+              div(cls := "border-start border-secondary"),
+              div(
+                div(cls := "fw-black text-danger", style := "font-size:1.8rem;", perdidos.toString),
+                div(cls := "xx-small text-muted", "Perdidos")
+              ),
+              div(cls := "border-start border-secondary"),
+              {
+                val wr = if (pj > 0) (ganados.toDouble / pj * 100).toInt else 0
+                val wrColor = if (wr >= 60) "text-success" else if (wr >= 40) "text-warning" else "text-danger"
+                div(
+                  div(cls := s"fw-black $wrColor", style := "font-size:1.8rem;", s"$wr%"),
+                  div(cls := "xx-small text-muted", "Win rate")
+                )
+              }
+            )
+          ),
+
+          // Últimos partidos
+          if (ultimos.nonEmpty)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "ÚLTIMOS PARTIDOS"),
+              frag(ultimos.map { m =>
+                val nota = m("nota").toDouble
+                div(cls := "d-flex align-items-center gap-2 py-2",
+                  style := "border-bottom:1px solid #1e1e1e;",
+                  div(cls := s"nota-badge ${notaBadgeCls(nota)}", m("nota")),
+                  div(cls := "flex-fill",
+                    div(cls := "fw-bold small text-white", m("rival")),
+                    div(cls := "xx-small text-muted", m("fecha"))
+                  ),
+                  div(cls := "fw-black text-white small", m("res"))
+                )
+              }: _*)
+            )
+          else span(),
+
+          // Acceso rápido
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-6",
+              a(href := "/am/match-center", cls := "btn btn-primary w-100 fw-bold py-3",
+                "⚽ Nuevo partido")),
+            div(cls := "col-6",
+              a(href := "/am/progression", cls := "btn btn-outline-info w-100 fw-bold py-3",
+                "📈 Mi progreso"))
+          ),
+
+          // Temporada actual + historial
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex justify-content-between align-items-center mb-2",
+              div(
+                div(cls := "xx-small fw-bold text-muted", "TEMPORADA ACTUAL"),
+                div(cls := "fw-black text-white", style := "font-size:1.1rem;", s"Temporada $currentSeason")
+              ),
+              button(
+                tpe := "button",
+                cls := "btn btn-outline-warning btn-sm fw-bold",
+                style := "font-size:11px;",
+                attr("data-bs-toggle") := "modal",
+                attr("data-bs-target") := "#modalEndSeason",
+                "🏁 Finalizar temporada"
+              )
+            ),
+            if (pastSeasons.nonEmpty)
+              div(
+                div(cls := "xx-small fw-bold text-muted mb-2", "TEMPORADAS ANTERIORES"),
+                frag(pastSeasons.map { s =>
+                  div(cls := "d-flex justify-content-between align-items-center py-1",
+                    style := "border-bottom:1px solid #1e1e1e; font-size:11px;",
+                    div(cls := "text-muted", s"T${s("num")} · ${s("ended").take(7)}"),
+                    div(cls := "text-white",
+                      span(cls := "text-success me-1", s"${s("g")}G"),
+                      span(cls := "text-muted me-1", s"${s("e")}E"),
+                      span(cls := "text-danger me-1", s"${s("p")}P"),
+                      span(cls := "text-warning", s"★${s("nota")}")
+                    )
+                  )
+                }: _*)
+              )
+            else span()
+          ),
+
+          // Modal confirmación finalizar temporada
+          div(cls := "modal fade", id := "modalEndSeason",
+            attr("tabindex") := "-1",
+            div(cls := "modal-dialog modal-dialog-centered",
+              div(cls := "modal-content bg-dark border-warning",
+                div(cls := "modal-header border-warning",
+                  h5(cls := "modal-title text-warning fw-black", "🏁 Finalizar temporada"),
+                  button(tpe := "button", cls := "btn-close btn-close-white",
+                    attr("data-bs-dismiss") := "modal")
+                ),
+                div(cls := "modal-body text-white",
+                  p(s"¿Seguro que quieres cerrar la Temporada $currentSeason?"),
+                  p(cls := "text-muted small",
+                    "Se guardará un resumen de la temporada y todos los partidos nuevos contarán para la Temporada ",
+                    strong(cls := "text-warning", s"${currentSeason + 1}"),
+                    ". Los datos históricos se conservan.")
+                ),
+                div(cls := "modal-footer border-secondary",
+                  button(tpe := "button", cls := "btn btn-secondary",
+                    attr("data-bs-dismiss") := "modal", "Cancelar"),
+                  a(href := "/am/end-season", cls := "btn btn-warning fw-bold",
+                    "✅ Confirmar y nueva temporada")
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  }
+
+  // ── MATCH CENTER ───────────────────────────────────────────────────────────
+  @cask.get("/am/match-center")
+  def matchCenterPage(request: cask.Request) = withAmAuth(request) { user =>
+    renderAm("match", user.nombre,
+      div(
+        h5(cls := "fw-black text-white mb-3", "⚽ Registrar partido"),
+
+        form(action := "/am/match/save", method := "post", id := "matchForm",
+
+          // Selector de posición
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "DE QUE JUGASTE?"),
+            div(cls := "d-flex gap-2",
+              div(cls := "flex-fill",
+                input(tpe := "radio", name := "posicion_partido", id := "pos_portero",
+                  value := "portero", checked := true, style := "display:none;",
+                  attr("onchange") := "togglePosicion()"),
+                label(cls := "btn btn-primary w-100 fw-bold", attr("for") := "pos_portero",
+                  id := "lbl_portero", style := "font-size:13px;", "Portero")
+              ),
+              div(cls := "flex-fill",
+                input(tpe := "radio", name := "posicion_partido", id := "pos_jugador",
+                  value := "jugador", style := "display:none;",
+                  attr("onchange") := "togglePosicion()"),
+                label(cls := "btn btn-outline-secondary w-100 fw-bold", attr("for") := "pos_jugador",
+                  id := "lbl_jugador", style := "font-size:13px;", "Jugador de campo")
+              )
+            ),
+            div(id := "posicion_campo_div", style := "display:none;",
+              div(cls := "mt-2",
+                label(cls := "xx-small text-muted fw-bold", "POSICION EN CAMPO"),
+                select(name := "posicion_campo", cls := "form-select mt-1",
+                  option(value := "Delantero", "Delantero"),
+                  option(value := "Centrocampista", "Centrocampista"),
+                  option(value := "Extremo", "Extremo"),
+                  option(value := "Defensa", "Defensa")
+                )
+              ),
+              div(cls := "row g-2 mt-1",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "GOLES MARCADOS"),
+                  input(tpe := "number", name := "goles_marcados", value := "0",
+                    cls := "form-control mt-1", attr("min") := "0", attr("max") := "20")
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "ASISTENCIAS"),
+                  input(tpe := "number", name := "asistencias", value := "0",
+                    cls := "form-control mt-1", attr("min") := "0", attr("max") := "20")
+                )
+              )
+            )
+          ),
+
+          // Rival y fecha
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "row g-2",
+              div(cls := "col-8",
+                label(cls := "xx-small text-muted fw-bold", "RIVAL"),
+                input(tpe := "text", name := "rival", cls := "form-control bg-dark text-white border-secondary mt-1", placeholder := "Nombre del equipo rival", required := true)
+              ),
+              div(cls := "col-4",
+                label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                input(tpe := "date", name := "fecha", cls := "form-control bg-dark text-white border-secondary mt-1",
+                  value := java.time.LocalDate.now().toString)
+              )
+            )
+          ),
+
+          // Resultado
+          div(cls := "card-am p-3 mb-3", id := "gc_section",
+            div(cls := "xx-small text-muted fw-bold mb-2", "RESULTADO"),
+            div(cls := "row g-3 text-center",
+              div(cls := "col-5",
+                label(cls := "small text-success fw-bold", "A FAVOR"),
+                input(tpe := "number", name := "gf", id := "inGF",
+                  cls := "form-control text-center bg-success bg-opacity-25 text-white border-0 fw-black mt-1",
+                  style := "font-size:2rem;", value := "0", min := "0", attr("inputmode") := "numeric")
+              ),
+              div(cls := "col-2 d-flex align-items-center justify-content-center",
+                span(cls := "text-muted fw-bold", style := "font-size:1.5rem;", "−")
+              ),
+              div(cls := "col-5",
+                label(cls := "small text-danger fw-bold", "EN CONTRA"),
+                input(tpe := "number", name := "gc", id := "inGC",
+                  cls := "form-control text-center bg-danger bg-opacity-25 text-white border-0 fw-black mt-1",
+                  style := "font-size:2rem;", value := "0", min := "0",
+                  attr("inputmode") := "numeric",
+                  attr("oninput") := "syncGoalCount(this.value)")
+              )
+            )
+          ),
+
+          // Nota
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small text-muted fw-bold mb-2", "TU NOTA (1-10)"),
+            div(cls := "d-flex align-items-center gap-3",
+              input(tpe := "range", name := "nota", id := "notaSlider",
+                cls := "form-range flex-fill", min := "1", max := "10", step := "0.5", value := "7",
+                attr("oninput") := "document.getElementById('notaVal').textContent=this.value"),
+              span(id := "notaVal", cls := "fw-black text-warning", style := "font-size:1.8rem; min-width:40px;", "7")
+            )
+          ),
+
+          // Clima + Local/Visitante
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "row g-2",
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "CLIMA"),
+                select(name := "clima", cls := "form-select bg-dark text-white border-secondary mt-1",
+                  option(value := "Sol", "☀️ Sol"),
+                  option(value := "Nubes", "☁️ Nubes"),
+                  option(value := "Lluvia", "🌧️ Lluvia"),
+                  option(value := "Frio", "❄️ Frío"),
+                  option(value := "Viento", "💨 Viento")
+                )
+              ),
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "ESTADIO"),
+                input(tpe := "text", name := "estadio", cls := "form-control bg-dark text-white border-secondary mt-1",
+                  placeholder := "Campo o pabellón")
+              )
+            ),
+            div(cls := "mt-2",
+              label(cls := "xx-small text-muted fw-bold", "¿LOCAL O VISITANTE?"),
+              div(cls := "d-flex gap-2 mt-1",
+                frag(Seq(("", "— Sin especificar"), ("true", "?? Local"), ("false", "✈️ Visitante")).map {
+                  case (v, lbl) =>
+                    label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
+                      style := "cursor:pointer; background:#1a1a1a;",
+                      input(tpe := "radio", name := "esLocal", value := v, cls := "d-none",
+                        if (v == "") attr("checked") := "checked" else span()),
+                      span(lbl)
+                    )
+                }: _*)
+              )
+            )
+          ),
+
+          // Mapa de goles encajados
+          div(cls := "card-am p-3 mb-3", id := "goalsSection",
+            div(cls := "d-flex justify-content-between align-items-center mb-2",
+              span(cls := "xx-small text-muted fw-bold", "GOLES ENCAJADOS — Zona y contexto"),
+              span(id := "goalCounter", cls := "badge bg-danger", "0 goles")
+            ),
+            div(id := "goalsList"),
+            div(cls := "text-center",
+              button(tpe := "button", cls := "btn btn-outline-danger btn-sm mt-2 fw-bold",
+                attr("onclick") := "addGoalRow()",
+                "+ Añadir gol encajado")
+            ),
+            input(tpe := "hidden", name := "goalsData", id := "goalsData")
+          ),
+
+          // Video (opcional)
+          div(cls := "card-am p-3 mb-3",
+            label(cls := "xx-small text-muted fw-bold", "ENLACE DE VÍDEO (opcional)"),
+            input(tpe := "url", name := "video", cls := "form-control bg-dark text-white border-secondary mt-1",
+              placeholder := "https://youtube.com/...")
+          ),
+
+          // Notas
+          div(cls := "card-am p-3 mb-3",
+            label(cls := "xx-small text-muted fw-bold", "NOTAS DEL PARTIDO"),
+            textarea(name := "notas", cls := "form-control bg-dark text-white border-secondary mt-1",
+              rows := "3", placeholder := "Qué salió bien, qué mejorar...")()
+          ),
+
+          button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold py-3 mb-2",
+            "GUARDAR PARTIDO")
+        ),
+
+        // JavaScript para el formulario
+        script(raw("""
+          var goalCount = 0;
+          var goals = [];
+          var zones = ['TL','TC','TR','ML','MC','MR','BL','BC','BR'];
+          var zoneLabels = {
+            'TL':'↖ Alto Izq','TC':'↑ Alto Cen','TR':'↗ Alto Der',
+            'ML':'← Med Izq','MC':'· Centro','MR':'→ Med Der',
+            'BL':'↙ Bajo Izq','BC':'↓ Bajo Cen','BR':'↘ Bajo Der'
+          };
+
+          function syncGoalCount(val) {
+            document.getElementById('goalCounter').textContent = val + ' goles';
+          }
+
+          function addGoalRow() {
+            goalCount++;
+            var id = 'goal_' + goalCount;
+            var html = '<div id="' + id + '" class="card bg-dark border-secondary p-2 mb-2 rounded">' +
+              '<div class="d-flex justify-content-between align-items-center mb-2">' +
+              '<span class="xx-small text-danger fw-bold">GOL ' + goalCount + '</span>' +
+              '<button type="button" class="btn btn-outline-secondary btn-sm xx-small" onclick="removeGoal(\'' + id + '\')">✕</button>' +
+              '</div>' +
+              '<div class="xx-small text-muted fw-bold mb-1">Zona de portería:</div>' +
+              '<div class="row g-1 mb-2" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">';
+
+            zones.forEach(function(z) {
+              html += '<button type="button" class="btn-goal-zone" id="' + id + '_zone_' + z + '"' +
+                ' onclick="selectZone(\'' + id + '\',\'' + z + '\')">' + zoneLabels[z] + '</button>';
+            });
+
+            html += '</div>' +
+              '<div class="xx-small text-muted fw-bold mb-1">Situación:</div>' +
+              '<select id="' + id + '_sit" class="form-select form-select-sm bg-dark text-white border-secondary mb-2">' +
+              '<option value="Remate">Remate</option>' +
+              '<option value="1v1">1 vs 1</option>' +
+              '<option value="2v1">2 vs 1</option>' +
+              '<option value="Cabezazo">Cabezazo</option>' +
+              '<option value="Tiro libre">Tiro libre</option>' +
+              '<option value="Penalti">Penalti</option>' +
+              '</select>' +
+              '<div class="form-check">' +
+              '<input class="form-check-input" type="checkbox" id="' + id + '_errdef">' +
+              '<label class="form-check-label xx-small text-warning" for="' + id + '_errdef">' +
+              '⚠️ Error defensivo del equipo (no cuenta para mi nota)' +
+              '</label>' +
+              '</div>' +
+              '</div>';
+
+            document.getElementById('goalsList').insertAdjacentHTML('beforeend', html);
+            // Select center by default
+            selectZone(id, 'MC');
+            syncGoalCount(document.getElementById('inGC').value);
+          }
+
+          function selectZone(goalId, zone) {
+            zones.forEach(function(z) {
+              var btn = document.getElementById(goalId + '_zone_' + z);
+              if (btn) btn.classList.toggle('selected', z === zone);
+            });
+          }
+
+          function removeGoal(id) {
+            var el = document.getElementById(id);
+            if (el) el.remove();
+          }
+
+          function getSelectedZone(goalId) {
+            var selected = 'MC';
+            zones.forEach(function(z) {
+              var btn = document.getElementById(goalId + '_zone_' + z);
+              if (btn && btn.classList.contains('selected')) selected = z;
+            });
+            return selected;
+          }
+
+          // Serializar antes de enviar
+          document.getElementById('matchForm').addEventListener('submit', function() {
+            var rows = document.getElementById('goalsList').querySelectorAll('[id^="goal_"]');
+            var data = [];
+            rows.forEach(function(row) {
+              var gid = row.id;
+              data.push(
+                getSelectedZone(gid) + '|' +
+                document.getElementById(gid + '_sit').value + '|' +
+                (document.getElementById(gid + '_errdef').checked ? '1' : '0')
+              );
+            });
+            document.getElementById('goalsData').value = data.join(';');
+          });
+
+          // Toggle portero / jugador de campo
+          function togglePosicion() {
+            var esJugador = document.getElementById('pos_jugador').checked;
+            document.getElementById('posicion_campo_div').style.display = esJugador ? 'block' : 'none';
+            document.getElementById('goalsSection').style.display      = esJugador ? 'none'  : 'block';
+            document.getElementById('lbl_portero').className = esJugador
+              ? 'btn btn-outline-secondary w-100 fw-bold'
+              : 'btn btn-primary w-100 fw-bold';
+            document.getElementById('lbl_jugador').className = esJugador
+              ? 'btn btn-primary w-100 fw-bold'
+              : 'btn btn-outline-secondary w-100 fw-bold';
+          }
+          // Inicializar estado
+          togglePosicion();
+
+          // Radio buttons local/visitante visual
+          document.querySelectorAll('input[name="esLocal"]').forEach(function(r) {
+            r.addEventListener('change', function() {
+              document.querySelectorAll('input[name="esLocal"]').forEach(function(x) {
+                x.parentElement.style.background = '#1a1a1a';
+                x.parentElement.style.color = '';
+              });
+              this.parentElement.style.background =
+                this.value === 'true' ? 'rgba(40,167,69,0.2)' :
+                this.value === 'false' ? 'rgba(13,202,240,0.2)' : '#1a1a1a';
+            });
+          });
+        """))
+      )
+    )
+  }
+
+  @cask.post("/am/match/save")
+  def saveMatch(request: cask.Request) = withAmAuth(request) { user =>
+    val body = new String(request.data.readAllBytes(), "UTF-8")
+    val params = body.split("&").map { pair =>
+      val p = pair.split("=", 2)
+      val k = java.net.URLDecoder.decode(p(0), "UTF-8")
+      val v = if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else ""
+      k -> v
     }.toMap
 
-    // Funciones auxiliares de extraccion
-    def getStr(key: String): String = formData.getOrElse(key, "")
-    def getInt(key: String): Int = try { getStr(key).toInt } catch { case _: Exception => 0 }
-    def getDouble(key: String): Double = try { getStr(key).toDouble } catch { case _: Exception => 0.0 }
+    def str(k: String) = params.getOrElse(k, "")
+    def int(k: String) = try str(k).toInt catch { case _: Exception => 0 }
+    def dbl(k: String) = try str(k).toDouble catch { case _: Exception => 0.0 }
 
-    // Los 23 parametros (Extraidos manualmente del mapa)
-    val scheduleId = getInt("scheduleId")
-    val rival = getStr("rival")
-    val gf = getInt("gf")
-    val gc = getInt("gc")
-    val minutos = getInt("minutos")
-    val nota = getDouble("nota")
-    val paradas = getInt("paradas")
-    val zonaGoles = getStr("zonaGoles")
-    val zonaTiros = getStr("zonaTiros")
-    val zonaParadas = getStr("zonaParadas")
-    val clima = getStr("clima")
-    val estadio = getStr("estadio")
-    val temp = getInt("temp")
-    val notas = getStr("notas")
-    val video = getStr("video")
-    val reaccion = getStr("reaccion")
-    val fecha = getStr("fecha")
-    val mode = getStr("mode")
-    val passData = getStr("passData")
-    val actionData = getStr("actionData")
-    val tipo = getStr("tipo")
-    val mapaCampo  = getStr("mapaCampo")
-    val goalsData  = getStr("goalsData")
-    val lineasSup    = getInt("lineasSuperadas")
-    val scanningRate = getInt("scanningRate")
-    val esLocalStr   = getStr("esLocal")
-    val esLocalOpt: Option[Boolean] = esLocalStr match {
+    val esLocalOpt: Option[Boolean] = str("esLocal") match {
       case "true"  => Some(true)
       case "false" => Some(false)
       case _       => None
     }
 
-    // --- LOGICA DE PROCESAMIENTO (Base de datos y calculos) ---
-    val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
-    val (pcTot, pcOk, plTot, plOk) = if(pArr.length >= 4) (pArr(0), pArr(1), pArr(2), pArr(3)) else (0,0,0,0)
-    val aArr = actionData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
-    val (p1v1, pAir, pPie) = if(aArr.length >= 3) (aArr(0), aArr(1), aArr(2)) else (0,0,0)
-
-    val cleanRival = fixEncoding(rival)
-    val cleanNotas = fixEncoding(notas)
-    val cleanReaccion = fixEncoding(reaccion)
-
-    val c = DatabaseManager.getLatestCardData()
-    val n = StatsCalculator.calculateGrowth(c, minutos, gc, nota, paradas, pcTot, pcOk, plTot, plOk)
-    DatabaseManager.updateStats(n)
-
-    if (scheduleId > 0) {
-      DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo)
-    } else {
-      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt)
+    val posicionPartido = str("posicion_partido") match {
+      case "jugador" => "jugador"
+      case _         => "portero"
     }
+    val posicionCampo   = str("posicion_campo")
+    val golesMarcados   = int("goles_marcados")
+    val asistencias     = int("asistencias")
 
-    // Guardar contexto de goles encajados
-    if (goalsData.nonEmpty) {
-      val matchId: Int = DatabaseManager.getLastMatchId()
-      DatabaseManager.deleteMatchGoals(matchId)  // limpiar si es re-save
+    val matchId = AmateurDatabaseManager.logMatch(
+      userId   = user.id,
+      rival    = str("rival"),
+      gf       = int("gf"),
+      gc       = int("gc"),
+      nota     = dbl("nota"),
+      clima    = str("clima"),
+      estadio  = str("estadio"),
+      esLocal  = esLocalOpt,
+      fecha    = str("fecha"),
+      videoUrl = str("video"),
+      notas    = str("notas"),
+      posicionPartido = posicionPartido,
+      posicionCampo   = posicionCampo,
+      golesMarcados   = golesMarcados,
+      asistencias     = asistencias
+    )
+
+    // Guardar goles
+    val goalsData = str("goalsData")
+    if (goalsData.nonEmpty && matchId > 0) {
       goalsData.split(";").foreach { row =>
-        val parts = row.split("\\|", -1)
-        if (parts.length >= 6) {
-          val minuto   = try parts(0).toInt catch { case _: Exception => 0 }
-          val origen   = if (parts.length > 1) parts(1) else ""
-          val situacion= if (parts.length > 2) parts(2) else ""
-          val resp     = if (parts.length > 3) parts(3) else "Media"
-          val parable  = if (parts.length > 4) parts(4) else "Dudoso"
-          val zona     = if (parts.length > 5) parts(5) else ""
-          val notaG    = if (parts.length > 6) parts(6) else ""
-          DatabaseManager.saveMatchGoal(matchId, minuto, origen, situacion, resp, parable, zona, notaG)
+        val parts = row.split("\\|")
+        if (parts.length >= 3) {
+          AmateurDatabaseManager.saveGoal(
+            matchId        = matchId,
+            zona           = parts(0),
+            situacion      = parts(1),
+            errorDefensivo = parts(2) == "1",
+            minuto         = 0,
+            notas          = ""
+          )
         }
       }
     }
 
-    // Respuesta visual renderizada como Array[Byte] para cumplir con withAuth
-    val d = n.media - c.media
-    val msg = if(d > 0) s"SUBIDA DE NIVEL! +$d" else "Experiencia acumulada..."
-
-    val mediaAntes = c.media.toInt
-    val mediaDespues = n.media
-    cask.Response(
-      "".getBytes("UTF-8"),
-      statusCode = 302,
-      headers = Seq("Location" -> s"/match-center/saved?antes=$mediaAntes&despues=$mediaDespues&msg=${java.net.URLEncoder.encode(msg, "UTF-8")}")
-    )
+    cask.Response(Array.emptyByteArray, 302,
+      headers = Seq("Location" -> "/am/dashboard"))
   }
-  @cask.get("/match-center/saved")
-  def matchSavedPage(request: cask.Request, antes: Int = 0, despues: Int = 0, msg: String = "") = withAuth(request) {
-    val diff = despues - antes
-    val (arrowColor, arrowSymbol) = if (diff > 0) ("success", "+") else if (diff == 0) ("warning", "=") else ("danger", "")
-    renderHtml(doctype("html")(
-      html(
-        head(
-          meta(charset := "utf-8"),
-          tags2.title("Guardado"),
-          tags2.style(raw(getCss())),
-          meta(attr("http-equiv") := "refresh", content := "4; url=/")
+
+  // ── HISTORIAL ──────────────────────────────────────────────────────────────
+  @cask.get("/am/history")
+  def historyPage(request: cask.Request) = withAmAuth(request) { user =>
+    val matches = AmateurDatabaseManager.getMatches(user.id)
+
+    def notaBadgeCls(n: Double) = if (n >= 7.0) "badge-green" else if (n >= 5.0) "badge-yellow" else "badge-red"
+    def climaIcon(c: String) = c.toLowerCase match {
+      case s if s.contains("sol")  => "☀️"
+      case s if s.contains("lluv") => "??️"
+      case s if s.contains("frio") => "??"
+      case s if s.contains("vient")=> "??"
+      case _                       => "☁️"
+    }
+
+    renderAm("history", user.nombre,
+      div(
+        div(cls := "d-flex justify-content-between align-items-center mb-3",
+          h5(cls := "fw-black text-white mb-0", "?? Historial"),
+          a(href := "/am/match-center", cls := "btn btn-primary btn-sm fw-bold", "+ Partido")
         ),
-        body(style := "background:#1a1a1a; color:white; text-align:center; padding-top:60px; font-family:'Oswald';",
-          div(style := "font-size:52px; margin-bottom:10px;", "✅"),
-          h2(style := "color:#d4af37; letter-spacing:2px;", "ANALISIS GUARDADO"),
-          div(style := "margin:30px auto; width:320px; background:#242424; padding:24px; border-radius:12px; border:1px solid #444;",
-            div(style := "font-size:13px; color:#aaa; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;", "Media Global"),
-            div(style := "font-size:52px; font-weight:700;",
-              span(style := "color:#888;", s"$antes"),
-              span(style := "color:#555; margin:0 10px;", "→"),
-              span(style := s"color:${if(diff>0)"#28a745"else if(diff==0)"#ffc107"else"#dc3545"};", s"$despues")
-            ),
-            if (diff != 0)
-              p(style := s"color:${if(diff>0)"#28a745"else"#dc3545"}; font-size:20px; font-weight:700; margin-top:8px;",
-                s"$arrowSymbol$diff puntos")
-            else p(),
-            p(style := "color:#ffc107; font-size:14px; margin-top:10px;", java.net.URLDecoder.decode(msg, "UTF-8"))
-          ),
-          p(style := "color:#555; font-size:13px; margin-top:20px;", "Redirigiendo al inicio en 4 segundos..."),
-          a(href := "/", style := "color:white; text-decoration:none; border:1px solid #555; padding:10px 24px; border-radius:6px; font-size:14px; letter-spacing:1px;", "INICIO")
-        )
-      )
-    ).render)
-  }
 
-  @cask.get("/tournament/new")
-  def newTournamentPage() = {
-    val content = basePage("match-center",
-      div(cls := "row justify-content-center",
-        div(cls := "col-md-8",
-          div(cls := "card bg-dark text-white border-warning shadow",
-            div(cls := "card-header bg-warning text-dark fw-bold text-center", "🏆 NUEVO TORNEO"),
-            div(cls := "card-body",
-              form(action := "/tournament/create", method := "post",
-                div(cls := "mb-3",
-                  label(cls := "form-label fw-bold", "Nombre del Torneo"),
-                  input(tpe := "text", name := "nombre", cls := "form-control fw-bold",
-                    placeholder := "Ej: Mundialito Algarve", required := true)
+        if (matches.isEmpty)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:40px; opacity:0.3", "??"),
+            p(cls := "text-muted mt-3", "Aún no has registrado ningún partido.")
+          )
+        else
+          frag(matches.map { m =>
+            val gcStr   = if (m.gc == 0) "✅" else m.gc.toString
+            val locStr  = m.esLocal match { case Some(true) => "??" case Some(false) => "✈️" case None => "" }
+            div(cls := "card-am p-3 mb-2",
+              div(cls := "d-flex align-items-center gap-3",
+                div(cls := s"nota-badge ${notaBadgeCls(m.nota)}", f"${m.nota}%.1f"),
+                div(cls := "flex-fill",
+                  div(cls := "fw-bold text-white small",
+                    span(locStr, " "), m.rival),
+                  div(cls := "xx-small text-muted",
+                    s"${m.fecha}  ${climaIcon(m.clima)}")
                 ),
-                div(cls := "mb-3",
-                  label(cls := "form-label fw-bold", "Cuadro / Estructura"),
-                  div(cls := "alert alert-secondary small p-2 fw-bold",
-                    "Formato por linea: FASE | RIVAL | FECHA (AAAA-MM-DD)"),
-                  textarea(name := "estructura", cls := "form-control bg-secondary text-white fw-bold",
-                    rows := "6",
-                    placeholder := "Fase Grupos | Betis | 2026-04-12\nFase Grupos | Benfica | 2026-04-12\nCuartos | ? | 2026-04-13\nFinal | ? | 2026-04-14")
-                ),
-                div(cls := "d-grid",
-                  button(tpe := "submit", cls := "btn btn-warning fw-bold", "GENERAR CUADRO")
+                div(cls := "text-end",
+                  div(cls := "fw-black text-white", s"${m.gf}—${m.gc}"),
+                  div(cls := "xx-small text-muted", s"GC: $gcStr")
                 )
               )
             )
-          ),
-          div(cls := "text-center mt-3",
-            a(href := "/match-center", cls := "text-muted", "Cancelar")
-          )
-        )
+          }: _*)
       )
     )
-    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
-  }
-  @cask.postForm("/tournament/create")
-  def createTournamentAction(nombre: String, estructura: String) = {
-    val res = DatabaseManager.createTournament(nombre, estructura)
-    val htmlStr = doctype("html")(html(
-      head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
-      body(style := "background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';",
-        h1("TORNEO CREADO"),
-        h3(res),
-        div(style := "margin-top:20px;",
-          a(href := "/match-center", cls := "btn btn-warning fw-bold", "Ir a Jugar")
-        )
-      )
-    )).render
-    cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
-  @cask.get("/match/delete/:id")
-  def deleteMatchAction(id: Int) = {
-    DatabaseManager.deleteMatch(id)
-    cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
-  }
-  @cask.get("/match/edit/:matchId")
-  def editMatchPage(matchId: Int) = {
-    val m = DatabaseManager.getMatchById(matchId)
-    if (m.isEmpty) {
-      cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
-    } else {
-      val matchData = m.get
-      val (gf, gc)  = if (matchData.resultado.contains("-"))
-        (matchData.resultado.split("-")(0), matchData.resultado.split("-")(1))
-      else ("0", "0")
-      val tags = DatabaseManager.getVideoTags(matchId)
+  // ── PENALTIS ───────────────────────────────────────────────────────────────
+  @cask.get("/am/penalties")
+  def penaltiesPage(request: cask.Request) = withAmAuth(request) { user =>
+    val penalties = AmateurDatabaseManager.getPenalties(user.id)
+    val stats     = AmateurDatabaseManager.getPenaltyStats(user.id)
 
-      // --- Widget de tags de video ---
-      val tagList = if (matchData.video.nonEmpty) {
-        val tItems = for (t <- tags) yield {
-          val link = if (matchData.video.contains("?"))
-            s"${matchData.video}&t=${t.minuto * 60 + t.segundo}"
-          else
-            s"${matchData.video}?t=${t.minuto * 60 + t.segundo}"
-          a(href := link, target := "_blank",
-            cls := "list-group-item list-group-item-action bg-dark text-white border-secondary d-flex justify-content-between align-items-center",
-            div(
-              span(cls := "badge bg-danger me-2", s"${t.minuto}:${t.segundo}"),
-              span(t.tipo)
+    val total          = stats("total").asInstanceOf[Int]
+    val paradas        = stats("paradas").asInstanceOf[Int]
+    val adivinados     = stats("adivinados").asInstanceOf[Int]
+    val pctParada      = stats("pctParada").asInstanceOf[Int]
+    val pctIntuicion   = stats("pctIntuicion").asInstanceOf[Int]
+    val parConInt      = stats("paradasConIntuicion").asInstanceOf[Int]
+    val tirIzq         = stats("tirIzq").asInstanceOf[Int]
+    val tirCen         = stats("tirCen").asInstanceOf[Int]
+    val tirDer         = stats("tirDer").asInstanceOf[Int]
+    val estIzq         = stats("estIzq").asInstanceOf[Int]
+    val estCen         = stats("estCen").asInstanceOf[Int]
+    val estDer         = stats("estDer").asInstanceOf[Int]
+
+    def pct(n: Int, d: Int) = if (d > 0) n * 100 / d else 0
+    def barWidth(n: Int, d: Int) = s"${pct(n, d)}%"
+
+    renderAm("penalties", user.nombre,
+      div(
+        h5(cls := "fw-black text-white mb-3", "?? Penaltis"),
+
+        // Estadísticas
+        if (total > 0) frag(
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-black text-white", style := "font-size:1.8rem;", total.toString),
+                div(cls := "xx-small text-muted", "Totales")
+              )
             ),
-            a(href := s"/video/delete_tag/${t.id}/$matchId",
-              cls := "text-danger fw-bold text-decoration-none", "X")
-          )
-        }
-        div(
-          form(action := "/video/add_tag", method := "post", cls := "row g-2 mb-3",
-            input(tpe := "hidden", name := "matchId", value := matchId.toString),
-            div(cls := "col-3",
-              input(tpe := "number", name := "min", cls := "form-control form-control-sm",
-                placeholder := "Min", required := true)
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-black text-success", style := "font-size:1.8rem;", s"$pctParada%"),
+                div(cls := "xx-small text-muted", "Parados")
+              )
             ),
-            div(cls := "col-3",
-              input(tpe := "number", name := "sec", cls := "form-control form-control-sm",
-                placeholder := "Sec", required := true)
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-black text-warning", style := "font-size:1.8rem;", s"$pctIntuicion%"),
+                div(cls := "xx-small text-muted", "Intuición")
+              )
+            )
+          ),
+
+          // Desglose intuición
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small text-muted fw-bold mb-2", "ANÁLISIS DE INTUICIÓN"),
+            div(cls := "small text-white mb-1",
+              s"Adivinaste el lado $adivinados de $total veces ($pctIntuicion%)"),
+            div(cls := "progress mb-2", style := "height:8px;",
+              div(cls := "progress-bar bg-warning", style := s"width:$pctIntuicion%;")
+            ),
+            if (parConInt > 0)
+              div(cls := "xx-small text-success",
+                s"✅ $parConInt paradas con intuición correcta (te tiraste al lado correcto Y la paraste)")
+            else span(),
+            div(cls := "xx-small text-muted mt-2 fst-italic",
+              if (pctIntuicion >= 60) "?? Buena lectura de penaltis. Confía en tu instinto."
+              else if (pctIntuicion >= 40) "?? Intuición media. Estudia las tendencias del tiro."
+              else "?? Trabajo de análisis de tendencias recomendado."
+            )
+          ),
+
+          // Tendencias
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-6",
+              div(cls := "card-am p-3",
+                div(cls := "xx-small text-muted fw-bold mb-2", "DÓNDE TIRAN"),
+                frag(Seq(("Izquierda", tirIzq), ("Centro", tirCen), ("Derecha", tirDer)).map { case (lbl, n) =>
+                  div(cls := "mb-2",
+                    div(cls := "d-flex justify-content-between xx-small mb-1",
+                      span(cls := "text-white", lbl),
+                      span(cls := "text-danger fw-bold", n.toString)
+                    ),
+                    div(cls := "progress", style := "height:6px;",
+                      div(cls := "progress-bar bg-danger", style := s"width:${barWidth(n, total)};")
+                    )
+                  )
+                }: _*)
+              )
             ),
             div(cls := "col-6",
-              div(cls := "input-group input-group-sm",
-                select(name := "tipo", cls := "form-select",
-                  option("PARADA"), option("ERROR"), option("GOL"), option("PASE")
+              div(cls := "card-am p-3",
+                div(cls := "xx-small text-muted fw-bold mb-2", "DÓNDE TE TIRAS"),
+                frag(Seq(("Izquierda", estIzq), ("Centro", estCen), ("Derecha", estDer)).map { case (lbl, n) =>
+                  div(cls := "mb-2",
+                    div(cls := "d-flex justify-content-between xx-small mb-1",
+                      span(cls := "text-white", lbl),
+                      span(cls := "text-primary fw-bold", n.toString)
+                    ),
+                    div(cls := "progress", style := "height:6px;",
+                      div(cls := "progress-bar bg-primary", style := s"width:${barWidth(n, total)};")
+                    )
+                  )
+                }: _*)
+              )
+            )
+          )
+        ) else div(),
+
+        // Formulario registro
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "fw-bold small text-white mb-3", "➕ Registrar penalti"),
+          form(action := "/am/penalties/save", method := "post",
+
+            div(cls := "row g-2 mb-3",
+              div(cls := "col-8",
+                label(cls := "xx-small text-muted fw-bold", "RIVAL"),
+                input(tpe := "text", name := "rival", cls := "form-control bg-dark text-white border-secondary mt-1",
+                  placeholder := "Nombre del tirador (opcional)")
+              ),
+              div(cls := "col-4",
+                label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                input(tpe := "date", name := "fecha", cls := "form-control bg-dark text-white border-secondary mt-1",
+                  value := java.time.LocalDate.now().toString)
+              )
+            ),
+
+            // Dirección del tiro
+            div(cls := "mb-3",
+              div(cls := "xx-small text-muted fw-bold mb-2", "?? DIRECCIÓN DEL TIRO"),
+              div(cls := "row g-2",
+                frag(Seq("Izquierda", "Centro", "Derecha").map { d =>
+                  div(cls := "col-4",
+                    label(cls := "d-block",
+                      input(tpe := "radio", name := "dirTiro", value := d, cls := "d-none", required := true),
+                      div(cls := "btn-dir text-center", id := s"tiro_$d",
+                        attr("onclick") := s"selectDir('tiro','$d')",
+                        if (d == "Izquierda") "← Izq" else if (d == "Derecha") "Der →" else "● Cen"
+                      )
+                    )
+                  )
+                }: _*)
+              )
+            ),
+
+            // Dirección de la estirada
+            div(cls := "mb-3",
+              div(cls := "xx-small text-muted fw-bold mb-2", "?? ¿DÓNDE TE TIRASTE?"),
+              div(cls := "row g-2",
+                frag(Seq("Izquierda", "Centro", "Derecha").map { d =>
+                  div(cls := "col-4",
+                    label(cls := "d-block",
+                      input(tpe := "radio", name := "dirEstirada", value := d, cls := "d-none", required := true),
+                      div(cls := "btn-dir text-center", id := s"est_$d",
+                        attr("onclick") := s"selectDir('est','$d')",
+                        if (d == "Izquierda") "← Izq" else if (d == "Derecha") "Der →" else "● Cen"
+                      )
+                    )
+                  )
+                }: _*)
+              )
+            ),
+
+            // Resultado
+            div(cls := "mb-3",
+              div(cls := "xx-small text-muted fw-bold mb-2", "RESULTADO"),
+              div(cls := "d-flex gap-2",
+                frag(Seq(("true", "✅ Parada"), ("false", "❌ Gol")).map { case (v, lbl) =>
+                  label(cls := "flex-fill text-center border border-secondary rounded p-2 xx-small fw-bold",
+                    style := "cursor:pointer; background:#1a1a1a;",
+                    input(tpe := "radio", name := "parada", value := v, cls := "d-none",
+                      if (v == "false") attr("checked") := "checked" else span()),
+                    span(lbl)
+                  )
+                }: _*)
+              )
+            ),
+
+            button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar penalti")
+          )
+        ),
+
+        // Historial de penaltis
+        if (penalties.nonEmpty)
+          div(cls := "card-am p-3",
+            div(cls := "xx-small text-muted fw-bold mb-2", "HISTORIAL"),
+            frag(penalties.take(20).map { p =>
+              val intuicion = p.direccionTiro == p.direccionEstirada
+              val icono = if (p.parada) "✅" else if (intuicion) "??" else "❌"
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid #1e1e1e;",
+                span(style := "font-size:18px;", icono),
+                div(cls := "flex-fill",
+                  div(cls := "xx-small text-white",
+                    if (p.rival.nonEmpty) p.rival else "Sin rival"),
+                  div(cls := "xx-small text-muted", p.fecha)
                 ),
-                button(tpe := "submit", cls := "btn btn-warning", "+")
+                div(cls := "text-end xx-small",
+                  div(cls := "text-danger", s"Tiro: ${p.direccionTiro}"),
+                  div(cls := "text-primary", s"Estirada: ${p.direccionEstirada}")
+                ),
+                form(action := "/am/penalties/delete", method := "post", cls := "ms-1",
+                  input(tpe := "hidden", name := "penaltyId", value := p.id.toString),
+                  button(tpe := "submit", cls := "btn btn-outline-secondary btn-sm xx-small", "✕")
+                )
+              )
+            }: _*)
+          )
+        else div(),
+
+        script(raw("""
+          function selectDir(group, dir) {
+            ['Izquierda','Centro','Derecha'].forEach(function(d) {
+              var el = document.getElementById(group + '_' + d);
+              if (el) {
+                el.classList.remove('selected-tiro', 'selected-estirada');
+                if (d === dir) el.classList.add(group === 'tiro' ? 'selected-tiro' : 'selected-estirada');
+              }
+              // también marcar el radio
+              var radio = document.querySelector('input[name="' + (group === 'tiro' ? 'dirTiro' : 'dirEstirada') + '"][value="' + d + '"]');
+              if (radio) radio.checked = (d === dir);
+            });
+          }
+          // visual para radio parada
+          document.querySelectorAll('input[name="parada"]').forEach(function(r) {
+            r.addEventListener('change', function() {
+              document.querySelectorAll('input[name="parada"]').forEach(function(x) {
+                x.parentElement.style.background = '#1a1a1a';
+              });
+              this.parentElement.style.background =
+                this.value === 'true' ? 'rgba(40,167,69,0.2)' : 'rgba(220,53,69,0.2)';
+            });
+          });
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/penalties/save")
+  def savePenalty(request: cask.Request, rival: String = "", fecha: String = "",
+                  dirTiro: String, dirEstirada: String, parada: String = "false") =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.savePenalty(
+        userId       = user.id,
+        fecha        = fecha,
+        rival        = rival,
+        dirTiro      = dirTiro,
+        dirEstirada  = dirEstirada,
+        parada       = parada == "true",
+        matchId      = None,
+        notas        = ""
+      )
+      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/penalties"))
+    }
+
+  @cask.postForm("/am/penalties/delete")
+  def deletePenalty(request: cask.Request, penaltyId: Int) =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.deletePenalty(penaltyId, user.id)
+      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/penalties"))
+    }
+
+  // ── GEAR ───────────────────────────────────────────────────────────────────
+  @cask.get("/am/gear")
+  def gearPage(request: cask.Request) = withAmAuth(request) { user =>
+    val items = AmateurDatabaseManager.getGear(user.id)
+
+    val tiposLatex = Seq("Garra", "Flat", "Roll Finger", "Negative Cut", "Hybrid", "Otro")
+    val tiposCorte = Seq("Roll", "Flat", "Negative", "Hybrid", "Gunn Cut", "Otro")
+
+    def estadoColor(usos: Int) =
+      if (usos < 15) "success" else if (usos < 30) "warning" else "danger"
+    def estadoLabel(usos: Int) =
+      if (usos < 15) "Nuevo" else if (usos < 30) "En uso" else "Desgastado"
+
+    renderAm("gear", user.nombre,
+      div(
+        h5(cls := "fw-black text-white mb-3", "?? Mis Guantes"),
+
+        // Lista
+        if (items.nonEmpty)
+          div(cls := "mb-3",
+            frag(items.map { g =>
+              val c = estadoColor(g.partidosUsados)
+              div(cls := s"card-am p-3 mb-2 border-start border-$c border-3",
+                div(cls := "d-flex justify-content-between align-items-start",
+                  div(
+                    div(cls := "fw-bold text-white small", g.nombre),
+                    if (g.marca.nonEmpty) div(cls := "xx-small text-muted", g.marca) else span(),
+                    div(cls := "xx-small text-muted mt-1",
+                      if (g.tipoLatex.nonEmpty) s"${g.tipoLatex}" else "",
+                      if (g.corte.nonEmpty) s" · Corte: ${g.corte}" else ""
+                    )
+                  ),
+                  div(cls := "text-end",
+                    span(cls := s"badge bg-$c bg-opacity-25 text-$c small fw-bold",
+                      s"${g.partidosUsados} PJ"),
+                    div(cls := "xx-small text-muted mt-1", estadoLabel(g.partidosUsados)),
+                    if (!g.activo)
+                      div(cls := "badge bg-secondary xx-small mt-1", "Retirado")
+                    else span()
+                  )
+                ),
+                div(cls := "d-flex gap-2 mt-2",
+                  form(action := "/am/gear/use", method := "post",
+                    input(tpe := "hidden", name := "gearId", value := g.id.toString),
+                    button(tpe := "submit", cls := "btn btn-outline-success btn-sm xx-small fw-bold",
+                      "+ Uso")
+                  ),
+                  form(action := "/am/gear/toggle", method := "post",
+                    input(tpe := "hidden", name := "gearId", value := g.id.toString),
+                    button(tpe := "submit",
+                      cls := s"btn btn-outline-secondary btn-sm xx-small",
+                      if (g.activo) "Retirar" else "Activar")
+                  )
+                ),
+                if (g.notas.nonEmpty)
+                  div(cls := "xx-small text-muted mt-2 fst-italic", g.notas)
+                else span()
+              )
+            }: _*)
+          )
+        else
+          div(cls := "card-am p-4 text-center mb-3",
+            div(style := "font-size:40px; opacity:0.3", "??"),
+            p(cls := "text-muted mt-2 small", "Aún no has añadido guantes.")
+          ),
+
+        // Formulario añadir
+        div(cls := "card-am p-3",
+          div(cls := "fw-bold small text-white mb-3", "➕ Añadir guantes"),
+          form(action := "/am/gear/save", method := "post",
+            div(cls := "mb-2",
+              label(cls := "xx-small text-muted fw-bold", "NOMBRE / MODELO"),
+              input(tpe := "text", name := "nombre", cls := "form-control bg-dark text-white border-secondary mt-1",
+                placeholder := "Ej: Reusch Attrakt Gold", required := true)
+            ),
+            div(cls := "row g-2 mb-2",
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "MARCA"),
+                input(tpe := "text", name := "marca", cls := "form-control bg-dark text-white border-secondary mt-1",
+                  placeholder := "Reusch, Puma...")
+              ),
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "TIPO LÁTEX"),
+                select(name := "tipoLatex", cls := "form-select bg-dark text-white border-secondary mt-1",
+                  frag(tiposLatex.map(t => option(value := t, t)): _*)
+                )
+              )
+            ),
+            div(cls := "row g-2 mb-2",
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "CORTE"),
+                select(name := "corte", cls := "form-select bg-dark text-white border-secondary mt-1",
+                  frag(tiposCorte.map(t => option(value := t, t)): _*)
+                )
+              )
+            ),
+            div(cls := "mb-2",
+              label(cls := "xx-small text-muted fw-bold", "NOTAS (opcional)"),
+              input(tpe := "text", name := "notas", cls := "form-control bg-dark text-white border-secondary mt-1",
+                placeholder := "Para lluvia, para hierba...")
+            ),
+            button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold mt-1", "Guardar guantes")
+          )
+        )
+      )
+    )
+  }
+
+  @cask.postForm("/am/gear/save")
+  def saveGear(request: cask.Request, nombre: String, marca: String = "",
+               tipoLatex: String = "", corte: String = "", notas: String = "") =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.saveGear(user.id, nombre, marca, tipoLatex, corte, notas)
+      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
+    }
+
+  @cask.postForm("/am/gear/use")
+  def gearUse(request: cask.Request, gearId: Int) =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.incrementGearUsage(gearId, user.id)
+      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
+    }
+
+  @cask.postForm("/am/gear/toggle")
+  def gearToggle(request: cask.Request, gearId: Int) =
+    withAmAuth(request) { user =>
+      AmateurDatabaseManager.toggleGearActive(gearId, user.id)
+      cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/gear"))
+    }
+
+  // ── AGENDA / CALENDARIO ─────────────────────────────────────────────────────
+  @cask.get("/am/calendar")
+  def calendarPage(request: cask.Request) = withAmAuth(request) { user =>
+    val today    = java.time.LocalDate.now()
+    val year     = today.getYear
+    val month    = today.getMonthValue
+    val firstDay = java.time.LocalDate.of(year, month, 1)
+    val lastDay  = firstDay.plusMonths(1).minusDays(1)
+    val fromStr  = firstDay.toString
+    val toStr    = lastDay.toString
+    val monthName = firstDay.getMonth.getDisplayName(
+      java.time.format.TextStyle.FULL, new java.util.Locale("es"))
+    val schedules   = AmateurDatabaseManager.getScheduleRange(user.id, fromStr, toStr)
+    val upcoming    = AmateurDatabaseManager.getUpcomingSchedule(user.id, 5)
+    val schedByDate = schedules.groupBy(_.fecha)
+    val startDow    = firstDay.getDayOfWeek.getValue
+    val blancos     = startDow - 1
+    val daysInMonth = lastDay.getDayOfMonth
+    val todayStr    = today.toString
+
+    renderAm("calendar", user.nombre,
+      div(
+        div(cls := "d-flex justify-content-between align-items-center mb-3",
+          h5(cls := "fw-black mb-0", s"$monthName $year"),
+          div(cls := "d-flex gap-2",
+            a(href := "/am/calendar/add", cls := "btn btn-primary btn-sm fw-bold", "+ Partido"),
+            a(href := "/am/calendar/nlp", cls := "btn btn-outline-primary btn-sm fw-bold",
+              style := "font-size:10px;", "🤖 IA"))
+        ),
+        div(cls := "card-am p-2 mb-3",
+          div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
+            frag(Seq("L","M","X","J","V","S","D").map(d =>
+              div(cls := "text-center xx-small text-muted fw-bold py-1", d)
+            ): _*),
+            frag((1 to blancos).map(_ => div()): _*),
+            frag((1 to daysInMonth).map { d =>
+              val dateStr = f"$year-$month%02d-$d%02d"
+              val hasSched = schedByDate.contains(dateStr)
+              val isToday  = dateStr == todayStr
+              val dayCls   = "cal-day" + (if (isToday) " today" else if (hasSched) " has-schedule" else "")
+              div(cls := dayCls,
+                div(cls := "day-num", d.toString),
+                if (hasSched)
+                  frag(schedByDate(dateStr).map(s =>
+                    div(cls := "xx-small", style := "overflow:hidden;white-space:nowrap;text-overflow:ellipsis;",
+                      s.rival)
+                  ): _*)
+                else span()
+              )
+            }: _*)
+          )
+        ),
+        div(cls := "d-flex gap-3 mb-3 xx-small",
+          span(span(cls := "cal-dot", style := "background:#38a169;"), " Jugado"),
+          span(span(cls := "cal-dot", style := "background:#d69e2e;"), " Programado"),
+          span(span(cls := "cal-dot", style := "background:#0d6efd;"), " Hoy")
+        ),
+        if (upcoming.nonEmpty)
+          div(cls := "card-am p-3",
+            div(cls := "fw-bold small text-muted mb-2", "PROXIMOS PARTIDOS"),
+            frag(upcoming.map { s =>
+              val tipoColor = s.tipo match {
+                case "TORNEO" => "#dc3545"; case "CUP" => "#6f42c1"; case _ => "#0d6efd"
+              }
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid #e2e8f0;",
+                div(style := s"width:4px;height:36px;background:$tipoColor;border-radius:2px;"),
+                div(cls := "flex-fill",
+                  div(cls := "fw-bold small", s.rival),
+                  div(cls := "xx-small text-muted",
+                    s.fecha,
+                    if (s.hora.nonEmpty) s" - ${s.hora}" else "",
+                    if (s.lugar.nonEmpty) s" - ${s.lugar}" else "")
+                ),
+                form(action := "/am/calendar/delete", method := "post",
+                  input(tpe := "hidden", name := "scheduleId", value := s.id.toString),
+                  button(tpe := "submit", cls := "btn btn-outline-danger btn-sm",
+                    style := "font-size:10px;", "X")
+                )
+              )
+            }: _*)
+          )
+        else
+          div(cls := "card-am p-3 text-center", style := "border-style:dashed;",
+            div(cls := "text-muted small", "Sin partidos programados"),
+            a(href := "/am/calendar/add", cls := "btn btn-outline-primary btn-sm mt-2", "+ Añadir")
+          )
+      )
+    )
+  }
+
+  @cask.get("/am/calendar/add")
+  def calendarAddPage(request: cask.Request) = withAmAuth(request) { user =>
+    val today = java.time.LocalDate.now().toString
+    renderAm("calendar", user.nombre,
+      div(
+        h5(cls := "fw-black mb-3", "Añadir partido a la agenda"),
+        div(cls := "card-am p-3",
+          form(action := "/am/calendar/save", method := "post",
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "RIVAL"),
+              input(tpe := "text", name := "rival", cls := "form-control mt-1",
+                placeholder := "Equipo rival", required := true)
+            ),
+            div(cls := "row g-2 mb-3",
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                input(tpe := "date", name := "fecha", cls := "form-control mt-1",
+                  value := today, required := true)
+              ),
+              div(cls := "col-6",
+                label(cls := "xx-small text-muted fw-bold", "HORA"),
+                input(tpe := "time", name := "hora", cls := "form-control mt-1")
+              )
+            ),
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "LUGAR"),
+              input(tpe := "text", name := "lugar", cls := "form-control mt-1", placeholder := "Campo / pabellon")
+            ),
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "TIPO"),
+              select(name := "tipo", cls := "form-select mt-1",
+                option(value := "LIGA", "Liga"),
+                option(value := "TORNEO", "Torneo"),
+                option(value := "CUP", "Copa"),
+                option(value := "AMISTOSO", "Amistoso")
+              )
+            ),
+            div(cls := "mb-3",
+              label(cls := "xx-small text-muted fw-bold", "NOTAS"),
+              textarea(name := "notas", cls := "form-control mt-1", rows := "2")
+            ),
+            button(tpe := "submit", cls := "btn btn-primary fw-bold w-100", "Guardar")
+          )
+        )
+      )
+    )
+  }
+
+  @cask.post("/am/calendar/save")
+  def calendarSave(request: cask.Request) = withAmAuth(request) { user =>
+    val body   = new String(request.data.readAllBytes(), "UTF-8")
+    val params = body.split("&").map { pair =>
+      val p = pair.split("=", 2)
+      java.net.URLDecoder.decode(p(0), "UTF-8") -> (if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else "")
+    }.toMap
+    AmateurDatabaseManager.saveSchedule(
+      user.id,
+      params.getOrElse("rival", ""),
+      params.getOrElse("fecha", java.time.LocalDate.now().toString),
+      params.getOrElse("hora", ""),
+      params.getOrElse("lugar", ""),
+      params.getOrElse("tipo", "LIGA"),
+      params.getOrElse("notas", "")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
+  }
+
+  @cask.post("/am/calendar/delete")
+  def calendarDelete(request: cask.Request) = withAmAuth(request) { user =>
+    val body   = new String(request.data.readAllBytes(), "UTF-8")
+    val params = body.split("&").map { pair =>
+      val p = pair.split("=", 2)
+      java.net.URLDecoder.decode(p(0), "UTF-8") -> (if (p.length > 1) java.net.URLDecoder.decode(p(1), "UTF-8") else "")
+    }.toMap
+    val sid = params.getOrElse("scheduleId", "0").toIntOption.getOrElse(0)
+    AmateurDatabaseManager.deleteSchedule(sid, user.id)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/calendar"))
+  }
+
+  // ── INFORME PDF ──────────────────────────────────────────────────────────────
+  @cask.get("/am/report")
+  def reportPage(request: cask.Request) = withAmAuth(request) { user =>
+    val data          = AmateurDatabaseManager.getReportData(user.id)
+    val pj            = data.getOrElse("pj", 0).asInstanceOf[Int]
+    val pjP           = data.getOrElse("pjPortero", 0).asInstanceOf[Int]
+    val pjJ           = data.getOrElse("pjJugador", 0).asInstanceOf[Int]
+    val notaM         = data.getOrElse("notaMedia", 0.0).asInstanceOf[Double]
+    val notaP         = data.getOrElse("notaPortero", 0.0).asInstanceOf[Double]
+    val notaJ         = data.getOrElse("notaJugador", 0.0).asInstanceOf[Double]
+    val gcMedia       = data.getOrElse("gcMedia", 0.0).asInstanceOf[Double]
+    val limpias       = data.getOrElse("limpias", 0).asInstanceOf[Int]
+    val ganados       = data.getOrElse("ganados", 0).asInstanceOf[Int]
+    val empatados     = data.getOrElse("empatados", 0).asInstanceOf[Int]
+    val perdidos      = data.getOrElse("perdidos", 0).asInstanceOf[Int]
+    val golesMarcados = data.getOrElse("golesMarcados", 0).asInstanceOf[Int]
+    val asistencias   = data.getOrElse("asistencias", 0).asInstanceOf[Int]
+    val totalPen      = data.getOrElse("totalPen", 0).asInstanceOf[Int]
+    val paradasPen    = data.getOrElse("paradasPen", 0).asInstanceOf[Int]
+    val historial     = data.getOrElse("historial", List.empty).asInstanceOf[List[Map[String, String]]]
+    val nextMatch     = data.getOrElse("nextMatch", None).asInstanceOf[Option[Map[String, String]]]
+    val pctLimpias    = if (pjP > 0) (limpias * 100) / pjP else 0
+    val pctParadas    = if (totalPen > 0) (paradasPen * 100) / totalPen else 0
+    val today         = java.time.LocalDate.now().toString
+
+    val histRows = historial.map { m =>
+      val nota   = m.getOrElse("nota","5").toDoubleOption.getOrElse(5.0)
+      val notaCls = if(nota>=7)"nota-green" else if(nota>=5)"nota-yellow" else "nota-red"
+      val esP    = m.getOrElse("posicion","Portero").startsWith("Portero")
+      s"""<tr>
+        <td>${m.getOrElse("fecha","")}</td>
+        <td style="font-weight:600">${m.getOrElse("rival","")}</td>
+        <td style="text-align:center">${m.getOrElse("res","")}</td>
+        <td><span class="${if(esP) "badge-portero" else "badge-jugador"}">${m.getOrElse("posicion","Portero")}</span></td>
+        <td style="text-align:center"><span class="nota-pill $notaCls">${m.getOrElse("nota","")}</span></td>
+        <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("goles","0")}</td>
+        <td style="text-align:center">${if(esP) "&mdash;" else m.getOrElse("asist","0")}</td>
+      </tr>"""
+    }.mkString("\n")
+
+    val nextHtml = nextMatch.map { nm =>
+      s"""<div class="mb-3 p-2" style="border-left:4px solid #f59e0b;background:#fffbeb;border-radius:4px;">
+        <div style="font-size:9px;font-weight:700;color:#92400e;">PROXIMO &middot; ${nm.getOrElse("tipo","LIGA")}</div>
+        <div style="font-weight:900;font-size:1rem;">${nm.getOrElse("rival","")}</div>
+        <div style="font-size:10px;color:#718096;">${nm.getOrElse("fecha","")}${if(nm.getOrElse("hora","").nonEmpty) " &middot; " + nm("hora") else ""}</div>
+      </div>"""
+    }.getOrElse("")
+
+    val rolSection = if (pjJ > 0)
+      s"""<div class="section-title">Desglose por posicion</div>
+      <div class="row g-2 mb-2">
+        <div class="col-6"><div class="stat-box" style="border-color:#bfdbfe;">
+          <div style="font-size:9px;font-weight:700;color:#1e40af;margin-bottom:6px;">PORTERO</div>
+          <div class="d-flex justify-content-around">
+            <div><div class="stat-val text-primary">$pjP</div><div class="stat-lbl">Partidos</div></div>
+            <div><div class="stat-val text-primary">${f"$notaP%.1f"}</div><div class="stat-lbl">Nota</div></div>
+            <div><div class="stat-val text-success">$limpias</div><div class="stat-lbl">Limpias</div></div>
+          </div></div></div>
+        <div class="col-6"><div class="stat-box" style="border-color:#ddd6fe;">
+          <div style="font-size:9px;font-weight:700;color:#5b21b6;margin-bottom:6px;">JUGADOR</div>
+          <div class="d-flex justify-content-around">
+            <div><div class="stat-val" style="color:#5b21b6;">$pjJ</div><div class="stat-lbl">Partidos</div></div>
+            <div><div class="stat-val" style="color:#5b21b6;">${f"$notaJ%.1f"}</div><div class="stat-lbl">Nota</div></div>
+            <div><div class="stat-val" style="color:#5b21b6;">$golesMarcados</div><div class="stat-lbl">Goles</div></div>
+            <div><div class="stat-val" style="color:#5b21b6;">$asistencias</div><div class="stat-lbl">Asist.</div></div>
+          </div></div></div>
+      </div>"""
+    else ""
+
+    val penSection = if (totalPen > 0)
+      s"""<div class="section-title">Penaltis</div>
+      <div class="row g-2 mb-2">
+        <div class="col-3"><div class="stat-box"><div class="stat-val">$totalPen</div><div class="stat-lbl">Total</div></div></div>
+        <div class="col-3"><div class="stat-box"><div class="stat-val text-success">$paradasPen</div><div class="stat-lbl">Parados</div></div></div>
+        <div class="col-3"><div class="stat-box"><div class="stat-val text-danger">${totalPen-paradasPen}</div><div class="stat-lbl">Encajados</div></div></div>
+        <div class="col-3"><div class="stat-box"><div class="stat-val">$pctParadas%</div><div class="stat-lbl">% parada</div></div></div>
+      </div>"""
+    else ""
+
+    val html =
+      s"""<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<title>Informe Guardian Amateur - ${user.nombre}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<style>
+@page{size:A4;margin:16mm}
+body{font-family:'Segoe UI',sans-serif;background:#fff;color:#1a202c;font-size:12px}
+@media screen{body{max-width:800px;margin:0 auto;padding:20px}}
+@media print{.no-print{display:none!important}}
+.stat-box{border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center}
+.stat-val{font-size:1.4rem;font-weight:900;line-height:1}
+.stat-lbl{font-size:9px;color:#718096;text-transform:uppercase;margin-top:2px}
+.section-title{font-size:10px;font-weight:800;letter-spacing:.08em;color:#718096;text-transform:uppercase;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-bottom:10px;margin-top:14px}
+.badge-portero{background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700}
+.badge-jugador{background:#ede9fe;color:#5b21b6;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700}
+table{border-collapse:collapse;width:100%;font-size:10px}
+th{background:#f8fafc;font-weight:700;color:#4a5568;padding:5px 8px;border:1px solid #e2e8f0;text-align:left}
+td{padding:4px 8px;border:1px solid #e2e8f0}
+tr:nth-child(even){background:#f8fafc}
+.nota-pill{border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:10px}
+.nota-green{background:#d1fae5;color:#065f46}
+.nota-yellow{background:#fef3c7;color:#92400e}
+.nota-red{background:#fee2e2;color:#991b1b}
+</style></head>
+<body>
+<div class="no-print mb-3 d-flex gap-2">
+  <button class="btn btn-primary fw-bold" onclick="window.print()">Imprimir / Guardar PDF</button>
+  <a href="/am/dashboard" class="btn btn-outline-secondary">&larr; Volver</a>
+</div>
+<div class="d-flex align-items-center justify-content-between mb-3 pb-2" style="border-bottom:3px solid #0d6efd;">
+  <div>
+    <div style="font-size:1.2rem;font-weight:900;">🛡 GUARDIAN AMATEUR</div>
+    <div style="font-size:10px;color:#718096;">Informe de rendimiento &mdash; ${user.nombre}</div>
+  </div>
+  <div class="text-end">
+    <div style="font-size:9px;color:#718096;">$today</div>
+    <div style="font-size:9px;color:#718096;">$pj partidos totales</div>
+  </div>
+</div>
+$nextHtml
+<div class="section-title">Estadisticas globales</div>
+<div class="row g-2 mb-2">
+  <div class="col"><div class="stat-box"><div class="stat-val text-primary">${f"$notaM%.1f"}</div><div class="stat-lbl">Nota media</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-danger">${f"$gcMedia%.1f"}</div><div class="stat-lbl">GC/partido</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-success">$limpias ($pctLimpias%)</div><div class="stat-lbl">Limpias</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val">$ganados</div><div class="stat-lbl">Ganados</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-warning">$empatados</div><div class="stat-lbl">Empates</div></div></div>
+  <div class="col"><div class="stat-box"><div class="stat-val text-danger">$perdidos</div><div class="stat-lbl">Perdidos</div></div></div>
+</div>
+$rolSection
+$penSection
+<div class="section-title">Ultimos ${historial.size} partidos</div>
+<table><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Posicion</th><th>Nota</th><th>Goles</th><th>Asist.</th></tr></thead>
+<tbody>$histRows</tbody></table>
+<div class="mt-3 text-center" style="font-size:9px;color:#a0aec0;border-top:1px solid #e2e8f0;padding-top:8px;">Guardian Amateur &copy; $today</div>
+</body></html>"""
+
+    cask.Response(html.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // ── FINALIZAR TEMPORADA ──────────────────────────────────────────────────
+  @cask.get("/am/end-season")
+  def endSeasonRoute(request: cask.Request) = withAmAuth(request) { user =>
+    AmateurDatabaseManager.endSeason(user.id)
+    cask.Response(Array.emptyByteArray, 302,
+      headers = Seq("Location" -> "/am/dashboard"))
+  }
+
+  // ── MAPA DE GOLES ─────────────────────────────────────────────────────────
+  @cask.get("/am/mapa-goles")
+  def mapaGolesPage(request: cask.Request, tipo: String = "", rival: String = "") = withAmAuth(request) { user =>
+    val heatmap    = if (rival.nonEmpty) AmateurDatabaseManager.getGoalHeatmapByRival(user.id, rival)
+    else               AmateurDatabaseManager.getGoalHeatmap(user.id, tipo)
+    val rivales    = AmateurDatabaseManager.getRivalesConGoles(user.id)
+    val totalGoles = heatmap.values.sum
+
+    val maxVal = { val m = heatmap.values.max; if (m > 0) m.toDouble else 1.0 }
+
+    def cellColor(count: Int): String = {
+      val i = count / maxVal
+      if (i == 0)        "rgba(255,255,255,0.04)"
+      else if (i < 0.25) "rgba(220,53,69,0.20)"
+      else if (i < 0.50) "rgba(220,53,69,0.45)"
+      else if (i < 0.75) "rgba(220,53,69,0.70)"
+      else               "rgba(220,53,69,0.92)"
+    }
+
+    def cellLabel(z: String) = z match {
+      case "TL" => "Arr Izq"; case "TC" => "Arr Cen"; case "TR" => "Arr Der"
+      case "ML" => "Med Izq"; case "MC" => "Med Cen"; case "MR" => "Med Der"
+      case "BL" => "Baj Izq"; case "BC" => "Baj Cen"; case "BR" => "Baj Der"
+      case _ => z
+    }
+
+    val zonaRows = Seq(Seq("TL","TC","TR"), Seq("ML","MC","MR"), Seq("BL","BC","BR"))
+
+    def renderCell(zone: String) = {
+      val count = heatmap.getOrElse(zone, 0)
+      val pct   = if (totalGoles > 0) (count * 100.0 / totalGoles).toInt else 0
+      div(
+        style := s"background:${cellColor(count)}; border:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:65px;",
+        attr("title") := s"${cellLabel(zone)}: $count goles ($pct%)",
+        if (count > 0) frag(
+          div(cls := "fw-bold text-white", style := "font-size:18px; line-height:1;", count.toString),
+          div(cls := "xx-small text-light", style := "opacity:.7;", s"$pct%")
+        ) else frag(
+          div(cls := "text-muted", style := "font-size:16px; opacity:.25;", "–")
+        )
+      )
+    }
+
+    val golsAlto  = Seq("TL","TC","TR").map(heatmap.getOrElse(_, 0)).sum
+    val golsMedio = Seq("ML","MC","MR").map(heatmap.getOrElse(_, 0)).sum
+    val golsBajo  = Seq("BL","BC","BR").map(heatmap.getOrElse(_, 0)).sum
+    val golsIzq   = Seq("TL","ML","BL").map(heatmap.getOrElse(_, 0)).sum
+    val golsCen   = Seq("TC","MC","BC").map(heatmap.getOrElse(_, 0)).sum
+    val golsDer   = Seq("TR","MR","BR").map(heatmap.getOrElse(_, 0)).sum
+
+    // Punto ciego: zona con más goles
+    val puntoCiego = if (totalGoles > 0) {
+      val worst = heatmap.maxBy(_._2)
+      val wpct  = (worst._2 * 100.0 / totalGoles).toInt
+      Some(cellLabel(worst._1).toUpperCase -> wpct)
+    } else None
+
+    val tituloFiltro = if (rival.nonEmpty) s"vs ${rival.toUpperCase}"
+    else if (tipo.nonEmpty) tipo
+    else "Todos los partidos"
+
+    renderAm("goals", user.nombre,
+      div(
+
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(
+            h5(cls := "fw-black text-white mb-0", "🥅 Mapa de Goles"),
+            span(cls := "text-muted small", s"$tituloFiltro — $totalGoles goles registrados")
+          ),
+          a(href := "/am/history", cls := "btn btn-outline-secondary btn-sm fw-bold xx-small", "← Historial")
+        ),
+
+        // Filtros
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "xx-small fw-bold text-muted mb-2", "FILTRAR POR TIPO"),
+          div(cls := "d-flex gap-2 flex-wrap mb-2",
+            a(href := "/am/mapa-goles",
+              cls := s"btn btn-sm fw-bold ${if (tipo.isEmpty && rival.isEmpty) "btn-danger" else "btn-outline-secondary"}",
+              "TODOS"),
+            Seq("LIGA","TORNEO","CUP","AMISTOSO").map { t =>
+              a(href := s"/am/mapa-goles?tipo=$t",
+                cls := s"btn btn-sm fw-bold ${if (tipo == t) "btn-danger" else "btn-outline-secondary"}",
+                t)
+            }
+          ),
+          if (rivales.nonEmpty)
+            div(
+              div(cls := "xx-small fw-bold text-muted mb-1 mt-2", "FILTRAR POR RIVAL"),
+              div(cls := "d-flex gap-1 flex-wrap",
+                rivales.take(8).map { r =>
+                  a(href := s"/am/mapa-goles?rival=${java.net.URLEncoder.encode(r, "UTF-8")}",
+                    cls := s"btn btn-sm fw-bold ${if (rival.toLowerCase == r.toLowerCase) "btn-warning" else "btn-outline-secondary"}",
+                    style := "font-size:10px;",
+                    if (r.length > 12) r.take(12) + "…" else r)
+                }
+              )
+            )
+          else span()
+        ),
+
+        if (totalGoles == 0)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:48px; opacity:.3;", "🥅"),
+            h5(cls := "text-muted mt-3", "Sin goles registrados"),
+            p(cls := "text-secondary small", "Los goles encajados solo se registran cuando juegas de portero")
+          )
+        else frag(
+
+          // Portería heatmap
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted text-center mb-2", "PORTERÍA — Vista frontal"),
+            // Poste superior
+            div(style := "height:5px; background:linear-gradient(90deg,#666,#bbb,#666); border-radius:3px; margin-bottom:2px;"),
+            div(cls := "d-flex align-items-stretch",
+              // Poste izq
+              div(style := "width:5px; background:linear-gradient(180deg,#666,#bbb,#666); border-radius:3px; flex-shrink:0;"),
+              // Grid 3x3
+              div(style := "flex:1; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; gap:2px; padding:2px;",
+                zonaRows.flatten.map(renderCell)
+              ),
+              // Poste der
+              div(style := "width:5px; background:linear-gradient(180deg,#666,#bbb,#666); border-radius:3px; flex-shrink:0;")
+            ),
+            // Línea de fondo
+            div(style := "height:4px; background:rgba(255,255,255,.12); border-radius:2px; margin-top:2px;"),
+            // Leyenda
+            div(cls := "d-flex justify-content-center align-items-center gap-2 mt-2",
+              span(cls := "xx-small text-muted", "0"),
+              div(style := "width:80px; height:6px; border-radius:3px; background:linear-gradient(90deg,rgba(220,53,69,.05),rgba(220,53,69,.9));"),
+              span(cls := "xx-small text-muted", s"${maxVal.toInt}")
+            )
+          ),
+
+          // Stats por altura y lado
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-6",
+              div(cls := "card-am p-2",
+                div(cls := "xx-small fw-bold text-muted mb-2 text-center", "POR ALTURA"),
+                Seq(("Alto", golsAlto, "#dc3545"), ("Medio", golsMedio, "#ffc107"), ("Bajo", golsBajo, "#0dcaf0")).map {
+                  case (lbl, n, color) =>
+                    val p = if (totalGoles > 0) (n * 100.0 / totalGoles).toInt else 0
+                    div(cls := "mb-1",
+                      div(cls := "d-flex justify-content-between xx-small mb-1",
+                        span(cls := "text-white", lbl),
+                        span(style := s"color:$color; font-weight:700;", s"$n ($p%)")
+                      ),
+                      div(style := "height:6px; background:rgba(255,255,255,.08); border-radius:3px;",
+                        div(style := s"height:6px; width:$p%; background:$color; border-radius:3px;")
+                      )
+                    )
+                }
+              )
+            ),
+            div(cls := "col-6",
+              div(cls := "card-am p-2",
+                div(cls := "xx-small fw-bold text-muted mb-2 text-center", "POR LADO"),
+                Seq(("Izq", golsIzq, "#dc3545"), ("Centro", golsCen, "#ffc107"), ("Der", golsDer, "#0dcaf0")).map {
+                  case (lbl, n, color) =>
+                    val p = if (totalGoles > 0) (n * 100.0 / totalGoles).toInt else 0
+                    div(cls := "mb-1",
+                      div(cls := "d-flex justify-content-between xx-small mb-1",
+                        span(cls := "text-white", lbl),
+                        span(style := s"color:$color; font-weight:700;", s"$n ($p%)")
+                      ),
+                      div(style := "height:6px; background:rgba(255,255,255,.08); border-radius:3px;",
+                        div(style := s"height:6px; width:$p%; background:$color; border-radius:3px;")
+                      )
+                    )
+                }
               )
             )
           ),
-          div(cls := "list-group", tItems)
-        )
-      } else {
-        div(cls := "alert alert-secondary small", "Anade URL de video para usar tags.")
-      }
 
-      val content = basePage("history",
-        div(cls := "row justify-content-center",
-          div(cls := "col-md-6 col-12",
-            div(cls := "card bg-dark text-white border-primary shadow",
-              div(cls := "card-header bg-primary text-white fw-bold text-center",
-                "EDITAR PARTIDO & VIDEO"),
-              div(cls := "card-body p-3",
-                form(action := "/match/update", method := "post",
-                  attr("accept-charset") := "UTF-8",
-                  input(tpe := "hidden", name := "id", value := matchId.toString),
-                  div(cls := "mb-3", label("Rival"),
-                    input(tpe := "text", name := "rival", value := matchData.rival, cls := "form-control")),
-                  div(cls := "mb-3", label("Fecha"),
-                    input(tpe := "date", name := "fecha", value := matchData.fecha, cls := "form-control")),
-                  div(cls := "row mb-3",
-                    div(cls := "col-6", label("GF"),
-                      input(tpe := "number", name := "gf", value := gf, cls := "form-control")),
-                    div(cls := "col-6", label("GC"),
-                      input(tpe := "number", name := "gc", value := gc, cls := "form-control"))
+          // Punto ciego
+          puntoCiego.map { case (zona, wpct) =>
+            div(cls := "card-am p-3 text-center",
+              style := "border-top: 3px solid #dc3545;",
+              div(cls := "xx-small fw-bold text-muted mb-1", "⚠️ PUNTO CIEGO"),
+              div(cls := "fw-black text-danger", style := "font-size:1.4rem;", zona),
+              div(cls := "xx-small text-white", s"$wpct% de tus goles encajados"),
+              div(cls := "xx-small text-muted mt-1", "Trabaja el posicionamiento en esta zona")
+            )
+          }.getOrElse(span())
+        )
+      )
+    )
+  }
+
+  // ── RIVALES H2H ────────────────────────────────────────────────────────────
+  @cask.get("/am/rivals")
+  def rivalsPage(request: cask.Request) = withAmAuth(request) { user =>
+    val rivales = AmateurDatabaseManager.getRivalesList(user.id)
+
+    renderAm("rivals", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "⚔️ Historial de Rivales"),
+          span(cls := "text-muted small", s"${rivales.size} equipos enfrentados")
+        ),
+
+        if (rivales.isEmpty)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:48px; opacity:.3;", "⚔️"),
+            h5(cls := "text-muted mt-3", "Sin rivales aún"),
+            p(cls := "text-secondary small", "Registra partidos para ver el historial por rival")
+          )
+        else frag(
+          rivales.map { r =>
+            val pj   = r("pj").toInt
+            val g    = r("g").toInt
+            val e    = r("e").toInt
+            val p    = r("p").toInt
+            val res  = r("resultado")
+            val (resColor, resBadge) = res match {
+              case "W" => ("#20c997", "DOMINAS")
+              case "L" => ("#dc3545", "PIERDES")
+              case _   => ("#ffc107", "IGUALADO")
+            }
+            a(href := s"/am/rivals/${java.net.URLEncoder.encode(r("rival"), "UTF-8")}",
+              style := "text-decoration:none;",
+              div(cls := "card-am p-3 mb-2",
+                style := s"border-left: 3px solid $resColor;",
+                div(cls := "d-flex justify-content-between align-items-start",
+                  div(
+                    div(cls := "fw-bold text-white", style := "font-size:.95rem;", r("rival")),
+                    div(cls := "xx-small text-muted mt-1",
+                      s"${pj} partidos · última vez ${r("ultimo").take(7)}")
                   ),
-                  div(cls := "mb-3", label("Estadio"),
-                    input(tpe := "text", name := "estadio", value := matchData.estadio, cls := "form-control")),
-                  div(cls := "mb-3", label("Nota"),
-                    input(tpe := "number", step := "0.1", name := "nota",
-                      value := matchData.nota.toString, cls := "form-control")),
-                  div(cls := "mb-3", label("Notas Texto"),
-                    textarea(name := "notas", cls := "form-control", rows := "3", matchData.notas)),
-                  div(cls := "mb-3", label("Reaccion/Goles"),
-                    textarea(name := "reaccion", cls := "form-control", rows := "3", matchData.reaccion)),
-                  div(cls := "mb-3", label("Video URL (Youtube)"),
-                    input(tpe := "text", name := "video", value := matchData.video, cls := "form-control")),
-                  div(cls := "d-grid gap-2 mb-4",
-                    button(tpe := "submit", cls := "btn btn-success", "Guardar Cambios"),
-                    a(href := "/history", cls := "btn btn-outline-secondary", "Cancelar")
+                  span(cls := "badge xx-small fw-bold",
+                    style := s"background:${resColor}22; color:$resColor; border:1px solid ${resColor}55;",
+                    resBadge)
+                ),
+                div(cls := "d-flex gap-3 mt-2",
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-success", style := "font-size:1.2rem;", g.toString),
+                    div(cls := "xx-small text-muted", "G")
+                  ),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-warning", style := "font-size:1.2rem;", e.toString),
+                    div(cls := "xx-small text-muted", "E")
+                  ),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-danger", style := "font-size:1.2rem;", p.toString),
+                    div(cls := "xx-small text-muted", "P")
+                  ),
+                  div(cls := "border-start border-secondary mx-1"),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-white", style := "font-size:1.2rem;", r("nota")),
+                    div(cls := "xx-small text-muted", "Nota")
+                  ),
+                  div(cls := "text-center",
+                    div(cls := "fw-black text-danger", style := "font-size:1.2rem;", r("gc")),
+                    div(cls := "xx-small text-muted", "GC")
                   )
                 )
-              ),
-
-              // --- Footer: Diario de voz ---
-              div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary mt-3",
-                h6(cls := "text-info small fw-bold mb-2", "🎙 DIARIO DE VOZ (POST-PARTIDO)"),
-                div(cls := "mb-2 small text-muted", "Graba a Hector contando como se sintio o sube un audio."),
-                div(cls := "d-flex gap-2 mb-3",
-                  button(id := "btnRecord", cls := "btn btn-sm btn-outline-danger",
-                    onclick := "toggleRecording()", "⏺ Grabar"),
-                  button(id := "btnStop", cls := "btn btn-sm btn-danger",
-                    style := "display:none;", onclick := "stopRecording()", "⏹ Parar"),
-                  input(tpe := "file", id := "fileUpload", accept := "audio/*",
-                    cls := "form-control form-control-sm bg-dark text-white",
-                    onchange := "handleFileUpload(this)")
-                ),
-                audio(id := "audioPreview", attr("controls") := "true",
-                  style := "width: 100%; display:none;", cls := "mb-2"),
-                form(action := "/match/analyze_audio", method := "post", id := "audioForm",
-                  input(tpe := "hidden", name := "matchId",    value := matchId.toString),
-                  input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
-                  button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
-                    onclick := "submitAudio()", disabled := true, "🧠 Analizar Emociones con IA")
-                ),
-                if (matchData.analisisVoz.nonEmpty)
-                  div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
-                    style := "white-space: pre-wrap;",
-                    b(cls := "text-info", "Psicologo IA: "), br,
-                    fixEncoding(matchData.analisisVoz))
-                else div()
-              ),
-
-              // --- Footer: Tags de video ---
-              div(cls := "card-footer bg-secondary bg-opacity-25",
-                h6(cls := "text-white small fw-bold", "CORTES DE VIDEO (TAGS)"),
-                tagList
               )
-            ),
-
-            // Script grabacion de audio
-            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
-          )
+            )
+          }: _*
         )
       )
-      renderHtml(content.render)
-    }
-  }
-  @cask.postForm("/match/analyze_audio")
-  def analyzeAudioAction(matchId: Int, audioData: String) = {
-    // La logica de IA y la actualizacion de la DB ahora ocurren dentro de analyzeAudioLog
-    // audioData ya viene como Base64 desde el script del navegador
-    DatabaseManager.analyzeAudioLog(matchId, audioData)
-
-    cask.Response(
-      "".getBytes("UTF-8"),
-      statusCode = 302,
-      headers = Seq("Location" -> s"/match/edit/$matchId")
     )
   }
-  @cask.postForm("/video/add_tag")
-  def addVideoTag(matchId: Int, min: Int, sec: Int, tipo: String) = {
-    DatabaseManager.addVideoTag(matchId, min, sec, tipo, "")
-    cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> s"/match/edit/$matchId"))
-  }
-  @cask.get("/video/delete_tag/:id/:matchId")
-  def deleteVideoTag(id: Int, matchId: Int) = {
-    DatabaseManager.deleteVideoTag(id)
-    cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> s"/match/edit/$matchId"))
-  }
-  @cask.postForm("/match/update")
-  def updateMatchAction(id: Int, rival: String, gf: Int, gc: Int, nota: Double,
-                        notas: String, video: String, reaccion: String, fecha: String, estadio: String) = {
-    val cleanRival    = fixEncoding(rival)
-    val cleanNotas    = fixEncoding(notas)
-    val cleanReaccion = fixEncoding(reaccion)
-    DatabaseManager.updateMatch(id, cleanRival, gf, gc, 60, nota, "Sol", estadio, 20, cleanNotas, video, cleanReaccion, fecha)
-    cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
-  }
 
-  @cask.get("/videoteca")
-  def videotecaPage(request: cask.Request, tipo: String = "") = withAuth(request) {
-    val clips = DatabaseManager.getVideotecaClips(tipo)
-    val tipos = List("", "PARADA", "GOL", "PASE", "ERROR")
+  @cask.get("/am/rivals/:rivalName")
+  def rivalDetailPage(request: cask.Request, rivalName: String) = withAmAuth(request) { user =>
+    val rival = java.net.URLDecoder.decode(rivalName, "UTF-8")
+    val d     = AmateurDatabaseManager.getRivalDetail(user.id, rival)
 
-    // Extraer YouTube video ID de la URL
-    def extractYoutubeId(url: String): String = {
-      if (url.contains("youtu.be/")) url.split("youtu.be/").last.split("[?&]").head
-      else if (url.contains("v=")) url.split("v=").last.split("&").head
-      else ""
-    }
+    val pj      = d("pj").asInstanceOf[Int]
+    val g       = d("g").asInstanceOf[Int]
+    val e       = d("e").asInstanceOf[Int]
+    val p       = d("p").asInstanceOf[Int]
+    val nota    = d("notaMedia").asInstanceOf[Double]
+    val gcMedia = d("gcMedia").asInstanceOf[Double]
+    val gmTotal = d("gmTotal").asInstanceOf[Int]
+    val aTotal  = d("aTotal").asInstanceOf[Int]
+    val limpias = d("limpias").asInstanceOf[Int]
+    val partidos = d("partidos").asInstanceOf[List[Map[String, String]]]
+    val notasTac = d("notasTacticas").asInstanceOf[List[String]]
 
-    val ytClips = clips.filter(c => extractYoutubeId(c.videoUrl).nonEmpty)
-    val clipsJson = ytClips.map { c =>
-      val vid = extractYoutubeId(c.videoUrl)
-      val secs = c.minuto * 60 + c.segundo
-      s"""{"videoId":"$vid","start":$secs,"rival":"${c.rival}","fecha":"${c.fecha}","tipo":"${c.tipo}","matchId":${c.matchId}}"""
-    }.mkString("[", ",", "]")
+    val resGeneral = if (g > p) ("DOMINAS", "#20c997") else if (g < p) ("PIERDES", "#dc3545") else ("IGUALADO", "#ffc107")
+    val notaColor  = if (nota >= 7) "#20c997" else if (nota >= 5) "#ffc107" else "#dc3545"
 
-    val tipoLabel = if (tipo.isEmpty) "TODOS" else tipo
-
-    val filterTabs = div(cls := "d-flex gap-2 mb-4 flex-wrap",
-      tipos.map { t =>
-        val label = if (t.isEmpty) "TODOS" else t
-        val active = if (t == tipo) "btn-warning" else "btn-outline-secondary"
-        a(href := s"/videoteca${if (t.nonEmpty) s"?tipo=$t" else ""}",
-          cls := s"btn btn-sm fw-bold $active", label)
-      }
-    )
-
-    val playlistItems = if (ytClips.isEmpty) {
-      div(cls := "alert alert-secondary text-center fw-bold",
-        "Sin clips con video de YouTube disponibles. Anade URL de YouTube y tags en los partidos.")
-    } else {
-      div(cls := "playlist-list", id := "playlist",
-        ytClips.zipWithIndex.map { case (c, i) =>
-          val icon = c.tipo match {
-            case "PARADA" => "🧤"; case "GOL" => "🥅"; case "PASE" => "⚽"; case _ => "📍"
-          }
-          val activeCls = if (i == 0) " active" else ""
-          div(cls := s"playlist-item d-flex align-items-center p-2 mb-1 rounded$activeCls",
-            id := s"clip-$i",
-            attr("onclick") := s"loadClip($i)",
-            div(cls := "me-3 fs-4", icon),
-            div(cls := "flex-grow-1",
-              div(cls := "fw-bold text-white small", s"${c.rival} — ${c.fecha}"),
-              div(cls := "text-muted small", s"${c.minuto}:${"%02d".format(c.segundo)} • ${c.tipo}")
-            ),
-            span(cls := "badge bg-secondary ms-2", s"${i + 1}")
-          )
-        }
-      )
-    }
-
-    val playerSection = if (ytClips.nonEmpty) {
-      div(cls := "video-player-section",
-        // Player
-        div(cls := "ratio ratio-16x9 mb-3 rounded overflow-hidden",
-          id := "player-container",
-          div(id := "yt-player")
-        ),
-        // Info del clip actual
-        div(cls := "d-flex align-items-center justify-content-between mb-3",
-          div(id := "clip-info",
-            div(cls := "fw-bold text-warning", id := "clip-title", ytClips.head.rival + " — " + ytClips.head.fecha),
-            div(cls := "small text-muted", id := "clip-sub",
-              s"${ytClips.head.minuto}:${"%02d".format(ytClips.head.segundo)} • ${ytClips.head.tipo}")
+    renderAm("rivals", user.nombre,
+      div(
+        // Header
+        div(cls := "d-flex justify-content-between align-items-center mb-3",
+          div(
+            div(cls := "xx-small text-muted fw-bold", "HISTORIAL VS"),
+            h5(cls := "fw-black text-white mb-0", rival.toUpperCase)
           ),
-          div(cls := "badge bg-dark border border-warning text-warning px-3 py-2",
-            span(id := "clip-counter", s"1 / ${ytClips.size}")
-          )
+          a(href := "/am/rivals", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Rivales")
         ),
-        // Controles
-        div(cls := "d-flex gap-2 mb-3",
-          button(id := "btn-prev", cls := "btn btn-outline-secondary fw-bold", onclick := "prevClip()", "◀ Ant"),
-          button(id := "btn-motivame", cls := "btn btn-warning fw-bold flex-grow-1", onclick := "toggleMotivame()",
-            "🔥 MOTIVAME"),
-          button(id := "btn-next", cls := "btn btn-outline-secondary fw-bold", onclick := "nextClip()", "Sig ▶")
-        ),
-        // Auto-advance toggle
-        div(cls := "d-flex align-items-center gap-2 small text-muted",
-          input(tpe := "range", id := "clip-duration", cls := "form-range", attr("min") := "10", attr("max") := "60", attr("value") := "25", style := "width: 120px;"),
-          span("Duracion clip: "),
-          span(id := "dur-label", "25s"),
-          span(cls := "ms-3", "🔁"),
-          div(cls := "form-check form-switch mb-0 ms-1",
-            input(cls := "form-check-input", tpe := "checkbox", id := "loop-toggle"),
-            label(cls := "form-check-label text-muted", attr("for") := "loop-toggle", "Bucle")
-          )
-        )
-      )
-    } else div()
 
-    val content = basePage("match-center",
-      div(cls := "row justify-content-center",
-        div(cls := "col-md-10 col-12",
-          h2(cls := "text-center text-warning mb-1", "🎬 VIDEOTECA"),
-          p(cls := "text-center text-muted small mb-4", s"${clips.size} clips totales • Filtro: $tipoLabel"),
-          filterTabs,
-          if (ytClips.isEmpty) playlistItems
-          else div(cls := "row g-3",
-            div(cls := "col-md-7", playerSection),
-            div(cls := "col-md-5",
-              div(cls := "card bg-dark border-secondary shadow h-100",
-                div(cls := "card-header text-warning fw-bold small", s"📋 PLAYLIST — ${ytClips.size} clips"),
-                div(cls := "card-body p-2 overflow-auto", style := "max-height: 420px;",
-                  playlistItems
+        // Banner resultado general
+        div(cls := "card-am p-3 mb-3 text-center",
+          style := s"border-top: 3px solid ${resGeneral._2};",
+          div(cls := "fw-black", style := s"font-size:1.1rem; color:${resGeneral._2};", resGeneral._1),
+          div(cls := "fw-bold text-white mt-1", s"$g G — $e E — $p P  ·  $pj partidos")
+        ),
+
+        // KPIs
+        div(cls := "row g-2 mb-3",
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black", style := s"font-size:1.6rem; color:$notaColor;", f"$nota%.1f"),
+              div(cls := "xx-small text-muted", "Nota media")
+            )
+          ),
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-danger", style := "font-size:1.6rem;", f"$gcMedia%.1f"),
+              div(cls := "xx-small text-muted", "GC/partido")
+            )
+          ),
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-success", style := "font-size:1.6rem;", limpias.toString),
+              div(cls := "xx-small text-muted", "Limpias")
+            )
+          ),
+          if (gmTotal > 0 || aTotal > 0)
+            frag(
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "fw-black text-info", style := "font-size:1.6rem;", gmTotal.toString),
+                  div(cls := "xx-small text-muted", "Goles marcados")
+                )
+              ),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "fw-black text-info", style := "font-size:1.6rem;", aTotal.toString),
+                  div(cls := "xx-small text-muted", "Asistencias")
                 )
               )
             )
-          ),
-          if (clips.size != ytClips.size) {
-            val sinYt = clips.size - ytClips.size
-            div(cls := "alert alert-secondary small mt-3 text-muted",
-              s"ℹ️ $sinYt clip(s) con URL no-YouTube no se muestran en el player (Drive, etc.)")
-          } else div(),
-          script(raw(s"""
-            const clips = $clipsJson;
-            let current = 0;
-            let player;
-            let motivameTimer = null;
-            let isMotivame = false;
-            let clipDuration = 25;
-
-            // Duracion slider
-            document.getElementById('clip-duration').addEventListener('input', function() {
-              clipDuration = parseInt(this.value);
-              document.getElementById('dur-label').textContent = clipDuration + 's';
-            });
-
-            // Cargar YouTube API
-            var tag = document.createElement('script');
-            tag.src = "https://www.youtube.com/iframe_api";
-            document.head.appendChild(tag);
-
-            function onYouTubeIframeAPIReady() {
-              if (clips.length === 0) return;
-              player = new YT.Player('yt-player', {
-                height: '100%', width: '100%',
-                videoId: clips[0].videoId,
-                playerVars: { start: clips[0].start, autoplay: 0, rel: 0, modestbranding: 1 },
-                events: { onStateChange: onPlayerStateChange }
-              });
-            }
-
-            function onPlayerStateChange(event) {
-              // Si termina el video y esta en modo motivame, siguiente
-              if (event.data === YT.PlayerState.ENDED && isMotivame) {
-                nextClip();
-              }
-            }
-
-            function loadClip(idx) {
-              if (!player || clips.length === 0) return;
-              current = idx;
-              const c = clips[idx];
-              player.loadVideoById({ videoId: c.videoId, startSeconds: c.start });
-              // Actualizar info
-              document.getElementById('clip-title').textContent = c.rival + ' — ' + c.fecha;
-              document.getElementById('clip-sub').textContent = c.start + 's • ' + c.tipo;
-              document.getElementById('clip-counter').textContent = (idx+1) + ' / ' + clips.length;
-              // Resaltar playlist
-              document.querySelectorAll('.playlist-item').forEach((el, i) => {
-                el.classList.toggle('active', i === idx);
-              });
-              // Scroll en playlist
-              const el = document.getElementById('clip-' + idx);
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-              // Si modo motivame, programar siguiente clip tras clipDuration segundos
-              if (isMotivame) {
-                clearTimeout(motivameTimer);
-                motivameTimer = setTimeout(() => {
-                  const doLoop = document.getElementById('loop-toggle').checked;
-                  const next = (current + 1) % clips.length;
-                  if (!doLoop && next === 0) { stopMotivame(); return; }
-                  nextClip();
-                }, clipDuration * 1000);
-              }
-            }
-
-            function nextClip() {
-              const doLoop = document.getElementById('loop-toggle').checked;
-              const next = (current + 1) % clips.length;
-              if (!doLoop && next === 0 && current === clips.length - 1) { stopMotivame(); return; }
-              loadClip(next);
-            }
-
-            function prevClip() {
-              loadClip((current - 1 + clips.length) % clips.length);
-            }
-
-            function toggleMotivame() {
-              if (isMotivame) { stopMotivame(); } else { startMotivame(); }
-            }
-
-            function startMotivame() {
-              isMotivame = true;
-              document.getElementById('btn-motivame').className = 'btn btn-danger fw-bold flex-grow-1';
-              document.getElementById('btn-motivame').textContent = '⏹ DETENER';
-              loadClip(0);
-            }
-
-            function stopMotivame() {
-              isMotivame = false;
-              clearTimeout(motivameTimer);
-              document.getElementById('btn-motivame').className = 'btn btn-warning fw-bold flex-grow-1';
-              document.getElementById('btn-motivame').textContent = '🔥 MOTIVAME';
-            }
-          """))
-        )
-      )
-    )
-    renderHtml(content)
-  }
-
-  @cask.get("/tournament/bracket")
-  def tournamentBracket(request: cask.Request, nombre: String = "") = withAuth(request) {
-    val torneos = DatabaseManager.getTournamentNames()
-    val matches = if (nombre.nonEmpty) DatabaseManager.getTournamentMatches(nombre) else List.empty
-
-    // Agrupar por fase
-    val byFase = matches.groupBy(_.fase)
-    val fasesOrden = Seq("Grupos","Cuartos","Semifinal","Final","Octavos","Ronda 1","Ronda 2","Ronda 3")
-    val fases = (fasesOrden.filter(byFase.contains) ++ byFase.keys.filterNot(fasesOrden.contains)).distinct
-
-    def matchCard(m: MatchLog) = {
-      val (gf, gc) = m.resultado.split("-") match {
-        case Array(a,b) => (a.trim, b.trim); case _ => ("-","-")
-      }
-      val statusCls = if (m.status == "PLAYED") {
-        if (gf.toIntOption.getOrElse(0) > gc.toIntOption.getOrElse(0)) "border-success"
-        else if (gf == gc) "border-warning"
-        else "border-danger"
-      } else "border-secondary"
-      val resultBadge = if (m.status == "PLAYED")
-        span(cls := s"badge ${if(gf.toIntOption.getOrElse(0) > gc.toIntOption.getOrElse(0)) "bg-success" else "bg-danger"} fw-bold ms-2",
-          s"$gf - $gc")
-      else span(cls := "badge bg-secondary ms-2", "Pendiente")
-
-      div(cls := s"card bg-dark $statusCls shadow bracket-match mb-2",
-        div(cls := "card-body p-2",
-          div(cls := "d-flex justify-content-between align-items-center",
-            div(
-              div(cls := "fw-bold text-white small", fixEncoding(m.rival)),
-              div(cls := "xx-small text-muted", m.fecha)
-            ),
-            resultBadge
-          ),
-          if (m.status == "PLAYED" && m.nota > 0)
-            div(cls := "xx-small text-muted mt-1", s"Nota: ${m.nota} | Paradas: ${m.paradas}")
           else span()
+        ),
+
+        // Notas tácticas de partidos anteriores
+        if (notasTac.nonEmpty)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "📝 NOTAS DE PARTIDOS ANTERIORES"),
+            frag(notasTac.map { nota =>
+              div(cls := "d-flex gap-2 py-2",
+                style := "border-bottom:1px solid #1e1e1e;",
+                div(style := "width:4px; background:#ffc107; border-radius:2px; flex-shrink:0;"),
+                div(cls := "small text-white", style := "font-size:11px; line-height:1.4;", nota)
+              )
+            }: _*)
+          )
+        else span(),
+
+        // Historial de partidos
+        div(cls := "card-am p-3",
+          div(cls := "xx-small fw-bold text-muted mb-2", s"TODOS LOS PARTIDOS ($pj)"),
+          frag(partidos.map { m =>
+            val resColor = m("res") match {
+              case "G" => "#20c997"; case "P" => "#dc3545"; case _ => "#ffc107"
+            }
+            val esPortero = m("posicion") == "portero"
+            div(cls := "d-flex align-items-center gap-2 py-2",
+              style := "border-bottom:1px solid #1e1e1e;",
+              div(cls := "fw-bold text-white", style := s"font-size:.85rem; color:$resColor; min-width:18px;",
+                m("res")),
+              div(cls := "fw-bold text-white", style := "font-size:.85rem; min-width:32px;",
+                m("score")),
+              div(cls := "flex-fill",
+                div(cls := "xx-small text-muted", m("fecha")),
+                div(cls := "xx-small",
+                  style := "color:#888;",
+                  if (esPortero) "Portero" else s"${m("posicion").capitalize} · ${m("campo")}"
+                )
+              ),
+              div(cls := "text-center",
+                div(cls := "fw-bold text-white xx-small", s"★${m("nota")}"),
+                div(cls := "xx-small text-muted", m("local"))
+              )
+            )
+          }: _*)
         )
       )
-    }
+    )
+  }
 
-    val bracketContent = if (nombre.isEmpty || matches.isEmpty) {
-      div(cls := "alert alert-secondary text-center py-4",
-        div(style:="font-size:36px; opacity:0.3;","🏆"),
-        div(cls:="fw-bold mt-2", if(nombre.isEmpty)"Selecciona un torneo" else s"Sin partidos en '$nombre'")
-      )
-    } else {
-      div(cls := "bracket-container",
-        div(cls := "d-flex gap-3 overflow-auto pb-3",
-          fases.map { fase =>
-            val ms = byFase.getOrElse(fase, List.empty)
-            div(style := "min-width: 220px;",
-              div(cls := "text-center mb-2",
-                span(cls := "badge bg-warning text-dark fw-bold px-3 py-2", style:="font-size:13px;", fase.toUpperCase)
-              ),
-              div(ms.map(matchCard))
-            )
-          }
+  // ── WELLNESS PRE-PARTIDO ──────────────────────────────────────────────────
+  @cask.get("/am/wellness")
+  def wellnessPage(request: cask.Request) = withAmAuth(request) { user =>
+    val corr        = AmateurDatabaseManager.getWellnessCorrelation(user.id)
+    val rows        = corr("rows").asInstanceOf[List[Map[String, Any]]]
+    val lastW       = corr("lastWellness").asInstanceOf[Option[Map[String, Any]]]
+    val avgHigh     = corr("avgNotaHigh").asInstanceOf[Double]
+    val avgLow      = corr("avgNotaLow").asInstanceOf[Double]
+    val nHigh       = corr("nHighSleep").asInstanceOf[Int]
+    val nLow        = corr("nLowSleep").asInstanceOf[Int]
+    val today       = java.time.LocalDate.now().toString
+    val checkedToday = lastW.exists(_("fecha").asInstanceOf[String] == today)
+
+    // Gemini insights (solo si hay datos suficientes)
+    val insights: List[String] = if (rows.size >= 3) {
+      val raw = AmateurDatabaseManager.callGeminiWellness(rows)
+      if (raw.nonEmpty) raw.split("\n").map(_.trim).filter(_.nonEmpty).toList else List.empty
+    } else List.empty
+
+    renderAm("wellness", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "🧠 Wellness"),
+          span(cls := "text-muted small", "Bienestar pre-partido y correlación con rendimiento")
         ),
-        // Stats del torneo
-        if (matches.exists(_.status == "PLAYED")) {
-          val played = matches.filter(_.status == "PLAYED")
-          val wins = played.count(m => { val p = m.resultado.split("-"); p(0).trim.toIntOption.getOrElse(0) > p(1).trim.toIntOption.getOrElse(0) })
-          val gc = played.flatMap(m => m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption)).sum
-          val avgNota = if (played.nonEmpty) played.map(_.nota).sum / played.size else 0.0
-          div(cls := "row g-2 mt-3",
-            Seq(
-              ("Partidos", played.size.toString, "secondary"),
-              ("Victorias", wins.toString, "success"),
-              ("Goles Enc.", gc.toString, "danger"),
-              ("Nota Media", f"$avgNota%.1f", "warning")
-            ).map { case (lbl, v, c) =>
-              div(cls := "col-3",
-                div(cls := s"card bg-dark border-$c text-center py-2",
-                  div(cls := s"text-$c fw-bold fs-5", v),
-                  div(cls := "xx-small text-muted", lbl)
+
+        // Check-in card
+        div(cls := "card-am p-3 mb-3",
+          style := s"border-top: 3px solid ${if (checkedToday) "#20c997" else "#ffc107"};",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(cls := "fw-bold text-white", "📋 Check-in de hoy"),
+            if (checkedToday)
+              span(cls := "badge", style := "background:#20c99733; color:#20c997; font-size:10px;", "✓ Registrado")
+            else
+              span(cls := "badge", style := "background:#ffc10733; color:#ffc107; font-size:10px;", "Pendiente")
+          ),
+          div(id := "wellness-form",
+            // Sueño
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "🌙 HORAS DE SUEÑO"),
+              div(cls := "d-flex gap-2 flex-wrap",
+                Seq(4,5,6,7,8,9,10).map { h =>
+                  div(cls := "text-center",
+                    input(tpe := "radio", name := "sueno", id := s"s$h", value := h.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"s$h",
+                      cls := "btn btn-sm fw-bold",
+                      id := s"lbl_s$h",
+                      style := "min-width:36px; font-size:12px;",
+                      s"${h}h")
+                  )
+                }
+              )
+            ),
+            // Energía
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "⚡ NIVEL DE ENERGÍA"),
+              div(cls := "d-flex gap-2",
+                Seq((1,"😴"),(2,"😪"),(3,"😐"),(4,"😊"),(5,"🔥")).map { case (v, emoji) =>
+                  div(cls := "text-center flex-fill",
+                    input(tpe := "radio", name := "energia", id := s"e$v", value := v.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"e$v",
+                      cls := "btn w-100 fw-bold",
+                      id := s"lbl_e$v",
+                      style := "font-size:16px; padding:8px 4px;",
+                      emoji)
+                  )
+                }
+              )
+            ),
+            // Ánimo
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "💭 ESTADO ANÍMICO"),
+              div(cls := "d-flex gap-2",
+                Seq((1,"😤"),(2,"😕"),(3,"😐"),(4,"🙂"),(5,"🤩")).map { case (v, emoji) =>
+                  div(cls := "text-center flex-fill",
+                    input(tpe := "radio", name := "animo", id := s"a$v", value := v.toString,
+                      style := "display:none;",
+                      attr("onchange") := "updateWellness()"),
+                    label(attr("for") := s"a$v",
+                      cls := "btn w-100 fw-bold",
+                      id := s"lbl_a$v",
+                      style := "font-size:16px; padding:8px 4px;",
+                      emoji)
+                  )
+                }
+              )
+            ),
+            // Nota rápida
+            div(cls := "mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-1", "📝 NOTA RÁPIDA (opcional)"),
+              input(tpe := "text", id := "w-notas", cls := "form-control bg-dark text-white border-secondary",
+                style := "font-size:13px;",
+                placeholder := "ej. cansado del entreno, resfrío leve...")
+            ),
+            button(tpe := "button", id := "btn-wellness",
+              cls := "btn btn-warning w-100 fw-bold",
+              attr("onclick") := "guardarWellness()",
+              "💾 Guardar check-in")
+          )
+        ),
+
+        // Correlación sueño-nota (si hay datos)
+        if (nHigh + nLow >= 3)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "📊 CORRELACIÓN SUEÑO → RENDIMIENTO"),
+            div(cls := "row g-2 mb-2",
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top:2px solid #20c997;",
+                  div(cls := "fw-black text-success", style := "font-size:1.5rem;",
+                    f"$avgHigh%.1f"),
+                  div(cls := "xx-small text-muted", s"Nota · ≥7h sueño"),
+                  div(cls := "xx-small text-muted", s"($nHigh partidos)")
+                )
+              ),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top:2px solid #dc3545;",
+                  div(cls := "fw-black text-danger", style := "font-size:1.5rem;",
+                    f"$avgLow%.1f"),
+                  div(cls := "xx-small text-muted", s"Nota · <7h sueño"),
+                  div(cls := "xx-small text-muted", s"($nLow partidos)")
                 )
               )
-            }
+            ),
+
+            // Insights Gemini
+            if (insights.nonEmpty)
+              div(cls := "mt-2",
+                div(cls := "xx-small fw-bold text-muted mb-2", "✨ PATRONES DETECTADOS POR IA"),
+                frag(insights.map { insight =>
+                  div(cls := "d-flex gap-2 py-2",
+                    style := "border-bottom:1px solid #1e1e1e;",
+                    div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0;"),
+                    div(cls := "small text-white", style := "font-size:11px; line-height:1.5;", insight)
+                  )
+                }: _*)
+              )
+            else span()
           )
-        } else div()
+        else
+          div(cls := "card-am p-3 mb-3 text-center",
+            style := "border-style:dashed; opacity:.6;",
+            div(cls := "xx-small text-muted", "Registra wellness en al menos 3 días de partido"),
+            div(cls := "xx-small text-muted", "para ver la correlación con tu rendimiento")
+          ),
+
+        // Historial reciente
+        if (rows.nonEmpty)
+          div(cls := "card-am p-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "HISTORIAL (días con partido)"),
+            frag(rows.take(8).map { r =>
+              val nota  = r("nota").asInstanceOf[Double]
+              val nc    = if (nota >= 7) "#20c997" else if (nota >= 5) "#ffc107" else "#dc3545"
+              val sueno = r("sueno").asInstanceOf[Int]
+              val en    = r("energia").asInstanceOf[Int]
+              val an    = r("animo").asInstanceOf[Int]
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid #1e1e1e;",
+                div(cls := "xx-small text-muted", style := "min-width:55px;",
+                  r("fecha").asInstanceOf[String].take(10)),
+                div(cls := "flex-fill d-flex gap-2",
+                  span(cls := "xx-small text-info", s"🌙${sueno}h"),
+                  span(cls := "xx-small text-warning", s"⚡$en"),
+                  span(cls := "xx-small text-info", s"💭$an")
+                ),
+                div(cls := "fw-bold xx-small", style := s"color:$nc;", f"★$nota%.1f")
+              )
+            }: _*)
+          )
+        else span(),
+
+        // JS
+        script(raw("""
+          function updateWellness() {
+            ['s4','s5','s6','s7','s8','s9','s10'].forEach(function(id) {
+              var el = document.getElementById('lbl_' + id);
+              var inp = document.getElementById(id);
+              if (el && inp) el.className = inp.checked
+                ? 'btn btn-sm fw-bold btn-warning'
+                : 'btn btn-sm fw-bold btn-outline-secondary';
+            });
+            [1,2,3,4,5].forEach(function(v) {
+              ['e','a'].forEach(function(prefix) {
+                var el  = document.getElementById('lbl_' + prefix + v);
+                var inp = document.getElementById(prefix + v);
+                if (el && inp) el.className = inp.checked
+                  ? 'btn w-100 fw-bold btn-warning'
+                  : 'btn w-100 fw-bold btn-outline-secondary';
+              });
+            });
+          }
+          function guardarWellness() {
+            var sueno   = document.querySelector('input[name="sueno"]:checked');
+            var energia = document.querySelector('input[name="energia"]:checked');
+            var animo   = document.querySelector('input[name="animo"]:checked');
+            if (!sueno || !energia || !animo) {
+              alert('Completa los tres campos antes de guardar.');
+              return;
+            }
+            var params = new URLSearchParams();
+            params.append('sueno',   sueno.value);
+            params.append('energia', energia.value);
+            params.append('animo',   animo.value);
+            params.append('notas',   document.getElementById('w-notas').value);
+            document.getElementById('btn-wellness').disabled = true;
+            document.getElementById('btn-wellness').textContent = 'Guardando...';
+            fetch('/am/wellness/save', { method:'POST', body: params,
+              headers: {'Content-Type':'application/x-www-form-urlencoded'} })
+              .then(function(r) { if (r.ok) window.location.reload(); })
+              .catch(function() {
+                document.getElementById('btn-wellness').disabled = false;
+                document.getElementById('btn-wellness').textContent = '💾 Guardar check-in';
+              });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/wellness/save")
+  def wellnessSave(request: cask.Request,
+                   sueno: String, energia: String, animo: String, notas: String = "") =
+    withAmAuth(request) { user =>
+      val today = java.time.LocalDate.now().toString
+      AmateurDatabaseManager.saveWellness(
+        user.id, today,
+        try sueno.toInt   catch { case _: Exception => 0 },
+        try energia.toInt catch { case _: Exception => 0 },
+        try animo.toInt   catch { case _: Exception => 0 },
+        notas
+      )
+      cask.Response(Array.emptyByteArray, 200)
+    }
+
+  // ── NLP CALENDARIO ────────────────────────────────────────────────────────
+  @cask.get("/am/calendar/nlp")
+  def calendarNlpPage(request: cask.Request) = withAmAuth(request) { user =>
+    renderAm("calendar", user.nombre,
+      div(
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(
+            h5(cls := "fw-black text-white mb-0", "🔍 Carga de Calendario IA"),
+            span(cls := "text-muted small", "Pega el texto de tu liga — Gemini extrae los partidos automáticamente")
+          ),
+          a(href := "/am/calendar", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Agenda")
+        ),
+
+        // Instrucciones
+        div(cls := "card-am p-3 mb-3",
+          style := "border-left: 3px solid #7c3aed;",
+          div(cls := "xx-small fw-bold text-muted mb-2", "📋 CÓMO USAR"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "1. Ve a la web de tu liga (ligaelitefutbol.com u otra)"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "2. Selecciona y copia toda la página de clasificación/resultados (Ctrl+A, Ctrl+C)"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "3. Pégalo en el campo de abajo"),
+          div(cls := "small text-white", style := "line-height:1.6;",
+            "4. Escribe el nombre exacto de tu equipo"),
+          div(cls := "small text-warning mt-2", style := "font-size:11px;",
+            "⚠️ Los partidos duplicados se ignoran automáticamente")
+        ),
+
+        // Formulario
+        div(cls := "card-am p-3 mb-3",
+          // Nombre del equipo
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "NOMBRE DE TU EQUIPO *"),
+            input(tpe := "text", id := "team-name",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              placeholder := "ej. MiniFlow FC",
+              style := "font-size:13px;")
+          ),
+          // Texto de la web
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "TEXTO DE LA LIGA *"),
+            textarea(id := "league-text",
+              cls := "form-control bg-dark text-white border-secondary mt-1",
+              rows := "10",
+              style := "font-size:12px; font-family:monospace;",
+              placeholder := "Pega aquí el texto completo copiado de la web de tu liga...")
+          ),
+          // Botón
+          div(cls := "d-flex gap-2",
+            button(tpe := "button", id := "btn-nlp",
+              cls := "btn btn-primary fw-bold flex-fill",
+              attr("onclick") := "procesarCalendario()",
+              "🤖 Procesar con IA"),
+            a(href := "/am/calendar",
+              cls := "btn btn-outline-secondary fw-bold",
+              "Cancelar")
+          )
+        ),
+
+        // Loading
+        div(id := "nlp-loading", cls := "card-am p-3 text-center d-none",
+          div(cls := "text-muted small", "⏳ Analizando con Gemini..."),
+          div(cls := "text-muted", style := "font-size:11px; margin-top:4px;",
+            "Esto puede tardar 5-10 segundos")
+        ),
+
+        // Resultado
+        div(id := "nlp-result", cls := "d-none"),
+
+        script(raw("""
+          function procesarCalendario() {
+            var team = document.getElementById('team-name').value.trim();
+            var text = document.getElementById('league-text').value.trim();
+            if (!team) { alert('Escribe el nombre de tu equipo.'); return; }
+            if (text.length < 50) { alert('El texto parece demasiado corto. Pega más contenido.'); return; }
+
+            document.getElementById('btn-nlp').disabled = true;
+            document.getElementById('nlp-loading').classList.remove('d-none');
+            document.getElementById('nlp-result').classList.add('d-none');
+
+            var params = new URLSearchParams();
+            params.append('teamName', team);
+            params.append('texto', text);
+
+            fetch('/am/calendar/nlp/process', {
+              method: 'POST',
+              body: params,
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            })
+            .then(r => r.json())
+            .then(function(json) {
+              document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('nlp-loading').classList.add('d-none');
+              var res = document.getElementById('nlp-result');
+              res.classList.remove('d-none');
+
+              if (json.ok) {
+                var amenazasHtml = '';
+                if (json.amenazas && json.amenazas.length > 0) {
+                  amenazasHtml = '<div class="xx-small fw-bold text-muted mt-3 mb-1">⚠️ AMENAZAS DEL PRÓXIMO RIVAL</div>' +
+                    json.amenazas.map(function(a) {
+                      return '<span class="badge me-1" style="background:#dc354533;color:#dc3545;border:1px solid #dc354555;font-size:10px;">' + a + '</span>';
+                    }).join('');
+                }
+                var proximoHtml = json.proximo ? '<div class="xx-small text-muted mt-1">Próximo rival detectado: <strong class="text-white">' + json.proximo + '</strong></div>' : '';
+                res.innerHTML =
+                  '<div class="card-am p-3" style="border-top:3px solid #20c997;">' +
+                  '<div class="fw-bold text-success mb-1">✅ ' + json.inserted + ' partidos añadidos a tu agenda</div>' +
+                  (json.skipped > 0 ? '<div class="xx-small text-muted">' + json.skipped + ' ya existían y se ignoraron</div>' : '') +
+                  proximoHtml + amenazasHtml +
+                  '<a href="/am/calendar" class="btn btn-success btn-sm fw-bold mt-3 w-100">Ver agenda actualizada →</a>' +
+                  '</div>';
+              } else {
+                res.innerHTML =
+                  '<div class="card-am p-3" style="border-top:3px solid #dc3545;">' +
+                  '<div class="text-danger fw-bold">❌ Error al procesar</div>' +
+                  '<div class="xx-small text-muted mt-1">' + (json.error || 'Error desconocido') + '</div>' +
+                  '</div>';
+              }
+            })
+            .catch(function(e) {
+              document.getElementById('btn-nlp').disabled = false;
+              document.getElementById('nlp-loading').classList.add('d-none');
+              document.getElementById('nlp-result').classList.remove('d-none');
+              document.getElementById('nlp-result').innerHTML =
+                '<div class="card-am p-3" style="border-top:3px solid #dc3545;">' +
+                '<div class="text-danger">Error de red: ' + e.message + '</div></div>';
+            });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/calendar/nlp/process")
+  def calendarNlpProcess(request: cask.Request, teamName: String, texto: String) =
+    withAmAuth(request) { user =>
+      val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName)
+      val json = ujson.Obj(
+        "ok"       -> result.getOrElse("ok", false).asInstanceOf[Boolean],
+        "inserted" -> result.getOrElse("inserted", 0).asInstanceOf[Int],
+        "skipped"  -> result.getOrElse("skipped", 0).asInstanceOf[Int],
+        "total"    -> result.getOrElse("total", 0).asInstanceOf[Int],
+        "proximo"  -> result.getOrElse("proximo", "").asInstanceOf[String],
+        "amenazas" -> ujson.Arr.from(
+          result.getOrElse("amenazas", List.empty).asInstanceOf[List[String]].map(ujson.Str(_))
+        ),
+        "error"    -> result.getOrElse("error", "").asInstanceOf[String]
+      )
+      cask.Response(
+        ujson.write(json).getBytes("UTF-8"),
+        headers = Seq("Content-Type" -> "application/json")
       )
     }
 
-    val content = basePage("match-center",
-      div(cls := "row justify-content-center",
-        div(cls := "col-md-11 col-12",
-          h2(cls := "text-center text-warning mb-1", "BRACKET TORNEO"),
-          p(cls := "text-center text-muted small mb-4", "Visualizacion de fases y resultados"),
+  // Redirect /am → /am/dashboard
+  @cask.get("/am")
+  def amRoot(request: cask.Request) =
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/am/dashboard"))
 
-          // Selector de torneo
-          div(cls := "card bg-dark border-secondary shadow mb-4",
-            div(cls := "card-body d-flex gap-2 flex-wrap align-items-center",
-              span(cls := "text-muted small fw-bold me-2", "Torneo:"),
-              if (torneos.isEmpty)
-                span(cls := "text-muted small", "Sin torneos registrados. Crea uno desde Match Center.")
-              else
-                div(cls := "d-flex gap-2 flex-wrap",
-                  a(href := "/tournament/bracket",
-                    cls := s"btn btn-sm fw-bold ${if(nombre.isEmpty)"btn-warning"else"btn-outline-secondary"}",
-                    "Seleccionar"),
-                  torneos.map { t =>
-                    a(href := s"/tournament/bracket?nombre=${java.net.URLEncoder.encode(t, "UTF-8")}",
-                      cls := s"btn btn-sm fw-bold ${if(nombre == t)"btn-warning"else"btn-outline-secondary"}",
-                      fixEncoding(t))
-                  }
-                ),
-              div(cls := "ms-auto",
-                a(href := "/tournament/new", cls := "btn btn-sm btn-outline-warning fw-bold", "+ Nuevo Torneo")
+  // ── PROGRESIÓN Y TENDENCIAS ────────────────────────────────────────────────
+  @cask.get("/am/progression")
+  def progressionPage(request: cask.Request) = withAmAuth(request) { user =>
+    val d = AmateurDatabaseManager.getProgressionData(user.id)
+
+    val totalPartidos  = d("totalPartidos").asInstanceOf[Int]
+    val tendencia      = d("tendencia").asInstanceOf[String]
+    val tendenciaDelta = d("tendenciaDelta").asInstanceOf[Double]
+    val labels         = d("labels").asInstanceOf[List[String]]
+    val notas          = d("notas").asInstanceOf[List[Double]]
+    val gcList         = d("gcList").asInstanceOf[List[Int]]
+    val resultados     = d("resultados").asInstanceOf[List[String]]
+    val mesList        = d("mesList").asInstanceOf[List[Map[String, Any]]]
+    val mejorPartido   = d("mejorPartido").asInstanceOf[Option[Map[String, String]]]
+    val peorPartido    = d("peorPartido").asInstanceOf[Option[Map[String, String]]]
+    val racha          = d("racha").asInstanceOf[List[String]]
+
+    val tendenciaColor = tendencia match {
+      case "MEJORANDO"    => "#20c997"
+      case "BAJANDO"      => "#dc3545"
+      case "ESTABLE"      => "#ffc107"
+      case _              => "#6c757d"
+    }
+    val tendenciaIcon = tendencia match {
+      case "MEJORANDO"    => "↑"
+      case "BAJANDO"      => "↓"
+      case "ESTABLE"      => "→"
+      case _              => "—"
+    }
+    val tendenciaLabel = tendencia match {
+      case "MEJORANDO"    => "Mejorando"
+      case "BAJANDO"      => "Bajando"
+      case "ESTABLE"      => "Estable"
+      case _              => "Pocos datos"
+    }
+
+    val labelsJson   = labels.map(l => s""""$l"""").mkString("[", ",", "]")
+    val notasJson    = notas.map(n => f"$n%.1f").mkString("[", ",", "]")
+    val gcJson       = gcList.mkString("[", ",", "]")
+
+    def mesLabel(m: String): String = {
+      val parts = m.split("-")
+      if (parts.length == 2) {
+        val mes = parts(1).toIntOption.getOrElse(0)
+        val meses = Array("", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+        if (mes >= 1 && mes <= 12) s"${meses(mes)} ${parts(0).takeRight(2)}" else m
+      } else m
+    }
+
+    renderAm("progression", user.nombre,
+      div(
+        // Header
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "📈 Progresión"),
+          span(cls := "text-muted small", s"$totalPartidos partidos registrados")
+        ),
+
+        if (totalPartidos == 0)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:48px; opacity:0.4", "📊"),
+            h5(cls := "text-muted mt-3", "Sin datos aún"),
+            p(cls := "text-secondary small", "Registra partidos para ver tu evolución."),
+            a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
+          )
+        else frag(
+
+          // Tendencia principal
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex align-items-center gap-3",
+              div(style := s"font-size:2.8rem; color:$tendenciaColor; font-weight:900; line-height:1;",
+                tendenciaIcon),
+              div(
+                div(cls := "fw-black text-white", style := "font-size:1.2rem;", tendenciaLabel),
+                div(cls := "xx-small text-muted",
+                  if (tendencia != "POCOS_DATOS")
+                    s"${if (tendenciaDelta >= 0) "+" else ""}${f"$tendenciaDelta%.2f"} puntos vs. 5 partidos anteriores"
+                  else "Necesitas al menos 6 partidos para calcular tendencia"
+                )
               )
             )
           ),
 
-          bracketContent
-        )
+          // Racha actual (últimos 10)
+          if (racha.nonEmpty)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "FORMA RECIENTE"),
+              div(cls := "d-flex gap-1 flex-wrap",
+                frag(racha.reverse.map { r =>
+                  val (bg, txt) = r match {
+                    case "W" => ("#20c997", "G")
+                    case "D" => ("#ffc107", "E")
+                    case _   => ("#dc3545", "P")
+                  }
+                  span(style := s"background:$bg; color:#000; font-weight:900; font-size:11px; width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;",
+                    txt)
+                }: _*)
+              )
+            )
+          else span(),
+
+          // Gráfico evolución nota
+          if (notas.size >= 2)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "EVOLUCIÓN DE NOTA"),
+              div(style := "height:160px;",
+                canvas(id := "chartNota")
+              ),
+              script(raw(s"""
+                new Chart(document.getElementById('chartNota'), {
+                  type: 'line',
+                  data: {
+                    labels: $labelsJson,
+                    datasets: [{
+                      label: 'Nota',
+                      data: $notasJson,
+                      borderColor: '#0d6efd',
+                      backgroundColor: 'rgba(13,110,253,0.1)',
+                      tension: 0.3,
+                      fill: true,
+                      pointRadius: ${if (notas.size > 20) "0" else "3"},
+                      borderWidth: 2
+                    }]
+                  },
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                      y: { min: 0, max: 10, ticks: { color: '#888', stepSize: 2 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#888', maxTicksLimit: 8 }, grid: { display: false } }
+                    }
+                  }
+                });
+              """))
+            )
+          else span(),
+
+          // Gráfico GC por partido
+          if (gcList.size >= 2)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "GOLES ENCAJADOS POR PARTIDO"),
+              div(style := "height:120px;",
+                canvas(id := "chartGC")
+              ),
+              script(raw(s"""
+                new Chart(document.getElementById('chartGC'), {
+                  type: 'bar',
+                  data: {
+                    labels: $labelsJson,
+                    datasets: [{
+                      label: 'GC',
+                      data: $gcJson,
+                      backgroundColor: function(ctx) {
+                        var v = ctx.raw;
+                        return v === 0 ? '#20c997' : v <= 1 ? '#ffc107' : '#dc3545';
+                      },
+                      borderRadius: 3
+                    }]
+                  },
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                      y: { ticks: { color: '#888', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      x: { ticks: { color: '#888', maxTicksLimit: 8 }, grid: { display: false } }
+                    }
+                  }
+                });
+              """))
+            )
+          else span(),
+
+          // Stats por mes
+          if (mesList.nonEmpty)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "POR MES"),
+              frag(mesList.map { mes =>
+                val nota = mes("notaMedia").asInstanceOf[Double]
+                val pj   = mes("pj").asInstanceOf[Int]
+                val lim  = mes("limpias").asInstanceOf[Int]
+                val gan  = mes("ganados").asInstanceOf[Int]
+                val nc   = if (nota >= 7.0) "#20c997" else if (nota >= 5.0) "#ffc107" else "#dc3545"
+                div(cls := "d-flex align-items-center gap-2 py-2",
+                  style := "border-bottom:1px solid rgba(255,255,255,0.06);",
+                  div(style := s"min-width:52px; font-size:11px; font-weight:700; color:$nc;",
+                    mesLabel(mes("mes").asInstanceOf[String])),
+                  div(cls := "flex-fill",
+                    div(cls := "d-flex gap-2",
+                      span(cls := "xx-small text-muted", s"$pj PJ"),
+                      span(cls := "xx-small text-muted", s"$gan G"),
+                      span(cls := "xx-small text-muted", s"$lim LP")
+                    )
+                  ),
+                  div(style := s"font-size:1.3rem; font-weight:900; color:$nc;",
+                    f"$nota%.1f")
+                )
+              }: _*)
+            )
+          else span(),
+
+          // Mejor / peor partido
+          div(cls := "row g-2 mb-3",
+            mejorPartido.map { m =>
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top: 3px solid #20c997;",
+                  div(cls := "xx-small text-muted mb-1", "MEJOR"),
+                  div(cls := "fw-black text-success", style := "font-size:1.5rem;", m("nota")),
+                  div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
+                  div(cls := "xx-small text-muted", m("res"))
+                )
+              )
+            }.getOrElse(span()),
+            peorPartido.map { m =>
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  style := "border-top: 3px solid #dc3545;",
+                  div(cls := "xx-small text-muted mb-1", "PEOR"),
+                  div(cls := "fw-black text-danger", style := "font-size:1.5rem;", m("nota")),
+                  div(cls := "xx-small text-white fw-bold", m("rival").take(14)),
+                  div(cls := "xx-small text-muted", m("res"))
+                )
+              )
+            }.getOrElse(span())
+          )
+        ),
+
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js")
       )
     )
-    renderHtml(content)
   }
 
   initialize()
