@@ -239,20 +239,6 @@ object AmateurDatabaseManager {
         respuesta LIKE 'Error:%' OR respuesta LIKE '%status code%' OR respuesta = ''
       """)
 
-      // Métricas corporales — añadido en v7.4
-      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_body_metrics (
-        id          SERIAL PRIMARY KEY,
-        user_id     INT REFERENCES am_users(id) ON DELETE CASCADE,
-        fecha       DATE NOT NULL,
-        peso        DOUBLE PRECISION NOT NULL,
-        altura      DOUBLE PRECISION NOT NULL,
-        grasa       DOUBLE PRECISION DEFAULT NULL,
-        cintura     DOUBLE PRECISION DEFAULT NULL,
-        notas       TEXT DEFAULT '',
-        created_at  TIMESTAMP DEFAULT NOW(),
-        UNIQUE(user_id, fecha)
-      )""")
-
       // Wellness — añadido en v7.4
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_wellness (
         id        SERIAL PRIMARY KEY,
@@ -1594,95 +1580,6 @@ $jsonTpl"""
         "notasTacticas" -> notasTacticas
       )
     } finally { conn.close() }
-  }
-
-  def saveBodyMetrics(userId: Int, fecha: String, peso: Double, altura: Double,
-                      grasa: Option[Double], cintura: Option[Double], notas: String): Unit = {
-    val conn = getConn()
-    try {
-      val ps = conn.prepareStatement("""
-        INSERT INTO am_body_metrics (user_id, fecha, peso, altura, grasa, cintura, notas)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (user_id, fecha) DO UPDATE
-          SET peso=EXCLUDED.peso, altura=EXCLUDED.altura,
-              grasa=EXCLUDED.grasa, cintura=EXCLUDED.cintura, notas=EXCLUDED.notas
-      """)
-      ps.setInt(1, userId); ps.setString(2, fecha)
-      ps.setDouble(3, peso); ps.setDouble(4, altura)
-      grasa match { case Some(v) => ps.setDouble(5, v) case None => ps.setNull(5, java.sql.Types.DOUBLE) }
-      cintura match { case Some(v) => ps.setDouble(6, v) case None => ps.setNull(6, java.sql.Types.DOUBLE) }
-      ps.setString(7, fix(notas))
-      ps.executeUpdate()
-    } finally { conn.close() }
-  }
-
-  def getBodyMetrics(userId: Int): List[Map[String, Any]] = {
-    val conn = getConn()
-    try {
-      val ps = conn.prepareStatement("""
-        SELECT fecha, peso, altura, grasa, cintura, notas
-        FROM am_body_metrics WHERE user_id = ?
-        ORDER BY fecha DESC LIMIT 20
-      """)
-      ps.setInt(1, userId)
-      val rs = ps.executeQuery()
-      var list = List[Map[String, Any]]()
-      while (rs.next()) {
-        val grasaVal  = rs.getDouble("grasa");  val grasaNull  = rs.wasNull()
-        val cinturaVal = rs.getDouble("cintura"); val cinturaNull = rs.wasNull()
-        list = list :+ Map(
-          "fecha"   -> rs.getString("fecha").take(10),
-          "peso"    -> rs.getDouble("peso"),
-          "altura"  -> rs.getDouble("altura"),
-          "imc"     -> { val a = rs.getDouble("altura"); if (a > 0) rs.getDouble("peso") / math.pow(a/100.0, 2) else 0.0 },
-          "grasa"   -> (if (grasaNull) None else Some(grasaVal)),
-          "cintura" -> (if (cinturaNull) None else Some(cinturaVal)),
-          "notas"   -> Option(rs.getString("notas")).getOrElse("")
-        )
-      }
-      list
-    } finally { conn.close() }
-  }
-
-  def getBodyMetricsAI(userId: Int): String = {
-    val metrics = getBodyMetrics(userId)
-    if (metrics.size < 2) return ""
-
-    val latest  = metrics.head
-    val peso    = latest("peso").asInstanceOf[Double]
-    val altura  = latest("altura").asInstanceOf[Double]
-    val imc     = latest("imc").asInstanceOf[Double]
-    val grasa   = latest("grasa").asInstanceOf[Option[Double]]
-    val cintura = latest("cintura").asInstanceOf[Option[Double]]
-
-    // Build trend data (last 6 weeks)
-    val trend = metrics.take(6).reverse.map { m =>
-      val p = m("peso").asInstanceOf[Double]
-      val i = m("imc").asInstanceOf[Double]
-      s"${m("fecha").asInstanceOf[String].take(10)}: ${f"$p%.1f"}kg IMC:${f"$i%.1f"}"
-    }.mkString(", ")
-
-    val extras = List(
-      grasa.map(g => s"grasa corporal: ${f"$g%.1f"}%"),
-      cintura.map(c => s"cintura: ${f"$c%.1f"}cm")
-    ).flatten.mkString(", ")
-
-    val prompt = s"""Eres un experto en fisiología deportiva aplicada al fútbol. Analiza estas métricas corporales de un jugador/portero amateur y da 3 consejos MUY CONCRETOS sobre cómo sus medidas actuales afectan su rendimiento EN EL CAMPO.
-
-DATOS ACTUALES: ${f"$peso%.1f"}kg, ${f"$altura%.0f"}cm, IMC:${f"$imc%.1f"}${if (extras.nonEmpty) s", $extras" else ""}
-EVOLUCIÓN (últimas semanas): $trend
-
-REGLAS ESTRICTAS:
-- NO menciones ejercicios, entrenamientos, nutrición ni dietas
-- Habla SOLO de cómo estas medidas impactan: velocidad de reacción, potencia de salto, agilidad lateral, alcance de brazos, duelos aéreos
-- Sé directo y específico con números cuando sea posible
-- Máximo 15 palabras por consejo, una línea cada uno, sin numeración ni guiones
-
-Ejemplos del tono correcto:
-Con IMC 24 tienes la relación peso-potencia óptima para explosividad en salidas
-Tu cintura indica baja masa abdominal, lo que mejora la rotación en coberturas laterales"""
-
-    askCached(prompt)
   }
 
   def getReportData(userId: Int): Map[String, Any] = {
