@@ -503,7 +503,7 @@ object MatchController extends cask.Routes {
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
   }
   @cask.get("/match/edit/:matchId")
-  def editMatchPage(matchId: Int) = {
+  def editMatchPage(request: cask.Request, matchId: Int) = withAuth(request) {
     val m = DatabaseManager.getMatchById(matchId)
     if (m.isEmpty) {
       cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
@@ -559,84 +559,157 @@ object MatchController extends cask.Routes {
 
       val content = basePage("history",
         div(cls := "row justify-content-center",
-          div(cls := "col-md-6 col-12",
-            div(cls := "card bg-dark text-white border-primary shadow",
-              div(cls := "card-header bg-primary text-white fw-bold text-center",
-                "EDITAR PARTIDO & VIDEO"),
+          div(cls := "col-md-8 col-lg-7 col-12",
+
+            div(cls := "d-flex justify-content-between align-items-center mb-3",
+              h4(cls := "text-white fw-black mb-0", "✏️ Editar Partido"),
+              a(href := "/history", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Historial")
+            ),
+
+            div(cls := "card bg-dark border-secondary shadow mb-3",
+              div(cls := "card-header border-secondary fw-bold text-white small text-uppercase",
+                "Datos del partido"),
               div(cls := "card-body p-3",
                 form(action := "/match/update", method := "post",
                   attr("accept-charset") := "UTF-8",
                   input(tpe := "hidden", name := "id", value := matchId.toString),
-                  div(cls := "mb-3", label("Rival"),
-                    input(tpe := "text", name := "rival", value := matchData.rival, cls := "form-control")),
-                  div(cls := "mb-3", label("Fecha"),
-                    input(tpe := "date", name := "fecha", value := matchData.fecha, cls := "form-control")),
-                  div(cls := "row mb-3",
-                    div(cls := "col-6", label("GF"),
-                      input(tpe := "number", name := "gf", value := gf, cls := "form-control")),
-                    div(cls := "col-6", label("GC"),
-                      input(tpe := "number", name := "gc", value := gc, cls := "form-control"))
+
+                  // Rival + fecha
+                  div(cls := "row g-2 mb-3",
+                    div(cls := "col-8",
+                      label(cls := "form-label small text-muted fw-bold", "RIVAL"),
+                      input(tpe := "text", name := "rival", value := matchData.rival,
+                        cls := "form-control bg-dark text-white border-secondary")),
+                    div(cls := "col-4",
+                      label(cls := "form-label small text-muted fw-bold", "FECHA"),
+                      input(tpe := "date", name := "fecha", value := matchData.fecha,
+                        cls := "form-control bg-dark text-white border-secondary"))
                   ),
-                  div(cls := "mb-3", label("Estadio"),
-                    input(tpe := "text", name := "estadio", value := matchData.estadio, cls := "form-control")),
-                  div(cls := "mb-3", label("Nota"),
-                    input(tpe := "number", step := "0.1", name := "nota",
-                      value := matchData.nota.toString, cls := "form-control")),
-                  div(cls := "mb-3", label("Notas Texto"),
-                    textarea(name := "notas", cls := "form-control", rows := "3", matchData.notas)),
-                  div(cls := "mb-3", label("Reaccion/Goles"),
-                    textarea(name := "reaccion", cls := "form-control", rows := "3", matchData.reaccion)),
-                  div(cls := "mb-3", label("Video URL (Youtube)"),
-                    input(tpe := "text", name := "video", value := matchData.video, cls := "form-control")),
-                  div(cls := "d-grid gap-2 mb-4",
-                    button(tpe := "submit", cls := "btn btn-success", "Guardar Cambios"),
-                    a(href := "/history", cls := "btn btn-outline-secondary", "Cancelar")
+
+                  // Resultado + nota
+                  div(cls := "row g-2 mb-3",
+                    div(cls := "col-3",
+                      label(cls := "form-label small text-muted fw-bold", "GF"),
+                      input(tpe := "number", name := "gf", value := gf,
+                        cls := "form-control bg-dark text-white border-secondary", attr("min") := "0")),
+                    div(cls := "col-3",
+                      label(cls := "form-label small text-muted fw-bold", "GC"),
+                      input(tpe := "number", name := "gc", value := gc,
+                        cls := "form-control bg-dark text-white border-secondary", attr("min") := "0")),
+                    div(cls := "col-3",
+                      label(cls := "form-label small text-muted fw-bold", "NOTA"),
+                      input(tpe := "number", step := "0.1", name := "nota",
+                        value := matchData.nota.toString, attr("min") := "0", attr("max") := "10",
+                        cls := "form-control bg-dark text-white border-secondary")),
+                    div(cls := "col-3",
+                      label(cls := "form-label small text-muted fw-bold", "MIN"),
+                      input(tpe := "number", name := "minutos", value := matchData.minutos.toString,
+                        cls := "form-control bg-dark text-white border-secondary", attr("min") := "0"))
+                  ),
+
+                  // Tipo + clima
+                  div(cls := "row g-2 mb-3",
+                    div(cls := "col-6",
+                      label(cls := "form-label small text-muted fw-bold", "TIPO"),
+                      select(name := "tipo", cls := "form-select bg-dark text-white border-secondary",
+                        Seq("LIGA","TORNEO","CUP","AMISTOSO").map { t =>
+                          option(value := t, if (matchData.tipo == t) attr("selected") := "selected" else emptyFrag, t)
+                        }
+                      )
+                    ),
+                    div(cls := "col-6",
+                      label(cls := "form-label small text-muted fw-bold", "CLIMA"),
+                      select(name := "clima", cls := "form-select bg-dark text-white border-secondary",
+                        Seq("Sol","Nublado","Lluvia","Frío","Calor","Viento").map { c =>
+                          option(value := c, if (matchData.clima == c) attr("selected") := "selected" else emptyFrag, c)
+                        }
+                      )
+                    )
+                  ),
+
+                  // Estadio + local/visitante
+                  div(cls := "row g-2 mb-3",
+                    div(cls := "col-8",
+                      label(cls := "form-label small text-muted fw-bold", "ESTADIO"),
+                      input(tpe := "text", name := "estadio", value := matchData.estadio,
+                        cls := "form-control bg-dark text-white border-secondary")),
+                    div(cls := "col-4",
+                      label(cls := "form-label small text-muted fw-bold", "LOCAL/VISIT."),
+                      select(name := "esLocal", cls := "form-select bg-dark text-white border-secondary",
+                        option(value := "", "—"),
+                        option(value := "true",  "🏠 Local"),
+                        option(value := "false", "✈️ Visitante")
+                      )
+                    )
+                  ),
+
+                  // Notas + reacción
+                  div(cls := "mb-3",
+                    label(cls := "form-label small text-muted fw-bold", "NOTAS DEL PARTIDO"),
+                    textarea(name := "notas", cls := "form-control bg-dark text-white border-secondary",
+                      rows := "3", matchData.notas)),
+                  div(cls := "mb-3",
+                    label(cls := "form-label small text-muted fw-bold", "REACCIÓN / GOLES ENCAJADOS"),
+                    textarea(name := "reaccion", cls := "form-control bg-dark text-white border-secondary",
+                      rows := "3", matchData.reaccion)),
+
+                  // Video
+                  div(cls := "mb-4",
+                    label(cls := "form-label small text-muted fw-bold", "VIDEO URL (YouTube)"),
+                    input(tpe := "text", name := "video", value := matchData.video,
+                      cls := "form-control bg-dark text-white border-secondary",
+                      placeholder := "https://youtube.com/watch?v=...")),
+
+                  div(cls := "d-flex gap-2",
+                    button(tpe := "submit", cls := "btn btn-success fw-bold flex-fill", "💾 Guardar cambios"),
+                    a(href := "/history", cls := "btn btn-outline-secondary fw-bold", "Cancelar")
                   )
                 )
-              ),
-
-              // --- Footer: Diario de voz ---
-              div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary mt-3",
-                h6(cls := "text-info small fw-bold mb-2", "🎙 DIARIO DE VOZ (POST-PARTIDO)"),
-                div(cls := "mb-2 small text-muted", "Graba a Hector contando como se sintio o sube un audio."),
-                div(cls := "d-flex gap-2 mb-3",
-                  button(id := "btnRecord", cls := "btn btn-sm btn-outline-danger",
-                    onclick := "toggleRecording()", "⏺ Grabar"),
-                  button(id := "btnStop", cls := "btn btn-sm btn-danger",
-                    style := "display:none;", onclick := "stopRecording()", "⏹ Parar"),
-                  input(tpe := "file", id := "fileUpload", accept := "audio/*",
-                    cls := "form-control form-control-sm bg-dark text-white",
-                    onchange := "handleFileUpload(this)")
-                ),
-                audio(id := "audioPreview", attr("controls") := "true",
-                  style := "width: 100%; display:none;", cls := "mb-2"),
-                form(action := "/match/analyze_audio", method := "post", id := "audioForm",
-                  input(tpe := "hidden", name := "matchId",    value := matchId.toString),
-                  input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
-                  button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
-                    onclick := "submitAudio()", disabled := true, "🧠 Analizar Emociones con IA")
-                ),
-                if (matchData.analisisVoz.nonEmpty)
-                  div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
-                    style := "white-space: pre-wrap;",
-                    b(cls := "text-info", "Psicologo IA: "), br,
-                    fixEncoding(matchData.analisisVoz))
-                else div()
-              ),
-
-              // --- Footer: Tags de video ---
-              div(cls := "card-footer bg-secondary bg-opacity-25",
-                h6(cls := "text-white small fw-bold", "CORTES DE VIDEO (TAGS)"),
-                tagList
               )
             ),
 
-            // Script grabacion de audio
-            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
-          )
+            // --- Footer: Diario de voz ---
+            div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary mt-3",
+              h6(cls := "text-info small fw-bold mb-2", "🎙 DIARIO DE VOZ (POST-PARTIDO)"),
+              div(cls := "mb-2 small text-muted", "Graba a Hector contando como se sintio o sube un audio."),
+              div(cls := "d-flex gap-2 mb-3",
+                button(id := "btnRecord", cls := "btn btn-sm btn-outline-danger",
+                  onclick := "toggleRecording()", "⏺ Grabar"),
+                button(id := "btnStop", cls := "btn btn-sm btn-danger",
+                  style := "display:none;", onclick := "stopRecording()", "⏹ Parar"),
+                input(tpe := "file", id := "fileUpload", accept := "audio/*",
+                  cls := "form-control form-control-sm bg-dark text-white",
+                  onchange := "handleFileUpload(this)")
+              ),
+              audio(id := "audioPreview", attr("controls") := "true",
+                style := "width: 100%; display:none;", cls := "mb-2"),
+              form(action := "/match/analyze_audio", method := "post", id := "audioForm",
+                input(tpe := "hidden", name := "matchId",    value := matchId.toString),
+                input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
+                button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
+                  onclick := "submitAudio()", disabled := true, "🧠 Analizar Emociones con IA")
+              ),
+              if (matchData.analisisVoz.nonEmpty)
+                div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
+                  style := "white-space: pre-wrap;",
+                  b(cls := "text-info", "Psicologo IA: "), br,
+                  fixEncoding(matchData.analisisVoz))
+              else div()
+            ),
+
+            // --- Footer: Tags de video ---
+            div(cls := "card-footer bg-secondary bg-opacity-25",
+              h6(cls := "text-white small fw-bold", "CORTES DE VIDEO (TAGS)"),
+              tagList
+            )
+          ),
+
+          // Script grabacion de audio
+          script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
         )
       )
-      renderHtml(content.render)
+      )
+      renderHtml(content)
     }
   }
   @cask.postForm("/match/analyze_audio")
@@ -662,12 +735,16 @@ object MatchController extends cask.Routes {
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> s"/match/edit/$matchId"))
   }
   @cask.postForm("/match/update")
-  def updateMatchAction(id: Int, rival: String, gf: Int, gc: Int, nota: Double,
-                        notas: String, video: String, reaccion: String, fecha: String, estadio: String) = {
-    val cleanRival    = fixEncoding(rival)
-    val cleanNotas    = fixEncoding(notas)
-    val cleanReaccion = fixEncoding(reaccion)
-    DatabaseManager.updateMatch(id, cleanRival, gf, gc, 60, nota, "Sol", estadio, 20, cleanNotas, video, cleanReaccion, fecha)
+  def updateMatchAction(request: cask.Request, id: Int, rival: String, gf: Int, gc: Int,
+                        nota: Double, minutos: String = "60", tipo: String = "LIGA",
+                        clima: String = "Sol", estadio: String = "",
+                        esLocal: String = "", notas: String = "",
+                        video: String = "", reaccion: String = "", fecha: String) = withAuth(request) {
+    val min = try minutos.toInt catch { case _: Exception => 60 }
+    DatabaseManager.updateMatch(id, fixEncoding(rival), gf, gc, min, nota,
+      clima, fixEncoding(estadio), 20, fixEncoding(notas), video, fixEncoding(reaccion), fecha)
+    // Update es_local and tipo separately if columns exist
+    DatabaseManager.updateMatchExtra(id, tipo, esLocal)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
   }
 
