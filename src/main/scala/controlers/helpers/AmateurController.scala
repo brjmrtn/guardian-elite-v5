@@ -204,7 +204,10 @@ object AmateurController extends cask.Routes {
             span(cls := "nav-icon", "🧠"), span("Wellness")),
           a(href := "/am/league",
             cls := s"nav-item ${if (activeLink == "league") "active" else ""}",
-            span(cls := "nav-icon", "🏆"), span("Liga"))
+            span(cls := "nav-icon", "🏆"), span("Liga")),
+          a(href := "/am/body",
+            cls := s"nav-item ${if (activeLink == "body") "active" else ""}",
+            span(cls := "nav-icon", "⚖️"), span("Cuerpo"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -360,264 +363,311 @@ object AmateurController extends cask.Routes {
   // ── DASHBOARD ──────────────────────────────────────────────────────────────
   @cask.get("/am/dashboard")
   def dashboardPage(request: cask.Request) = withAmAuth(request) { user =>
-    val st       = AmateurDatabaseManager.getDashboardStats(user.id)
-    val upcoming = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
-    val seasonInfo = AmateurDatabaseManager.getSeasonInfo(user.id)
+    val st           = AmateurDatabaseManager.getDashboardStats(user.id)
+    val upcoming     = AmateurDatabaseManager.getUpcomingSchedule(user.id, 1)
+    val seasonInfo   = AmateurDatabaseManager.getSeasonInfo(user.id)
+    val penStats     = AmateurDatabaseManager.getPenaltyStats(user.id)
+    val bodyMetrics  = AmateurDatabaseManager.getBodyMetrics(user.id).headOption
+    val (leagueUrl, _) = AmateurDatabaseManager.getLeagueConfig(user.id)
+
     val currentSeason = seasonInfo("currentSeason").asInstanceOf[Int]
     val pastSeasons   = seasonInfo("pastSeasons").asInstanceOf[List[Map[String, String]]]
-    val pj             = st("pj").asInstanceOf[Int]
-    val notaMedia      = st("notaMedia").asInstanceOf[Double]
-    val notaAjustada   = st("notaAjustada").asInstanceOf[Double]
-    val gcMedia        = st("gcMedia").asInstanceOf[Double]
-    val limpias        = st("limpias").asInstanceOf[Int]
-    val ganados        = st("ganados").asInstanceOf[Int]
-    val empatados      = st("empatados").asInstanceOf[Int]
-    val perdidos       = st("perdidos").asInstanceOf[Int]
-    val rachaLimpias   = st("rachaLimpias").asInstanceOf[Int]
-    val ultimos        = st("ultimos").asInstanceOf[List[Map[String, String]]]
+    val pj            = st("pj").asInstanceOf[Int]
+    val notaMedia     = st("notaMedia").asInstanceOf[Double]
+    val notaAjustada  = st("notaAjustada").asInstanceOf[Double]
+    val gcMedia       = st("gcMedia").asInstanceOf[Double]
+    val limpias       = st("limpias").asInstanceOf[Int]
+    val ganados       = st("ganados").asInstanceOf[Int]
+    val empatados     = st("empatados").asInstanceOf[Int]
+    val perdidos      = st("perdidos").asInstanceOf[Int]
+    val rachaLimpias  = st("rachaLimpias").asInstanceOf[Int]
+    val ultimos       = st("ultimos").asInstanceOf[List[Map[String, String]]]
 
-    def notaColor(n: Double) = if (n >= 7.0) "success" else if (n >= 5.0) "warning" else "danger"
-    def notaBadgeCls(n: Double) = if (n >= 7.0) "badge-green" else if (n >= 5.0) "badge-yellow" else "badge-red"
+    val wr         = if (pj > 0) (ganados.toDouble / pj * 100).toInt else 0
+    val notaColor  = if (notaMedia >= 7) "#20c997" else if (notaMedia >= 5) "#f59e0b" else "#ef4444"
+    val gcColor    = if (gcMedia <= 0.5) "#20c997" else if (gcMedia <= 1.5) "#f59e0b" else "#ef4444"
+    val wrColor    = if (wr >= 60) "#20c997" else if (wr >= 40) "#f59e0b" else "#ef4444"
+
+    // Forma últimos 5
+    val forma5 = ultimos.take(5).reverse.map { m =>
+      val gf = m("res").split("-")(0).toIntOption.getOrElse(0)
+      val gc = m("res").split("-").lastOption.flatMap(_.toIntOption).getOrElse(0)
+      if (gf > gc) "G" else if (gf < gc) "P" else "E"
+    }
 
     renderAm("home", user.nombre,
       div(
-        // Bienvenida
-        div(cls := "mb-3",
-          h5(cls := "fw-black text-white mb-0", s"Hola, ${user.nombre} 👋"),
-          span(cls := "text-muted small", if (pj == 0) "Registra tu primer partido para empezar."
-          else s"$pj partidos registrados")
-        ),
 
-        if (pj == 0)
-          div(cls := "card-am p-4 text-center mb-3",
-            div(style := "font-size:52px; opacity:0.4", "⚽"),
-            h5(cls := "text-muted mt-3", "Sin partidos aún"),
-            p(cls := "text-secondary small", "Pulsa en «Partido» para registrar tu primera actuación."),
-            a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
-          )
-        else frag(
-
-          // Próximo partido programado — Widget con cuenta atrás
-          upcoming.headOption.map { s =>
-            val tipoColor = s.tipo match {
-              case "LIGA"     => "#0d6efd"
-              case "TORNEO"   => "#dc3545"
-              case "CUP"      => "#6f42c1"
-              case _          => "#20c997"
-            }
-            val tipoBadge = s.tipo match {
-              case "LIGA"     => "LIGA"
-              case "TORNEO"   => "TORNEO"
-              case "CUP"      => "CUP"
-              case _          => "AMISTOSO"
-            }
-            div(cls := "card-am p-3 mb-3",
-              style := s"border-left: 4px solid $tipoColor;",
-              div(cls := "d-flex justify-content-between align-items-start mb-1",
-                div(cls := "xx-small fw-bold text-muted", "PROXIMO PARTIDO"),
-                span(cls := "badge rounded-pill xx-small",
-                  style := s"background:${tipoColor}22; color:$tipoColor;",
-                  tipoBadge)
-              ),
-              div(cls := "fw-black mb-1", style := "font-size:1.15rem;", s.rival),
-              div(cls := "xx-small text-muted mb-2",
-                s.fecha,
-                if (s.hora.nonEmpty) s" - ${s.hora}" else "",
-                if (s.lugar.nonEmpty) s" - ${s.lugar}" else ""
-              ),
-              div(id := "countdown-widget", cls := "fw-bold text-center mb-2",
-                style := s"font-size:1.05rem; color:$tipoColor;", "..."),
-              div(cls := "row g-1",
-                div(cls := "col-8",
-                  a(href := "/am/match-center", cls := "btn btn-sm fw-bold w-100",
-                    style := s"background:$tipoColor; color:#fff;", "Registrar partido")
-                ),
-                div(cls := "col-4",
-                  a(href := "/am/calendar", cls := "btn btn-sm btn-outline-secondary fw-bold w-100", "Agenda")
-                )
-              ),
-              script(raw(s"""
-                (function() {
-                  var target = new Date("${s.fecha}T${if (s.hora.nonEmpty && s.hora.length >= 5) s.hora else "10:00"}:00");
-                  function update() {
-                    var now = new Date(); var diff = target - now;
-                    var el = document.getElementById('countdown-widget');
-                    if (!el) return;
-                    if (diff <= 0) { el.textContent = "HOY JUEGAS!"; return; }
-                    var d = Math.floor(diff/86400000), h = Math.floor((diff%86400000)/3600000), m = Math.floor((diff%3600000)/60000);
-                    if (d > 0) el.textContent = d+"d "+h+"h para el partido";
-                    else if (h > 0) el.textContent = h+"h "+m+"m para el partido";
-                    else el.textContent = m+" minutos para el partido";
+        // ── HERO HEADER ──────────────────────────────────────────────────────
+        div(style := "background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius:16px; padding:20px; margin-bottom:16px; color:#fff;",
+          div(cls := "d-flex justify-content-between align-items-start",
+            div(
+              div(cls := "fw-black", style := "font-size:1.3rem; letter-spacing:-.3px;",
+                s"👋 Hola, ${user.nombre}"),
+              div(style := "font-size:12px; color:#94a3b8; margin-top:2px;",
+                s"Temporada $currentSeason · $pj partidos")
+            ),
+            div(cls := "text-end",
+              div(cls := "fw-black", style := s"font-size:2rem; color:$notaColor; line-height:1;",
+                f"$notaMedia%.1f"),
+              div(style := "font-size:10px; color:#94a3b8;", "nota media")
+            )
+          ),
+          // Forma reciente
+          if (forma5.nonEmpty)
+            div(cls := "d-flex align-items-center gap-2 mt-3",
+              div(style := "font-size:10px; color:#64748b;", "FORMA"),
+              div(cls := "d-flex gap-1",
+                frag(forma5.map { r =>
+                  val (bg, txt) = r match {
+                    case "G" => ("#20c997", "G")
+                    case "P" => ("#ef4444", "P")
+                    case _   => ("#f59e0b", "E")
                   }
-                  update(); setInterval(update, 60000);
-                })();
-              """))
-            )
-          }.getOrElse(
-            div(cls := "card-am p-3 mb-3 text-center",
-              style := "border-style:dashed;",
-              div(cls := "xx-small text-muted mt-1", "Sin partidos programados"),
-              a(href := "/am/calendar/add", cls := "btn btn-outline-primary btn-sm mt-2 fw-bold",
-                "+ Añadir a la agenda")
-            )
-          ),
-
-          // KPIs principales
-          div(cls := "row g-2 mb-3",
-            div(cls := "col-6",
-              div(cls := "card-am p-3 text-center",
-                div(cls := s"fw-black text-${notaColor(notaMedia)}", style := "font-size:2.4rem;",
-                  f"$notaMedia%.1f"),
-                div(cls := "xx-small text-muted", "Nota media"),
-                if (notaAjustada > notaMedia + 0.05)
-                  div(cls := "xx-small text-success mt-1",
-                    f"↑ $notaAjustada%.1f ajustada")
-                else span()
-              )
-            ),
-            div(cls := "col-6",
-              div(cls := "card-am p-3 text-center",
-                div(cls := "fw-black text-danger", style := "font-size:2.4rem;",
-                  f"$gcMedia%.1f"),
-                div(cls := "xx-small text-muted", "GC por partido")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-bold text-success", style := "font-size:1.6rem;", limpias.toString),
-                div(cls := "xx-small text-muted", "Limpias")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-bold text-info", style := "font-size:1.6rem;", pj.toString),
-                div(cls := "xx-small text-muted", "Partidos")
-              )
-            ),
-            div(cls := "col-4",
-              div(cls := "card-am p-2 text-center",
-                div(cls := "fw-bold text-warning", style := "font-size:1.6rem;", rachaLimpias.toString),
-                div(cls := "xx-small text-muted", "Racha 0 GC")
-              )
-            )
-          ),
-
-          // Resultados + win rate
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "d-flex justify-content-around text-center",
-              div(
-                div(cls := "fw-black text-success", style := "font-size:1.8rem;", ganados.toString),
-                div(cls := "xx-small text-muted", "Ganados")
-              ),
-              div(cls := "border-start border-secondary"),
-              div(
-                div(cls := "fw-black text-warning", style := "font-size:1.8rem;", empatados.toString),
-                div(cls := "xx-small text-muted", "Empates")
-              ),
-              div(cls := "border-start border-secondary"),
-              div(
-                div(cls := "fw-black text-danger", style := "font-size:1.8rem;", perdidos.toString),
-                div(cls := "xx-small text-muted", "Perdidos")
-              ),
-              div(cls := "border-start border-secondary"),
-              {
-                val wr = if (pj > 0) (ganados.toDouble / pj * 100).toInt else 0
-                val wrColor = if (wr >= 60) "text-success" else if (wr >= 40) "text-warning" else "text-danger"
-                div(
-                  div(cls := s"fw-black $wrColor", style := "font-size:1.8rem;", s"$wr%"),
-                  div(cls := "xx-small text-muted", "Win rate")
-                )
-              }
-            )
-          ),
-
-          // Últimos partidos
-          if (ultimos.nonEmpty)
-            div(cls := "card-am p-3 mb-3",
-              div(cls := "fw-bold small text-muted mb-2", "ÚLTIMOS PARTIDOS"),
-              frag(ultimos.map { m =>
-                val nota = m("nota").toDouble
-                div(cls := "d-flex align-items-center gap-2 py-2",
-                  style := "border-bottom:1px solid #1e1e1e;",
-                  div(cls := s"nota-badge ${notaBadgeCls(nota)}", m("nota")),
-                  div(cls := "flex-fill",
-                    div(cls := "fw-bold small text-white", m("rival")),
-                    div(cls := "xx-small text-muted", m("fecha"))
-                  ),
-                  div(cls := "fw-black text-white small", m("res"))
-                )
-              }: _*)
-            )
-          else span(),
-
-          // Acceso rápido
-          div(cls := "row g-2 mb-3",
-            div(cls := "col-6",
-              a(href := "/am/match-center", cls := "btn btn-primary w-100 fw-bold py-3",
-                "⚽ Nuevo partido")),
-            div(cls := "col-6",
-              a(href := "/am/progression", cls := "btn btn-outline-info w-100 fw-bold py-3",
-                "📈 Mi progreso"))
-          ),
-
-          // Temporada actual + historial
-          div(cls := "card-am p-3 mb-3",
-            div(cls := "d-flex justify-content-between align-items-center mb-2",
-              div(
-                div(cls := "xx-small fw-bold text-muted", "TEMPORADA ACTUAL"),
-                div(cls := "fw-black text-white", style := "font-size:1.1rem;", s"Temporada $currentSeason")
-              ),
-              button(
-                tpe := "button",
-                cls := "btn btn-outline-warning btn-sm fw-bold",
-                style := "font-size:11px;",
-                attr("data-bs-toggle") := "modal",
-                attr("data-bs-target") := "#modalEndSeason",
-                "🏁 Finalizar temporada"
-              )
-            ),
-            if (pastSeasons.nonEmpty)
-              div(
-                div(cls := "xx-small fw-bold text-muted mb-2", "TEMPORADAS ANTERIORES"),
-                frag(pastSeasons.map { s =>
-                  div(cls := "d-flex justify-content-between align-items-center py-1",
-                    style := "border-bottom:1px solid #1e1e1e; font-size:11px;",
-                    div(cls := "text-muted", s"T${s("num")} · ${s("ended").take(7)}"),
-                    div(cls := "text-white",
-                      span(cls := "text-success me-1", s"${s("g")}G"),
-                      span(cls := "text-muted me-1", s"${s("e")}E"),
-                      span(cls := "text-danger me-1", s"${s("p")}P"),
-                      span(cls := "text-warning", s"★${s("nota")}")
-                    )
-                  )
+                  span(style := s"background:$bg; color:#000; font-weight:800; font-size:10px; width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;",
+                    txt)
                 }: _*)
               )
-            else span()
-          ),
+            )
+          else span()
+        ),
 
-          // Modal confirmación finalizar temporada
-          div(cls := "modal fade", id := "modalEndSeason",
-            attr("tabindex") := "-1",
-            div(cls := "modal-dialog modal-dialog-centered",
-              div(cls := "modal-content bg-dark border-warning",
-                div(cls := "modal-header border-warning",
-                  h5(cls := "modal-title text-warning fw-black", "🏁 Finalizar temporada"),
-                  button(tpe := "button", cls := "btn-close btn-close-white",
-                    attr("data-bs-dismiss") := "modal")
-                ),
-                div(cls := "modal-body text-white",
-                  p(s"¿Seguro que quieres cerrar la Temporada $currentSeason?"),
-                  p(cls := "text-muted small",
-                    "Se guardará un resumen de la temporada y todos los partidos nuevos contarán para la Temporada ",
-                    strong(cls := "text-warning", s"${currentSeason + 1}"),
-                    ". Los datos históricos se conservan.")
-                ),
-                div(cls := "modal-footer border-secondary",
-                  button(tpe := "button", cls := "btn btn-secondary",
-                    attr("data-bs-dismiss") := "modal", "Cancelar"),
-                  a(href := "/am/end-season", cls := "btn btn-warning fw-bold",
-                    "✅ Confirmar y nueva temporada")
+        // ── PRÓXIMO PARTIDO ──────────────────────────────────────────────────
+        upcoming.headOption.map { s =>
+          val tipoColor = s.tipo match {
+            case "LIGA" => "#3b82f6"; case "TORNEO" => "#ef4444"
+            case "CUP"  => "#8b5cf6"; case _        => "#20c997"
+          }
+          div(cls := "card-am mb-3 overflow-hidden",
+            style := s"border-top: 4px solid $tipoColor;",
+            div(cls := "p-3",
+              div(cls := "d-flex justify-content-between align-items-center mb-2",
+                div(style := s"font-size:10px; font-weight:800; color:$tipoColor; letter-spacing:.05em;",
+                  s.tipo),
+                span(id := "dash-countdown",
+                  style := s"font-size:11px; font-weight:700; color:$tipoColor; background:${tipoColor}15; padding:3px 10px; border-radius:20px;",
+                  "...")
+              ),
+              div(cls := "fw-black text-dark", style := "font-size:1.4rem; line-height:1.1;",
+                s.rival),
+              div(style := "font-size:11px; color:#64748b; margin-top:4px;",
+                s.fecha,
+                if (s.hora.nonEmpty) s" · ${s.hora}" else "",
+                if (s.lugar.nonEmpty) s" · ${s.lugar}" else ""
+              ),
+              div(cls := "d-flex gap-2 mt-3",
+                a(href := "/am/match-center",
+                  style := s"background:$tipoColor; color:#fff; font-weight:800; font-size:12px; padding:8px 16px; border-radius:8px; text-decoration:none; flex:1; text-align:center;",
+                  "⚽ Registrar partido"),
+                a(href := "/am/calendar",
+                  style := "background:#f1f5f9; color:#475569; font-weight:700; font-size:12px; padding:8px 14px; border-radius:8px; text-decoration:none;",
+                  "Agenda")
+              )
+            ),
+            script(raw(s"""
+              (function() {
+                var target = new Date("${s.fecha}T${if (s.hora.nonEmpty && s.hora.length >= 5) s.hora else "10:00"}:00");
+                function update() {
+                  var diff = target - new Date();
+                  var el = document.getElementById('dash-countdown');
+                  if (!el) return;
+                  if (diff <= 0) { el.textContent = "HOY JUEGAS!"; return; }
+                  var d = Math.floor(diff/86400000);
+                  var h = Math.floor((diff%86400000)/3600000);
+                  var m = Math.floor((diff%3600000)/60000);
+                  el.textContent = d > 0 ? d+"d "+h+"h" : h > 0 ? h+"h "+m+"m" : m+"min";
+                }
+                update(); setInterval(update, 30000);
+              })();
+            """))
+          )
+        }.getOrElse(
+          div(cls := "card-am p-3 mb-3 text-center",
+            style := "border-style:dashed; border-color:#cbd5e0;",
+            div(style := "font-size:28px; opacity:.3;", "📅"),
+            div(style := "font-size:12px; color:#94a3b8; margin-top:4px;", "Sin partido programado"),
+            a(href := "/am/calendar/add",
+              style := "display:inline-block; margin-top:8px; font-size:11px; font-weight:700; color:#3b82f6;",
+              "+ Añadir a la agenda")
+          )
+        ),
+
+        // ── KPIs 2x3 ─────────────────────────────────────────────────────────
+        div(cls := "row g-2 mb-3",
+          // Nota
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black", style := s"font-size:1.6rem; color:$notaColor; line-height:1;",
+                f"$notaMedia%.1f"),
+              div(style := "font-size:9px; color:#94a3b8; font-weight:600; margin-top:2px;", "NOTA MEDIA")
+            )
+          ),
+          // GC
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black", style := s"font-size:1.6rem; color:$gcColor; line-height:1;",
+                f"$gcMedia%.1f"),
+              div(style := "font-size:9px; color:#94a3b8; font-weight:600; margin-top:2px;", "GC / PJ")
+            )
+          ),
+          // Win rate
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black", style := s"font-size:1.6rem; color:$wrColor; line-height:1;",
+                s"$wr%"),
+              div(style := "font-size:9px; color:#94a3b8; font-weight:600; margin-top:2px;", "WIN RATE")
+            )
+          ),
+          // Limpias
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-success", style := "font-size:1.4rem; line-height:1;",
+                limpias.toString),
+              div(style := "font-size:9px; color:#94a3b8; font-weight:600; margin-top:2px;", "LIMPIAS")
+            )
+          ),
+          // Partidos
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-dark", style := "font-size:1.4rem; line-height:1;",
+                pj.toString),
+              div(style := "font-size:9px; color:#94a3b8; font-weight:600; margin-top:2px;", "PARTIDOS")
+            )
+          ),
+          // Racha limpias
+          div(cls := "col-4",
+            div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black",
+                style := s"font-size:1.4rem; line-height:1; color:${if(rachaLimpias>=3)"#20c997" else "#94a3b8"};",
+                rachaLimpias.toString),
+              div(style := "font-size:9px; color:#94a3b8; font-weight:600; margin-top:2px;", "RACHA 0GC")
+            )
+          )
+        ),
+
+        // ── G/E/P BAR ────────────────────────────────────────────────────────
+        if (pj > 0)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex justify-content-between mb-2",
+              div(style := "font-size:10px; font-weight:800; color:#64748b;", "BALANCE"),
+              div(style := "font-size:10px; color:#94a3b8;", s"$ganados G · $empatados E · $perdidos P")
+            ),
+            div(style := "display:flex; height:8px; border-radius:6px; overflow:hidden; gap:2px;",
+              if (ganados > 0) div(style := s"flex:$ganados; background:#20c997; border-radius:4px;") else span(),
+              if (empatados > 0) div(style := s"flex:$empatados; background:#f59e0b; border-radius:4px;") else span(),
+              if (perdidos > 0) div(style := s"flex:$perdidos; background:#ef4444; border-radius:4px;") else span()
+            )
+          )
+        else span(),
+
+        // ── CUERPO (si tiene registro) ────────────────────────────────────────
+        bodyMetrics.map { m =>
+          val peso   = m("peso").asInstanceOf[Double]
+          val imc    = m("imc").asInstanceOf[Double]
+          val imcColor = if (imc < 18.5) "#0dcaf0" else if (imc < 25) "#20c997" else if (imc < 30) "#f59e0b" else "#ef4444"
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex justify-content-between align-items-center",
+              div(
+                div(style := "font-size:10px; font-weight:800; color:#64748b;", "MÉTRICAS CORPORALES"),
+                div(style := "font-size:12px; color:#64748b; margin-top:2px;",
+                  s"${m("fecha").asInstanceOf[String].take(10)}")
+              ),
+              a(href := "/am/body", style := "font-size:11px; color:#3b82f6; font-weight:700;", "Ver todo →")
+            ),
+            div(cls := "d-flex gap-3 mt-2",
+              div(cls := "text-center",
+                div(cls := "fw-black text-dark", style := "font-size:1.3rem;", f"$peso%.1f"),
+                div(style := "font-size:9px; color:#94a3b8;", "kg")
+              ),
+              div(cls := "text-center",
+                div(cls := "fw-black", style := s"font-size:1.3rem; color:$imcColor;", f"$imc%.1f"),
+                div(style := "font-size:9px; color:#94a3b8;", "IMC")
+              )
+            )
+          )
+        }.getOrElse(span()),
+
+        // ── PENALTIS RÁPIDO ──────────────────────────────────────────────────
+        if (penStats("total").asInstanceOf[Int] > 0) {
+          val total = penStats("total").asInstanceOf[Int]
+          val pct   = penStats("pctParada").asInstanceOf[Int]
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex justify-content-between align-items-center",
+              div(
+                div(style := "font-size:10px; font-weight:800; color:#64748b;", "PENALTIS"),
+                div(style := "font-size:12px; color:#64748b; margin-top:2px;",
+                  s"$total lanzamientos · $pct% parados")
+              ),
+              a(href := "/am/penalties", style := "font-size:11px; color:#3b82f6; font-weight:700;", "Ver →")
+            ),
+            div(style := "height:6px; background:#e2e8f0; border-radius:3px; margin-top:8px;",
+              div(style := s"height:6px; width:$pct%; background:#20c997; border-radius:3px;")
+            )
+          )
+        } else span(),
+
+        // ── TEMPORADA ────────────────────────────────────────────────────────
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "d-flex justify-content-between align-items-center",
+            div(
+              div(style := "font-size:10px; font-weight:800; color:#64748b;", s"TEMPORADA $currentSeason"),
+              if (pastSeasons.nonEmpty)
+                div(style := "font-size:11px; color:#94a3b8; margin-top:2px;",
+                  s"Anterior: T${pastSeasons.head("num")} — ${pastSeasons.head("nota")}★")
+              else span()
+            ),
+            button(tpe := "button",
+              style := "font-size:10px; font-weight:700; color:#f59e0b; background:#fef3c7; border:none; padding:5px 10px; border-radius:6px; cursor:pointer;",
+              attr("data-bs-toggle") := "modal",
+              attr("data-bs-target") := "#modalEndSeason",
+              "🏁 Finalizar")
+          )
+        ),
+
+        // ── ACCESO RÁPIDO ────────────────────────────────────────────────────
+        div(cls := "row g-2 mb-3",
+          Seq(
+            ("/am/match-center", "⚽", "Partido", "#3b82f6"),
+            ("/am/progression",  "📈", "Progreso", "#8b5cf6"),
+            ("/am/mapa-goles",   "🥅", "Mapa",    "#ef4444"),
+            ("/am/rivals",       "⚔️", "Rivales",  "#f59e0b"),
+            ("/am/wellness",     "🧠", "Wellness", "#20c997"),
+            (if (leagueUrl.nonEmpty) "/am/league" else "/am/league-config",
+              "🏆", "Liga", "#0ea5e9")
+          ).map { case (href, icon, label, color) =>
+            div(cls := "col-4",
+              a(href := href, style := "text-decoration:none;",
+                div(cls := "card-am p-2 text-center",
+                  style := s"border-top:3px solid $color;",
+                  div(style := "font-size:20px;", icon),
+                  div(style := s"font-size:10px; font-weight:700; color:$color; margin-top:2px;",
+                    label)
                 )
+              )
+            )
+          }: _*
+        ),
+
+        // ── MODAL TEMPORADA ──────────────────────────────────────────────────
+        div(cls := "modal fade", id := "modalEndSeason", attr("tabindex") := "-1",
+          div(cls := "modal-dialog modal-dialog-centered",
+            div(cls := "modal-content",
+              div(cls := "modal-header",
+                h5(cls := "modal-title fw-black", "🏁 Finalizar temporada"),
+                button(tpe := "button", cls := "btn-close",
+                  attr("data-bs-dismiss") := "modal")
+              ),
+              div(cls := "modal-body",
+                p(style := "font-size:14px;", s"¿Cerrar la Temporada $currentSeason?"),
+                p(style := "font-size:12px; color:#64748b;",
+                  "El resumen se archiva y los nuevos partidos cuentan para la Temporada ",
+                  strong(s"${currentSeason + 1}"), ".")
+              ),
+              div(cls := "modal-footer",
+                button(tpe := "button", cls := "btn btn-secondary btn-sm",
+                  attr("data-bs-dismiss") := "modal", "Cancelar"),
+                a(href := "/am/end-season", cls := "btn btn-warning btn-sm fw-bold",
+                  "✅ Confirmar")
               )
             )
           )
@@ -627,6 +677,7 @@ object AmateurController extends cask.Routes {
   }
 
   // ── MATCH CENTER ───────────────────────────────────────────────────────────
+  @cask.get("/am/match-center")  // ── MATCH CENTER ───────────────────────────────────────────────────────────
   @cask.get("/am/match-center")
   def matchCenterPage(request: cask.Request) = withAmAuth(request) { user =>
     renderAm("match", user.nombre,
@@ -2978,6 +3029,271 @@ $geminiRaw"""
       )
     )
   }
+
+  // ── MÉTRICAS CORPORALES ───────────────────────────────────────────────────
+  @cask.get("/am/body")
+  def bodyPage(request: cask.Request) = withAmAuth(request) { user =>
+    val metrics  = AmateurDatabaseManager.getBodyMetrics(user.id)
+    val latest   = metrics.headOption
+    val aiRaw    = if (metrics.size >= 2) AmateurDatabaseManager.getBodyMetricsAI(user.id) else ""
+    val insights = aiRaw.split("\n").map(_.trim).filter(_.nonEmpty).toList
+    val today    = java.time.LocalDate.now().toString
+
+    val alturaDefault = latest.map(_("altura").asInstanceOf[Double]).getOrElse(0.0)
+    val pesoDefault   = latest.map(_("peso").asInstanceOf[Double]).getOrElse(0.0)
+
+    // Chart data
+    val chartLabels = metrics.reverse.map(m => s""""${m("fecha").asInstanceOf[String].take(7)}"""").mkString("[",",","]")
+    val chartPeso   = metrics.reverse.map(m => f"${m("peso").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+    val chartImc    = metrics.reverse.map(m => f"${m("imc").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+
+    renderAm("body", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "⚖️ Métricas Corporales"),
+          span(cls := "text-muted small", "Seguimiento semanal · impacto en rendimiento")
+        ),
+
+        // KPIs actuales
+        latest.map { m =>
+          val peso    = m("peso").asInstanceOf[Double]
+          val altura  = m("altura").asInstanceOf[Double]
+          val imc     = m("imc").asInstanceOf[Double]
+          val imcColor = if (imc < 18.5) "#0dcaf0"
+          else if (imc < 25) "#20c997"
+          else if (imc < 30) "#ffc107"
+          else "#dc3545"
+          val imcLabel = if (imc < 18.5) "Bajo peso"
+          else if (imc < 25) "Óptimo"
+          else if (imc < 30) "Sobrepeso"
+          else "Obesidad"
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-black text-white", style := "font-size:1.6rem;", f"$peso%.1f"),
+                div(cls := "xx-small text-muted", "kg")
+              )
+            ),
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-black", style := s"font-size:1.6rem; color:$imcColor;", f"$imc%.1f"),
+                div(cls := "xx-small text-muted", "IMC"),
+                div(cls := "xx-small fw-bold", style := s"color:$imcColor;", imcLabel)
+              )
+            ),
+            div(cls := "col-4",
+              div(cls := "card-am p-2 text-center",
+                div(cls := "fw-black text-white", style := "font-size:1.6rem;", f"$altura%.0f"),
+                div(cls := "xx-small text-muted", "cm altura")
+              )
+            ),
+            // Grasa y cintura si existen
+            m("grasa").asInstanceOf[Option[Double]].map { g =>
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "fw-black text-info", style := "font-size:1.4rem;", f"$g%.1f%"),
+                  div(cls := "xx-small text-muted", "% grasa corporal")
+                )
+              )
+            }.getOrElse(span()),
+            m("cintura").asInstanceOf[Option[Double]].map { c =>
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "fw-black text-warning", style := "font-size:1.4rem;", f"$c%.0f cm"),
+                  div(cls := "xx-small text-muted", "perímetro cintura")
+                )
+              )
+            }.getOrElse(span())
+          )
+        }.getOrElse(span()),
+
+        // Análisis IA
+        if (insights.nonEmpty)
+          div(cls := "card-am p-3 mb-3",
+            style := "border-left: 3px solid #a78bfa;",
+            div(cls := "d-flex align-items-center gap-2 mb-2",
+              span(style := "font-size:16px;", "✨"),
+              div(cls := "xx-small fw-bold text-muted", "IMPACTO EN TU JUEGO")
+            ),
+            frag(insights.map { insight =>
+              div(cls := "d-flex gap-2 py-2",
+                style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0; margin-top:2px;"),
+                div(cls := "small text-white", style := "font-size:12px; line-height:1.5;", insight)
+              )
+            }: _*)
+          )
+        else if (metrics.size < 2)
+          div(cls := "card-am p-3 mb-3 text-center",
+            style := "border-style:dashed; opacity:.6;",
+            div(cls := "xx-small text-muted", "Registra al menos 2 semanas para ver el análisis IA")
+          )
+        else span(),
+
+        // Gráfico evolución peso
+        if (metrics.size >= 2)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "fw-bold small text-muted mb-2", "EVOLUCIÓN DE PESO"),
+            div(style := "height:130px;",
+              canvas(id := "chartPeso")
+            ),
+            script(raw(s"""
+              new Chart(document.getElementById('chartPeso'), {
+                type: 'line',
+                data: {
+                  labels: $chartLabels,
+                  datasets: [{
+                    label: 'kg',
+                    data: $chartPeso,
+                    borderColor: '#0d6efd',
+                    backgroundColor: 'rgba(13,110,253,0.08)',
+                    tension: 0.3, fill: true, pointRadius: 4, borderWidth: 2
+                  }]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: {
+                    y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    x: { ticks: { color: '#888' }, grid: { display: false } }
+                  }
+                }
+              });
+            """))
+          )
+        else span(),
+
+        // Formulario registro
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "fw-bold small text-muted mb-3", "➕ Registrar esta semana"),
+          div(cls := "row g-2 mb-2",
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "PESO (kg) *"),
+              input(tpe := "number", id := "inp-peso", step := "0.1",
+                cls := "form-control mt-1", style := "font-size:13px;",
+                value := (if (pesoDefault > 0) f"$pesoDefault%.1f" else ""),
+                placeholder := "75.0", attr("min") := "30", attr("max") := "200",
+                attr("oninput") := "calcIMC()")
+            ),
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "ALTURA (cm) *"),
+              input(tpe := "number", id := "inp-altura", step := "0.5",
+                cls := "form-control mt-1", style := "font-size:13px;",
+                value := (if (alturaDefault > 0) f"$alturaDefault%.0f" else ""),
+                placeholder := "178", attr("min") := "100", attr("max") := "250",
+                attr("oninput") := "calcIMC()")
+            )
+          ),
+          div(cls := "row g-2 mb-2",
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "% GRASA (opcional)"),
+              input(tpe := "number", id := "inp-grasa", step := "0.1",
+                cls := "form-control mt-1", style := "font-size:13px;",
+                placeholder := "15.0", attr("min") := "3", attr("max") := "50")
+            ),
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "CINTURA cm (opcional)"),
+              input(tpe := "number", id := "inp-cintura", step := "0.5",
+                cls := "form-control mt-1", style := "font-size:13px;",
+                placeholder := "80", attr("min") := "50", attr("max") := "150")
+            )
+          ),
+          div(cls := "mb-2",
+            label(cls := "xx-small text-muted fw-bold", "FECHA"),
+            input(tpe := "date", id := "inp-fecha-body",
+              cls := "form-control mt-1", style := "font-size:13px;",
+              value := today)
+          ),
+          // IMC calculado en tiempo real
+          div(id := "imc-preview", cls := "text-center py-2 mb-2",
+            style := "background:rgba(255,255,255,.04); border-radius:8px;",
+            span(cls := "xx-small text-muted", "IMC: "),
+            span(id := "imc-val", cls := "fw-bold text-white", "—")
+          ),
+          button(tpe := "button", id := "btn-body",
+            cls := "btn btn-primary w-100 fw-bold",
+            attr("onclick") := "guardarMetricas()",
+            "💾 Guardar métricas")
+        ),
+
+        // Historial
+        if (metrics.nonEmpty)
+          div(cls := "card-am p-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "HISTORIAL"),
+            frag(metrics.take(10).map { m =>
+              val peso   = m("peso").asInstanceOf[Double]
+              val imc    = m("imc").asInstanceOf[Double]
+              val imcC   = if (imc < 18.5) "#0dcaf0" else if (imc < 25) "#20c997" else if (imc < 30) "#ffc107" else "#dc3545"
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                div(cls := "xx-small text-muted", style := "min-width:60px;",
+                  m("fecha").asInstanceOf[String].take(10)),
+                div(cls := "flex-fill fw-bold text-white xx-small", f"$peso%.1f kg"),
+                div(cls := "fw-bold xx-small", style := s"color:$imcC;", f"IMC $imc%.1f")
+              )
+            }: _*)
+          )
+        else span(),
+
+        script(raw("""
+          function calcIMC() {
+            var peso   = parseFloat(document.getElementById('inp-peso').value);
+            var altura = parseFloat(document.getElementById('inp-altura').value);
+            var el = document.getElementById('imc-val');
+            if (peso > 0 && altura > 0) {
+              var imc = peso / Math.pow(altura / 100, 2);
+              var label = imc < 18.5 ? ' Bajo peso' : imc < 25 ? ' Óptimo' : imc < 30 ? ' Sobrepeso' : ' Obesidad';
+              el.textContent = imc.toFixed(1) + label;
+            } else {
+              el.textContent = '—';
+            }
+          }
+          function guardarMetricas() {
+            var peso   = document.getElementById('inp-peso').value;
+            var altura = document.getElementById('inp-altura').value;
+            var grasa  = document.getElementById('inp-grasa').value;
+            var cintura = document.getElementById('inp-cintura').value;
+            var fecha  = document.getElementById('inp-fecha-body').value;
+            if (!peso || !altura) { alert('Peso y altura son obligatorios.'); return; }
+            var params = new URLSearchParams();
+            params.append('peso',    peso);
+            params.append('altura',  altura);
+            params.append('grasa',   grasa);
+            params.append('cintura', cintura);
+            params.append('fecha',   fecha);
+            document.getElementById('btn-body').disabled = true;
+            document.getElementById('btn-body').textContent = 'Guardando...';
+            fetch('/am/body/save', { method:'POST', body: params,
+              headers: {'Content-Type':'application/x-www-form-urlencoded'} })
+              .then(function(r) {
+                if (r.ok) window.location.reload();
+              })
+              .catch(function() {
+                document.getElementById('btn-body').disabled = false;
+                document.getElementById('btn-body').textContent = '💾 Guardar métricas';
+              });
+          }
+          calcIMC();
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/body/save")
+  def bodySave(request: cask.Request, peso: String, altura: String,
+               grasa: String = "", cintura: String = "", fecha: String = "") =
+    withAmAuth(request) { user =>
+      val fechaFinal = if (fecha.nonEmpty) fecha else java.time.LocalDate.now().toString
+      AmateurDatabaseManager.saveBodyMetrics(
+        user.id, fechaFinal,
+        try peso.toDouble   catch { case _: Exception => 0.0 },
+        try altura.toDouble catch { case _: Exception => 0.0 },
+        if (grasa.nonEmpty)   try Some(grasa.toDouble)   catch { case _: Exception => None } else None,
+        if (cintura.nonEmpty) try Some(cintura.toDouble) catch { case _: Exception => None } else None,
+        ""
+      )
+      cask.Response(Array.emptyByteArray, 200)
+    }
 
   // Redirect /am → /am/dashboard
   @cask.get("/am")
