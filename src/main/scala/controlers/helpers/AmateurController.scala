@@ -677,7 +677,6 @@ object AmateurController extends cask.Routes {
   }
 
   // ── MATCH CENTER ───────────────────────────────────────────────────────────
-  @cask.get("/am/match-center")  // ── MATCH CENTER ───────────────────────────────────────────────────────────
   @cask.get("/am/match-center")
   def matchCenterPage(request: cask.Request) = withAmAuth(request) { user =>
     renderAm("match", user.nombre,
