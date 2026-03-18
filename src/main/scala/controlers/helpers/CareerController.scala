@@ -845,6 +845,10 @@ object CareerController extends cask.Routes {
       val activeGripAlert = gear.filter(g =>
         g("activo").asInstanceOf[Boolean] && g("gripAlert").asInstanceOf[Boolean])
 
+      val diff      = csWinRate - nonCsWinRate
+      val diffColor  = if (diff > 0) "#20c997" else "#dc3545"
+      val diffSign   = if (diff > 0) "+" else ""
+
       val content = basePage("career",
         div(cls := "container-fluid px-2",
 
@@ -857,8 +861,6 @@ object CareerController extends cask.Routes {
           ),
 
           // ── CLEAN SHEET IMPACT ──────────────────────────────────────────
-          val diff = csWinRate - nonCsWinRate
-          val diffColor = if (diff > 0) "#20c997" else "#dc3545"
           div(cls := "card bg-dark border-success shadow mb-3",
             div(cls := "card-header bg-success bg-opacity-10 border-success",
               span(cls := "text-success fw-bold small", "🛡️ IMPACTO CLEAN SHEET")
@@ -878,16 +880,13 @@ object CareerController extends cask.Routes {
                   div(cls := "xx-small text-muted", "Win rate SIN CS")
                 )
               ),
-              {
-                val diffSign = if (diff > 0) "+" else ""
-                div(cls := "text-center p-2 rounded",
-                  style := s"background:${diffColor}18; border:1px solid ${diffColor}44;",
-                  div(cls := "fw-black", style := s"font-size:1.5rem; color:$diffColor;",
-                    s"$diffSign$diff%"),
-                  div(cls := "xx-small text-muted",
-                    "diferencial de win rate cuando mantienes la portería a cero")
-                )
-              }
+              div(cls := "text-center p-2 rounded",
+                style := s"background:${diffColor}18; border:1px solid ${diffColor}44;",
+                div(cls := "fw-black", style := s"font-size:1.5rem; color:$diffColor;",
+                  s"$diffSign$diff%"),
+                div(cls := "xx-small text-muted",
+                  "diferencial de win rate cuando mantienes la portería a cero")
+              )
             )
           ),
 
