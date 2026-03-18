@@ -1,6 +1,7 @@
 import cask._
 import scalatags.Text.all._
 import scalatags.Text.tags2
+
 import SharedLayout._
 
 import java.net.URLEncoder
