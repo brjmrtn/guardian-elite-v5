@@ -10,38 +10,38 @@ import java.security.MessageDigest
 case class AmUser(id: Int, username: String, nombre: String)
 
 case class AmMatch(
-                    id: Int, rival: String, gf: Int, gc: Int,
-                    nota: Double, clima: String, estadio: String,
-                    esLocal: Option[Boolean], fecha: String,
-                    videoUrl: String, notas: String, analisisVoz: String,
-                    posicionPartido: String,   // "portero" | "jugador"
-                    posicionCampo: String,     // "Delantero", "Centrocampista", "Defensa", "" si portero
-                    golesMarcados: Int,        // solo relevante si jugó de jugador de campo
-                    asistencias: Int           // solo relevante si jugó de jugador de campo
-                  )
+  id: Int, rival: String, gf: Int, gc: Int,
+  nota: Double, clima: String, estadio: String,
+  esLocal: Option[Boolean], fecha: String,
+  videoUrl: String, notas: String, analisisVoz: String,
+  posicionPartido: String,   // "portero" | "jugador"
+  posicionCampo: String,     // "Delantero", "Centrocampista", "Defensa", "" si portero
+  golesMarcados: Int,        // solo relevante si jugó de jugador de campo
+  asistencias: Int           // solo relevante si jugó de jugador de campo
+)
 
 case class AmGoal(
-                   id: Int, matchId: Int, zona: String, situacion: String,
-                   errorDefensivo: Boolean, minuto: Int, notas: String
-                 )
+  id: Int, matchId: Int, zona: String, situacion: String,
+  errorDefensivo: Boolean, minuto: Int, notas: String
+)
 
 case class AmPenalty(
-                      id: Int, userId: Int, fecha: String, rival: String,
-                      direccionTiro: String, direccionEstirada: String, parada: Boolean,
-                      matchId: Option[Int], notas: String
-                    )
+  id: Int, userId: Int, fecha: String, rival: String,
+  direccionTiro: String, direccionEstirada: String, parada: Boolean,
+  matchId: Option[Int], notas: String
+)
 
 case class AmGearItem(
-                       id: Int, userId: Int, nombre: String, marca: String,
-                       tipoLatex: String, corte: String, partidosUsados: Int,
-                       activo: Boolean, notas: String
-                     )
+  id: Int, userId: Int, nombre: String, marca: String,
+  tipoLatex: String, corte: String, partidosUsados: Int,
+  activo: Boolean, notas: String
+)
 
 case class AmSchedule(
-                       id: Int, userId: Int, rival: String, fecha: String,
-                       hora: String, lugar: String, tipo: String, notas: String,
-                       matchId: Option[Int]
-                     )
+  id: Int, userId: Int, rival: String, fecha: String,
+  hora: String, lugar: String, tipo: String, notas: String,
+  matchId: Option[Int]
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 object AmateurDatabaseManager {
@@ -365,13 +365,13 @@ object AmateurDatabaseManager {
 
   // ── MATCHES ────────────────────────────────────────────────────────────────
   def logMatch(
-                userId: Int, rival: String, gf: Int, gc: Int,
-                nota: Double, clima: String, estadio: String,
-                esLocal: Option[Boolean], fecha: String,
-                videoUrl: String, notas: String,
-                posicionPartido: String = "portero", posicionCampo: String = "",
-                golesMarcados: Int = 0, asistencias: Int = 0
-              ): Int = {
+    userId: Int, rival: String, gf: Int, gc: Int,
+    nota: Double, clima: String, estadio: String,
+    esLocal: Option[Boolean], fecha: String,
+    videoUrl: String, notas: String,
+    posicionPartido: String = "portero", posicionCampo: String = "",
+    golesMarcados: Int = 0, asistencias: Int = 0
+  ): Int = {
     val conn = getConn()
     try {
       val ps = conn.prepareStatement("""
@@ -544,10 +544,10 @@ object AmateurDatabaseManager {
 
   // ── PENALTIES ──────────────────────────────────────────────────────────────
   def savePenalty(
-                   userId: Int, fecha: String, rival: String,
-                   dirTiro: String, dirEstirada: String, parada: Boolean,
-                   matchId: Option[Int], notas: String
-                 ): Unit = {
+    userId: Int, fecha: String, rival: String,
+    dirTiro: String, dirEstirada: String, parada: Boolean,
+    matchId: Option[Int], notas: String
+  ): Unit = {
     val conn = getConn()
     try {
       val ps = conn.prepareStatement("""
@@ -646,9 +646,9 @@ object AmateurDatabaseManager {
           "estDer"             -> rs.getInt("est_der")
         )
       } else Map("total" -> 0, "paradas" -> 0, "adivinados" -> 0, "pctParada" -> 0,
-        "pctIntuicion" -> 0, "paradasConIntuicion" -> 0,
-        "tirIzq" -> 0, "tirCen" -> 0, "tirDer" -> 0,
-        "estIzq" -> 0, "estCen" -> 0, "estDer" -> 0)
+                 "pctIntuicion" -> 0, "paradasConIntuicion" -> 0,
+                 "tirIzq" -> 0, "tirCen" -> 0, "tirDer" -> 0,
+                 "estIzq" -> 0, "estCen" -> 0, "estDer" -> 0)
     } finally { conn.close() }
   }
 
@@ -935,7 +935,7 @@ object AmateurDatabaseManager {
       val rs2 = ps2.executeQuery()
       val (pj, g, e, p, nm) = if (rs2.next())
         (rs2.getInt("pj"), rs2.getInt("ganados"), rs2.getInt("empatados"),
-          rs2.getInt("perdidos"), rs2.getDouble("nota_media"))
+         rs2.getInt("perdidos"), rs2.getDouble("nota_media"))
       else (0, 0, 0, 0, 0.0)
 
       // Past seasons
@@ -993,7 +993,7 @@ object AmateurDatabaseManager {
       val rs2 = ps2.executeQuery()
       val (pj, g, e, p, nm, gcm, lim) = if (rs2.next())
         (rs2.getInt("pj"), rs2.getInt("g"), rs2.getInt("e"), rs2.getInt("p"),
-          rs2.getDouble("nm"), rs2.getDouble("gcm"), rs2.getInt("lim"))
+         rs2.getDouble("nm"), rs2.getDouble("gcm"), rs2.getInt("lim"))
       else (0, 0, 0, 0, 0.0, 0.0, 0)
 
       // Archive season
@@ -1183,7 +1183,7 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
   }
 
   def saveLeagueConfig(userId: Int, leagueUrl: String, teamName: String,
-                       clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = ""): Unit = {
+    clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = ""): Unit = {
     val conn = getConn()
     try {
       val ps = conn.prepareStatement("""
@@ -1230,7 +1230,7 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
         "goleadoresUrl"     -> rs.getString("go"),
         "resumenUrl"        -> rs.getString("re")
       ) else Map("calendarUrl" -> "", "teamName" -> "", "clasificacionUrl" -> "",
-        "goleadoresUrl" -> "", "resumenUrl" -> "")
+                 "goleadoresUrl" -> "", "resumenUrl" -> "")
     } finally { conn.close() }
   }
 
@@ -1426,37 +1426,37 @@ $jsonTpl"""
             val fechaDate = try java.time.LocalDate.parse(fecha) catch { case _: Exception => null }
             val isUpcoming = fechaDate != null && !fechaDate.isBefore(java.time.LocalDate.now())
             if (isUpcoming) {
-              val conn = getConn()
-              try {
-                // Check if already exists in schedule OR in played matches
-                val check = conn.prepareStatement("""
+            val conn = getConn()
+            try {
+              // Check if already exists in schedule OR in played matches
+              val check = conn.prepareStatement("""
                 SELECT id FROM am_schedule WHERE user_id = ? AND rival = ? AND fecha = ?::date
                 UNION
                 SELECT id FROM am_matches WHERE user_id = ? AND LOWER(rival) = LOWER(?) AND fecha = ?::date
               """)
-                check.setInt(1, userId); check.setString(2, rival); check.setString(3, fecha)
-                check.setInt(4, userId); check.setString(5, rival); check.setString(6, fecha)
-                val rs = check.executeQuery()
-                if (!rs.next()) {
-                  val ps = conn.prepareStatement("""
+              check.setInt(1, userId); check.setString(2, rival); check.setString(3, fecha)
+              check.setInt(4, userId); check.setString(5, rival); check.setString(6, fecha)
+              val rs = check.executeQuery()
+              if (!rs.next()) {
+                val ps = conn.prepareStatement("""
                   INSERT INTO am_schedule (user_id, rival, fecha, hora, tipo, notas)
                   VALUES (?, ?, ?::date, ?, ?, ?)
                 """)
-                  ps.setInt(1, userId); ps.setString(2, rival); ps.setString(3, fecha)
-                  ps.setString(4, hora); ps.setString(5, tipo)
-                  val nota = if (esLocal == "true") "Local" else if (esLocal == "false") "Visitante" else ""
-                  ps.setString(6, nota)
-                  ps.executeUpdate()
-                  inserted += 1
-                } else skipped += 1
-              } finally { conn.close() }
+                ps.setInt(1, userId); ps.setString(2, rival); ps.setString(3, fecha)
+                ps.setString(4, hora); ps.setString(5, tipo)
+                val nota = if (esLocal == "true") "Local" else if (esLocal == "false") "Visitante" else ""
+                ps.setString(6, nota)
+                ps.executeUpdate()
+                inserted += 1
+              } else skipped += 1
+            } finally { conn.close() }
             } // isUpcoming
           }
         } catch { case e: Exception => println(s"Skip partido: ${e.getMessage}") }
       }
 
       val amenazas = try json("amenazas_rival").arr.map(_.str).toList
-      catch { case _: Exception => List.empty[String] }
+                     catch { case _: Exception => List.empty[String] }
       val proximo  = try json("proximo_rival").str catch { case _: Exception => "" }
 
       Map(
@@ -1597,7 +1597,7 @@ $jsonTpl"""
   }
 
   def saveBodyMetrics(userId: Int, fecha: String, peso: Double, altura: Double,
-                      grasa: Option[Double], cintura: Option[Double], notas: String): Unit = {
+    grasa: Option[Double], cintura: Option[Double], notas: String): Unit = {
     val conn = getConn()
     try {
       val ps = conn.prepareStatement("""
