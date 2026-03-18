@@ -23,7 +23,19 @@ object AdminController extends cask.Routes {
                 (if(card.posicion=="GK" || card.posicion=="")
                   option(value:="GK", selected:="selected", "Goalkeeper (GK)")
                 else
-                  option(value:="GK", "Goalkeeper (GK)"))
+                  option(value:="GK", "Goalkeeper (GK)")),
+                (if(card.posicion=="DEL")
+                  option(value:="DEL", selected:="selected", "Delantero (DEL)")
+                else
+                  option(value:="DEL", "Delantero (DEL)")),
+                (if(card.posicion=="CEN")
+                  option(value:="CEN", selected:="selected", "Centrocampista (CEN)")
+                else
+                  option(value:="CEN", "Centrocampista (CEN)")),
+                (if(card.posicion=="DEF")
+                  option(value:="DEF", selected:="selected", "Defensa (DEF)")
+                else
+                  option(value:="DEF", "Defensa (DEF)"))
               )
             ),
             div(cls:="col-6",
