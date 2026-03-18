@@ -922,11 +922,11 @@ object CareerController extends cask.Routes {
             div(cls := "card-body p-2",
               div(style := "height:220px;", canvas(id := "chartInfluencia")),
               div(cls := "d-flex justify-content-center gap-3 mt-2",
-                Seq(("#20c997","G","Victorias"), ("#ffc107","E","Empates"), ("#dc3545","P","Derrotas")).map {
+                frag(Seq(("#20c997","G","Victorias"), ("#ffc107","E","Empates"), ("#dc3545","P","Derrotas")).map {
                   case (c,_,lbl) => span(cls := "xx-small",
                     span(style := s"display:inline-block;width:10px;height:10px;background:$c;border-radius:2px;margin-right:4px;"),
                     lbl)
-                }: _*
+                }: _*)
               )
             )
           ),
