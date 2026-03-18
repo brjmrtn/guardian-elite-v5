@@ -37,10 +37,10 @@ object AmateurController extends cask.Routes {
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
   private def renderAm(
-    activeLink: String,
-    userName: String,
-    pageContent: scalatags.Text.Modifier
-  ): cask.Response[Array[Byte]] = {
+                        activeLink: String,
+                        userName: String,
+                        pageContent: scalatags.Text.Modifier
+                      ): cask.Response[Array[Byte]] = {
     val page = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
@@ -633,10 +633,10 @@ object AmateurController extends cask.Routes {
             ("/am/rivals",       "⚔️", "Rivales",  "#f59e0b"),
             ("/am/wellness",     "🧠", "Wellness", "#20c997"),
             (if (leagueUrl.nonEmpty) "/am/league" else "/am/league-config",
-             "🏆", "Liga", "#0ea5e9")
-          ).map { case (href, icon, label, color) =>
+              "🏆", "Liga", "#0ea5e9")
+          ).map { case (url, icon, label, color) =>
             div(cls := "col-4",
-              a(href := href, style := "text-decoration:none;",
+              a(href := url, style := "text-decoration:none;",
                 div(cls := "card-am p-2 text-center",
                   style := s"border-top:3px solid $color;",
                   div(style := "font-size:20px;", icon),
@@ -1513,13 +1513,13 @@ object AmateurController extends cask.Routes {
             if (leagueUrl.nonEmpty)
               a(href := "/am/calendar/sync", cls := "btn btn-success btn-sm fw-bold",
                 style := "font-size:11px;", "🔄 Sync"),
-          a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
-            style := "font-size:11px;", "⚙️ Liga"),
-          a(href := "#", cls := "btn btn-outline-danger btn-sm fw-bold",
-            style := "font-size:11px;",
-            attr("onclick") := "if(confirm('¿Borrar todos los partidos pendientes de la agenda?')) window.location='/am/calendar/clear'",
-            "🗑")
-        )
+            a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
+              style := "font-size:11px;", "⚙️ Liga"),
+            a(href := "#", cls := "btn btn-outline-danger btn-sm fw-bold",
+              style := "font-size:11px;",
+              attr("onclick") := "if(confirm('¿Borrar todos los partidos pendientes de la agenda?')) window.location='/am/calendar/clear'",
+              "🗑")
+          )
         ),
         div(cls := "card-am p-2 mb-3",
           div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
@@ -1813,7 +1813,7 @@ $penSection
   @cask.get("/am/mapa-goles")
   def mapaGolesPage(request: cask.Request, tipo: String = "", rival: String = "") = withAmAuth(request) { user =>
     val heatmap    = if (rival.nonEmpty) AmateurDatabaseManager.getGoalHeatmapByRival(user.id, rival)
-                     else               AmateurDatabaseManager.getGoalHeatmap(user.id, tipo)
+    else               AmateurDatabaseManager.getGoalHeatmap(user.id, tipo)
     val rivales    = AmateurDatabaseManager.getRivalesConGoles(user.id)
     val totalGoles = heatmap.values.sum
 
@@ -1867,8 +1867,8 @@ $penSection
     } else None
 
     val tituloFiltro = if (rival.nonEmpty) s"vs ${rival.toUpperCase}"
-                       else if (tipo.nonEmpty) tipo
-                       else "Todos los partidos"
+    else if (tipo.nonEmpty) tipo
+    else "Todos los partidos"
 
     renderAm("goals", user.nombre,
       div(
@@ -2420,7 +2420,7 @@ $penSection
 
   @cask.postForm("/am/wellness/save")
   def wellnessSave(request: cask.Request,
-    sueno: String, energia: String, animo: String, notas: String = "") =
+                   sueno: String, energia: String, animo: String, notas: String = "") =
     withAmAuth(request) { user =>
       val today = java.time.LocalDate.now().toString
       AmateurDatabaseManager.saveWellness(
@@ -2595,7 +2595,7 @@ $penSection
 
   @cask.postForm("/am/calendar/nlp/process")
   def calendarNlpProcess(request: cask.Request, teamName: String,
-    texto: String = "", url: String = "") =
+                         texto: String = "", url: String = "") =
     withAmAuth(request) { user =>
       val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName, url)
       val json = ujson.Obj(
@@ -2723,7 +2723,7 @@ $penSection
 
   @cask.postForm("/am/league-config/save")
   def leagueConfigSave(request: cask.Request, leagueUrl: String = "", teamName: String,
-    clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = "") =
+                       clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = "") =
     withAmAuth(request) { user =>
       AmateurDatabaseManager.saveLeagueConfig(user.id, leagueUrl, teamName,
         clasificacionUrl, goleadoresUrl, resumenUrl)
@@ -2803,7 +2803,7 @@ $penSection
       if (parts.length == 2) {
         val mes = parts(1).toIntOption.getOrElse(0)
         val meses = Array("", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-                          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
         if (mes >= 1 && mes <= 12) s"${meses(mes)} ${parts(0).takeRight(2)}" else m
       } else m
     }
@@ -2989,6 +2989,316 @@ $penSection
       )
     )
   }
+
+  // ── PÁGINA DE LIGA ────────────────────────────────────────────────────────
+  @cask.get("/am/league")
+  def leaguePage(request: cask.Request, saved: String = "") = withAmAuth(request) { user =>
+    val cfg      = AmateurDatabaseManager.getLeagueFullConfig(user.id)
+    val teamName = cfg("teamName")
+    val hasStats = cfg("clasificacionUrl").nonEmpty || cfg("goleadoresUrl").nonEmpty || cfg("resumenUrl").nonEmpty
+    val stats = if (hasStats) AmateurDatabaseManager.getLeagueStats(user.id)
+    else Map("ok" -> false, "error" -> "")
+
+    def parseJ(raw: String): Option[ujson.Value] =
+      if (raw.isEmpty) None
+      else try { val c = raw.replaceAll("(?s)```json\\s*","").replaceAll("(?s)```\\s*","").trim; Some(ujson.read(c)) }
+      catch { case _: Exception => None }
+
+    val clasificacion = if (stats.getOrElse("ok",false).asInstanceOf[Boolean])
+      parseJ(stats.getOrElse("clasificacion","").asInstanceOf[String]) else None
+    val goleadores = if (stats.getOrElse("ok",false).asInstanceOf[Boolean])
+      parseJ(stats.getOrElse("goleadores","").asInstanceOf[String]) else None
+    val resumen = if (stats.getOrElse("ok",false).asInstanceOf[Boolean])
+      parseJ(stats.getOrElse("resumen","").asInstanceOf[String]) else None
+    val analisis: List[String] = if (stats.getOrElse("ok",false).asInstanceOf[Boolean]) {
+      val raw = stats.getOrElse("analisis","").asInstanceOf[String]
+      if (raw.nonEmpty) raw.split("\n").map(_.trim).filter(_.nonEmpty).toList else List.empty
+    } else List.empty
+
+    renderAm("league", user.nombre,
+      div(
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(h5(cls := "fw-black text-white mb-0", "🏆 Mi Liga"), span(cls := "text-muted small", teamName)),
+          div(cls := "d-flex gap-2",
+            a(href := "/am/league-config", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "⚙️ Config"),
+            a(href := "/am/league", cls := "btn btn-outline-primary btn-sm xx-small fw-bold", "🔄 Actualizar")
+          )
+        ),
+        if (saved.nonEmpty) div(cls := "alert alert-success py-2 px-3 mb-3 small", "✅ Configuración guardada") else span(),
+        if (!hasStats)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:40px; opacity:.3;", "🏆"),
+            h5(cls := "text-muted mt-3", "Sin URLs configuradas"),
+            a(href := "/am/league-config", cls := "btn btn-primary mt-2 fw-bold", "⚙️ Configurar liga")
+          )
+        else frag(
+          if (analisis.nonEmpty)
+            div(cls := "card-am p-3 mb-3", style := "border-left:3px solid #a78bfa;",
+              div(cls := "d-flex align-items-center gap-2 mb-2",
+                span(style := "font-size:16px;", "✨"),
+                div(cls := "xx-small fw-bold text-muted", "ANÁLISIS IA")),
+              frag(analisis.map { i =>
+                div(cls := "d-flex gap-2 py-2", style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                  div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0; margin-top:2px;"),
+                  div(cls := "small text-white", style := "font-size:12px; line-height:1.5;", i))
+              }: _*)
+            )
+          else span(),
+          clasificacion.map { cl =>
+            val pos = try cl("posicion").num.toInt catch { case _:Exception => 0 }
+            val pts = try cl("puntos").num.toInt   catch { case _:Exception => 0 }
+            val pj2 = try cl("partidos").num.toInt catch { case _:Exception => 0 }
+            val posColor = if (pos<=3)"#20c997" else if (pos<=6)"#ffc107" else "#6c757d"
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "📊 CLASIFICACIÓN"),
+              div(cls := "d-flex align-items-center gap-3 mb-2",
+                div(style := s"font-size:3rem; font-weight:900; color:$posColor; line-height:1;", s"${pos}º"),
+                div(div(cls := "fw-black text-white", style := "font-size:1.1rem;", teamName),
+                  div(cls := "xx-small text-muted", s"$pts pts · $pj2 PJ"))
+              ),
+              try {
+                val tabla = cl("tabla").arr.take(8).toSeq
+                frag(tabla.zipWithIndex.map { case (row,idx) =>
+                  val eq   = try row("equipo").str catch {case _:Exception=>""}
+                  val rpos = try row("pos").num.toInt catch {case _:Exception=>idx+1}
+                  val rpts = try row("pts").num.toInt catch {case _:Exception=>0}
+                  val rpj2 = try row("pj").num.toInt  catch {case _:Exception=>0}
+                  val isUs = eq.toUpperCase.contains(teamName.toUpperCase.take(6))
+                  div(cls := "d-flex align-items-center gap-2 py-1",
+                    style := s"border-bottom:1px solid rgba(255,255,255,.06);${if(isUs)"background:rgba(13,110,253,.08);border-radius:4px;" else ""}",
+                    div(cls := "xx-small text-muted", style := "min-width:20px; text-align:right;", s"$rpos"),
+                    div(cls := s"flex-fill xx-small ${if(isUs)"fw-bold text-primary" else "text-white"}", eq),
+                    div(cls := "xx-small text-muted", style := "min-width:28px; text-align:right;", s"$rpj2"),
+                    div(cls := s"xx-small fw-bold ${if(isUs)"text-primary" else "text-white"}", style := "min-width:28px; text-align:right;", s"$rpts"))
+                }: _*)
+              } catch { case _:Exception => span() }
+            )
+          }.getOrElse(span()),
+          goleadores.map { gol =>
+            val lista = try gol("goleadores").arr.toSeq catch { case _:Exception => Seq.empty }
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2", "⚽ PICHICHIS"),
+              frag(lista.zipWithIndex.map { case (g,idx) =>
+                val nombre  = try g("nombre").str catch {case _:Exception=>""}
+                val equipo  = try g("equipo").str catch {case _:Exception=>""}
+                val goles   = try g("goles").num.toInt catch {case _:Exception=>0}
+                val isRival = !equipo.toUpperCase.contains(teamName.toUpperCase.take(6))
+                div(cls := "d-flex align-items-center gap-2 py-2",
+                  style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                  div(cls := "xx-small text-muted fw-bold", style := "min-width:20px;", s"${idx+1}"),
+                  div(cls := "flex-fill",
+                    div(cls := s"xx-small ${if(isRival)"text-warning fw-bold" else "text-white"}",
+                      nombre,
+                      if (isRival) span(cls := "badge ms-1", style := "background:#dc354533;color:#dc3545;font-size:9px;", "⚠️ RIVAL")
+                      else span()),
+                    div(cls := "xx-small text-muted", equipo)),
+                  div(cls := "fw-black text-white", style := "font-size:1.1rem;", goles.toString))
+              }: _*)
+            )
+          }.getOrElse(span()),
+          resumen.map { res =>
+            val jornada = try res("jornada").num.toInt catch {case _:Exception=>0}
+            val resultados = try res("resultados").arr.toSeq catch {case _:Exception=>Seq.empty}
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "xx-small fw-bold text-muted mb-2",
+                s"📋 ÚLTIMA JORNADA${if(jornada>0)s" (J$jornada)" else ""}"),
+              frag(resultados.take(8).map { r =>
+                val loc  = try r("local").str catch {case _:Exception=>""}
+                val vis  = try r("visitante").str catch {case _:Exception=>""}
+                val gl   = try r("goles_local").num.toInt    catch {case _:Exception=>0}
+                val gv2  = try r("goles_visitante").num.toInt catch {case _:Exception=>0}
+                val isUs = loc.toUpperCase.contains(teamName.toUpperCase.take(6)) ||
+                  vis.toUpperCase.contains(teamName.toUpperCase.take(6))
+                div(cls := "d-flex align-items-center gap-2 py-1 xx-small",
+                  style := s"border-bottom:1px solid rgba(255,255,255,.06);${if(isUs)"background:rgba(13,110,253,.08);border-radius:4px;" else ""}",
+                  div(cls := s"flex-fill text-end ${if(isUs)"fw-bold text-primary" else "text-white"}", loc),
+                  div(cls := "fw-bold text-white px-2", s"$gl — $gv2"),
+                  div(cls := s"flex-fill ${if(isUs)"fw-bold text-primary" else "text-white"}", vis))
+              }: _*)
+            )
+          }.getOrElse(span())
+        )
+      )
+    )
+  }
+
+  // ── MÉTRICAS CORPORALES ───────────────────────────────────────────────────
+  @cask.get("/am/body")
+  def bodyPage(request: cask.Request) = withAmAuth(request) { user =>
+    val metrics  = AmateurDatabaseManager.getBodyMetrics(user.id)
+    val latest   = metrics.headOption
+    val aiRaw    = if (metrics.size >= 2) AmateurDatabaseManager.getBodyMetricsAI(user.id) else ""
+    val insights = aiRaw.split("\n").map(_.trim).filter(_.nonEmpty).toList
+    val today    = java.time.LocalDate.now().toString
+    val alturaDefault = latest.map(_("altura").asInstanceOf[Double]).getOrElse(0.0)
+    val pesoDefault   = latest.map(_("peso").asInstanceOf[Double]).getOrElse(0.0)
+    val chartLabels = metrics.reverse.map(m => s""""${m("fecha").asInstanceOf[String].take(7)}"""").mkString("[",",","]")
+    val chartPeso   = metrics.reverse.map(m => f"${m("peso").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+
+    renderAm("body", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "⚖️ Métricas Corporales"),
+          span(cls := "text-muted small", "Seguimiento semanal · impacto en rendimiento")
+        ),
+        latest.map { m =>
+          val peso = m("peso").asInstanceOf[Double]
+          val imc  = m("imc").asInstanceOf[Double]
+          val imcColor = if(imc<18.5)"#0dcaf0" else if(imc<25)"#20c997" else if(imc<30)"#ffc107" else "#ef4444"
+          val imcLabel = if(imc<18.5)"Bajo peso" else if(imc<25)"Óptimo" else if(imc<30)"Sobrepeso" else "Obesidad"
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-4", div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-white", style := "font-size:1.6rem;", f"$peso%.1f"),
+              div(cls := "xx-small text-muted", "kg"))),
+            div(cls := "col-4", div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black", style := s"font-size:1.6rem; color:$imcColor;", f"$imc%.1f"),
+              div(cls := "xx-small text-muted", "IMC"),
+              div(cls := "xx-small fw-bold", style := s"color:$imcColor;", imcLabel))),
+            div(cls := "col-4", div(cls := "card-am p-2 text-center",
+              div(cls := "fw-black text-white", style := "font-size:1.6rem;",
+                f"${m("altura").asInstanceOf[Double]}%.0f"),
+              div(cls := "xx-small text-muted", "cm")))
+          )
+        }.getOrElse(span()),
+        if (insights.nonEmpty)
+          div(cls := "card-am p-3 mb-3", style := "border-left:3px solid #a78bfa;",
+            div(cls := "d-flex align-items-center gap-2 mb-2",
+              span(style := "font-size:16px;", "✨"),
+              div(cls := "xx-small fw-bold text-muted", "IMPACTO EN TU JUEGO")),
+            frag(insights.map { i =>
+              div(cls := "d-flex gap-2 py-2", style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0; margin-top:2px;"),
+                div(cls := "small text-white", style := "font-size:12px; line-height:1.5;", i))
+            }: _*)
+          )
+        else if (metrics.size < 2)
+          div(cls := "card-am p-3 mb-3 text-center", style := "border-style:dashed; opacity:.6;",
+            div(cls := "xx-small text-muted", "Registra al menos 2 semanas para ver el análisis IA"))
+        else span(),
+        if (metrics.size >= 2)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "fw-bold small text-muted mb-2", "EVOLUCIÓN DE PESO"),
+            div(style := "height:130px;", canvas(id := "chartPeso")),
+            script(raw(s"""
+              new Chart(document.getElementById('chartPeso'), {
+                type: 'line',
+                data: { labels: $chartLabels, datasets: [{ label: 'kg', data: $chartPeso,
+                  borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.08)',
+                  tension: 0.3, fill: true, pointRadius: 4, borderWidth: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: {
+                    y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    x: { ticks: { color: '#888' }, grid: { display: false } } } }
+              });
+            """))
+          )
+        else span(),
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "fw-bold small text-muted mb-3", "➕ Registrar esta semana"),
+          div(cls := "row g-2 mb-2",
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "PESO (kg) *"),
+              input(tpe := "number", id := "inp-peso", step := "0.1",
+                cls := "form-control mt-1", style := "font-size:13px;",
+                value := (if(pesoDefault>0) f"$pesoDefault%.1f" else ""),
+                placeholder := "75.0", attr("min") := "30", attr("max") := "200",
+                attr("oninput") := "calcIMC()")),
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "ALTURA (cm) *"),
+              input(tpe := "number", id := "inp-altura", step := "0.5",
+                cls := "form-control mt-1", style := "font-size:13px;",
+                value := (if(alturaDefault>0) f"$alturaDefault%.0f" else ""),
+                placeholder := "178", attr("min") := "100", attr("max") := "250",
+                attr("oninput") := "calcIMC()"))
+          ),
+          div(cls := "row g-2 mb-2",
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "% GRASA (opcional)"),
+              input(tpe := "number", id := "inp-grasa", step := "0.1",
+                cls := "form-control mt-1", placeholder := "15.0")),
+            div(cls := "col-6",
+              label(cls := "xx-small text-muted fw-bold", "CINTURA cm (opcional)"),
+              input(tpe := "number", id := "inp-cintura", step := "0.5",
+                cls := "form-control mt-1", placeholder := "80"))
+          ),
+          div(cls := "mb-2",
+            label(cls := "xx-small text-muted fw-bold", "FECHA"),
+            input(tpe := "date", id := "inp-fecha-body", cls := "form-control mt-1", value := today)),
+          div(id := "imc-preview", cls := "text-center py-2 mb-2",
+            style := "background:rgba(255,255,255,.04); border-radius:8px;",
+            span(cls := "xx-small text-muted", "IMC: "),
+            span(id := "imc-val", cls := "fw-bold text-white", "—")),
+          button(tpe := "button", id := "btn-body", cls := "btn btn-primary w-100 fw-bold",
+            attr("onclick") := "guardarMetricas()", "💾 Guardar métricas")
+        ),
+        if (metrics.nonEmpty)
+          div(cls := "card-am p-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "HISTORIAL"),
+            frag(metrics.take(10).map { m =>
+              val peso2 = m("peso").asInstanceOf[Double]
+              val imc2  = m("imc").asInstanceOf[Double]
+              val imcC  = if(imc2<18.5)"#0dcaf0" else if(imc2<25)"#20c997" else if(imc2<30)"#ffc107" else "#ef4444"
+              div(cls := "d-flex align-items-center gap-2 py-2",
+                style := "border-bottom:1px solid rgba(255,255,255,.06);",
+                div(cls := "xx-small text-muted", style := "min-width:60px;",
+                  m("fecha").asInstanceOf[String].take(10)),
+                div(cls := "flex-fill fw-bold text-white xx-small", f"$peso2%.1f kg"),
+                div(cls := "fw-bold xx-small", style := s"color:$imcC;", f"IMC $imc2%.1f"))
+            }: _*)
+          )
+        else span(),
+        script(raw("""
+          function calcIMC() {
+            var peso=parseFloat(document.getElementById('inp-peso').value);
+            var alt=parseFloat(document.getElementById('inp-altura').value);
+            var el=document.getElementById('imc-val');
+            if(peso>0&&alt>0){
+              var imc=peso/Math.pow(alt/100,2);
+              var lbl=imc<18.5?' Bajo peso':imc<25?' Óptimo':imc<30?' Sobrepeso':' Obesidad';
+              el.textContent=imc.toFixed(1)+lbl;
+            } else el.textContent='—';
+          }
+          function guardarMetricas(){
+            var peso=document.getElementById('inp-peso').value;
+            var alt=document.getElementById('inp-altura').value;
+            if(!peso||!alt){alert('Peso y altura son obligatorios.');return;}
+            var params=new URLSearchParams();
+            params.append('peso',peso); params.append('altura',alt);
+            params.append('grasa',document.getElementById('inp-grasa').value);
+            params.append('cintura',document.getElementById('inp-cintura').value);
+            params.append('fecha',document.getElementById('inp-fecha-body').value);
+            document.getElementById('btn-body').disabled=true;
+            document.getElementById('btn-body').textContent='Guardando...';
+            fetch('/am/body/save',{method:'POST',body:params,
+              headers:{'Content-Type':'application/x-www-form-urlencoded'}})
+              .then(function(r){if(r.ok)window.location.reload();})
+              .catch(function(){
+                document.getElementById('btn-body').disabled=false;
+                document.getElementById('btn-body').textContent='💾 Guardar métricas';
+              });
+          }
+          calcIMC();
+        """))
+      )
+    )
+  }
+
+  @cask.postForm("/am/body/save")
+  def bodySave(request: cask.Request, peso: String, altura: String,
+               grasa: String = "", cintura: String = "", fecha: String = "") =
+    withAmAuth(request) { user =>
+      val fechaFinal = if (fecha.nonEmpty) fecha else java.time.LocalDate.now().toString
+      AmateurDatabaseManager.saveBodyMetrics(
+        user.id, fechaFinal,
+        try peso.toDouble   catch { case _: Exception => 0.0 },
+        try altura.toDouble catch { case _: Exception => 0.0 },
+        if (grasa.nonEmpty)   try Some(grasa.toDouble)   catch { case _: Exception => None } else None,
+        if (cintura.nonEmpty) try Some(cintura.toDouble) catch { case _: Exception => None } else None,
+        ""
+      )
+      cask.Response(Array.emptyByteArray, 200)
+    }
 
   initialize()
 }
