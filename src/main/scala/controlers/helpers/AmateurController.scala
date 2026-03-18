@@ -37,10 +37,10 @@ object AmateurController extends cask.Routes {
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
   private def renderAm(
-    activeLink: String,
-    userName: String,
-    pageContent: scalatags.Text.Modifier
-  ): cask.Response[Array[Byte]] = {
+                        activeLink: String,
+                        userName: String,
+                        pageContent: scalatags.Text.Modifier
+                      ): cask.Response[Array[Byte]] = {
     val page = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
@@ -639,7 +639,7 @@ object AmateurController extends cask.Routes {
             ("/am/rivals",       "⚔️", "Rivales",  "#f59e0b"),
             ("/am/wellness",     "🧠", "Wellness", "#20c997"),
             (if (leagueUrl.nonEmpty) "/am/league" else "/am/league-config",
-             "🏆", "Liga", "#0ea5e9"),
+              "🏆", "Liga", "#0ea5e9"),
             ("/am/miniflow", "🌊", "MiniFlow", "#0f4c81")
           ).map { case (url, icon, label, color) =>
             div(cls := "col-4",
@@ -1621,13 +1621,13 @@ object AmateurController extends cask.Routes {
             if (leagueUrl.nonEmpty)
               a(href := "/am/calendar/sync", cls := "btn btn-success btn-sm fw-bold",
                 style := "font-size:11px;", "🔄 Sync"),
-          a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
-            style := "font-size:11px;", "⚙️ Liga"),
-          a(href := "#", cls := "btn btn-outline-danger btn-sm fw-bold",
-            style := "font-size:11px;",
-            attr("onclick") := "if(confirm('¿Borrar todos los partidos pendientes de la agenda?')) window.location='/am/calendar/clear'",
-            "🗑")
-        )
+            a(href := "/am/league-config", cls := "btn btn-outline-success btn-sm fw-bold",
+              style := "font-size:11px;", "⚙️ Liga"),
+            a(href := "#", cls := "btn btn-outline-danger btn-sm fw-bold",
+              style := "font-size:11px;",
+              attr("onclick") := "if(confirm('¿Borrar todos los partidos pendientes de la agenda?')) window.location='/am/calendar/clear'",
+              "🗑")
+          )
         ),
         div(cls := "card-am p-2 mb-3",
           div(style := "display:grid; grid-template-columns: repeat(7,1fr); gap:3px;",
@@ -1921,7 +1921,7 @@ $penSection
   @cask.get("/am/mapa-goles")
   def mapaGolesPage(request: cask.Request, tipo: String = "", rival: String = "") = withAmAuth(request) { user =>
     val heatmap    = if (rival.nonEmpty) AmateurDatabaseManager.getGoalHeatmapByRival(user.id, rival)
-                     else               AmateurDatabaseManager.getGoalHeatmap(user.id, tipo)
+    else               AmateurDatabaseManager.getGoalHeatmap(user.id, tipo)
     val rivales    = AmateurDatabaseManager.getRivalesConGoles(user.id)
     val totalGoles = heatmap.values.sum
 
@@ -1975,8 +1975,8 @@ $penSection
     } else None
 
     val tituloFiltro = if (rival.nonEmpty) s"vs ${rival.toUpperCase}"
-                       else if (tipo.nonEmpty) tipo
-                       else "Todos los partidos"
+    else if (tipo.nonEmpty) tipo
+    else "Todos los partidos"
 
     renderAm("goals", user.nombre,
       div(
@@ -2528,7 +2528,7 @@ $penSection
 
   @cask.postForm("/am/wellness/save")
   def wellnessSave(request: cask.Request,
-    sueno: String, energia: String, animo: String, notas: String = "") =
+                   sueno: String, energia: String, animo: String, notas: String = "") =
     withAmAuth(request) { user =>
       val today = java.time.LocalDate.now().toString
       AmateurDatabaseManager.saveWellness(
@@ -2703,7 +2703,7 @@ $penSection
 
   @cask.postForm("/am/calendar/nlp/process")
   def calendarNlpProcess(request: cask.Request, teamName: String,
-    texto: String = "", url: String = "") =
+                         texto: String = "", url: String = "") =
     withAmAuth(request) { user =>
       val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName, url)
       val json = ujson.Obj(
@@ -2831,7 +2831,7 @@ $penSection
 
   @cask.postForm("/am/league-config/save")
   def leagueConfigSave(request: cask.Request, leagueUrl: String = "", teamName: String,
-    clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = "") =
+                       clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = "") =
     withAmAuth(request) { user =>
       AmateurDatabaseManager.saveLeagueConfig(user.id, leagueUrl, teamName,
         clasificacionUrl, goleadoresUrl, resumenUrl)
@@ -2911,7 +2911,7 @@ $penSection
       if (parts.length == 2) {
         val mes = parts(1).toIntOption.getOrElse(0)
         val meses = Array("", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-                          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+          "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
         if (mes >= 1 && mes <= 12) s"${meses(mes)} ${parts(0).takeRight(2)}" else m
       } else m
     }
@@ -3105,7 +3105,7 @@ $penSection
     val teamName = cfg("teamName")
     val hasStats = cfg("clasificacionUrl").nonEmpty || cfg("goleadoresUrl").nonEmpty || cfg("resumenUrl").nonEmpty
     val stats = if (hasStats) AmateurDatabaseManager.getLeagueStats(user.id)
-                else Map("ok" -> false, "error" -> "")
+    else Map("ok" -> false, "error" -> "")
 
     def parseJ(raw: String): Option[ujson.Value] =
       if (raw.isEmpty) None
@@ -3162,7 +3162,7 @@ $penSection
               div(cls := "d-flex align-items-center gap-3 mb-2",
                 div(style := s"font-size:3rem; font-weight:900; color:$posColor; line-height:1;", s"${pos}º"),
                 div(div(cls := "fw-black text-white", style := "font-size:1.1rem;", teamName),
-                    div(cls := "xx-small text-muted", s"$pts pts · $pj2 PJ"))
+                  div(cls := "xx-small text-muted", s"$pts pts · $pj2 PJ"))
               ),
               try {
                 val tabla = cl("tabla").arr.take(8).toSeq
@@ -3216,7 +3216,7 @@ $penSection
                 val gl   = try r("goles_local").num.toInt    catch {case _:Exception=>0}
                 val gv2  = try r("goles_visitante").num.toInt catch {case _:Exception=>0}
                 val isUs = loc.toUpperCase.contains(teamName.toUpperCase.take(6)) ||
-                           vis.toUpperCase.contains(teamName.toUpperCase.take(6))
+                  vis.toUpperCase.contains(teamName.toUpperCase.take(6))
                 div(cls := "d-flex align-items-center gap-2 py-1 xx-small",
                   style := s"border-bottom:1px solid rgba(255,255,255,.06);${if(isUs)"background:rgba(13,110,253,.08);border-radius:4px;" else ""}",
                   div(cls := s"flex-fill text-end ${if(isUs)"fw-bold text-primary" else "text-white"}", loc),
@@ -3394,7 +3394,7 @@ $penSection
 
   @cask.postForm("/am/body/save")
   def bodySave(request: cask.Request, peso: String, altura: String,
-    grasa: String = "", cintura: String = "", fecha: String = "") =
+               grasa: String = "", cintura: String = "", fecha: String = "") =
     withAmAuth(request) { user =>
       val fechaFinal = if (fecha.nonEmpty) fecha else java.time.LocalDate.now().toString
       AmateurDatabaseManager.saveBodyMetrics(
@@ -3687,7 +3687,7 @@ $penSection
         div(
           div(cls := "mb-3 d-flex justify-content-between align-items-center",
             div(h5(cls := "fw-black text-white mb-0", "🦋 Efecto Mariposa"),
-                span(cls := "text-muted small", s"Tu impacto en MiniFlow FC — $pj partidos")),
+              span(cls := "text-muted small", s"Tu impacto en MiniFlow FC — $pj partidos")),
             a(href := "/am/history", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Atrás")
           ),
 
