@@ -614,16 +614,18 @@ object MatchController extends cask.Routes {
                       label(cls := "form-label small text-muted fw-bold", "TIPO"),
                       select(name := "tipo", cls := "form-select bg-dark text-white border-secondary",
                         Seq("LIGA","TORNEO","CUP","AMISTOSO").map { t =>
-                          option(value := t, if (matchData.tipo == t) attr("selected") := "selected" else emptyFrag, t)
-                        }
+                          if (matchData.tipo == t) option(value := t, attr("selected") := "selected", t)
+                          else option(value := t, t)
+                        }.toSeq: _*
                       )
                     ),
                     div(cls := "col-6",
                       label(cls := "form-label small text-muted fw-bold", "CLIMA"),
                       select(name := "clima", cls := "form-select bg-dark text-white border-secondary",
                         Seq("Sol","Nublado","Lluvia","Frío","Calor","Viento").map { c =>
-                          option(value := c, if (matchData.clima == c) attr("selected") := "selected" else emptyFrag, c)
-                        }
+                          if (matchData.clima == c) option(value := c, attr("selected") := "selected", c)
+                          else option(value := c, c)
+                        }.toSeq: _*
                       )
                     )
                   ),
