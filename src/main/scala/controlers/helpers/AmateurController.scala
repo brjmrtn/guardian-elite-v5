@@ -3722,12 +3722,15 @@ $penSection
                 div(cls := "fw-black text-danger", style := "font-size:1.8rem;", s"$nonCsWinRate%"),
                 div(cls := "xx-small text-muted", "Win rate SIN"))
             ),
-            div(cls := "text-center p-2 rounded",
-              style := s"background:${diffColor}18; border:1px solid ${diffColor}44;",
-              div(cls := "fw-black", style := s"font-size:1.4rem; color:$diffColor;",
-                s"${if(diff>0)"+" else ""}$diff%"),
-              div(cls := "xx-small text-muted", "diferencial de win rate con/sin CS")
-            )
+            {
+              val diffSign2 = if (diff > 0) "+" else ""
+              div(cls := "text-center p-2 rounded",
+                style := s"background:${diffColor}18; border:1px solid ${diffColor}44;",
+                div(cls := "fw-black", style := s"font-size:1.4rem; color:$diffColor;",
+                  s"$diffSign2$diff%"),
+                div(cls := "xx-small text-muted", "diferencial de win rate con/sin CS")
+              )
+            }
           ),
 
           // Clutch por posición
