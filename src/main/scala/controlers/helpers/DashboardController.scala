@@ -17,37 +17,45 @@ object DashboardController extends cask.Routes {
     val aiMessage = DatabaseManager.getDeepAnalysis()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
 
-    // ── CONSEJOS IA CONSOLIDADOS ──────────────────────────────────────────
+    // ── CONSEJOS IA CONSOLIDADOS (datos ya cargados arriba — sin llamadas extra) ─
     val eliteConsejos = scala.collection.mutable.ListBuffer[(String, String, String)]()
 
-    // 1. IA Neuro-Scout (primera línea)
-    if (aiMessage.nonEmpty) {
-      val line = aiMessage.replaceAll("<[^>]+>", "").split("\n").map(_.trim).filter(_.nonEmpty).headOption
-      line.foreach { l => eliteConsejos += (("🧠", "Neuro-Scout", l.take(120))) }
-    }
+    // 1. IA Neuro-Scout — ya cargado en aiMessage
+    try {
+      if (aiMessage.nonEmpty) {
+        val line = aiMessage.replaceAll("<[^>]+>","").split("\n").map(_.trim).filter(_.nonEmpty).headOption
+        line.foreach { l => eliteConsejos += (("🧠", "Neuro-Scout", l.take(120))) }
+      }
+    } catch { case _: Exception => () }
 
-    // 2. Analista cognitivo
-    if (cognitiveInsight.nonEmpty) {
-      val line = cognitiveInsight.replaceAll("<[^>]+>", "").split("\n").map(_.trim).filter(_.nonEmpty).headOption
-      line.foreach { l => eliteConsejos += (("🧩", "Cognitivo", l.take(120))) }
-    }
+    // 2. Analista cognitivo — ya cargado
+    try {
+      if (cognitiveInsight.nonEmpty) {
+        val line = cognitiveInsight.replaceAll("<[^>]+>","").split("\n").map(_.trim).filter(_.nonEmpty).headOption
+        line.foreach { l => eliteConsejos += (("🧩", "Cognitivo", l.take(120))) }
+      }
+    } catch { case _: Exception => () }
 
-    // 3. Auditor técnico (primer alerta)
-    techAlerts.headOption.foreach { alert =>
-      eliteConsejos += (("⚡", "Auditor técnico", alert.take(120)))
-    }
+    // 3. Auditor técnico — ya cargado
+    try { techAlerts.headOption.foreach { a => eliteConsejos += (("⚡", "Auditor", a.take(120))) } }
+    catch { case _: Exception => () }
 
-    // 4. Último audio-diario
-    matches.find(_.analisisVoz.nonEmpty).foreach { m =>
-      val line = m.analisisVoz.split("\n").map(_.trim).filter(_.nonEmpty).headOption
-      line.foreach { l => eliteConsejos += (("🎙️", s"Audio vs ${m.rival}", l.take(120))) }
-    }
+    // 4. Último audio — de matches ya cargados
+    try {
+      matches.find(_.analisisVoz.nonEmpty).foreach { m =>
+        m.analisisVoz.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
+          eliteConsejos += (("🎙️", s"Audio vs ${m.rival}", l.take(120)))
+        }
+      }
+    } catch { case _: Exception => () }
 
-    // 5. Inteligencia de datos (smartInsights primera línea)
-    if (smartInsights.nonEmpty) {
-      val line = smartInsights.replaceAll("<[^>]+>", "").split("\n").map(_.trim).filter(_.nonEmpty).headOption
-      line.foreach { l => eliteConsejos += (("📡", "Datos", l.take(120))) }
-    }
+    // 5. Smart insights — ya cargado
+    try {
+      if (smartInsights.nonEmpty) {
+        val line = smartInsights.replaceAll("<[^>]+>","").split("\n").map(_.trim).filter(_.nonEmpty).headOption
+        line.foreach { l => eliteConsejos += (("📡", "Datos", l.take(120))) }
+      }
+    } catch { case _: Exception => () }
 
     val cognitiveWidget = div(cls:="card bg-dark border-info shadow mb-3",
       div(cls:="card-header border-info text-info fw-bold py-1 text-center small", "🧠 ANALISTA COGNITIVO"),

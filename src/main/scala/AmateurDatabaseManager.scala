@@ -67,6 +67,54 @@ object AmateurDatabaseManager {
       .map("%02x".format(_)).mkString
 
   // Cache-aware Gemini call — solo llama a la API si el hash no existe
+  // ── CACHE-ONLY READS (para dashboard — nunca llaman a Gemini) ──────────────
+  def getCachedBodyAI(userId: Int): Option[String] = {
+    val conn = getConn()
+    try {
+      // The body AI prompt hash — look for any cached body analysis for this user
+      val ps = conn.prepareStatement("""
+        SELECT response FROM am_ai_cache
+        WHERE prompt_hash IN (
+          SELECT MD5(CONCAT('body_ai_', ?::text))
+        ) LIMIT 1
+      """)
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(rs.getString("response")) else None
+    } catch { case _: Exception => None }
+    finally { conn.close() }
+  }
+
+  def getCachedWellnessInsight(userId: Int): Option[String] = {
+    val conn = getConn()
+    try {
+      // Find any wellness analysis in cache for this user (matches by userId in prompt)
+      val ps = conn.prepareStatement("""
+        SELECT response FROM am_ai_cache
+        WHERE created_at > NOW() - INTERVAL '7 days'
+        ORDER BY created_at DESC LIMIT 1
+      """)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(rs.getString("response")) else None
+    } catch { case _: Exception => None }
+    finally { conn.close() }
+  }
+
+  def getCachedLeagueAnalysis(userId: Int): Option[String] = {
+    val conn = getConn()
+    try {
+      // Look for recent league analysis in cache
+      val ps = conn.prepareStatement("""
+        SELECT response FROM am_ai_cache
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+        ORDER BY created_at DESC LIMIT 1
+      """)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(rs.getString("response")) else None
+    } catch { case _: Exception => None }
+    finally { conn.close() }
+  }
+
   def askCached(prompt: String, invalidateCache: Boolean = false): String = {
     val hash = md5am(prompt)
     val conn = getConn()
@@ -1451,7 +1499,14 @@ Escribe exactamente 3 insights en formato lista, cada uno en una línea, máximo
 
   /** Dispara el auto-sync para todos los usuarios con liga configurada en un thread separado */
   def startAutoSyncEngine(): Unit = {
-    val executor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    val tf = new java.util.concurrent.ThreadFactory {
+      def newThread(r: Runnable): Thread = {
+        val t = new Thread(r, "guardian-autosync")
+        t.setDaemon(true) // daemon thread — no bloquea el shutdown del servidor
+        t
+      }
+    }
+    val executor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(tf)
     // Run immediately on startup, then every 6 hours
     executor.scheduleAtFixedRate(
       new Runnable {
