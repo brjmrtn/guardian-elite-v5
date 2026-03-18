@@ -626,7 +626,7 @@ object AmateurController extends cask.Routes {
 
         // ── ACCESO RÁPIDO ────────────────────────────────────────────────────
         div(cls := "row g-2 mb-3",
-          Seq(
+          frag(Seq(
             ("/am/match-center", "⚽", "Partido", "#3b82f6"),
             ("/am/progression",  "📈", "Progreso", "#8b5cf6"),
             ("/am/mapa-goles",   "🥅", "Mapa",    "#ef4444"),
@@ -645,7 +645,7 @@ object AmateurController extends cask.Routes {
                 )
               )
             )
-          }: _*
+          }: _*)
         ),
 
         // ── MODAL TEMPORADA ──────────────────────────────────────────────────

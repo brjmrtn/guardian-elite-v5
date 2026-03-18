@@ -239,6 +239,14 @@ object AmateurDatabaseManager {
         respuesta LIKE 'Error:%' OR respuesta LIKE '%status code%' OR respuesta = ''
       """)
 
+      // Auto-sync log — añadido en v7.4
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_sync_log (
+        user_id     INT PRIMARY KEY REFERENCES am_users(id) ON DELETE CASCADE,
+        last_sync   TIMESTAMP DEFAULT NULL,
+        last_result TEXT DEFAULT '',
+        inserted    INT DEFAULT 0
+      )""")
+
       // Métricas corporales — añadido en v7.4
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_body_metrics (
         id          SERIAL PRIMARY KEY,
@@ -1315,11 +1323,104 @@ Escribe exactamente 3 insights en formato lista, cada uno en una línea, máximo
     )
   }
 
+  // ── AUTO-SYNC ENGINE ──────────────────────────────────────────────────────
+
+  /** Devuelve true si han pasado más de 24h desde el último sync o nunca se ha hecho */
+  def needsSync(userId: Int): Boolean = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT last_sync FROM am_sync_log WHERE user_id = ?")
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      if (!rs.next()) return true // nunca sincronizado
+      val lastSync = rs.getTimestamp("last_sync")
+      if (lastSync == null) return true
+      val hoursSince = (System.currentTimeMillis() - lastSync.getTime) / 3600000L
+      hoursSince >= 24
+    } finally { conn.close() }
+  }
+
+  private def recordSync(userId: Int, inserted: Int, result: String): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_sync_log (user_id, last_sync, last_result, inserted)
+        VALUES (?, NOW(), ?, ?)
+        ON CONFLICT (user_id) DO UPDATE
+          SET last_sync=NOW(), last_result=EXCLUDED.last_result, inserted=EXCLUDED.inserted
+      """)
+      ps.setInt(1, userId); ps.setString(2, result.take(200)); ps.setInt(3, inserted)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Devuelve todos los userId que tienen league_url configurada */
+  def getUsersWithLeagueUrl(): List[Int] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT id FROM am_users WHERE league_url IS NOT NULL AND league_url != ''")
+      val rs = ps.executeQuery()
+      var ids = List[Int]()
+      while (rs.next()) ids = ids :+ rs.getInt("id")
+      ids
+    } finally { conn.close() }
+  }
+
+  /** Sync automático — solo ejecuta si han pasado 24h. Llama a processCalendarNLP internamente */
+  def autoSyncIfNeeded(userId: Int): Unit = {
+    if (!needsSync(userId)) return
+    val (url, teamName) = getLeagueConfig(userId)
+    if (url.isEmpty || teamName.isEmpty) return
+    try {
+      val result = processCalendarNLP(userId, "", teamName, url)
+      val inserted = result.getOrElse("inserted", 0).asInstanceOf[Int]
+      val ok       = result.getOrElse("ok", false).asInstanceOf[Boolean]
+      val msg      = if (ok) s"ok:$inserted" else result.getOrElse("error", "error").asInstanceOf[String]
+      recordSync(userId, inserted, msg)
+      println(s"[AutoSync] User $userId — $msg")
+    } catch {
+      case e: Exception =>
+        recordSync(userId, 0, s"exception:${e.getMessage.take(100)}")
+        println(s"[AutoSync] User $userId — ERROR: ${e.getMessage.take(100)}")
+    }
+  }
+
+  /** Dispara el auto-sync para todos los usuarios con liga configurada en un thread separado */
+  def startAutoSyncEngine(): Unit = {
+    val executor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    // Run immediately on startup, then every 6 hours
+    executor.scheduleAtFixedRate(
+      new Runnable {
+        def run(): Unit = {
+          println("[AutoSync] Checking all users...")
+          try {
+            val users = getUsersWithLeagueUrl()
+            println(s"[AutoSync] Found ${users.size} users with league URL")
+            users.foreach { userId =>
+              try { autoSyncIfNeeded(userId) }
+              catch { case e: Exception => println(s"[AutoSync] Error user $userId: ${e.getMessage}") }
+            }
+          } catch { case e: Exception => println(s"[AutoSync] Engine error: ${e.getMessage}") }
+        }
+      },
+      10,    // initial delay: 10 seconds after startup
+      21600, // repeat every 6 hours
+      java.util.concurrent.TimeUnit.SECONDS
+    )
+    println("[AutoSync] Engine started — checking every 6h, syncing if >24h stale")
+  }
+
   def syncCalendarFromConfig(userId: Int): Map[String, Any] = {
     val (url, teamName) = getLeagueConfig(userId)
     if (url.isEmpty)  return Map("ok" -> false, "error" -> "No hay URL de liga configurada. Configúrala en tu perfil.")
     if (teamName.isEmpty) return Map("ok" -> false, "error" -> "No hay nombre de equipo configurado. Configúralo en tu perfil.")
-    processCalendarNLP(userId, "", teamName, url)
+    val result   = processCalendarNLP(userId, "", teamName, url)
+    val inserted = result.getOrElse("inserted", 0).asInstanceOf[Int]
+    val ok       = result.getOrElse("ok", false).asInstanceOf[Boolean]
+    recordSync(userId, inserted, if (ok) s"manual:$inserted" else "error")
+    result
   }
 
   def fetchLeagueUrl(url: String): Either[String, String] = {
