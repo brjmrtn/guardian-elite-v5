@@ -209,6 +209,7 @@ object DatabaseManager {
         activo               BOOLEAN DEFAULT TRUE,
         imagen_url           TEXT
       )""")
+      stmt.executeUpdate("ALTER TABLE gear ADD COLUMN IF NOT EXISTS precio_compra DOUBLE PRECISION DEFAULT 0")
 
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS injuries (
         id              SERIAL PRIMARY KEY,
@@ -352,10 +353,10 @@ object DatabaseManager {
   def escHtml(s: String): String = {
     if (s == null) ""
     else s.replace("&", "&amp;")
-      .replace("<", "&lt;")
-      .replace(">", "&gt;")
-      .replace("\"", "&quot;")
-      .replace("'", "&#x27;")
+          .replace("<", "&lt;")
+          .replace(">", "&gt;")
+          .replace("\"", "&quot;")
+          .replace("'", "&#x27;")
   }
   def calcularEdadExacta(fechaStr: String): Int = { try { Period.between(LocalDate.parse(fechaStr), LocalDate.now()).getYears } catch { case _: Exception => 5 } }
 
@@ -426,10 +427,10 @@ object DatabaseManager {
         val safeNombre = escHtml(fixEncoding(rsLegend.getString("nombre")))
         val safeHito   = escHtml(fixEncoding(rsLegend.getString("hito")))
         "<div class='mb-3'>" +
-          "<h6 class='text-warning text-uppercase mb-1'>A TU EDAD (" + edad + " A\u00d1OS)...</h6>" +
-          "<h4 class='text-white fw-bold mb-1'>" + safeNombre + "</h4>" +
-          "<p class='text-light small fst-italic'>&quot;" + safeHito + "&quot;</p>" +
-          "</div>"
+        "<h6 class='text-warning text-uppercase mb-1'>A TU EDAD (" + edad + " A\u00d1OS)...</h6>" +
+        "<h4 class='text-white fw-bold mb-1'>" + safeNombre + "</h4>" +
+        "<p class='text-light small fst-italic'>&quot;" + safeHito + "&quot;</p>" +
+        "</div>"
       } else ""
       val diff = mediaLiga - miMedia; val color = if(diff >= 0) "text-success" else "text-danger"
       f"""<div class="card bg-secondary bg-opacity-10 border-warning shadow mb-4"><div class="card-header bg-dark text-warning fw-bold text-center small">CONTEXTO & LEYENDAS</div><div class="card-body">$legendHtml<hr class="border-secondary"><h6 class="text-info text-uppercase text-center mb-2 small fw-bold">COMPARATIVA RFFM</h6><div class="row text-center align-items-center"><div class="col-6 border-end border-secondary"><div class="small text-muted fw-bold">TU MEDIA</div><div class="display-6 fw-bold $color">${f"$miMedia%1.1f"}</div></div><div class="col-6"><div class="small text-muted fw-bold">MEDIA LIGA</div><div class="display-6 fw-bold text-white">${f"$mediaLiga%1.1f"}</div></div></div></div></div>"""
@@ -1074,7 +1075,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
       val prob = math.min(95, math.max(5, score.toInt))
 
       Map("prob" -> prob, "pj" -> pj, "pcs" -> pcs, "avgNota" -> avgNota,
-        "formaAvg" -> formaAvg, "horasSueno" -> horasSueno, "acwr" -> acwr)
+          "formaAvg" -> formaAvg, "horasSueno" -> horasSueno, "acwr" -> acwr)
     } finally { conn.close() }
   }
 
@@ -1093,10 +1094,10 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
       val avgTemp = if (temps.nonEmpty) temps.sum / temps.size else 15
       val hasRain = climas.count(c => c.contains("Lluvia") || c.contains("lluvia")) > 0
       val (latex, motivo) = if (avgTemp <= 5) ("Latex Hibrido Frio", s"Temperatura media ${avgTemp}C — latex hibrido mantiene agarre")
-      else if (avgTemp <= 12) ("Latex Soft Grip", s"Temperatura fresca ${avgTemp}C — latex blando optimo")
-      else if (hasRain) ("Latex Aqua", "Condiciones humedas recientes — latex aqua recomendado")
-      else if (avgTemp >= 25) ("Latex Duo Soft", s"Temperatura alta ${avgTemp}C — latex suave con respiro")
-      else ("Latex Contact", s"Condiciones ideales ${avgTemp}C — latex contact estandar")
+                            else if (avgTemp <= 12) ("Latex Soft Grip", s"Temperatura fresca ${avgTemp}C — latex blando optimo")
+                            else if (hasRain) ("Latex Aqua", "Condiciones humedas recientes — latex aqua recomendado")
+                            else if (avgTemp >= 25) ("Latex Duo Soft", s"Temperatura alta ${avgTemp}C — latex suave con respiro")
+                            else ("Latex Contact", s"Condiciones ideales ${avgTemp}C — latex contact estandar")
       val gloves = conn.createStatement().executeQuery("SELECT nombre FROM gear WHERE tipo='Guantes' AND activo=TRUE LIMIT 1")
       val gloveName = if (gloves.next()) gloves.getString("nombre") else "Sin guantes registrados"
       (latex, motivo, gloveName)
@@ -1135,7 +1136,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
       val (estilo, claves) = if (rsRiR.next()) (Option(rsRiR.getString("estilo_juego")).getOrElse(""), Option(rsRiR.getString("jugadores_clave")).getOrElse("")) else ("", "")
 
       Map("partidos" -> partidos, "zonaMasVulnerable" -> zonaMasVulnerable,
-        "clips" -> clips, "estilo" -> estilo, "claves" -> claves)
+          "clips" -> clips, "estilo" -> estilo, "claves" -> claves)
     } finally { conn.close() }
   }
 
@@ -1258,7 +1259,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
 
   // ── EMOTIONAL INTELLIGENCE ENGINE ─────────────────────────────────────────
   case class EmotionalEntry(fecha: String, animo: Int, energia: Int, notas: String,
-                            notaPartido: Option[Double], reaccionGoles: String)
+                             notaPartido: Option[Double], reaccionGoles: String)
 
   def getEmotionalData(): Map[String, Any] = {
     val conn = getConnection()
@@ -1293,7 +1294,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
         val animoAlto  = conPartido.filter(_.animo >= 4).flatMap(_.notaPartido)
         val animoBajo  = conPartido.filter(_.animo <= 2).flatMap(_.notaPartido)
         val diffCorr = (if (animoAlto.nonEmpty) animoAlto.sum / animoAlto.size else 0.0) -
-          (if (animoBajo.nonEmpty) animoBajo.sum / animoBajo.size else 0.0)
+                       (if (animoBajo.nonEmpty) animoBajo.sum / animoBajo.size else 0.0)
         diffCorr
       } else 0.0
 
@@ -1368,7 +1369,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
     try {
       val ps = conn.prepareStatement(
         "INSERT INTO match_goals (match_id, minuto, origen, situacion, responsabilidad, era_parable, zona_gol, notas) " +
-          "VALUES (?,?,?,?,?,?,?,?)")
+        "VALUES (?,?,?,?,?,?,?,?)")
       ps.setInt(1, matchId); ps.setInt(2, minuto)
       ps.setString(3, fixEncoding(origen)); ps.setString(4, fixEncoding(situacion))
       ps.setString(5, responsabilidad); ps.setString(6, eraParable)
@@ -1396,7 +1397,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
     try {
       val rs = conn.createStatement().executeQuery(
         "SELECT mg.*, m.rival, m.fecha, m.goles_favor, m.goles_contra " +
-          "FROM match_goals mg JOIN matches m ON mg.match_id = m.id ORDER BY m.fecha DESC, mg.minuto ASC")
+        "FROM match_goals mg JOIN matches m ON mg.match_id = m.id ORDER BY m.fecha DESC, mg.minuto ASC")
       var rows = List[Map[String, String]]()
       while (rs.next()) {
         rows = rows :+ Map(
@@ -1433,10 +1434,10 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // Nota ajustada: de cada partido, descuenta los goles inevitables
       val rsNota = conn.createStatement().executeQuery(
         "SELECT m.id, m.nota, m.goles_contra, " +
-          "COUNT(CASE WHEN mg.responsabilidad='Ninguna' THEN 1 END) as goles_defensa " +
-          "FROM matches m LEFT JOIN match_goals mg ON mg.match_id = m.id " +
-          "WHERE m.status='PLAYED' AND m.nota > 0 " +
-          "GROUP BY m.id, m.nota, m.goles_contra ORDER BY m.fecha DESC LIMIT 20")
+        "COUNT(CASE WHEN mg.responsabilidad='Ninguna' THEN 1 END) as goles_defensa " +
+        "FROM matches m LEFT JOIN match_goals mg ON mg.match_id = m.id " +
+        "WHERE m.status='PLAYED' AND m.nota > 0 " +
+        "GROUP BY m.id, m.nota, m.goles_contra ORDER BY m.fecha DESC LIMIT 20")
       var notaAjustadaTotal = 0.0; var notaAjustadaCount = 0
       var notaRealTotal = 0.0
       while (rsNota.next()) {
@@ -1499,11 +1500,11 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // Obtener todos los goles de match_goals con su zona y situacion
       val rsGoles = conn.createStatement().executeQuery(
         "SELECT mg.zona_gol, mg.situacion, mg.responsabilidad, mg.era_parable, " +
-          "mg.minuto, m.fecha, m.rival, m.nota " +
-          "FROM match_goals mg " +
-          "JOIN matches m ON mg.match_id = m.id " +
-          "WHERE m.status = 'PLAYED' " +
-          "ORDER BY m.fecha DESC")
+        "mg.minuto, m.fecha, m.rival, m.nota " +
+        "FROM match_goals mg " +
+        "JOIN matches m ON mg.match_id = m.id " +
+        "WHERE m.status = 'PLAYED' " +
+        "ORDER BY m.fecha DESC")
 
       case class GoalRow(zona: String, situacion: String, responsabilidad: String,
                          eraParable: String, minuto: Int, fecha: String,
@@ -1536,13 +1537,13 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val psxgDelta: Double = golesReales - xgTotal
       val psxgDeltaStr: String = (if (psxgDelta <= 0) "" else "+") + f"$psxgDelta%.2f"
       val psxgDeltaColor: String = if (psxgDelta <= -1.0) "success"
-      else if (psxgDelta <= 0.5) "info"
-      else if (psxgDelta <= 1.5) "warning"
-      else "danger"
+                                    else if (psxgDelta <= 0.5) "info"
+                                    else if (psxgDelta <= 1.5) "warning"
+                                    else "danger"
       val psxgLabel: String = if (psxgDelta <= -1.0) "BAJO LO ESPERADO"
-      else if (psxgDelta <= 0.5) "EN LO ESPERADO"
-      else if (psxgDelta <= 1.5) "ALGO POR ENCIMA"
-      else "POR ENCIMA"
+                               else if (psxgDelta <= 0.5) "EN LO ESPERADO"
+                               else if (psxgDelta <= 1.5) "ALGO POR ENCIMA"
+                               else "POR ENCIMA"
 
       // Clasificacion de goles por dificultad del tiro
       val golesAltaDif   = goles.count(_.xg < 0.35)   // tiros muy dificiles
@@ -1674,11 +1675,11 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
       // 4. Clasificacion
       val clasificacion: String = if (resetScore >= 70) "RESILIENTE"
-      else if (resetScore >= 45) "EN PROCESO"
-      else "VULNERABLE"
+                                  else if (resetScore >= 45) "EN PROCESO"
+                                  else "VULNERABLE"
       val clasificacionColor: String = if (resetScore >= 70) "success"
-      else if (resetScore >= 45) "warning"
-      else "danger"
+                                       else if (resetScore >= 45) "warning"
+                                       else "danger"
 
       // 5. Series para grafico
       val fechasSerie: List[String] = rows.reverse.map(_.fechaSig.take(10))
@@ -1872,14 +1873,14 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val nac       = java.time.LocalDate.parse(fechaNac)
       val edadAnios = java.time.Period.between(nac, hoy).getYears
       val edadMeses = java.time.Period.between(nac, hoy).getYears * 12 +
-        java.time.Period.between(nac, hoy).getMonths
+                      java.time.Period.between(nac, hoy).getMonths
 
       // 2. Altura actual y velocidad de crecimiento
       val rsG = conn.createStatement().executeQuery(
         "SELECT altura, peso, velocidad_crecimiento FROM physical_growth ORDER BY fecha DESC LIMIT 1")
       val (alturaActual, pesoActual, velCrecimiento) =
         if (rsG.next()) (rsG.getDouble("altura"), rsG.getDouble("peso"),
-          rsG.getDouble("velocidad_crecimiento"))
+                         rsG.getDouble("velocidad_crecimiento"))
         else (0.0, 0.0, 0.0)
 
       // 3. Velocidad máxima (PHV detector)
@@ -1890,12 +1891,12 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
       // 4. Fase biológica estimada
       val faseBio: String = if (edadAnios < 8) "INFANCIA TARDÍA"
-      else if (edadAnios < 10) "PRE-PUBERTAD"
-      else if (edadAnios < 12) "INICIO PUBERTAD"
-      else if (phvActivo) "PHV — PICO ACTIVO"
-      else if (edadAnios < 15) "PUBERTAD MEDIA"
-      else if (edadAnios < 17) "POST-PHV"
-      else "MADUREZ"
+                             else if (edadAnios < 10) "PRE-PUBERTAD"
+                             else if (edadAnios < 12) "INICIO PUBERTAD"
+                             else if (phvActivo) "PHV — PICO ACTIVO"
+                             else if (edadAnios < 15) "PUBERTAD MEDIA"
+                             else if (edadAnios < 17) "POST-PHV"
+                             else "MADUREZ"
       val faseBioColor: String = faseBio match {
         case "PHV — PICO ACTIVO" => "danger"
         case "INICIO PUBERTAD"   => "warning"
@@ -1918,8 +1919,8 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 6. Nota real vs nota bio-ajustada (últimos 20 partidos)
       val rsM = conn.createStatement().executeQuery(
         "SELECT fecha, rival, nota, goles_contra, paradas " +
-          "FROM matches WHERE status='PLAYED' AND nota > 0 " +
-          "ORDER BY fecha DESC LIMIT 20")
+        "FROM matches WHERE status='PLAYED' AND nota > 0 " +
+        "ORDER BY fecha DESC LIMIT 20")
       var matchRows = List[Map[String, Any]]()
       while (rsM.next()) {
         val nota      = rsM.getDouble("nota")
@@ -1943,8 +1944,8 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val percentilAltura: String = if (alturaActual <= 0) "Sin datos" else {
         // Medianas OMS para niños (cm) por edad
         val medianas = Map(5->109.0, 6->116.0, 7->122.0, 8->128.0, 9->133.0,
-          10->138.0, 11->143.0, 12->149.0, 13->156.0, 14->163.0,
-          15->169.0, 16->173.0, 17->175.0, 18->176.0)
+                           10->138.0, 11->143.0, 12->149.0, 13->156.0, 14->163.0,
+                           15->169.0, 16->173.0, 17->175.0, 18->176.0)
         val mediana = medianas.getOrElse(edadAnios, 155.0)
         val diff = alturaActual - mediana
         if (diff > 6) "P97 — Muy alto para su edad"
@@ -2050,11 +2051,11 @@ Responde en espanol, tono positivo y motivador para un nino."""
         }
 
         val amenaza: String = if (gcMedia >= 3.0) "ALTA"
-        else if (gcMedia >= 1.5) "MEDIA"
-        else "BAJA"
+                               else if (gcMedia >= 1.5) "MEDIA"
+                               else "BAJA"
         val amenazaColor: String = if (gcMedia >= 3.0) "danger"
-        else if (gcMedia >= 1.5) "warning"
-        else "success"
+                                    else if (gcMedia >= 1.5) "warning"
+                                    else "success"
 
         clusters = clusters :+ Map(
           "rival"          -> rival,
@@ -2084,18 +2085,18 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 1. Media global de referencia
       val rsGlobal = conn.createStatement().executeQuery(
         "SELECT AVG(nota) as avg_nota, AVG(paradas) as avg_paradas, " +
-          "AVG(goles_contra) as avg_gc, COUNT(*) as total " +
-          "FROM matches WHERE status='PLAYED' AND nota > 0")
+        "AVG(goles_contra) as avg_gc, COUNT(*) as total " +
+        "FROM matches WHERE status='PLAYED' AND nota > 0")
       val (avgNotaGlobal, avgParadasGlobal, avgGcGlobal, totalPartidos) =
         if (rsGlobal.next()) (rsGlobal.getDouble("avg_nota"), rsGlobal.getDouble("avg_paradas"),
-          rsGlobal.getDouble("avg_gc"),   rsGlobal.getInt("total"))
+                              rsGlobal.getDouble("avg_gc"),   rsGlobal.getInt("total"))
         else (0.0, 0.0, 0.0, 0)
 
       // 2. Partidos de alta presion: goles_contra >= 2 (asedio ofensivo)
       val rsAsedio = conn.createStatement().executeQuery(
         "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor, minutos " +
-          "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 2 " +
-          "ORDER BY fecha DESC LIMIT 30")
+        "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 2 " +
+        "ORDER BY fecha DESC LIMIT 30")
       var asedioRows = List[Map[String, Any]]()
       while (rsAsedio.next()) {
         asedioRows = asedioRows :+ Map(
@@ -2115,8 +2116,8 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 3. Partidos disputados con minutos >= 70 (final del partido - zona de fatiga)
       val rsFatiga = conn.createStatement().executeQuery(
         "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor, minutos " +
-          "FROM matches WHERE status='PLAYED' AND nota > 0 AND minutos >= 70 " +
-          "ORDER BY fecha DESC LIMIT 30")
+        "FROM matches WHERE status='PLAYED' AND nota > 0 AND minutos >= 70 " +
+        "ORDER BY fecha DESC LIMIT 30")
       var fatigaRows = List[Map[String, Any]]()
       while (rsFatiga.next()) {
         fatigaRows = fatigaRows :+ Map(
@@ -2136,8 +2137,8 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 4. Partidos de derrota abultada (gc >= 3) — colapso total
       val rsColapso = conn.createStatement().executeQuery(
         "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor " +
-          "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 3 " +
-          "ORDER BY fecha DESC LIMIT 20")
+        "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 3 " +
+        "ORDER BY fecha DESC LIMIT 20")
       var colapsoRows = List[Map[String, Any]]()
       while (rsColapso.next()) {
         colapsoRows = colapsoRows :+ Map(
@@ -2155,28 +2156,28 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 5. Resilience Index: nota en asedio vs nota global (0-100)
       val resilienceIndex: Int = if (avgNotaGlobal > 0)
         math.min(100, math.max(0, ((avgNotaAsedio / avgNotaGlobal) * 100).toInt))
-      else 0
+        else 0
       val resilienceLabel: String = if (resilienceIndex >= 90) "ÉLITE"
-      else if (resilienceIndex >= 75) "SOLIDO"
-      else if (resilienceIndex >= 55) "EN PROCESO"
-      else "VULNERABLE"
+                                    else if (resilienceIndex >= 75) "SOLIDO"
+                                    else if (resilienceIndex >= 55) "EN PROCESO"
+                                    else "VULNERABLE"
       val resilienceColor: String = if (resilienceIndex >= 90) "warning"
-      else if (resilienceIndex >= 75) "success"
-      else if (resilienceIndex >= 55) "info"
-      else "danger"
+                                    else if (resilienceIndex >= 75) "success"
+                                    else if (resilienceIndex >= 55) "info"
+                                    else "danger"
 
       // 6. Fatigue Index: nota en partidos largos vs global
       val fatigueIndex: Int = if (avgNotaGlobal > 0)
         math.min(100, math.max(0, ((avgNotaFatiga / avgNotaGlobal) * 100).toInt))
-      else 0
+        else 0
       val fatigueLabel: String = if (fatigueIndex >= 90) "SIN CAIDA"
-      else if (fatigueIndex >= 75) "AGUANTA"
-      else if (fatigueIndex >= 55) "LEVE CAIDA"
-      else "FATIGA CLARA"
+                                  else if (fatigueIndex >= 75) "AGUANTA"
+                                  else if (fatigueIndex >= 55) "LEVE CAIDA"
+                                  else "FATIGA CLARA"
       val fatigueColor: String = if (fatigueIndex >= 90) "success"
-      else if (fatigueIndex >= 75) "info"
-      else if (fatigueIndex >= 55) "warning"
-      else "danger"
+                                  else if (fatigueIndex >= 75) "info"
+                                  else if (fatigueIndex >= 55) "warning"
+                                  else "danger"
 
       // 7. Serie temporal: nota en asedio (ultimos 15)
       val asedioSerie   = asedioRows.reverse.takeRight(15).map(_("nota").asInstanceOf[Double])
@@ -2225,7 +2226,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // xT = (exito_pases_cortos * 0.4 + exito_pases_largos * 0.6) * volumen_relativo
       val rsXT = conn.createStatement().executeQuery(
         "SELECT pc_t, pc_ok, pl_t, pl_ok, acciones_pie, nota " +
-          "FROM matches WHERE status='PLAYED' AND (pc_t+pl_t) > 0 ORDER BY fecha DESC LIMIT 30")
+        "FROM matches WHERE status='PLAYED' AND (pc_t+pl_t) > 0 ORDER BY fecha DESC LIMIT 30")
       var xtRows = List[(Int,Int,Int,Int,Int,Double)]()
       while (rsXT.next()) xtRows = xtRows :+ (
         rsXT.getInt("pc_t"), rsXT.getInt("pc_ok"),
@@ -2254,7 +2255,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // Tension: paradas en partidos ajustados (diferencia goles <= 1) valen mas
       val rsXP = conn.createStatement().executeQuery(
         "SELECT paradas, paradas_1v1, nota, goles_favor, goles_contra, tipo_partido, torneo_nombre " +
-          "FROM matches WHERE status='PLAYED' AND paradas > 0 ORDER BY fecha DESC LIMIT 30")
+        "FROM matches WHERE status='PLAYED' AND paradas > 0 ORDER BY fecha DESC LIMIT 30")
       var xpRows = List[(Int,Int,Double,Int,Int,String,String)]()
       while (rsXP.next()) xpRows = xpRows :+ (
         rsXP.getInt("paradas"), rsXP.getInt("paradas_1v1"),
@@ -2264,7 +2265,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
       val xpPerMatch: List[Double] = xpRows.map { case (par, par1v1, nota, gf, gc, tipo, torneo) =>
         val importancia: Double = if (torneo.nonEmpty && tipo == "TORNEO") 2.0
-        else if (tipo == "LIGA") 1.0 else 0.5
+                                  else if (tipo == "LIGA") 1.0 else 0.5
         val diferencia: Int    = math.abs(gf - gc)
         val tension: Double    = if (diferencia == 0) 1.5 else if (diferencia == 1) 1.2 else 1.0
         val valorParadas: Double = par * 1.0 + par1v1 * 0.8  // 1v1 son de alto valor
@@ -2283,7 +2284,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // Paradas 1v1 (alto riesgo) + aereas (dominio espacio) + normal
       val rsSPV = conn.createStatement().executeQuery(
         "SELECT paradas, paradas_1v1, paradas_aereas, nota, fecha " +
-          "FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 30")
+        "FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 30")
       var spvRows = List[(Int,Int,Int,Double)]()
       while (rsSPV.next()) spvRows = spvRows :+ (
         rsSPV.getInt("paradas"), rsSPV.getInt("paradas_1v1"),
@@ -2309,7 +2310,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // ── 4. Bypass Rate: Lineas Superadas ────────────────────────────────────
       val rsBP = conn.createStatement().executeQuery(
         "SELECT lineas_superadas, acciones_pie, fecha FROM matches " +
-          "WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 30")
+        "WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 30")
       var bpRows = List[(Int,Int)]()
       while (rsBP.next()) bpRows = bpRows :+ (rsBP.getInt("lineas_superadas"), rsBP.getInt("acciones_pie"))
       val bpMedia: Double   = if (bpRows.nonEmpty) bpRows.map(_._1.toDouble).sum / bpRows.size else 0.0
@@ -2325,11 +2326,11 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // y calcula la correlacion entre calidad/atencion media y la nota del partido
       val rsROI = conn.createStatement().executeQuery(
         "SELECT m.fecha as mfecha, m.nota, " +
-          "  (SELECT AVG(t.calidad) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_calidad, " +
-          "  (SELECT AVG(t.atencion) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_atencion, " +
-          "  (SELECT AVG(t.rpe) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_rpe, " +
-          "  (SELECT COUNT(*) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as num_sesiones " +
-          "FROM matches m WHERE m.status='PLAYED' AND m.nota > 0 ORDER BY m.fecha DESC LIMIT 30")
+        "  (SELECT AVG(t.calidad) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_calidad, " +
+        "  (SELECT AVG(t.atencion) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_atencion, " +
+        "  (SELECT AVG(t.rpe) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as avg_rpe, " +
+        "  (SELECT COUNT(*) FROM trainings t WHERE t.fecha BETWEEN m.fecha - INTERVAL '7 days' AND m.fecha) as num_sesiones " +
+        "FROM matches m WHERE m.status='PLAYED' AND m.nota > 0 ORDER BY m.fecha DESC LIMIT 30")
       var roiRows = List[(Double,Double,Double,Double,Int)]()
       while (rsROI.next()) {
         val nota = rsROI.getDouble("nota")
@@ -2421,7 +2422,7 @@ CONSEJO: [recomendacion de mejora basada en los datos]"""
       val nac = java.time.LocalDate.parse(fechaNac)
       val edadAnios  = java.time.Period.between(nac, hoy).getYears
       val edadMeses  = java.time.Period.between(nac, hoy).getYears * 12 +
-        java.time.Period.between(nac, hoy).getMonths
+                       java.time.Period.between(nac, hoy).getMonths
 
       // 2. Historial de crecimiento completo
       val rsG = conn.createStatement().executeQuery(
@@ -2449,7 +2450,7 @@ CONSEJO: [recomendacion de mejora basada en los datos]"""
 
       // Tabla OMS: % de altura adulta alcanzado por edad (chicos)
       val pctPorEdad = Map(5->72.0, 6->75.0, 7->77.0, 8->80.0, 9->82.0, 10->84.0,
-        11->86.5, 12->89.0, 13->93.0, 14->97.0, 15->99.0, 16->100.0)
+                           11->86.5, 12->89.0, 13->93.0, 14->97.0, 15->99.0, 16->100.0)
 
       // Altura actual inconsistente con la edad registrada
       val alturaConsistente: Boolean = alturaActual > 80 && !(edadAnios >= 12 && alturaActual < 130)
@@ -2494,7 +2495,7 @@ CONSEJO: [recomendacion de mejora basada en los datos]"""
 
       // 6. Comparativa con percentiles de porteros profesionales
       val pctAltura: Int = if (alturaProyectada >= 190) 90 else if (alturaProyectada >= 185) 75
-      else if (alturaProyectada >= 180) 50 else if (alturaProyectada >= 175) 25 else 10
+                           else if (alturaProyectada >= 180) 50 else if (alturaProyectada >= 175) 25 else 10
 
       // 7. Evolucion de nota media por temporada para proyeccion de rendimiento
       val rsN = conn.createStatement().executeQuery(
@@ -2517,7 +2518,7 @@ CONSEJO: [recomendacion de mejora basada en los datos]"""
       // Genera puntos desde edad actual hasta 18 anios
       val curvaProyeccion: List[(Int, Double)] = {
         val pctPorEdad2 = Map(7->77.0, 8->80.0, 9->82.0, 10->84.0, 11->86.5, 12->89.0,
-          13->93.0, 14->97.0, 15->99.0, 16->100.0, 17->100.0, 18->100.0)
+                              13->93.0, 14->97.0, 15->99.0, 16->100.0, 17->100.0, 18->100.0)
         (edadAnios to 18).toList.map { edad =>
           val pct = pctPorEdad2.getOrElse(edad, 100.0)
           edad -> (alturaProyectada * pct / 100.0)
@@ -2568,6 +2569,145 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         "midParent"         -> midParent,
         "advertenciaFecha"  -> advertenciaFecha
       )
+    } finally { conn.close() }
+  }
+
+  // ── EFECTO MARIPOSA ──────────────────────────────────────────────────────
+  def getEfectoMariposa(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          COUNT(*) as pj,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as clean_sheets,
+          SUM(CASE WHEN goles_contra = 0 AND goles_favor > goles_contra THEN 1 ELSE 0 END) as cs_wins,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as ganados,
+          SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) as empatados,
+          SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) as perdidos,
+          AVG(nota) as nota_media
+        FROM matches WHERE status = 'PLAYED'
+      """)
+      if (!rs.next()) return Map("ok" -> false)
+      val pj         = rs.getInt("pj")
+      val cs         = rs.getInt("clean_sheets")
+      val csWins     = rs.getInt("cs_wins")
+      val ganados    = rs.getInt("ganados")
+      val empatados  = rs.getInt("empatados")
+      val perdidos   = rs.getInt("perdidos")
+      val notaMedia  = rs.getDouble("nota_media")
+
+      // Win rate con y sin clean sheet
+      val csWinRate  = if (cs > 0) (csWins.toDouble / cs * 100).toInt else 0
+      val nonCsWins  = ganados - csWins
+      val nonCs      = pj - cs
+      val nonCsWinRate = if (nonCs > 0) (nonCsWins.toDouble / nonCs * 100).toInt else 0
+
+      // Clutch points: partidos ganados donde margen = 1 gol con nota >= 7.5
+      val rsClutch = conn.createStatement().executeQuery("""
+        SELECT COUNT(*) as clutch,
+               SUM(goles_favor - goles_contra) as margen_total
+        FROM matches
+        WHERE status = 'PLAYED'
+          AND goles_favor > goles_contra
+          AND (goles_favor - goles_contra) = 1
+          AND nota >= 7.5
+      """)
+      val (clutch, margenTotal) = if (rsClutch.next())
+        (rsClutch.getInt("clutch"), rsClutch.getInt("margen_total")) else (0, 0)
+
+      // Influence data: nota por resultado para gráfico
+      val rsInfluence = conn.createStatement().executeQuery("""
+        SELECT
+          CASE WHEN goles_favor > goles_contra THEN 'G'
+               WHEN goles_favor = goles_contra THEN 'E'
+               ELSE 'P' END as res,
+          ROUND(nota::numeric, 1) as nota,
+          COUNT(*) as cnt
+        FROM matches WHERE status = 'PLAYED'
+        GROUP BY res, ROUND(nota::numeric, 1)
+        ORDER BY nota
+      """)
+      var influenceData = List[Map[String, Any]]()
+      while (rsInfluence.next()) {
+        influenceData = influenceData :+ Map(
+          "res"  -> rsInfluence.getString("res"),
+          "nota" -> rsInfluence.getDouble("nota"),
+          "cnt"  -> rsInfluence.getInt("cnt")
+        )
+      }
+
+      Map(
+        "ok"           -> true,
+        "pj"           -> pj,
+        "cleanSheets"  -> cs,
+        "csWinRate"    -> csWinRate,
+        "nonCsWinRate" -> nonCsWinRate,
+        "ganados"      -> ganados,
+        "empatados"    -> empatados,
+        "perdidos"     -> perdidos,
+        "notaMedia"    -> notaMedia,
+        "clutchPoints" -> clutch,
+        "influenceData"-> influenceData
+      )
+    } finally { conn.close() }
+  }
+
+  // ── GEAR ROI ──────────────────────────────────────────────────────────────
+  def getGearROI(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      // Get all gear with their usage and price
+      val rs = conn.createStatement().executeQuery("""
+        SELECT g.id, g.nombre, g.tipo, g.usos_actuales, g.vida_util_estimada,
+               g.activo, COALESCE(g.precio_compra, 0) as precio,
+               AVG(m.nota) as nota_media,
+               SUM(CASE WHEN m.clima ILIKE '%lluv%' OR m.clima ILIKE '%rain%' THEN 1 ELSE 0 END) as partidos_lluvia
+        FROM gear g
+        LEFT JOIN matches m ON m.status = 'PLAYED'
+          AND m.fecha >= (SELECT MIN(fecha) FROM matches WHERE status='PLAYED')
+        GROUP BY g.id, g.nombre, g.tipo, g.usos_actuales, g.vida_util_estimada, g.activo, g.precio_compra
+        ORDER BY g.activo DESC, g.usos_actuales DESC
+      """)
+      var list = List[Map[String, Any]]()
+      while (rs.next()) {
+        val usos   = rs.getInt("usos_actuales")
+        val vida   = rs.getInt("vida_util_estimada")
+        val precio = rs.getDouble("precio")
+        val nota   = rs.getDouble("nota_media")
+        val lluvia = rs.getInt("partidos_lluvia")
+        val desgaste = if (vida > 0) (usos.toDouble / vida * 100).toInt else 0
+        val costePorPartido = if (usos > 0 && precio > 0) precio / usos else 0.0
+
+        // Grip alert: >60% desgaste base + lluvia multiplier
+        val gripLoss = math.min(100, desgaste + (lluvia * 3))
+        val gripAlert = gripLoss >= 70
+
+        list = list :+ Map(
+          "id"              -> rs.getInt("id"),
+          "nombre"          -> rs.getString("nombre"),
+          "tipo"            -> rs.getString("tipo"),
+          "usos"            -> usos,
+          "vida"            -> vida,
+          "activo"          -> rs.getBoolean("activo"),
+          "precio"          -> precio,
+          "desgaste"        -> desgaste,
+          "gripLoss"        -> gripLoss,
+          "gripAlert"       -> gripAlert,
+          "costePorPartido" -> costePorPartido,
+          "notaMedia"       -> nota,
+          "partidosLluvia"  -> lluvia
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def updateGearPrecio(gearId: Int, precio: Double): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE gear SET precio_compra = ? WHERE id = ?")
+      ps.setDouble(1, precio); ps.setInt(2, gearId)
+      ps.executeUpdate()
     } finally { conn.close() }
   }
 
@@ -2967,7 +3107,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     alerts.toList
   }
 
-  def getCognitiveInsight(): String = {
+   def getCognitiveInsight(): String = {
     val conn = getConnection()
     try {
       // Buscamos la media de notas de los ultimos 30 dias
@@ -3108,15 +3248,25 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     AIProvider.ask(prompt)
   }
   def analyzeAudioLog(matchId: Int, audioBase64: String): String = {
-    // Prompt personalizado para Hector (5 anos) y su gestion emocional
-    val prompt = """
-      Eres un Psicologo Deportivo experto en formacion base.
-      Analiza este audio post-partido de Hector, un portero de 5 anos.
-      1) Transcribe lo que dice (ignora ruidos de fondo).
-      2) Evalua su estado emocional: ?frustracion, alegria, timidez, cansancio?
-      3) Da un consejo breve y practico al padre para reforzar la autoestima de Hector hoy.
-      Responde en texto plano, sin formato Markdown complejo.
-    """
+    val prompt = """Eres el psicólogo deportivo de Héctor, portero de élite. Analiza este audio post-partido con el Protocolo de 4 Anclas. Sé directo y conciso.
+
+ANCLA 1 — ESTADO BIO-EMOCIONAL:
+Detecta nivel de energía, fatiga o frustración por tono de voz y mensaje.
+Formato: [Motivado/Neutro/Bajón/Frustrado/Eufórico] + 1 frase explicativa
+
+ANCLA 2 — HITO CRÍTICO:
+La acción técnica más relevante mencionada (parada clave, fallo en salida, etc.)
+Formato: ACIERTO o ERROR: descripción breve
+
+ANCLA 3 — FACTOR EXTERNO:
+Menciona clima, campo, árbitro u otros factores externos no numéricos.
+Formato: [detectado/no mencionado] + detalle si existe
+
+ANCLA 4 — ENFOQUE DE MEJORA:
+Qué aspecto específico quiere trabajar para el próximo partido.
+Formato: OBJETIVO: descripción + 1 consejo técnico concreto
+
+Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado"."""
 
     // Llamada al motor unificado con soporte para audio
     val res = AIProvider.ask(prompt, Some(("audio/webm", audioBase64)))
@@ -3273,8 +3423,8 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       // 6. MEJOR Y PEOR CONTEXTO (resumen ejecutivo)
       val allContexts: List[(String, Double, Int)] = (
         porTipo.map(m => (m("tipo").toString, m("nota").asInstanceOf[Double], m("pj").asInstanceOf[Int])) ++
-          porClima.map(m => (m("clima").toString, m("nota").asInstanceOf[Double], m("pj").asInstanceOf[Int]))
-        ).filter(_._3 >= 2) // mínimo 2 partidos para ser significativo
+        porClima.map(m => (m("clima").toString, m("nota").asInstanceOf[Double], m("pj").asInstanceOf[Int]))
+      ).filter(_._3 >= 2) // mínimo 2 partidos para ser significativo
 
       val mejorCtx = allContexts.sortBy(-_._2).headOption
       val peorCtx  = allContexts.sortBy(_._2).headOption
@@ -3415,8 +3565,8 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       val edad   = java.time.Period.between(nac, hoy).getYears
       // Factor bio-banding: mayor = más avanzado en madurez (ventaja para clubes)
       val bioFactor: Double = if (edad <= 10) 0.70 else if (edad <= 12) 0.80
-      else if (edad <= 14) 0.90 else if (edad <= 16) 1.00
-      else 1.10
+                               else if (edad <= 14) 0.90 else if (edad <= 16) 1.00
+                               else 1.10
 
       // ── 4. SPV calculado inline ─────────────────────────────────────────────
       val spvEfic: Double = {
@@ -3441,11 +3591,11 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
 
       val rawScore: Double =
         notaNorm   * 35.0 +
-          spvNorm    * 20.0 +
-          bypassNorm * 15.0 +
-          psxgNorm   * 15.0 +
-          winRate    * 10.0 +
-          bioBoost   *  5.0
+        spvNorm    * 20.0 +
+        bypassNorm * 15.0 +
+        psxgNorm   * 15.0 +
+        winRate    * 10.0 +
+        bioBoost   *  5.0
 
       // Escala de valor formativo: 0-100 pts → 0 a 150.000 €
       // (referencia: porteros de academia sub-16 elite: 30k-80k; sub-14: 10k-40k)
@@ -3566,8 +3716,8 @@ Solo HTML limpio, sin markdown ni backticks."""
   // FASE 7 v7.2 — NLP SCOUTING AGGREGATOR
   // ─────────────────────────────────────────────────────────────────────────────
   def processScoutReport(
-                          textoRaw: String, ojeador: String, clubOrigen: String, fecha: String
-                        ): Map[String, Any] = {
+    textoRaw: String, ojeador: String, clubOrigen: String, fecha: String
+  ): Map[String, Any] = {
     // Llamada a Gemini con prompt estructurado
     val prompt = s"""Eres un analista de captacion experto en porteros de formacion.
 Has recibido el siguiente informe de un ojeador sobre un portero:
@@ -3597,7 +3747,7 @@ SOLO el JSON, nada mas."""
     // Parsear JSON de Gemini
     val cleaned = respuesta.replace("```json","").replace("```","").trim
     val parsed: ujson.Value = try { ujson.read(cleaned) }
-    catch { case _: Exception => ujson.Obj() }
+                              catch { case _: Exception => ujson.Obj() }
 
     def jInt(k: String): Int    = try { parsed(k).num.toInt } catch { case _: Exception => 0 }
     def jStr(k: String): String = try { parsed(k).str }       catch { case _: Exception => "" }
@@ -3626,7 +3776,7 @@ SOLO el JSON, nada mas."""
         RETURNING id
       """)
       val fechaDate = try { java.sql.Date.valueOf(fecha) }
-      catch { case _: Exception => java.sql.Date.valueOf(java.time.LocalDate.now().toString) }
+                      catch { case _: Exception => java.sql.Date.valueOf(java.time.LocalDate.now().toString) }
       ps.setDate(1, fechaDate)
       ps.setString(2, fixEncoding(ojeador))
       ps.setString(3, fixEncoding(clubOrigen))
@@ -3747,14 +3897,14 @@ SOLO el JSON, nada mas."""
 
       // ── 8. Prompt a Gemini ──────────────────────────────────────────────────
       val proximoStr = if (proximoRival.nonEmpty) s"Tiene partido $proximoTipo contra $proximoRival el $proximoFecha."
-      else "No tiene partido programado esta semana."
+                       else "No tiene partido programado esta semana."
       val prompt = s"""Eres un nutricionista deportivo especializado en porteros de formacion (academias de futbol).
 
 Perfil del portero:
 - Edad estimada: ${java.time.Period.between(
         try { val rs2 = conn.createStatement().executeQuery("SELECT fecha_nacimiento FROM seasons ORDER BY id DESC LIMIT 1")
-          if (rs2.next()) java.time.LocalDate.parse(Option(rs2.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2015-06-19"))
-          else java.time.LocalDate.of(2015,6,19) }
+              if (rs2.next()) java.time.LocalDate.parse(Option(rs2.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2015-06-19"))
+              else java.time.LocalDate.of(2015,6,19) }
         catch { case _:Exception => java.time.LocalDate.of(2015,6,19) },
         java.time.LocalDate.now()).getYears} años
 - Altura: ${altura.toInt} cm | Peso: ${f"$peso%.1f"} kg
@@ -3799,7 +3949,7 @@ Solo HTML limpio."""
       psSave.executeUpdate()
 
       Map("plan" -> planIA, "acwr" -> acwr, "rpe" -> rpeMedia, "nota" -> notaUlt,
-        "faseStr" -> faseStr, "altura" -> altura, "peso" -> peso, "cached" -> false)
+          "faseStr" -> faseStr, "altura" -> altura, "peso" -> peso, "cached" -> false)
     } finally { conn.close() }
   }
 

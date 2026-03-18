@@ -224,9 +224,9 @@ object CareerController extends cask.Routes {
       val goles = tot - par
       val intensity = if (maxTotal > 0) tot / maxTotal else 0.0
       val bg = if (tot == 0) "rgba(255,255,255,0.04)"
-      else if (intensity < 0.3) "rgba(220,53,69,0.25)"
-      else if (intensity < 0.6) "rgba(220,53,69,0.55)"
-      else "rgba(220,53,69,0.88)"
+               else if (intensity < 0.3) "rgba(220,53,69,0.25)"
+               else if (intensity < 0.6) "rgba(220,53,69,0.55)"
+               else "rgba(220,53,69,0.88)"
       val pctPar = if (tot > 0) (par * 100 / tot) else 0
       div(cls := "pen-heatmap-cell d-flex flex-column justify-content-center align-items-center",
         style := s"background:$bg; border:1px solid rgba(255,255,255,0.1);",
@@ -509,63 +509,63 @@ object CareerController extends cask.Routes {
               ("Temporadas", evolution.size.toString, "warning"),
               ("Partidos", totalPj.toString, "info"),
               (s"Media Global", f"$avgAll%.1f", if(avgAll>=70)"success"else"warning"),
-    ("Goles Encajados", totalGc.toString, "danger"),
-    ("Porterias a 0", totalPc.toString, "success")
-    ).map { case (lbl, v, c) =>
-      div(cls := "col",
-        div(cls := s"card bg-dark border-$c text-center py-2",
-          div(cls := s"text-$c fw-bold fs-4", v),
-          div(cls := "xx-small text-muted", lbl)
-        )
-      )
-    }
-    ),
-
-    if (evolution.isEmpty) {
-      div(cls := "alert alert-secondary text-center py-5",
-        div(style:="font-size:40px; opacity:0.3;","📈"),
-        div(cls:="fw-bold mt-2","Sin datos suficientes para mostrar evolucion"),
-        div(cls:="small text-muted mt-1","Registra partidos para ver tu progresion")
-      )
-    } else div(
-      // Grafico principal
-      div(cls := "card bg-dark border-warning shadow mb-4",
-        div(cls := "card-header text-warning fw-bold small", "EVOLUCION DE NOTA MEDIA POR TEMPORADA"),
-        div(cls := "card-body",
-          div(style := "position:relative; height:280px;",
-            tag("canvas")(id := "chartEvolucion")
-          )
-        )
-      ),
-
-      div(cls := "row g-3",
-        // Grafico barras GC
-        div(cls := "col-md-6",
-          div(cls := "card bg-dark border-danger shadow",
-            div(cls := "card-header text-danger fw-bold small", "GOLES ENCAJADOS POR TEMPORADA"),
-            div(cls := "card-body",
-              div(style := "position:relative; height:200px;",
-                tag("canvas")(id := "chartGoles")
+              ("Goles Encajados", totalGc.toString, "danger"),
+              ("Porterias a 0", totalPc.toString, "success")
+            ).map { case (lbl, v, c) =>
+              div(cls := "col",
+                div(cls := s"card bg-dark border-$c text-center py-2",
+                  div(cls := s"text-$c fw-bold fs-4", v),
+                  div(cls := "xx-small text-muted", lbl)
+                )
               )
-            )
-          )
-        ),
-        // Tabla por temporada
-        div(cls := "col-md-6",
-          div(cls := "card bg-dark border-secondary shadow",
-            div(cls := "card-header text-white fw-bold small", "RESUMEN POR TEMPORADA"),
-            div(cls := "card-body p-0",
-              table(cls := "table table-dark table-sm mb-0 small",
-                thead(tr(th("Temp"), th(cls:="text-center","PJ"), th(cls:="text-center","GC"), th(cls:="text-center","Media"))),
-                tbody(seasonTable)
-              )
-            )
-          )
-        )
-      ),
+            }
+          ),
 
-      script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
-      script(raw(s"""
+          if (evolution.isEmpty) {
+            div(cls := "alert alert-secondary text-center py-5",
+              div(style:="font-size:40px; opacity:0.3;","📈"),
+              div(cls:="fw-bold mt-2","Sin datos suficientes para mostrar evolucion"),
+              div(cls:="small text-muted mt-1","Registra partidos para ver tu progresion")
+            )
+          } else div(
+            // Grafico principal
+            div(cls := "card bg-dark border-warning shadow mb-4",
+              div(cls := "card-header text-warning fw-bold small", "EVOLUCION DE NOTA MEDIA POR TEMPORADA"),
+              div(cls := "card-body",
+                div(style := "position:relative; height:280px;",
+                  tag("canvas")(id := "chartEvolucion")
+                )
+              )
+            ),
+
+            div(cls := "row g-3",
+              // Grafico barras GC
+              div(cls := "col-md-6",
+                div(cls := "card bg-dark border-danger shadow",
+                  div(cls := "card-header text-danger fw-bold small", "GOLES ENCAJADOS POR TEMPORADA"),
+                  div(cls := "card-body",
+                    div(style := "position:relative; height:200px;",
+                      tag("canvas")(id := "chartGoles")
+                    )
+                  )
+                )
+              ),
+              // Tabla por temporada
+              div(cls := "col-md-6",
+                div(cls := "card bg-dark border-secondary shadow",
+                  div(cls := "card-header text-white fw-bold small", "RESUMEN POR TEMPORADA"),
+                  div(cls := "card-body p-0",
+                    table(cls := "table table-dark table-sm mb-0 small",
+                      thead(tr(th("Temp"), th(cls:="text-center","PJ"), th(cls:="text-center","GC"), th(cls:="text-center","Media"))),
+                      tbody(seasonTable)
+                    )
+                  )
+                )
+              )
+            ),
+
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
               const anios  = $aniosJs;
               const medias = $mediasJs;
               const gcs    = $gcsJs;
@@ -622,9 +622,9 @@ object CareerController extends cask.Routes {
                 }
               });
             """))
-    )
-    )
-    )
+          )
+        )
+      )
     )
     renderHtml(content)
   }
@@ -809,6 +809,210 @@ object CareerController extends cask.Routes {
       else span()
     )
     renderHtml(basePage("market-estimator", content))
+  }
+
+  // ── EFECTO MARIPOSA ──────────────────────────────────────────────────────
+  @cask.get("/efecto-mariposa")
+  def efectoMariposaPage(request: cask.Request) = withAuth(request) {
+    val d    = DatabaseManager.getEfectoMariposa()
+    val gear = DatabaseManager.getGearROI()
+
+    if (!d.getOrElse("ok", false).asInstanceOf[Boolean]) {
+      renderHtml(basePage("career", div(cls := "alert alert-secondary m-4", "Sin datos suficientes")))
+    } else {
+      val pj            = d("pj").asInstanceOf[Int]
+      val cs            = d("cleanSheets").asInstanceOf[Int]
+      val csWinRate     = d("csWinRate").asInstanceOf[Int]
+      val nonCsWinRate  = d("nonCsWinRate").asInstanceOf[Int]
+      val ganados       = d("ganados").asInstanceOf[Int]
+      val empatados     = d("empatados").asInstanceOf[Int]
+      val perdidos      = d("perdidos").asInstanceOf[Int]
+      val notaMedia     = d("notaMedia").asInstanceOf[Double]
+      val clutch        = d("clutchPoints").asInstanceOf[Int]
+      val influence     = d("influenceData").asInstanceOf[List[Map[String, Any]]]
+
+      val csRate        = if (pj > 0) (cs * 100 / pj) else 0
+      val winRate       = if (pj > 0) (ganados * 100 / pj) else 0
+
+      // Chart data for influence
+      val gNotas  = influence.filter(_("res") == "G").map(m => f"${m("nota").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+      val eNotas  = influence.filter(_("res") == "E").map(m => f"${m("nota").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+      val pNotas  = influence.filter(_("res") == "P").map(m => f"${m("nota").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+      val gCnts   = influence.filter(_("res") == "G").map(_("cnt").asInstanceOf[Int].toString).mkString("[",",","]")
+      val eCnts   = influence.filter(_("res") == "E").map(_("cnt").asInstanceOf[Int].toString).mkString("[",",","]")
+      val pCnts   = influence.filter(_("res") == "P").map(_("cnt").asInstanceOf[Int].toString).mkString("[",",","]")
+
+      val activeGripAlert = gear.filter(g =>
+        g("activo").asInstanceOf[Boolean] && g("gripAlert").asInstanceOf[Boolean])
+
+      val content = basePage("career",
+        div(cls := "container-fluid px-2",
+
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            div(
+              h4(cls := "text-white fw-black mb-0", "🦋 Efecto Mariposa"),
+              span(cls := "text-muted small", "Tu impacto real en los resultados del equipo")
+            ),
+            a(href := "/career", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Carrera")
+          ),
+
+          // ── CLEAN SHEET IMPACT ──────────────────────────────────────────
+          div(cls := "card bg-dark border-success shadow mb-3",
+            div(cls := "card-header bg-success bg-opacity-10 border-success",
+              span(cls := "text-success fw-bold small", "🛡️ IMPACTO CLEAN SHEET")
+            ),
+            div(cls := "card-body p-3",
+              div(cls := "row g-3 text-center mb-3",
+                div(cls := "col-4",
+                  div(cls := "fw-black text-success", style := "font-size:2rem;", s"$csRate%"),
+                  div(cls := "xx-small text-muted", "% Clean Sheets")
+                ),
+                div(cls := "col-4",
+                  div(cls := "fw-black text-warning", style := "font-size:2rem;", s"$csWinRate%"),
+                  div(cls := "xx-small text-muted", "Win rate CON CS")
+                ),
+                div(cls := "col-4",
+                  div(cls := "fw-black text-danger", style := "font-size:2rem;", s"$nonCsWinRate%"),
+                  div(cls := "xx-small text-muted", "Win rate SIN CS")
+                )
+              ),
+              // Diferencial
+              val diff = csWinRate - nonCsWinRate
+              val diffColor = if (diff > 0) "#20c997" else "#dc3545"
+              div(cls := "text-center p-2 rounded",
+                style := s"background:${diffColor}18; border:1px solid ${diffColor}44;",
+                div(cls := "fw-black", style := s"font-size:1.5rem; color:$diffColor;",
+                  s"${if(diff>0)"+" else ""}$diff%"),
+                div(cls := "xx-small text-muted",
+                  "diferencial de win rate cuando mantienes la portería a cero")
+              )
+            )
+          ),
+
+          // ── CLUTCH POINTS ───────────────────────────────────────────────
+          div(cls := "card bg-dark border-warning shadow mb-3",
+            div(cls := "card-header bg-warning bg-opacity-10 border-warning",
+              span(cls := "text-warning fw-bold small", "⚡ CLUTCH POINTS")
+            ),
+            div(cls := "card-body p-3",
+              div(cls := "row g-3 text-center",
+                div(cls := "col-4",
+                  div(cls := "fw-black text-warning", style := "font-size:2.5rem;", clutch.toString),
+                  div(cls := "xx-small text-muted", "Partidos clutch")
+                ),
+                div(cls := "col-4",
+                  div(cls := "fw-black text-white", style := "font-size:2.5rem;", s"${clutch * 3}"),
+                  div(cls := "xx-small text-muted", "Puntos salvados")
+                ),
+                div(cls := "col-4",
+                  div(cls := "fw-black text-info", style := "font-size:2.5rem;", f"$notaMedia%.1f"),
+                  div(cls := "xx-small text-muted", "Nota media global")
+                )
+              ),
+              div(cls := "xx-small text-muted text-center mt-2 fst-italic",
+                "Clutch = victoria por 1 gol con nota ≥ 7.5 — tu aportación fue decisiva"
+              )
+            )
+          ),
+
+          // ── GRÁFICO INFLUENCIA ──────────────────────────────────────────
+          div(cls := "card bg-dark border-info shadow mb-3",
+            div(cls := "card-header border-info text-info fw-bold small", "📊 NOTA vs RESULTADO"),
+            div(cls := "card-body p-2",
+              div(style := "height:220px;", canvas(id := "chartInfluencia")),
+              div(cls := "d-flex justify-content-center gap-3 mt-2",
+                Seq(("#20c997","G","Victorias"), ("#ffc107","E","Empates"), ("#dc3545","P","Derrotas")).map {
+                  case (c,_,lbl) => span(cls := "xx-small",
+                    span(style := s"display:inline-block;width:10px;height:10px;background:$c;border-radius:2px;margin-right:4px;"),
+                    lbl)
+                }: _*
+              )
+            )
+          ),
+
+          // ── GEAR ALERT ──────────────────────────────────────────────────
+          if (activeGripAlert.nonEmpty)
+            div(cls := "alert alert-warning border-warning shadow mb-3",
+              div(cls := "fw-bold text-dark mb-1", "⚠️ ALERTA DE GRIP"),
+              frag(activeGripAlert.map { g =>
+                val gl = g("gripLoss").asInstanceOf[Int]
+                div(cls := "small text-dark",
+                  s"${g("nombre").asInstanceOf[String]}: ${gl}% de desgaste estimado — considera usar el par de reserva")
+              }: _*)
+            )
+          else span(),
+
+          // ── GEAR ROI ────────────────────────────────────────────────────
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header border-secondary text-warning fw-bold small", "🧤 ROI DE GUANTES"),
+            div(cls := "card-body p-2",
+              if (gear.isEmpty)
+                div(cls := "text-muted small text-center py-2", "Sin guantes registrados")
+              else
+                div(cls := "table-responsive",
+                  tags2.table(cls := "table table-dark table-sm mb-0 xx-small",
+                    thead(tr(th("Guante"), th("Usos"), th("Desgaste"), th("Coste/PJ"), th("Nota ★"))),
+                    tbody(frag(gear.map { g =>
+                      val desg  = g("desgaste").asInstanceOf[Int]
+                      val desgColor = if(desg>=80)"text-danger" else if(desg>=50)"text-warning" else "text-success"
+                      val cpp   = g("costePorPartido").asInstanceOf[Double]
+                      val nota  = g("notaMedia").asInstanceOf[Double]
+                      tr(
+                        td(cls := "fw-bold text-white", g("nombre").asInstanceOf[String].take(20)),
+                        td(g("usos").asInstanceOf[Int].toString),
+                        td(cls := desgColor, s"$desg%"),
+                        td(if(cpp>0) f"€$cpp%.2f" else "—"),
+                        td(cls := "text-warning", if(nota>0) f"$nota%.1f" else "—")
+                      )
+                    }: _*))
+                  )
+                )
+            )
+          ),
+
+          script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+          script(raw(s"""
+            var ctx = document.getElementById('chartInfluencia');
+            if (ctx) {
+              new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                  datasets: [
+                    { label: 'Victoria', data: $gNotas.map(function(n,i){return {x:n,y:$gCnts[i]||1};}),
+                      backgroundColor: 'rgba(32,201,151,0.7)', pointRadius: 8 },
+                    { label: 'Empate', data: $eNotas.map(function(n,i){return {x:n,y:$eCnts[i]||1};}),
+                      backgroundColor: 'rgba(255,193,7,0.7)', pointRadius: 8 },
+                    { label: 'Derrota', data: $pNotas.map(function(n,i){return {x:n,y:$pCnts[i]||1};}),
+                      backgroundColor: 'rgba(220,53,69,0.7)', pointRadius: 8 }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: {
+                    x: { title: { display: true, text: 'Tu nota', color: '#888' },
+                         min: 1, max: 10, ticks: { color: '#888' }, grid: { color: '#333' } },
+                    y: { title: { display: true, text: 'Partidos', color: '#888' },
+                         ticks: { color: '#888', stepSize: 1 }, grid: { color: '#333' } }
+                  }
+                }
+              });
+            }
+          """))
+        )
+      )
+      renderHtml(content)
+    }
+  }
+
+  @cask.post("/gear/update-precio")
+  def updateGearPrecio(request: cask.Request) = withAuth(request) {
+    val body   = new String(request.data.readAllBytes(), "UTF-8")
+    val params = body.split("&").map { p => val kv = p.split("=",2); java.net.URLDecoder.decode(kv(0),"UTF-8") -> (if(kv.length>1) java.net.URLDecoder.decode(kv(1),"UTF-8") else "") }.toMap
+    val gearId = params.getOrElse("gearId","0").toIntOption.getOrElse(0)
+    val precio = params.getOrElse("precio","0").toDoubleOption.getOrElse(0.0)
+    DatabaseManager.updateGearPrecio(gearId, precio)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/efecto-mariposa"))
   }
 
   initialize()
