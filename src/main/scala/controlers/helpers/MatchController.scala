@@ -687,7 +687,7 @@ object MatchController extends cask.Routes {
                 input(tpe := "hidden", name := "matchId",    value := matchId.toString),
                 input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
                 button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
-                  onclick := "submitAudio()", disabled := true, "🧠 Analizar Emociones con IA")
+                  onclick := "submitAudio()", attr("disabled") := "disabled", "🧠 Analizar Emociones con IA")
               ),
               if (matchData.analisisVoz.nonEmpty)
                 div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
