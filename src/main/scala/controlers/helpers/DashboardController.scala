@@ -33,8 +33,8 @@ object DashboardController extends cask.Routes {
     val escudoPcs   = escudoData.getOrElse("pcs", 0).asInstanceOf[Int]
     val escudoPj    = escudoData.getOrElse("pj", 0).asInstanceOf[Int]
     val (escudoColor, escudoLabel) = if (escudoProb >= 70) ("success", "ALTA")
-    else if (escudoProb >= 45) ("warning", "MEDIA")
-    else ("danger", "BAJA")
+                                     else if (escudoProb >= 45) ("warning", "MEDIA")
+                                     else ("danger", "BAJA")
     val escudoWidget = if (upcoming.isEmpty) div() else {
       div(cls := "card bg-dark border-success shadow mb-3",
         div(cls := "card-header bg-success bg-opacity-10 border-success d-flex justify-content-between align-items-center py-2",
@@ -55,18 +55,18 @@ object DashboardController extends cask.Routes {
           div(cls := "row g-2",
             Seq(
               ("Historial cs", s"${if(escudoPj>0) escudoPcs else "—"}/${if(escudoPj>0) escudoPj else "—"}", if(escudoPj>0 && escudoPcs.toDouble/escudoPj>0.4)"success"else"secondary"),
-      ("Sueno anoche", if(escudoHoras>0) f"${escudoHoras}%.1fh" else "—", if(escudoHoras>=8)"success"else if(escudoHoras>=6)"warning"else"secondary"),
-      ("ACWR", if(escudoAcwr>0) f"${escudoAcwr}%.2f" else "—", if(escudoAcwr>1.5)"danger"else"success")
-      ).map { case (lbl, v, c) =>
-        div(cls := "col-4",
-          div(cls := s"text-center p-1 rounded border border-$c bg-dark",
-            div(cls := s"fw-bold text-$c small", v),
-            div(cls := "xx-small text-muted", lbl)
+              ("Sueno anoche", if(escudoHoras>0) f"${escudoHoras}%.1fh" else "—", if(escudoHoras>=8)"success"else if(escudoHoras>=6)"warning"else"secondary"),
+              ("ACWR", if(escudoAcwr>0) f"${escudoAcwr}%.2f" else "—", if(escudoAcwr>1.5)"danger"else"success")
+            ).map { case (lbl, v, c) =>
+              div(cls := "col-4",
+                div(cls := s"text-center p-1 rounded border border-$c bg-dark",
+                  div(cls := s"fw-bold text-$c small", v),
+                  div(cls := "xx-small text-muted", lbl)
+                )
+              )
+            }
           )
         )
-      }
-      )
-      )
       )
     }
 
@@ -310,7 +310,7 @@ object DashboardController extends cask.Routes {
                       div(style := "font-size:9px; color:#64748b; margin-top:2px;", lbl)
                     )
                   )
-                }: _*
+                }.toSeq: _*
               )
             )
           )
@@ -396,7 +396,7 @@ object DashboardController extends cask.Routes {
                         v)
                     )
                   )
-                }: _*
+                }.toSeq: _*
               )
             ),
 
@@ -459,7 +459,7 @@ object DashboardController extends cask.Routes {
                     )
                   )
                 )
-              }: _*
+              }.toSeq: _*
             )
           )
         )

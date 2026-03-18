@@ -18,6 +18,11 @@ object GuardianServer extends cask.Main {
   DatabaseManager.initDB()
   AmateurDatabaseManager.initTables()
 
+  // ── AUTO-SYNC ENGINE ────────────────────────────────────────────────────────
+  // Arranca en background tras 10s de startup.
+  // Verifica todos los usuarios con liga configurada y sincroniza si >24h sin sync.
+  AmateurDatabaseManager.startAutoSyncEngine()
+
   override def host: String = "0.0.0.0"
   override def port: Int    = sys.env.getOrElse("PORT", "8081").toInt
 
