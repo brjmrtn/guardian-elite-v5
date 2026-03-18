@@ -17,6 +17,38 @@ object DashboardController extends cask.Routes {
     val aiMessage = DatabaseManager.getDeepAnalysis()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
 
+    // ── CONSEJOS IA CONSOLIDADOS ──────────────────────────────────────────
+    val eliteConsejos = scala.collection.mutable.ListBuffer[(String, String, String)]()
+
+    // 1. IA Neuro-Scout (primera línea)
+    if (aiMessage.nonEmpty) {
+      val line = aiMessage.replaceAll("<[^>]+>", "").split("\n").map(_.trim).filter(_.nonEmpty).headOption
+      line.foreach { l => eliteConsejos += (("🧠", "Neuro-Scout", l.take(120))) }
+    }
+
+    // 2. Analista cognitivo
+    if (cognitiveInsight.nonEmpty) {
+      val line = cognitiveInsight.replaceAll("<[^>]+>", "").split("\n").map(_.trim).filter(_.nonEmpty).headOption
+      line.foreach { l => eliteConsejos += (("🧩", "Cognitivo", l.take(120))) }
+    }
+
+    // 3. Auditor técnico (primer alerta)
+    techAlerts.headOption.foreach { alert =>
+      eliteConsejos += (("⚡", "Auditor técnico", alert.take(120)))
+    }
+
+    // 4. Último audio-diario
+    matches.find(_.analisisVoz.nonEmpty).foreach { m =>
+      val line = m.analisisVoz.split("\n").map(_.trim).filter(_.nonEmpty).headOption
+      line.foreach { l => eliteConsejos += (("🎙️", s"Audio vs ${m.rival}", l.take(120))) }
+    }
+
+    // 5. Inteligencia de datos (smartInsights primera línea)
+    if (smartInsights.nonEmpty) {
+      val line = smartInsights.replaceAll("<[^>]+>", "").split("\n").map(_.trim).filter(_.nonEmpty).headOption
+      line.foreach { l => eliteConsejos += (("📡", "Datos", l.take(120))) }
+    }
+
     val cognitiveWidget = div(cls:="card bg-dark border-info shadow mb-3",
       div(cls:="card-header border-info text-info fw-bold py-1 text-center small", "🧠 ANALISTA COGNITIVO"),
       div(cls:="card-body p-2",
@@ -33,8 +65,8 @@ object DashboardController extends cask.Routes {
     val escudoPcs   = escudoData.getOrElse("pcs", 0).asInstanceOf[Int]
     val escudoPj    = escudoData.getOrElse("pj", 0).asInstanceOf[Int]
     val (escudoColor, escudoLabel) = if (escudoProb >= 70) ("success", "ALTA")
-    else if (escudoProb >= 45) ("warning", "MEDIA")
-    else ("danger", "BAJA")
+                                     else if (escudoProb >= 45) ("warning", "MEDIA")
+                                     else ("danger", "BAJA")
     val escudoWidget = if (upcoming.isEmpty) div() else {
       div(cls := "card bg-dark border-success shadow mb-3",
         div(cls := "card-header bg-success bg-opacity-10 border-success d-flex justify-content-between align-items-center py-2",
@@ -55,18 +87,18 @@ object DashboardController extends cask.Routes {
           div(cls := "row g-2",
             Seq(
               ("Historial cs", s"${if(escudoPj>0) escudoPcs else "—"}/${if(escudoPj>0) escudoPj else "—"}", if(escudoPj>0 && escudoPcs.toDouble/escudoPj>0.4)"success"else"secondary"),
-      ("Sueno anoche", if(escudoHoras>0) f"${escudoHoras}%.1fh" else "—", if(escudoHoras>=8)"success"else if(escudoHoras>=6)"warning"else"secondary"),
-      ("ACWR", if(escudoAcwr>0) f"${escudoAcwr}%.2f" else "—", if(escudoAcwr>1.5)"danger"else"success")
-      ).map { case (lbl, v, c) =>
-        div(cls := "col-4",
-          div(cls := s"text-center p-1 rounded border border-$c bg-dark",
-            div(cls := s"fw-bold text-$c small", v),
-            div(cls := "xx-small text-muted", lbl)
+              ("Sueno anoche", if(escudoHoras>0) f"${escudoHoras}%.1fh" else "—", if(escudoHoras>=8)"success"else if(escudoHoras>=6)"warning"else"secondary"),
+              ("ACWR", if(escudoAcwr>0) f"${escudoAcwr}%.2f" else "—", if(escudoAcwr>1.5)"danger"else"success")
+            ).map { case (lbl, v, c) =>
+              div(cls := "col-4",
+                div(cls := s"text-center p-1 rounded border border-$c bg-dark",
+                  div(cls := s"fw-bold text-$c small", v),
+                  div(cls := "xx-small text-muted", lbl)
+                )
+              )
+            }
           )
         )
-      }
-      )
-      )
       )
     }
 
@@ -439,6 +471,29 @@ object DashboardController extends cask.Routes {
                 )
               )
             ),
+
+            // ── CONSEJOS IA CONSOLIDADOS ────────────────────────────────
+            if (eliteConsejos.nonEmpty)
+              div(cls := "card bg-white border-0 shadow-sm mb-3",
+                style := "border-radius:12px; overflow:hidden;",
+                div(style := "background:linear-gradient(135deg,#1e293b,#0f172a); padding:10px 14px; display:flex; align-items:center; gap:8px;",
+                  span(style := "font-size:16px;", "✨"),
+                  span(style := "font-size:12px; font-weight:800; color:#a78bfa;", "CONSEJOS IA")
+                ),
+                div(style := "padding:8px;",
+                  frag(eliteConsejos.toList.map { case (icon, fuente, texto) =>
+                    div(style := "display:flex; gap:8px; padding:8px 6px; border-bottom:1px solid #f1f5f9;",
+                      div(style := "width:3px; background:#a78bfa; border-radius:2px; flex-shrink:0; margin-top:2px;"),
+                      div(
+                        div(style := "font-size:9px; font-weight:800; color:#a78bfa; margin-bottom:2px;",
+                          s"$icon $fuente"),
+                        div(style := "font-size:11px; color:#334155; line-height:1.5;", texto)
+                      )
+                    )
+                  }: _*)
+                )
+              )
+            else span(),
 
             // Acceso rápido — PRIORIDAD 4
             div(cls := "row g-2",
