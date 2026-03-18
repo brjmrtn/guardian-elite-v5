@@ -376,54 +376,50 @@ object AmateurController extends cask.Routes {
     val bodyMetrics  = AmateurDatabaseManager.getBodyMetrics(user.id).headOption
     val (leagueUrl, _) = AmateurDatabaseManager.getLeagueConfig(user.id)
 
-    // ── CONSEJOS IA CONSOLIDADOS ───────────────────────────────────────────
-    // Recoger todos los insights disponibles sin bloquear si no hay datos
+    // ── CONSEJOS IA CONSOLIDADOS (solo caché — nunca bloquea) ────────────────
+    // IMPORTANTE: solo lee de caché existente, NUNCA llama a Gemini en el dashboard
     val consejos = scala.collection.mutable.ListBuffer[(String, String, String)]()
-    // (icon, fuente, texto)
 
-    // 1. Último audio-diario
-    val lastAudio = AmateurDatabaseManager.getMatches(user.id).headOption
-      .filter(_.analisisVoz.nonEmpty)
-    lastAudio.foreach { m =>
-      val lines = m.analisisVoz.split("\n").map(_.trim).filter(_.nonEmpty)
-      lines.headOption.foreach { l =>
-        consejos += (("🎙️", s"Audio vs ${m.rival}", l.take(120)))
-      }
-    }
-
-    // 2. Body metrics AI
-    if (bodyMetrics.isDefined && AmateurDatabaseManager.getBodyMetrics(user.id).size >= 2) {
-      val bodyRaw = AmateurDatabaseManager.getBodyMetricsAI(user.id)
-      if (bodyRaw.nonEmpty) {
-        bodyRaw.split("\n").map(_.trim).filter(_.nonEmpty).take(2).foreach { l =>
-          consejos += (("⚖️", "Cuerpo", l.take(120)))
+    // 1. Último audio-diario (ya guardado en BD)
+    try {
+      AmateurDatabaseManager.getMatches(user.id).find(_.analisisVoz.nonEmpty).foreach { m =>
+        m.analisisVoz.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
+          consejos += (("🎙️", s"Audio vs ${m.rival}", l.take(120)))
         }
       }
-    }
+    } catch { case _: Exception => () }
 
-    // 3. Wellness insights
-    val wellCorr = AmateurDatabaseManager.getWellnessCorrelation(user.id)
-    val wellRows = wellCorr("rows").asInstanceOf[List[Map[String, Any]]]
-    if (wellRows.size >= 3) {
-      val wellRaw = AmateurDatabaseManager.callGeminiWellness(wellRows)
-      if (wellRaw.nonEmpty) {
-        wellRaw.split("\n").map(_.trim).filter(_.nonEmpty).take(1).foreach { l =>
+    // 2. Body metrics AI (solo si hay resultado en caché)
+    try {
+      if (bodyMetrics.isDefined) {
+        val cached = AmateurDatabaseManager.getCachedBodyAI(user.id)
+        cached.foreach { raw =>
+          raw.split("\n").map(_.trim).filter(_.nonEmpty).take(2).foreach { l =>
+            consejos += (("⚖️", "Cuerpo", l.take(120)))
+          }
+        }
+      }
+    } catch { case _: Exception => () }
+
+    // 3. Wellness (solo caché)
+    try {
+      val cached = AmateurDatabaseManager.getCachedWellnessInsight(user.id)
+      cached.foreach { raw =>
+        raw.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
           consejos += (("🧠", "Wellness", l.take(120)))
         }
       }
-    }
+    } catch { case _: Exception => () }
 
-    // 4. Liga IA
-    val leagueCfg = AmateurDatabaseManager.getLeagueFullConfig(user.id)
-    if (leagueCfg("clasificacionUrl").nonEmpty) {
-      val lStats = AmateurDatabaseManager.getLeagueStats(user.id)
-      val analisis = lStats.getOrElse("analisis", "").asInstanceOf[String]
-      if (analisis.nonEmpty) {
-        analisis.split("\n").map(_.trim).filter(_.nonEmpty).take(1).foreach { l =>
+    // 4. Liga IA (solo caché)
+    try {
+      val cached = AmateurDatabaseManager.getCachedLeagueAnalysis(user.id)
+      cached.foreach { raw =>
+        raw.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
           consejos += (("🏆", "Liga", l.take(120)))
         }
       }
-    }
+    } catch { case _: Exception => () }
 
     val currentSeason = seasonInfo("currentSeason").asInstanceOf[Int]
     val pastSeasons   = seasonInfo("pastSeasons").asInstanceOf[List[Map[String, String]]]
