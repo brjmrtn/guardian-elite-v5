@@ -2869,7 +2869,7 @@ $geminiRaw"""
               try {
                 val tabla = cl("tabla").arr.take(8)
                 div(
-                  frag(tabla.zipWithIndex.map { case (row, idx) =>
+                  frag(tabla.zipWithIndex.toSeq.map { case (row, idx) =>
                     val eq   = try row("equipo").str catch { case _: Exception => "" }
                     val rpos = try row("pos").num.toInt catch { case _: Exception => idx + 1 }
                     val rpts = try row("pts").num.toInt catch { case _: Exception => 0 }
@@ -2908,7 +2908,7 @@ $geminiRaw"""
                   span(cls := "xx-small text-muted", division)
                 else span()
               ),
-              frag(lista.zipWithIndex.map { case (g, idx) =>
+              frag(lista.zipWithIndex.toSeq.map { case (g, idx) =>
                 val nombre = try g("nombre").str catch { case _: Exception => "" }
                 val equipo = try g("equipo").str catch { case _: Exception => "" }
                 val goles  = try g("goles").num.toInt catch { case _: Exception => 0 }
@@ -2956,7 +2956,7 @@ $geminiRaw"""
                     resStr match { case "G" => "VICTORIA"; case "P" => "DERROTA"; case _ => "EMPATE" })
                 )
               }.getOrElse(span()),
-              frag(resultados.take(8).map { r =>
+              frag(resultados.take(8).toSeq.map { r =>
                 val loc = try r("local").str catch { case _: Exception => "" }
                 val vis = try r("visitante").str catch { case _: Exception => "" }
                 val gl  = try r("goles_local").num.toInt    catch { case _: Exception => 0 }
