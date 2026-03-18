@@ -33,8 +33,8 @@ object DashboardController extends cask.Routes {
     val escudoPcs   = escudoData.getOrElse("pcs", 0).asInstanceOf[Int]
     val escudoPj    = escudoData.getOrElse("pj", 0).asInstanceOf[Int]
     val (escudoColor, escudoLabel) = if (escudoProb >= 70) ("success", "ALTA")
-                                     else if (escudoProb >= 45) ("warning", "MEDIA")
-                                     else ("danger", "BAJA")
+    else if (escudoProb >= 45) ("warning", "MEDIA")
+    else ("danger", "BAJA")
     val escudoWidget = if (upcoming.isEmpty) div() else {
       div(cls := "card bg-dark border-success shadow mb-3",
         div(cls := "card-header bg-success bg-opacity-10 border-success d-flex justify-content-between align-items-center py-2",
@@ -55,18 +55,18 @@ object DashboardController extends cask.Routes {
           div(cls := "row g-2",
             Seq(
               ("Historial cs", s"${if(escudoPj>0) escudoPcs else "—"}/${if(escudoPj>0) escudoPj else "—"}", if(escudoPj>0 && escudoPcs.toDouble/escudoPj>0.4)"success"else"secondary"),
-              ("Sueno anoche", if(escudoHoras>0) f"${escudoHoras}%.1fh" else "—", if(escudoHoras>=8)"success"else if(escudoHoras>=6)"warning"else"secondary"),
-              ("ACWR", if(escudoAcwr>0) f"${escudoAcwr}%.2f" else "—", if(escudoAcwr>1.5)"danger"else"success")
-            ).map { case (lbl, v, c) =>
-              div(cls := "col-4",
-                div(cls := s"text-center p-1 rounded border border-$c bg-dark",
-                  div(cls := s"fw-bold text-$c small", v),
-                  div(cls := "xx-small text-muted", lbl)
-                )
-              )
-            }
+      ("Sueno anoche", if(escudoHoras>0) f"${escudoHoras}%.1fh" else "—", if(escudoHoras>=8)"success"else if(escudoHoras>=6)"warning"else"secondary"),
+      ("ACWR", if(escudoAcwr>0) f"${escudoAcwr}%.2f" else "—", if(escudoAcwr>1.5)"danger"else"success")
+      ).map { case (lbl, v, c) =>
+        div(cls := "col-4",
+          div(cls := s"text-center p-1 rounded border border-$c bg-dark",
+            div(cls := s"fw-bold text-$c small", v),
+            div(cls := "xx-small text-muted", lbl)
           )
         )
+      }
+      )
+      )
       )
     }
 
@@ -298,7 +298,7 @@ object DashboardController extends cask.Routes {
               ),
               // KPIs rápidos
               div(cls := "row g-2",
-                Seq(
+                frag(Seq(
                   (f"$avgLast5%2.1f", "RACHA 5", if(trendDiff>0)"#20c997" else if(trendDiff<0)"#ef4444" else "#94a3b8"),
                   (f"$acwr%1.2f",     "ACWR",    if(acwr>1.5)"#ef4444" else if(acwr>1.2)"#f59e0b" else "#20c997"),
                   (if(matches.nonEmpty) f"${matches.head.nota}%.1f" else "—", "ÚLTIMO", "#d4af37"),
@@ -310,7 +310,7 @@ object DashboardController extends cask.Routes {
                       div(style := "font-size:9px; color:#64748b; margin-top:2px;", lbl)
                     )
                   )
-                }.toSeq: _*
+                }: _*)
               )
             )
           )
@@ -383,7 +383,7 @@ object DashboardController extends cask.Routes {
               div(style := "font-size:10px; font-weight:800; color:#64748b; margin-bottom:10px;",
                 "RENDIMIENTO TÉCNICO"),
               div(cls := "row g-2 mb-3",
-                Seq(
+                frag(Seq(
                   ("CLIMA",      weatherStats.headOption.map(w => w._1).getOrElse("—"),        "#0ea5e9"),
                   ("NOTA CLIMA", weatherStats.headOption.map(w => f"${w._2._1}%.1f").getOrElse("—"), "#0ea5e9"),
                   ("INTELIGENCIA", smartInsights.take(30) + "...",          "#8b5cf6"),
@@ -396,7 +396,7 @@ object DashboardController extends cask.Routes {
                         v)
                     )
                   )
-                }.toSeq: _*
+                }: _*)
               )
             ),
 
@@ -442,7 +442,7 @@ object DashboardController extends cask.Routes {
 
             // Acceso rápido — PRIORIDAD 4
             div(cls := "row g-2",
-              Seq(
+              frag(Seq(
                 ("/scouting",       "🔍", "Scouting",   "#0ea5e9"),
                 ("/penalties",      "⛳", "Penaltis",   "#ef4444"),
                 ("/mapa-goles",     "🥅", "Mapa goles", "#3b82f6"),
@@ -459,7 +459,7 @@ object DashboardController extends cask.Routes {
                     )
                   )
                 )
-              }.toSeq: _*
+              }: _*)
             )
           )
         )
