@@ -384,7 +384,7 @@ object AmateurController extends cask.Routes {
     try {
       AmateurDatabaseManager.getMatches(user.id).find(_.analisisVoz.nonEmpty).foreach { m =>
         m.analisisVoz.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
-          consejos += (("🎙️", s"Audio vs ${m.rival}", l.take(120)))
+          consejos += (("🎙️", s"Audio vs ${m.rival}", l))
         }
       }
     } catch { case _: Exception => () }
@@ -395,7 +395,7 @@ object AmateurController extends cask.Routes {
         val cached = AmateurDatabaseManager.getCachedBodyAI(user.id)
         cached.foreach { raw =>
           raw.split("\n").map(_.trim).filter(_.nonEmpty).take(2).foreach { l =>
-            consejos += (("⚖️", "Cuerpo", l.take(120)))
+            consejos += (("⚖️", "Cuerpo", l))
           }
         }
       }
@@ -406,7 +406,7 @@ object AmateurController extends cask.Routes {
       val cached = AmateurDatabaseManager.getCachedWellnessInsight(user.id)
       cached.foreach { raw =>
         raw.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
-          consejos += (("🧠", "Wellness", l.take(120)))
+          consejos += (("🧠", "Wellness", l))
         }
       }
     } catch { case _: Exception => () }
@@ -416,7 +416,7 @@ object AmateurController extends cask.Routes {
       val cached = AmateurDatabaseManager.getCachedLeagueAnalysis(user.id)
       cached.foreach { raw =>
         raw.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
-          consejos += (("🏆", "Liga", l.take(120)))
+          consejos += (("🏆", "Liga", l))
         }
       }
     } catch { case _: Exception => () }

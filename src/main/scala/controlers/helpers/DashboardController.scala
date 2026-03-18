@@ -24,7 +24,7 @@ object DashboardController extends cask.Routes {
     try {
       if (aiMessage.nonEmpty) {
         val line = aiMessage.replaceAll("<[^>]+>","").split("\n").map(_.trim).filter(_.nonEmpty).headOption
-        line.foreach { l => eliteConsejos += (("🧠", "Neuro-Scout", l.take(120))) }
+        line.foreach { l => eliteConsejos += (("🧠", "Neuro-Scout", l)) }
       }
     } catch { case _: Exception => () }
 
@@ -32,19 +32,19 @@ object DashboardController extends cask.Routes {
     try {
       if (cognitiveInsight.nonEmpty) {
         val line = cognitiveInsight.replaceAll("<[^>]+>","").split("\n").map(_.trim).filter(_.nonEmpty).headOption
-        line.foreach { l => eliteConsejos += (("🧩", "Cognitivo", l.take(120))) }
+        line.foreach { l => eliteConsejos += (("🧩", "Cognitivo", l)) }
       }
     } catch { case _: Exception => () }
 
     // 3. Auditor técnico — ya cargado
-    try { techAlerts.headOption.foreach { a => eliteConsejos += (("⚡", "Auditor", a.take(120))) } }
+    try { techAlerts.headOption.foreach { a => eliteConsejos += (("⚡", "Auditor", a)) } }
     catch { case _: Exception => () }
 
     // 4. Último audio — de matches ya cargados
     try {
       matches.find(_.analisisVoz.nonEmpty).foreach { m =>
         m.analisisVoz.split("\n").map(_.trim).filter(_.nonEmpty).headOption.foreach { l =>
-          eliteConsejos += (("🎙️", s"Audio vs ${m.rival}", l.take(120)))
+          eliteConsejos += (("🎙️", s"Audio vs ${m.rival}", l))
         }
       }
     } catch { case _: Exception => () }
@@ -53,7 +53,7 @@ object DashboardController extends cask.Routes {
     try {
       if (smartInsights.nonEmpty) {
         val line = smartInsights.replaceAll("<[^>]+>","").split("\n").map(_.trim).filter(_.nonEmpty).headOption
-        line.foreach { l => eliteConsejos += (("📡", "Datos", l.take(120))) }
+        line.foreach { l => eliteConsejos += (("📡", "Datos", l)) }
       }
     } catch { case _: Exception => () }
 
