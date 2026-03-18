@@ -502,6 +502,7 @@ object MatchController extends cask.Routes {
     DatabaseManager.deleteMatch(id)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
   }
+  // v7.4 — edit mejorado
   @cask.get("/match/edit/:matchId")
   def editMatchPage(request: cask.Request, matchId: Int) = withAuth(request) {
     val m = DatabaseManager.getMatchById(matchId)
@@ -668,46 +669,46 @@ object MatchController extends cask.Routes {
               )
             ),
 
-              // --- Footer: Diario de voz ---
-              div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary mt-3",
-                h6(cls := "text-info small fw-bold mb-2", "🎙 DIARIO DE VOZ (POST-PARTIDO)"),
-                div(cls := "mb-2 small text-muted", "Graba a Hector contando como se sintio o sube un audio."),
-                div(cls := "d-flex gap-2 mb-3",
-                  button(id := "btnRecord", cls := "btn btn-sm btn-outline-danger",
-                    onclick := "toggleRecording()", "⏺ Grabar"),
-                  button(id := "btnStop", cls := "btn btn-sm btn-danger",
-                    style := "display:none;", onclick := "stopRecording()", "⏹ Parar"),
-                  input(tpe := "file", id := "fileUpload", accept := "audio/*",
-                    cls := "form-control form-control-sm bg-dark text-white",
-                    onchange := "handleFileUpload(this)")
-                ),
-                audio(id := "audioPreview", attr("controls") := "true",
-                  style := "width: 100%; display:none;", cls := "mb-2"),
-                form(action := "/match/analyze_audio", method := "post", id := "audioForm",
-                  input(tpe := "hidden", name := "matchId",    value := matchId.toString),
-                  input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
-                  button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
-                    onclick := "submitAudio()", attr("disabled") := "disabled", "🧠 Analizar Emociones con IA")
-                ),
-                if (matchData.analisisVoz.nonEmpty)
-                  div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
-                    style := "white-space: pre-wrap;",
-                    b(cls := "text-info", "Psicologo IA: "), br,
-                    fixEncoding(matchData.analisisVoz))
-                else div()
+            // --- Footer: Diario de voz ---
+            div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary mt-3",
+              h6(cls := "text-info small fw-bold mb-2", "🎙 DIARIO DE VOZ (POST-PARTIDO)"),
+              div(cls := "mb-2 small text-muted", "Graba a Hector contando como se sintio o sube un audio."),
+              div(cls := "d-flex gap-2 mb-3",
+                button(id := "btnRecord", cls := "btn btn-sm btn-outline-danger",
+                  onclick := "toggleRecording()", "⏺ Grabar"),
+                button(id := "btnStop", cls := "btn btn-sm btn-danger",
+                  style := "display:none;", onclick := "stopRecording()", "⏹ Parar"),
+                input(tpe := "file", id := "fileUpload", accept := "audio/*",
+                  cls := "form-control form-control-sm bg-dark text-white",
+                  onchange := "handleFileUpload(this)")
               ),
-
-              // --- Footer: Tags de video ---
-              div(cls := "card-footer bg-secondary bg-opacity-25",
-                h6(cls := "text-white small fw-bold", "CORTES DE VIDEO (TAGS)"),
-                tagList
-              )
+              audio(id := "audioPreview", attr("controls") := "true",
+                style := "width: 100%; display:none;", cls := "mb-2"),
+              form(action := "/match/analyze_audio", method := "post", id := "audioForm",
+                input(tpe := "hidden", name := "matchId",    value := matchId.toString),
+                input(tpe := "hidden", name := "audioData",  id := "hiddenAudioData"),
+                button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100",
+                  onclick := "submitAudio()", attr("disabled") := "disabled", "🧠 Analizar Emociones con IA")
+              ),
+              if (matchData.analisisVoz.nonEmpty)
+                div(cls := "mt-3 p-2 border border-info rounded bg-dark text-light small",
+                  style := "white-space: pre-wrap;",
+                  b(cls := "text-info", "Psicologo IA: "), br,
+                  fixEncoding(matchData.analisisVoz))
+              else div()
             ),
 
-            // Script grabacion de audio
-            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
-          )
+            // --- Footer: Tags de video ---
+            div(cls := "card-footer bg-secondary bg-opacity-25",
+              h6(cls := "text-white small fw-bold", "CORTES DE VIDEO (TAGS)"),
+              tagList
+            )
+          ),
+
+          // Script grabacion de audio
+          script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
         )
+      )
       )
       renderHtml(content)
     }
