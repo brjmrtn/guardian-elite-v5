@@ -951,7 +951,7 @@ object CareerController extends cask.Routes {
                 div(cls := "text-muted small text-center py-2", "Sin guantes registrados")
               else
                 div(cls := "table-responsive",
-                  tags2.table(cls := "table table-dark table-sm mb-0 xx-small",
+                  table(cls := "table table-dark table-sm mb-0 xx-small",
                     thead(tr(th("Guante"), th("Usos"), th("Desgaste"), th("Coste/PJ"), th("Nota ★"))),
                     tbody(frag(gear.map { g =>
                       val desg  = g("desgaste").asInstanceOf[Int]
