@@ -207,7 +207,13 @@ object AmateurController extends cask.Routes {
             span(cls := "nav-icon", "🏆"), span("Liga")),
           a(href := "/am/body",
             cls := s"nav-item ${if (activeLink == "body") "active" else ""}",
-            span(cls := "nav-icon", "⚖️"), span("Cuerpo"))
+            span(cls := "nav-icon", "⚖️"), span("Cuerpo")),
+          a(href := "/am/efecto-mariposa",
+            cls := s"nav-item ${if (activeLink == "mariposa") "active" else ""}",
+            span(cls := "nav-icon", "🦋"), span("Impacto")),
+          a(href := "/am/miniflow",
+            cls := s"nav-item ${if (activeLink == "miniflow") "active" else ""}",
+            span(cls := "nav-icon", "🌊"), span("MiniFlow"))
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js")
@@ -633,7 +639,8 @@ object AmateurController extends cask.Routes {
             ("/am/rivals",       "⚔️", "Rivales",  "#f59e0b"),
             ("/am/wellness",     "🧠", "Wellness", "#20c997"),
             (if (leagueUrl.nonEmpty) "/am/league" else "/am/league-config",
-             "🏆", "Liga", "#0ea5e9")
+             "🏆", "Liga", "#0ea5e9"),
+            ("/am/miniflow", "🌊", "MiniFlow", "#0f4c81")
           ).map { case (url, icon, label, color) =>
             div(cls := "col-4",
               a(href := url, style := "text-decoration:none;",
@@ -843,6 +850,37 @@ object AmateurController extends cask.Routes {
               rows := "3", placeholder := "Qué salió bien, qué mejorar...")()
           ),
 
+          // Audio post-partido (opcional)
+          div(cls := "card-am p-3 mb-3",
+            style := "border-left:3px solid #7c3aed;",
+            div(cls := "d-flex justify-content-between align-items-center mb-2",
+              div(cls := "xx-small fw-bold text-muted", "🎙️ AUDIO-DIARIO (opcional)"),
+              span(cls := "badge xx-small", style := "background:#7c3aed22; color:#7c3aed;",
+                "Análisis IA post-partido")
+            ),
+            div(cls := "small text-muted mb-2", style := "font-size:11px;",
+              "Graba o sube un audio contando cómo fue el partido. Gemini extrae insights tácticos y emocionales."),
+            div(cls := "d-flex gap-2 mb-2",
+              button(tpe := "button", id := "amBtnRecord",
+                cls := "btn btn-outline-danger btn-sm fw-bold",
+                attr("onclick") := "amStartRecording()", "⏺ Grabar"),
+              button(tpe := "button", id := "amBtnStop",
+                cls := "btn btn-outline-secondary btn-sm fw-bold",
+                style := "display:none;",
+                attr("onclick") := "amStopRecording()", "⏹ Stop"),
+              button(tpe := "button",
+                cls := "btn btn-outline-secondary btn-sm fw-bold",
+                attr("onclick") := "document.getElementById('amFileInput').click()", "📁 Archivo")
+            ),
+            input(tpe := "file", id := "amFileInput", style := "display:none;",
+              attr("accept") := "audio/*",
+              attr("onchange") := "amHandleFile(this)"),
+            audio(id := "amAudioPreview", style := "display:none; width:100%; margin-top:8px;",
+              attr("controls") := "controls"),
+            div(id := "amAudioStatus", cls := "xx-small text-muted mt-1"),
+            input(tpe := "hidden", name := "audioData", id := "amAudioData")
+          ),
+
           button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold py-3 mb-2",
             "GUARDAR PARTIDO")
         ),
@@ -953,6 +991,52 @@ object AmateurController extends cask.Routes {
           // Inicializar estado
           togglePosicion();
 
+          // ── AUDIO-DIARIO EN MATCH CENTER ──
+          var amMediaRecorder; var amAudioChunks = [];
+          function amStartRecording() {
+            navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream) {
+              amMediaRecorder = new MediaRecorder(stream);
+              amAudioChunks = [];
+              amMediaRecorder.start();
+              document.getElementById('amBtnRecord').style.display='none';
+              document.getElementById('amBtnStop').style.display='inline-block';
+              document.getElementById('amAudioStatus').textContent='⏺ Grabando...';
+              document.getElementById('amAudioStatus').style.color='#ef4444';
+              amMediaRecorder.ondataavailable = function(e){amAudioChunks.push(e.data);};
+              amMediaRecorder.onstop = function(){
+                var blob = new Blob(amAudioChunks,{type:'audio/webm'});
+                var url = URL.createObjectURL(blob);
+                document.getElementById('amAudioPreview').src=url;
+                document.getElementById('amAudioPreview').style.display='block';
+                var reader = new FileReader();
+                reader.readAsDataURL(blob);
+                reader.onloadend=function(){
+                  document.getElementById('amAudioData').value=reader.result;
+                  document.getElementById('amAudioStatus').textContent='✅ Audio listo — se analizará al guardar';
+                  document.getElementById('amAudioStatus').style.color='#20c997';
+                };
+              };
+            }).catch(function(e){alert('Error micrófono: '+e);});
+          }
+          function amStopRecording(){
+            amMediaRecorder.stop();
+            document.getElementById('amBtnRecord').style.display='inline-block';
+            document.getElementById('amBtnStop').style.display='none';
+          }
+          function amHandleFile(input){
+            if(input.files&&input.files[0]){
+              var reader=new FileReader();
+              reader.onload=function(e){
+                document.getElementById('amAudioData').value=e.target.result;
+                document.getElementById('amAudioPreview').src=e.target.result;
+                document.getElementById('amAudioPreview').style.display='block';
+                document.getElementById('amAudioStatus').textContent='✅ Archivo listo — se analizará al guardar';
+                document.getElementById('amAudioStatus').style.color='#20c997';
+              };
+              reader.readAsDataURL(input.files[0]);
+            }
+          }
+
           // Radio buttons local/visitante visual
           document.querySelectorAll('input[name="esLocal"]').forEach(function(r) {
             r.addEventListener('change', function() {
@@ -1034,6 +1118,23 @@ object AmateurController extends cask.Routes {
       }
     }
 
+    // Audio-Diario efímero: procesar y descartar (nunca se escribe en disco)
+    val audioData = str("audioData")
+    if (audioData.nonEmpty && matchId > 0) {
+      // Fire-and-forget in background thread — ephemeral processing
+      val rival2   = str("rival")
+      val nota2    = dbl("nota")
+      val matchId2 = matchId
+      new Thread(new Runnable {
+        def run(): Unit = {
+          try {
+            AmateurDatabaseManager.analyzeVoiceAmateur(matchId2, audioData, nota2, rival2)
+            // audioData is a local variable — GC'd after thread exits (ephemeral)
+          } catch { case _: Exception => () }
+        }
+      }).start()
+    }
+
     cask.Response(Array.emptyByteArray, 302,
       headers = Seq("Location" -> "/am/dashboard"))
   }
@@ -1068,6 +1169,7 @@ object AmateurController extends cask.Routes {
           frag(matches.map { m =>
             val gcStr   = if (m.gc == 0) "✅" else m.gc.toString
             val locStr  = m.esLocal match { case Some(true) => "??" case Some(false) => "✈️" case None => "" }
+            val hasVoice = m.analisisVoz.nonEmpty
             div(cls := "card-am p-3 mb-2",
               div(cls := "d-flex align-items-center gap-3",
                 div(cls := s"nota-badge ${notaBadgeCls(m.nota)}", f"${m.nota}%.1f"),
@@ -1075,11 +1177,18 @@ object AmateurController extends cask.Routes {
                   div(cls := "fw-bold text-white small",
                     span(locStr, " "), m.rival),
                   div(cls := "xx-small text-muted",
-                    s"${m.fecha}  ${climaIcon(m.clima)}")
+                    s"${m.fecha}  ${climaIcon(m.clima)}",
+                    if (hasVoice) span(cls := "ms-1", style := "color:#7c3aed;", "🎙️") else span())
                 ),
-                div(cls := "text-end",
-                  div(cls := "fw-black text-white", s"${m.gf}—${m.gc}"),
-                  div(cls := "xx-small text-muted", s"GC: $gcStr")
+                div(cls := "text-end d-flex align-items-center gap-2",
+                  div(
+                    div(cls := "fw-black text-white", s"${m.gf}—${m.gc}"),
+                    div(cls := "xx-small text-muted", s"GC: $gcStr")
+                  ),
+                  a(href := s"/am/audio-diary/${m.id}",
+                    style := "font-size:18px; text-decoration:none;",
+                    attr("title") := "Audio-Diario",
+                    if (hasVoice) "🎙️" else "🎤")
                 )
               )
             )
@@ -3298,6 +3407,519 @@ $penSection
       )
       cask.Response(Array.emptyByteArray, 200)
     }
+
+  // ── AUDIO-DIARIO POST-PARTIDO ─────────────────────────────────────────────
+  @cask.get("/am/audio-diary/:matchId")
+  def audioDiaryPage(request: cask.Request, matchId: Int) = withAmAuth(request) { user =>
+    val matchOpt = AmateurDatabaseManager.getMatch(user.id, matchId)
+    matchOpt match {
+      case None => cask.Response(Array.emptyByteArray, 302,
+        headers = Seq("Location" -> "/am/history"))
+      case Some(m) =>
+        renderAm("history", user.nombre,
+          div(
+            div(cls := "mb-3 d-flex justify-content-between align-items-center",
+              div(
+                h5(cls := "fw-black text-white mb-0", "🎙️ Audio-Diario"),
+                span(cls := "text-muted small",
+                  s"vs ${m.rival} · ${m.fecha} · ★${f"${m.nota}%.1f"}")
+              ),
+              a(href := "/am/history", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold",
+                "← Historial")
+            ),
+
+            // Instrucciones
+            div(cls := "card-am p-3 mb-3",
+              style := "border-left:3px solid #7c3aed;",
+              div(cls := "xx-small fw-bold text-muted mb-1", "🎯 CÓMO USAR"),
+              div(cls := "small text-white", style := "line-height:1.6;",
+                "Graba 30-60 segundos hablando sobre el partido: ¿cómo te sentiste? ¿qué salió bien? ¿qué mejorarías? Gemini analizará tu estado mental y extraerá insights tácticos.")
+            ),
+
+            // Grabadora
+            div(cls := "card-am p-3 mb-3",
+              div(id := "recorder-status",
+                style := "text-align:center; padding:20px 0;",
+                div(style := "font-size:48px; margin-bottom:12px;", "🎙️"),
+                div(id := "rec-label", cls := "text-muted small fw-bold", "Listo para grabar")
+              ),
+
+              // Timer
+              div(id := "rec-timer",
+                style := "display:none; text-align:center; font-size:2rem; font-weight:900; color:#ef4444; margin-bottom:12px;",
+                "0:00"
+              ),
+
+              // Botones grabación
+              div(cls := "d-flex gap-2 justify-content-center mb-3",
+                button(tpe := "button", id := "btnRecord",
+                  cls := "btn btn-danger fw-bold px-4",
+                  attr("onclick") := "startRecording()",
+                  "⏺ Grabar"),
+                button(tpe := "button", id := "btnStop",
+                  cls := "btn btn-secondary fw-bold px-4",
+                  style := "display:none;",
+                  attr("onclick") := "stopRecording()",
+                  "⏹ Detener"),
+                button(tpe := "button", id := "btnUpload",
+                  cls := "btn btn-outline-secondary fw-bold",
+                  attr("onclick") := "document.getElementById('fileInput').click()",
+                  "📁 Subir archivo")
+              ),
+
+              input(tpe := "file", id := "fileInput", style := "display:none;",
+                attr("accept") := "audio/*",
+                attr("onchange") := "handleFileUpload(this)"),
+
+              audio(id := "audioPreview", style := "display:none; width:100%; margin-bottom:12px;",
+                attr("controls") := "controls"),
+
+              // Botón analizar
+              button(tpe := "button", id := "btnAnalyze",
+                cls := "btn btn-primary w-100 fw-bold",
+                style := "display:none;",
+                attr("onclick") := "analyzeAudio()",
+                "🧠 Analizar con Gemini")
+            ),
+
+            // Loading
+            div(id := "analyzing-status", cls := "card-am p-3 mb-3 text-center",
+              style := "display:none;",
+              div(cls := "text-muted small", "⏳ Gemini está analizando tu audio..."),
+              div(cls := "text-muted", style := "font-size:11px; margin-top:4px;",
+                "Puede tardar 10-15 segundos")
+            ),
+
+            // Resultado análisis
+            div(id := "analysis-result", cls := "d-none"),
+
+            // Si ya tiene análisis previo
+            if (m.analisisVoz.nonEmpty)
+              div(cls := "card-am p-3 mb-3",
+                style := "border-top:3px solid #7c3aed;",
+                div(cls := "xx-small fw-bold text-muted mb-2", "📋 ÚLTIMO ANÁLISIS"),
+                div(cls := "small text-white", style := "white-space:pre-wrap; line-height:1.7;",
+                  m.analisisVoz)
+              )
+            else span(),
+
+            script(raw(s"""
+              var mediaRecorder;
+              var audioChunks = [];
+              var timerInterval;
+              var seconds = 0;
+
+              function startRecording() {
+                navigator.mediaDevices.getUserMedia({audio:true})
+                  .then(function(stream) {
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    mediaRecorder.start();
+                    seconds = 0;
+                    document.getElementById('btnRecord').style.display = 'none';
+                    document.getElementById('btnStop').style.display = 'inline-block';
+                    document.getElementById('btnAnalyze').style.display = 'none';
+                    document.getElementById('rec-label').textContent = 'Grabando...';
+                    document.getElementById('rec-label').style.color = '#ef4444';
+                    document.getElementById('rec-timer').style.display = 'block';
+                    timerInterval = setInterval(function() {
+                      seconds++;
+                      var m2 = Math.floor(seconds/60);
+                      var s2 = seconds % 60;
+                      document.getElementById('rec-timer').textContent = m2 + ':' + (s2<10?'0':'') + s2;
+                    }, 1000);
+                    mediaRecorder.ondataavailable = function(e) { audioChunks.push(e.data); };
+                    mediaRecorder.onstop = function() {
+                      clearInterval(timerInterval);
+                      var blob = new Blob(audioChunks, {type:'audio/webm'});
+                      var url = URL.createObjectURL(blob);
+                      var audio = document.getElementById('audioPreview');
+                      audio.src = url; audio.style.display = 'block';
+                      var reader = new FileReader();
+                      reader.readAsDataURL(blob);
+                      reader.onloadend = function() {
+                        window._audioData = reader.result;
+                        document.getElementById('btnAnalyze').style.display = 'block';
+                        document.getElementById('rec-label').textContent = 'Grabación lista';
+                        document.getElementById('rec-label').style.color = '#20c997';
+                      };
+                    };
+                  })
+                  .catch(function(err) { alert('Error micrófono: ' + err); });
+              }
+
+              function stopRecording() {
+                mediaRecorder.stop();
+                document.getElementById('btnStop').style.display = 'none';
+                document.getElementById('btnRecord').style.display = 'inline-block';
+              }
+
+              function handleFileUpload(input) {
+                if (input.files && input.files[0]) {
+                  var reader = new FileReader();
+                  reader.onload = function(e) {
+                    window._audioData = e.target.result;
+                    document.getElementById('audioPreview').src = e.target.result;
+                    document.getElementById('audioPreview').style.display = 'block';
+                    document.getElementById('btnAnalyze').style.display = 'block';
+                    document.getElementById('rec-label').textContent = 'Archivo listo';
+                    document.getElementById('rec-label').style.color = '#20c997';
+                  };
+                  reader.readAsDataURL(input.files[0]);
+                }
+              }
+
+              function analyzeAudio() {
+                if (!window._audioData) { alert('Graba o sube un audio primero.'); return; }
+                document.getElementById('btnAnalyze').disabled = true;
+                document.getElementById('btnAnalyze').textContent = '⏳ Analizando...';
+                document.getElementById('analyzing-status').style.display = 'block';
+                document.getElementById('analysis-result').classList.add('d-none');
+                var params = new URLSearchParams();
+                params.append('matchId', '${matchId}');
+                params.append('audioData', window._audioData);
+                fetch('/am/audio-diary/analyze', {
+                  method: 'POST',
+                  body: params,
+                  headers: {'Content-Type':'application/x-www-form-urlencoded'}
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(json) {
+                  document.getElementById('btnAnalyze').disabled = false;
+                  document.getElementById('btnAnalyze').textContent = '🧠 Analizar con Gemini';
+                  document.getElementById('analyzing-status').style.display = 'none';
+                  var res = document.getElementById('analysis-result');
+                  res.classList.remove('d-none');
+                  if (json.ok) {
+                    res.innerHTML = '<div class="card-am p-3" style="border-top:3px solid #7c3aed;">' +
+                      '<div class="xx-small fw-bold text-muted mb-2">✨ ANÁLISIS GEMINI</div>' +
+                      '<div class="small text-white" style="white-space:pre-wrap;line-height:1.7;">' +
+                      json.analysis.replace(/</g,"&lt;") + '</div>' +
+                      '<a href="/am/history" class="btn btn-outline-secondary btn-sm fw-bold mt-3">← Ver historial</a>' +
+                      '</div>';
+                  } else {
+                    res.innerHTML = '<div class="card-am p-3" style="border-top:3px solid #dc3545;">' +
+                      '<div class="text-danger fw-bold">❌ ' + (json.error||'Error desconocido') + '</div></div>';
+                  }
+                })
+                .catch(function(e) {
+                  document.getElementById('btnAnalyze').disabled = false;
+                  document.getElementById('btnAnalyze').textContent = '🧠 Analizar con Gemini';
+                  document.getElementById('analyzing-status').style.display = 'none';
+                  alert('Error de red: ' + e.message);
+                });
+              }
+            """))
+          )
+        )
+    }
+  }
+
+  @cask.post("/am/audio-diary/analyze")
+  def audioDiaryAnalyze(request: cask.Request) = withAmAuth(request) { user =>
+    val body   = new String(request.data.readAllBytes(), "UTF-8")
+    val params = body.split("&").map { p =>
+      val kv = p.split("=", 2)
+      java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+        (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+    }.toMap
+    val matchId   = params.getOrElse("matchId", "0").toIntOption.getOrElse(0)
+    val audioData = params.getOrElse("audioData", "")
+    val matchOpt  = AmateurDatabaseManager.getMatch(user.id, matchId)
+    matchOpt match {
+      case None =>
+        val json = ujson.Obj("ok" -> false, "error" -> "Partido no encontrado")
+        cask.Response(ujson.write(json).getBytes("UTF-8"),
+          headers = Seq("Content-Type" -> "application/json"))
+      case Some(m) =>
+        val analysis = AmateurDatabaseManager.analyzeVoiceAmateur(matchId, audioData, m.nota, m.rival)
+        val ok = !analysis.startsWith("Error")
+        val json = ujson.Obj("ok" -> ok, "analysis" -> analysis,
+          "error" -> (if (!ok) analysis else ""))
+        cask.Response(ujson.write(json).getBytes("UTF-8"),
+          headers = Seq("Content-Type" -> "application/json"))
+    }
+  }
+
+  // ── EFECTO MARIPOSA AMATEUR ──────────────────────────────────────────────
+  @cask.get("/am/efecto-mariposa")
+  def efectoMariposaAmPage(request: cask.Request) = withAmAuth(request) { user =>
+    val d = AmateurDatabaseManager.getEfectoMariposaAmateur(user.id)
+
+    if (!d.getOrElse("ok", false).asInstanceOf[Boolean]) {
+      renderAm("history", user.nombre,
+        div(cls := "card-am p-4 text-center m-3",
+          div(style := "font-size:40px; opacity:.3;", "🦋"),
+          h5(cls := "text-muted mt-3", "Sin datos suficientes"),
+          p(cls := "text-secondary small", "Registra partidos para ver tu impacto")
+        )
+      )
+    } else {
+      val pj            = d("pj").asInstanceOf[Int]
+      val cs            = d("cleanSheets").asInstanceOf[Int]
+      val csWinRate     = d("csWinRate").asInstanceOf[Int]
+      val nonCsWinRate  = d("nonCsWinRate").asInstanceOf[Int]
+      val csRate        = d("csRate").asInstanceOf[Int]
+      val ganados       = d("ganados").asInstanceOf[Int]
+      val empatados     = d("empatados").asInstanceOf[Int]
+      val perdidos      = d("perdidos").asInstanceOf[Int]
+      val notaMedia     = d("notaMedia").asInstanceOf[Double]
+      val clutchP       = d("clutchPortero").asInstanceOf[Int]
+      val clutchJ       = d("clutchJugador").asInstanceOf[Int]
+      val pjPortero     = d("pjPortero").asInstanceOf[Int]
+      val pjJugador     = d("pjJugador").asInstanceOf[Int]
+      val goles         = d("golesTotal").asInstanceOf[Int]
+      val asist         = d("asistTotal").asInstanceOf[Int]
+      val puntosGen     = d("puntosGenerados").asInstanceOf[Int]
+      val influence     = d("influenceData").asInstanceOf[List[Map[String, Any]]]
+
+      val diff = csWinRate - nonCsWinRate
+      val diffColor = if (diff > 0) "#20c997" else "#ef4444"
+
+      val gNotas = influence.filter(_("res")=="G").map(m=>f"${m("nota").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+      val eNotas = influence.filter(_("res")=="E").map(m=>f"${m("nota").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+      val pNotas = influence.filter(_("res")=="P").map(m=>f"${m("nota").asInstanceOf[Double]}%.1f").mkString("[",",","]")
+      val gCnts  = influence.filter(_("res")=="G").map(_("cnt").asInstanceOf[Int].toString).mkString("[",",","]")
+      val eCnts  = influence.filter(_("res")=="E").map(_("cnt").asInstanceOf[Int].toString).mkString("[",",","]")
+      val pCnts  = influence.filter(_("res")=="P").map(_("cnt").asInstanceOf[Int].toString).mkString("[",",","]")
+
+      renderAm("history", user.nombre,
+        div(
+          div(cls := "mb-3 d-flex justify-content-between align-items-center",
+            div(h5(cls := "fw-black text-white mb-0", "🦋 Efecto Mariposa"),
+                span(cls := "text-muted small", s"Tu impacto en MiniFlow FC — $pj partidos")),
+            a(href := "/am/history", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Atrás")
+          ),
+
+          // Resumen posiciones
+          if (pjPortero > 0 && pjJugador > 0)
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "row g-2 text-center",
+                div(cls := "col-6",
+                  div(style := "background:#0d6efd18; border:1px solid #0d6efd44; border-radius:8px; padding:10px;",
+                    div(cls := "fw-black text-primary", style := "font-size:1.5rem;", pjPortero.toString),
+                    div(cls := "xx-small text-muted", "Partidos portero"))),
+                div(cls := "col-6",
+                  div(style := "background:#8b5cf618; border:1px solid #8b5cf644; border-radius:8px; padding:10px;",
+                    div(cls := "fw-black", style := "font-size:1.5rem; color:#8b5cf6;", pjJugador.toString),
+                    div(cls := "xx-small text-muted", "Partidos jugador")))
+              )
+            )
+          else span(),
+
+          // Clean Sheet Impact
+          div(cls := "card-am p-3 mb-3",
+            style := "border-top:3px solid #20c997;",
+            div(cls := "xx-small fw-bold text-muted mb-2", "🛡️ IMPACTO CLEAN SHEET"),
+            div(cls := "row g-2 text-center mb-2",
+              div(cls := "col-4",
+                div(cls := "fw-black text-success", style := "font-size:1.8rem;", s"$csRate%"),
+                div(cls := "xx-small text-muted", "% CS")),
+              div(cls := "col-4",
+                div(cls := "fw-black text-warning", style := "font-size:1.8rem;", s"$csWinRate%"),
+                div(cls := "xx-small text-muted", "Win rate CON")),
+              div(cls := "col-4",
+                div(cls := "fw-black text-danger", style := "font-size:1.8rem;", s"$nonCsWinRate%"),
+                div(cls := "xx-small text-muted", "Win rate SIN"))
+            ),
+            div(cls := "text-center p-2 rounded",
+              style := s"background:${diffColor}18; border:1px solid ${diffColor}44;",
+              div(cls := "fw-black", style := s"font-size:1.4rem; color:$diffColor;",
+                s"${if(diff>0)"+" else ""}$diff%"),
+              div(cls := "xx-small text-muted", "diferencial de win rate con/sin CS")
+            )
+          ),
+
+          // Clutch por posición
+          div(cls := "card-am p-3 mb-3",
+            style := "border-top:3px solid #f59e0b;",
+            div(cls := "xx-small fw-bold text-muted mb-2", "⚡ CLUTCH FACTOR"),
+            div(cls := "row g-2 text-center",
+              div(cls := "col-6",
+                div(style := "background:#0d6efd18; border-radius:8px; padding:10px;",
+                  div(cls := "fw-black text-primary", style := "font-size:1.8rem;", clutchP.toString),
+                  div(cls := "xx-small text-muted", "Clutch portero"),
+                  div(cls := "xx-small text-muted", s"${clutchP*3} pts salvados"))),
+              div(cls := "col-6",
+                div(style := "background:#8b5cf618; border-radius:8px; padding:10px;",
+                  div(cls := "fw-black", style := "font-size:1.8rem; color:#8b5cf6;", clutchJ.toString),
+                  div(cls := "xx-small text-muted", "Clutch jugador"),
+                  div(cls := "xx-small text-muted", s"$goles G · $asist A · $puntosGen pts gen.")))
+            )
+          ),
+
+          // Gráfico influencia
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "xx-small fw-bold text-muted mb-2", "📊 NOTA VS RESULTADO"),
+            div(style := "height:200px;", canvas(id := "chartInflAm")),
+            div(cls := "d-flex justify-content-center gap-3 mt-2",
+              frag(Seq(("#20c997","Victorias"),("#f59e0b","Empates"),("#ef4444","Derrotas")).map {
+                case (c,l) => span(cls := "xx-small",
+                  span(style := s"display:inline-block;width:10px;height:10px;background:$c;border-radius:2px;margin-right:4px;"),
+                  l)
+              }: _*)
+            )
+          ),
+
+          script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"),
+          script(raw(s"""
+            var ctx = document.getElementById('chartInflAm');
+            if (ctx) {
+              new Chart(ctx, {
+                type: 'scatter',
+                data: { datasets: [
+                  { label:'Victoria', data:$gNotas.map(function(n,i){return{x:parseFloat(n),y:parseInt($gCnts[i])||1};}),
+                    backgroundColor:'rgba(32,201,151,0.7)', pointRadius:8 },
+                  { label:'Empate', data:$eNotas.map(function(n,i){return{x:parseFloat(n),y:parseInt($eCnts[i])||1};}),
+                    backgroundColor:'rgba(245,158,11,0.7)', pointRadius:8 },
+                  { label:'Derrota', data:$pNotas.map(function(n,i){return{x:parseFloat(n),y:parseInt($pCnts[i])||1};}),
+                    backgroundColor:'rgba(239,68,68,0.7)', pointRadius:8 }
+                ]},
+                options: { responsive:true, maintainAspectRatio:false,
+                  plugins:{legend:{display:false}},
+                  scales:{
+                    x:{title:{display:true,text:'Tu nota',color:'#888'},min:1,max:10,
+                       ticks:{color:'#888'},grid:{color:'rgba(255,255,255,.06)'}},
+                    y:{title:{display:true,text:'Partidos',color:'#888'},
+                       ticks:{color:'#888',stepSize:1},grid:{color:'rgba(255,255,255,.06)'}}
+                  }
+                }
+              });
+            }
+          """))
+        )
+      )
+    }
+  }
+
+  // ── MINIFLOW IDENTITY ─────────────────────────────────────────────────────
+  @cask.get("/am/miniflow")
+  def miniflowPage(request: cask.Request) = withAmAuth(request) { user =>
+    val st       = AmateurDatabaseManager.getDashboardStats(user.id)
+    val pj       = st("pj").asInstanceOf[Int]
+    val nota     = st("notaMedia").asInstanceOf[Double]
+    val gcMedia  = st("gcMedia").asInstanceOf[Double]
+    val limpias  = st("limpias").asInstanceOf[Int]
+    val ganados  = st("ganados").asInstanceOf[Int]
+    val perdidos = st("perdidos").asInstanceOf[Int]
+    val cfg      = AmateurDatabaseManager.getLeagueFullConfig(user.id)
+
+    // FUT Card attrs based on real stats (scale 1-99)
+    def toAttr(v: Double, min: Double, max: Double): Int =
+      math.min(99, math.max(40, ((v - min) / (max - min) * 59 + 40).toInt))
+
+    val attrNota    = toAttr(nota, 4.0, 9.5)
+    val attrCS      = toAttr(limpias.toDouble, 0, math.max(1, pj.toDouble) * 0.5)
+    val attrWin     = if (pj > 0) toAttr(ganados.toDouble / pj * 100, 0, 80) else 50
+    val attrGC      = toAttr(math.max(0, 3.0 - gcMedia), 0, 3.0)
+    val attrPJ      = toAttr(pj.toDouble, 0, 30)
+    val mediaCard   = ((attrNota + attrCS + attrWin + attrGC) / 4.0).toInt
+
+    renderAm("home", user.nombre,
+      div(
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          h5(cls := "fw-black text-white mb-0", "🌊 MiniFlow FC"),
+          a(href := "/am/dashboard", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Inicio")
+        ),
+
+        // FUT Card Amateur
+        div(cls := "d-flex justify-content-center mb-4",
+          div(style := """
+            width:220px; background:linear-gradient(135deg,#0f4c81,#1a7bc4,#0f4c81);
+            border-radius:16px; padding:16px; color:#fff;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5);
+            border:1px solid rgba(255,255,255,0.2);
+          """,
+            // Header
+            div(cls := "d-flex justify-content-between align-items-start mb-2",
+              div(
+                div(style := "font-size:2.5rem; font-weight:900; line-height:1;", mediaCard.toString),
+                div(style := "font-size:12px; font-weight:700; opacity:.9;", "POR"),
+                div(style := "font-size:14px;", "🇪🇸")
+              ),
+              div(style := "text-align:right;",
+                div(style := "font-size:28px;", "🌊"),
+                div(style := "font-size:9px; opacity:.7;", "MINIFLOW FC")
+              )
+            ),
+            // Avatar placeholder
+            div(style := "text-align:center; margin:8px 0;",
+              div(style := "width:80px; height:80px; border-radius:50%; background:rgba(255,255,255,.15); display:inline-flex; align-items:center; justify-content:center; font-size:36px;",
+                "🧤")
+            ),
+            // Nombre
+            div(style := "text-align:center; font-size:16px; font-weight:900; letter-spacing:1px; margin-bottom:12px;",
+              user.nombre.toUpperCase),
+            // Stats grid
+            div(style := "display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; text-align:center;",
+              frag(Seq(
+                (attrNota.toString, "NOT"),
+                (attrCS.toString,   "CS"),
+                (attrWin.toString,  "WIN"),
+                (attrGC.toString,   "SAL"),
+                (attrPJ.toString,   "EXP"),
+                (pj.toString,       "PJ")
+              ).map { case (v, lbl) =>
+                div(
+                  div(style := "font-size:18px; font-weight:900;", v),
+                  div(style := "font-size:8px; opacity:.8;", lbl)
+                )
+              }: _*)
+            )
+          )
+        ),
+
+        // Stats reales
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "xx-small fw-bold text-muted mb-2", "STATS REALES"),
+          div(cls := "row g-2 text-center",
+            frag(Seq(
+              (f"$nota%.1f", "Nota media", if(nota>=7)"#20c997" else if(nota>=5)"#f59e0b" else "#ef4444"),
+              (f"$gcMedia%.1f", "GC/partido", if(gcMedia<=1)"#20c997" else if(gcMedia<=2)"#f59e0b" else "#ef4444"),
+              (limpias.toString, "Clean sheets", "#20c997"),
+              (s"${if(pj>0)(ganados*100/pj) else 0}%", "Win rate", "#3b82f6")
+            ).map { case (v, lbl, color) =>
+              div(cls := "col-3",
+                div(cls := "card-am p-2",
+                  div(cls := "fw-black", style := s"font-size:1.3rem; color:$color;", v),
+                  div(cls := "xx-small text-muted", lbl)))
+            }: _*)
+          )
+        ),
+
+        // Liga info
+        if (cfg("teamName").nonEmpty)
+          div(cls := "card-am p-3 mb-3",
+            div(cls := "d-flex justify-content-between align-items-center",
+              div(
+                div(cls := "xx-small fw-bold text-muted", "LIGA"),
+                div(cls := "fw-bold text-white", cfg("teamName"))),
+              a(href := "/am/league", cls := "btn btn-outline-primary btn-sm xx-small fw-bold", "Ver liga →")
+            )
+          )
+        else span(),
+
+        // Acceso rápido
+        div(cls := "row g-2",
+          frag(Seq(
+            ("/am/efecto-mariposa", "🦋", "Efecto Mariposa", "#f59e0b"),
+            ("/am/progression",     "📈", "Progresión",      "#8b5cf6"),
+            ("/am/body",            "⚖️", "Cuerpo",          "#20c997")
+          ).map { case (url, icon, lbl, color) =>
+            div(cls := "col-4",
+              a(href := url, style := "text-decoration:none;",
+                div(cls := "card-am p-2 text-center",
+                  style := s"border-top:3px solid $color;",
+                  div(style := "font-size:20px;", icon),
+                  div(style := s"font-size:10px; font-weight:700; color:$color; margin-top:2px;", lbl)
+                )
+              )
+            )
+          }: _*)
+        )
+      )
+    )
+  }
 
   initialize()
 }

@@ -540,6 +540,68 @@ object AmateurDatabaseManager {
     } finally { conn.close() }
   }
 
+  def analyzeVoiceAmateur(matchId: Int, audioBase64: String, nota: Double, rival: String): String = {
+    val apiKey = sys.env.getOrElse("GEMINI_API_KEY", "").trim
+    if (apiKey.isEmpty) return "Error: GEMINI_API_KEY no configurada"
+
+    try {
+      // Extract pure base64 data (strip data:audio/...;base64, prefix)
+      val base64Data = if (audioBase64.contains(",")) audioBase64.split(",", 2)(1) else audioBase64
+      val mimeType   = if (audioBase64.startsWith("data:audio/webm")) "audio/webm"
+                       else if (audioBase64.startsWith("data:audio/mp4")) "audio/mp4"
+                       else "audio/webm"
+
+      val prompt = s"""Eres el psicólogo deportivo de Borja, jugador/portero amateur de MiniFlow FC. Analiza este audio post-partido vs $rival (nota: $nota/10) con el Protocolo de 4 Anclas.
+
+ANCLA 1 — ESTADO BIO-EMOCIONAL:
+Detecta nivel de energía, fatiga o frustración por tono de voz y mensaje.
+Formato: [Motivado/Neutro/Bajón/Frustrado/Eufórico] + 1 frase explicativa
+
+ANCLA 2 — HITO CRÍTICO:
+La acción más relevante mencionada (parada, gol, asistencia, error, etc.)
+Formato: ACIERTO o ERROR: descripción breve
+
+ANCLA 3 — FACTOR EXTERNO:
+Menciona clima, campo, árbitro u otros factores externos.
+Formato: [detectado/no mencionado] + detalle si existe
+
+ANCLA 4 — ENFOQUE DE MEJORA:
+Qué aspecto quiere trabajar para el próximo partido de MiniFlow FC.
+Formato: OBJETIVO: descripción + 1 consejo concreto
+
+Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado"."""
+
+      val payload = ujson.Obj(
+        "contents" -> ujson.Arr(ujson.Obj(
+          "parts" -> ujson.Arr(
+            ujson.Obj(
+              "inline_data" -> ujson.Obj(
+                "mime_type" -> mimeType,
+                "data"      -> base64Data
+              )
+            ),
+            ujson.Obj("text" -> prompt)
+          )
+        ))
+      )
+
+      val r = requests.post(
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        data    = ujson.write(payload),
+        headers = Map("Content-Type" -> "application/json"),
+        readTimeout = 30000
+      )
+
+      if (r.statusCode == 200) {
+        val analysis = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
+        saveVoiceAnalysis(matchId, analysis)
+        analysis
+      } else {
+        s"Error Gemini: HTTP ${r.statusCode}"
+      }
+    } catch { case e: Exception => s"Error procesando audio: ${e.getMessage.take(100)}" }
+  }
+
   def saveVoiceAnalysis(matchId: Int, analysis: String): Unit = {
     val conn = getConn()
     try {
@@ -1784,6 +1846,105 @@ Con IMC 24 tienes la relación peso-potencia óptima para explosividad en salida
 Tu cintura indica baja masa abdominal, lo que mejora la rotación en coberturas laterales"""
 
     askCached(prompt)
+  }
+
+  // ── EFECTO MARIPOSA AMATEUR ──────────────────────────────────────────────
+  def getEfectoMariposaAmateur(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      val rs = conn.prepareStatement("""
+        SELECT
+          COUNT(*) as pj,
+          SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as clean_sheets,
+          SUM(CASE WHEN goles_contra = 0 AND goles_favor > goles_contra THEN 1 ELSE 0 END) as cs_wins,
+          SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as ganados,
+          SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) as empatados,
+          SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) as perdidos,
+          AVG(nota) as nota_media,
+          SUM(COALESCE(goles_marcados,0)) as goles_total,
+          SUM(COALESCE(asistencias,0)) as asist_total,
+          SUM(CASE WHEN posicion_partido='portero' THEN 1 ELSE 0 END) as pj_portero,
+          SUM(CASE WHEN posicion_partido='jugador' THEN 1 ELSE 0 END) as pj_jugador
+        FROM am_matches WHERE user_id = ?
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+
+      if (!rs.next()) return Map("ok" -> false)
+
+      val pj        = rs.getInt("pj")
+      val cs        = rs.getInt("clean_sheets")
+      val csWins    = rs.getInt("cs_wins")
+      val ganados   = rs.getInt("ganados")
+      val empatados = rs.getInt("empatados")
+      val perdidos  = rs.getInt("perdidos")
+      val notaMedia = rs.getDouble("nota_media")
+      val golesT    = rs.getInt("goles_total")
+      val asistT    = rs.getInt("asist_total")
+      val pjPortero = rs.getInt("pj_portero")
+      val pjJugador = rs.getInt("pj_jugador")
+
+      val csRate       = if (pj > 0) (cs * 100 / pj) else 0
+      val csWinRate    = if (cs > 0) (csWins * 100 / cs) else 0
+      val nonCsWinRate = if (pj - cs > 0) ((ganados - csWins) * 100 / (pj - cs)) else 0
+
+      // Clutch portero: victoria por 1 gol con nota >= 7.5
+      val rsClutchP = conn.prepareStatement("""
+        SELECT COUNT(*) as c FROM am_matches
+        WHERE user_id=? AND goles_favor > goles_contra
+          AND (goles_favor - goles_contra)=1 AND nota>=7.5
+          AND posicion_partido='portero'
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val clutchPortero = if (rsClutchP.next()) rsClutchP.getInt("c") else 0
+
+      // Clutch jugador: gol o asistencia en victoria por 1 gol
+      val rsClutchJ = conn.prepareStatement("""
+        SELECT COUNT(*) as c FROM am_matches
+        WHERE user_id=? AND goles_favor > goles_contra
+          AND (goles_favor - goles_contra)=1
+          AND posicion_partido='jugador'
+          AND (COALESCE(goles_marcados,0) + COALESCE(asistencias,0)) > 0
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      val clutchJugador = if (rsClutchJ.next()) rsClutchJ.getInt("c") else 0
+
+      // Influence scatter data
+      val rsInf = conn.prepareStatement("""
+        SELECT CASE WHEN goles_favor>goles_contra THEN 'G'
+                    WHEN goles_favor=goles_contra THEN 'E'
+                    ELSE 'P' END as res,
+               ROUND(nota::numeric,1) as nota, COUNT(*) as cnt
+        FROM am_matches WHERE user_id=?
+        GROUP BY res, ROUND(nota::numeric,1) ORDER BY nota
+      """).also { ps => ps.setInt(1, userId); ps.executeQuery() }
+      var influenceData = List[Map[String,Any]]()
+      while (rsInf.next()) influenceData = influenceData :+ Map(
+        "res"  -> rsInf.getString("res"),
+        "nota" -> rsInf.getDouble("nota"),
+        "cnt"  -> rsInf.getInt("cnt")
+      )
+
+      // Puntos generados como jugador
+      val puntosGenerados = golesT * 2 + asistT
+
+      Map(
+        "ok"              -> true,
+        "pj"              -> pj,
+        "cleanSheets"     -> cs,
+        "csWinRate"       -> csWinRate,
+        "nonCsWinRate"    -> nonCsWinRate,
+        "csRate"          -> csRate,
+        "ganados"         -> ganados,
+        "empatados"       -> empatados,
+        "perdidos"        -> perdidos,
+        "notaMedia"       -> notaMedia,
+        "clutchPortero"   -> clutchPortero,
+        "clutchJugador"   -> clutchJugador,
+        "pjPortero"       -> pjPortero,
+        "pjJugador"       -> pjJugador,
+        "golesTotal"      -> golesT,
+        "asistTotal"      -> asistT,
+        "puntosGenerados" -> puntosGenerados,
+        "influenceData"   -> influenceData
+      )
+    } finally { conn.close() }
   }
 
   def getReportData(userId: Int): Map[String, Any] = {
