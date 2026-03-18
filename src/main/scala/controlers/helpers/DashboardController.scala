@@ -252,132 +252,219 @@ object DashboardController extends cask.Routes {
 
     // --- RENDERIZADO FINAL ---
 
-    val content = basePage("home", div(cls := "row justify-content-center",
-      div(cls := "col-md-5 mb-4",
-        div(cls := "d-flex justify-content-center mobile-scale",
-          div(cls := "fut-card",
-            div(cls := "left-info", div(cls := "rating", card.media), div(cls := "position", card.posicion), img(src := card.flagUrl, cls := "nation")),
-            img(src := card.clubUrl, cls := "club-badge"),
-            div(cls := "player-circle-container", img(src := card.fotoUrl, cls := "player-img")),
-            div(cls := "name-container", div(cls := "player-name", card.nombre), div(style:="font-size:12px; margin-top:-5px; opacity:0.9; font-weight:bold;", card.clubNombre)),
-            div(cls := "stats-container", div(cls := "stats-grid",
-              div(cls := "stat-item", span(cls:="stat-val", card.div), span(cls:="stat-label", "DIV")),
-              div(cls := "stat-item", span(cls:="stat-val", card.kic), span(cls:="stat-label", "KIC")),
-              div(cls := "stat-item", span(cls:="stat-val", card.spd), span(cls:="stat-label", "SPD")),
-              div(cls := "stat-item", span(cls:="stat-val", card.han), span(cls:="stat-label", "HAN")),
-              div(cls := "stat-item", span(cls:="stat-val", card.ref), span(cls:="stat-label", "REF")),
-              div(cls := "stat-item", span(cls:="stat-val", card.pos), span(cls:="stat-label", "POS")))))),
+    val content = basePage("home",
+      div(
+        // ── HERO HEADER (dark) ─────────────────────────────────────────────
+        div(style := "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:20px; margin-bottom:20px;",
+          div(cls := "d-flex justify-content-between align-items-start flex-wrap gap-3",
 
-        div(cls:="mt-3 mb-4 text-center",
-          div(cls:="d-flex justify-content-between text-white xx-small px-4", span(s"Nivel ${card.media}"), span(s"${xpPercent}% XP"), span(s"Nivel ${card.media+1}")),
-          div(cls:="progress mx-4", style:="height: 8px; background-color: #333;", div(cls:="progress-bar bg-warning", style:=s"width: $xpPercent%"))),
+            // Carta FUT compacta a la izquierda
+            div(cls := "d-flex justify-content-center mobile-scale",
+              style := "transform: scale(0.72); transform-origin: top left; margin-bottom:-30px;",
+              div(cls := "fut-card",
+                div(cls := "left-info",
+                  div(cls := "rating", card.media),
+                  div(cls := "position", card.posicion),
+                  img(src := card.flagUrl, cls := "nation")),
+                img(src := card.clubUrl, cls := "club-badge"),
+                div(cls := "player-circle-container",
+                  img(src := card.fotoUrl, cls := "player-img")),
+                div(cls := "name-container",
+                  div(cls := "player-name", card.nombre),
+                  div(style := "font-size:12px; margin-top:-5px; opacity:.9; font-weight:bold;",
+                    card.clubNombre)),
+                div(cls := "stats-container",
+                  div(cls := "stats-grid",
+                    div(cls := "stat-item", span(cls := "stat-val", card.div), span(cls := "stat-label", "DIV")),
+                    div(cls := "stat-item", span(cls := "stat-val", card.kic), span(cls := "stat-label", "KIC")),
+                    div(cls := "stat-item", span(cls := "stat-val", card.spd), span(cls := "stat-label", "SPD")),
+                    div(cls := "stat-item", span(cls := "stat-val", card.han), span(cls := "stat-label", "HAN")),
+                    div(cls := "stat-item", span(cls := "stat-val", card.ref), span(cls := "stat-label", "REF")),
+                    div(cls := "stat-item", span(cls := "stat-val", card.pos), span(cls := "stat-label", "POS")))))),
 
-        techAuditorWidget,
-
-        div(cls:="row g-2 mb-3",
-          div(cls:="col-6", a(href:="/scouting", cls:="btn btn-outline-info w-100 shadow fw-bold d-flex flex-column align-items-center py-2", span(style:="font-size:20px;", "🔍"), span(style:="font-size:10px;", "SCOUTING"))),
-          div(cls:="col-6", a(href:="/penalties", cls:="btn btn-outline-danger w-100 shadow fw-bold d-flex flex-column align-items-center py-2", span(style:="font-size:20px;", "⛳"), span(style:="font-size:10px;", "PENALTIS")))
-        ),
-
-        div(cls:="card bg-dark border-secondary shadow p-3 mb-3",
-          div(cls:="d-flex justify-content-between align-items-center",
-            div(h6(cls:="text-muted mb-0 small fw-bold", "RACHA (5)"), h3(cls:=s"mb-0 $trendColor fw-bold", f"$avgLast5%2.2f")),
-            div(cls:="text-end", span(cls:="small text-muted fw-bold", "CARGA ACWR"), div(cls:=s"fw-bold $acwrColor", f"$acwr%1.2f")))
-        )
-      ),
-
-      div(cls := "col-md-5",
-        nextMatchWidget,
-        escudoWidget,
-        cognitiveWidget,
-        div(cls := "alert alert-dark border-info shadow p-3 mb-3", div(cls:="d-flex align-items-center mb-2", span(style:="font-size: 24px; margin-right: 10px;", "🧠"), strong(cls:="text-info", "IA NEURO-SCOUT")), div(cls:="text-light small fst-italic lh-sm fw-bold", raw(aiMessage))),
-
-        // Widget alertas + notificaciones
-        div(cls := "card bg-dark border-warning shadow mb-3",
-          div(cls := "card-header text-warning fw-bold small d-flex justify-content-between align-items-center",
-            span("🔔 ALERTAS GUARDIAN"),
-            button(id := "btnActivarNotif", cls := "btn btn-outline-warning btn-sm fw-bold xx-small",
-              style := "font-size:10px; padding:2px 8px;",
-              "ACTIVAR PUSH")
-          ),
-          div(cls := "card-body p-2",
-            div(id := "alertasContainer",
-              div(cls := "text-muted small text-center py-1 fw-bold", "Cargando alertas...")
+            // Stats rápidos a la derecha de la carta
+            div(cls := "flex-fill",
+              style := "min-width:160px;",
+              // XP bar
+              div(style := "margin-bottom:12px;",
+                div(cls := "d-flex justify-content-between",
+                  style := "font-size:10px; color:#94a3b8; margin-bottom:4px;",
+                  span(s"Nv ${card.media}"),
+                  span(s"${xpPercent}% XP"),
+                  span(s"Nv ${card.media+1}")
+                ),
+                div(style := "height:6px; background:#334155; border-radius:3px;",
+                  div(style := s"height:6px; width:$xpPercent%; background:#d4af37; border-radius:3px;"))
+              ),
+              // KPIs rápidos
+              div(cls := "row g-2",
+                Seq(
+                  (f"$avgLast5%2.1f", "RACHA 5", if(trendDiff>0)"#20c997" else if(trendDiff<0)"#ef4444" else "#94a3b8"),
+                  (f"$acwr%1.2f",     "ACWR",    if(acwr>1.5)"#ef4444" else if(acwr>1.2)"#f59e0b" else "#20c997"),
+                  (if(matches.nonEmpty) f"${matches.head.nota}%.1f" else "—", "ÚLTIMO", "#d4af37"),
+                  (if(matches.nonEmpty) matches.head.resultado else "—", "RESULT", "#94a3b8")
+                ).map { case (v, lbl, color) =>
+                  div(cls := "col-6",
+                    div(style := "background:#1e293b; border:1px solid #334155; border-radius:8px; padding:8px; text-align:center;",
+                      div(style := s"font-size:1.1rem; font-weight:900; color:$color; line-height:1;", v),
+                      div(style := "font-size:9px; color:#64748b; margin-top:2px;", lbl)
+                    )
+                  )
+                }: _*
+              )
             )
           )
         ),
 
-        weatherPerformanceWidget,
+        // ── CONTENT AREA (light) ──────────────────────────────────────────
+        div(cls := "row g-3",
 
-        div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header border-secondary text-warning fw-bold py-1 text-center small", "SCOUTING RADAR"), div(cls := "card-body p-1 d-flex justify-content-center", div(style:="width: 200px; height: 200px;", canvas(id := "radarChart")))),
+          // COLUMNA IZQUIERDA
+          div(cls := "col-md-6",
 
-        div(cls := "card bg-dark text-white border-danger shadow mb-3", div(cls := "card-header border-danger text-danger fw-bold py-1 text-center small", "🕵 INTELIGENCIA DE DATOS"), div(cls := "card-body p-2", raw(smartInsights))),
+            // Próximo partido — PRIORIDAD 1
+            nextMatchWidget,
 
-        div(cls:="row mt-3",
-          div(cls:="col-6 pe-1", div(cls:="card bg-dark border-danger shadow p-1", h6(cls:="text-center text-danger mb-1 xx-small fw-bold", "GOLES RECIBIDOS"), div(cls:="d-flex mb-1", tactCell("A", ga, "bg-danger bg-opacity-75"), tactCell("M", gm, "bg-warning bg-opacity-75"), tactCell("B", gr, "bg-light bg-opacity-75")), div(cls:="d-flex", tactCell("I", gl, "bg-danger bg-opacity-75"), tactCell("C", gc_tact, "bg-warning bg-opacity-75"), tactCell("D", gd, "bg-danger bg-opacity-75")))),
-          div(cls:="col-6 ps-1", div(cls:="card bg-dark border-success shadow p-1", h6(cls:="text-center text-success mb-1 xx-small fw-bold", "PARADAS"), div(cls:="d-flex mb-1", tactCell("A", pa, "bg-success bg-opacity-75"), tactCell("M", pm, "bg-info bg-opacity-75"), tactCell("B", pr, "bg-light bg-opacity-75")), div(cls:="d-flex", tactCell("I", pl, "bg-success bg-opacity-75"), tactCell("C", pc_tact, "bg-info bg-opacity-75"), tactCell("D", pd, "bg-success bg-opacity-75"))))))
+            // Clean Sheet Predictor
+            escudoWidget,
+
+            // Alertas
+            div(cls := "card bg-white border-0 shadow-sm mb-3",
+              style := "border-radius:12px; overflow:hidden;",
+              div(style := "background:#0f172a; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;",
+                span(style := "font-size:12px; font-weight:800; color:#fbbf24;", "🔔 ALERTAS GUARDIAN"),
+                button(id := "btnActivarNotif",
+                  style := "font-size:10px; font-weight:700; color:#fbbf24; background:rgba(251,191,36,.15); border:1px solid rgba(251,191,36,.4); padding:2px 8px; border-radius:4px; cursor:pointer;",
+                  "ACTIVAR PUSH")
+              ),
+              div(style := "padding:8px;",
+                div(id := "alertasContainer",
+                  div(style := "font-size:12px; color:#94a3b8; text-align:center; padding:8px;",
+                    "Cargando alertas...")
+                )
+              )
+            ),
+
+            // Auditor técnico
+            techAuditorWidget
+          ),
+
+          // COLUMNA DERECHA
+          div(cls := "col-md-6",
+
+            // IA Neuro-Scout — PRIORIDAD 2
+            div(cls := "card bg-white border-0 shadow-sm mb-3",
+              style := "border-radius:12px; overflow:hidden;",
+              div(style := "background: linear-gradient(135deg, #1e293b, #0f172a); padding:10px 14px; display:flex; align-items:center; gap:8px;",
+                span(style := "font-size:18px;", "🧠"),
+                span(style := "font-size:12px; font-weight:800; color:#38bdf8;", "IA NEURO-SCOUT")
+              ),
+              div(style := "padding:14px;",
+                div(style := "font-size:12px; color:#334155; line-height:1.7; font-style:italic; font-weight:600;",
+                  raw(aiMessage))
+              )
+            ),
+
+            // Cognitivo
+            div(cls := "card bg-white border-0 shadow-sm mb-3",
+              style := "border-radius:12px; overflow:hidden;",
+              div(style := "background:#0c4a6e; padding:10px 14px;",
+                span(style := "font-size:12px; font-weight:800; color:#7dd3fc;", "🧠 ANALISTA COGNITIVO")
+              ),
+              div(style := "padding:12px;",
+                p(style := "font-size:12px; color:#334155; font-weight:600; margin:0; text-align:center;",
+                  raw(cognitiveInsight))
+              )
+            ),
+
+            // KPIs técnicos
+            div(cls := "card bg-white border-0 shadow-sm mb-3",
+              style := "border-radius:12px; padding:14px;",
+              div(style := "font-size:10px; font-weight:800; color:#64748b; margin-bottom:10px;",
+                "RENDIMIENTO TÉCNICO"),
+              div(cls := "row g-2 mb-3",
+                Seq(
+                  ("CLIMA",      weatherStats.headOption.map(w => w._1).getOrElse("—"),        "#0ea5e9"),
+                  ("NOTA CLIMA", weatherStats.headOption.map(w => f"${w._2._1}%.1f").getOrElse("—"), "#0ea5e9"),
+                  ("INTELIGENCIA", smartInsights.take(30) + "...",          "#8b5cf6"),
+                  ("ACWR HOY",   f"$acwr%.2f",                             if(acwr>1.5)"#ef4444" else "#20c997")
+                ).take(4).map { case (lbl, v, color) =>
+                  div(cls := "col-6",
+                    div(style := s"background:#f8fafc; border-left:3px solid $color; border-radius:6px; padding:8px;",
+                      div(style := "font-size:9px; font-weight:700; color:#94a3b8;", lbl),
+                      div(style := s"font-size:12px; font-weight:800; color:#1e293b; margin-top:2px;",
+                        v)
+                    )
+                  )
+                }: _*
+              )
+            ),
+
+            // Radar + heatmap táctico
+            div(cls := "row g-2 mb-3",
+              div(cls := "col-6",
+                div(cls := "card bg-white border-0 shadow-sm",
+                  style := "border-radius:12px; padding:10px;",
+                  div(style := "font-size:9px; font-weight:800; color:#64748b; text-align:center; margin-bottom:6px;",
+                    "RADAR"),
+                  div(style := "width:100%; height:160px;",
+                    canvas(id := "radarChart"))
+                )
+              ),
+              div(cls := "col-6",
+                div(cls := "card bg-white border-0 shadow-sm",
+                  style := "border-radius:12px; padding:10px;",
+                  div(style := "font-size:9px; font-weight:800; color:#64748b; text-align:center; margin-bottom:4px;",
+                    "GOLES/PARADAS"),
+                  div(style := "font-size:8px; color:#94a3b8; text-align:center; margin-bottom:4px;",
+                    "GC recibidos"),
+                  div(cls := "d-flex mb-1",
+                    tactCell("A", ga, "bg-danger bg-opacity-75"),
+                    tactCell("M", gm, "bg-warning bg-opacity-75"),
+                    tactCell("B", gr, "bg-light bg-opacity-75")),
+                  div(cls := "d-flex",
+                    tactCell("I", gl, "bg-danger bg-opacity-75"),
+                    tactCell("C", gc_tact, "bg-warning bg-opacity-75"),
+                    tactCell("D", gd, "bg-danger bg-opacity-75")),
+                  div(style := "font-size:8px; color:#94a3b8; text-align:center; margin:4px 0 2px;",
+                    "Paradas"),
+                  div(cls := "d-flex mb-1",
+                    tactCell("A", pa, "bg-success bg-opacity-75"),
+                    tactCell("M", pm, "bg-info bg-opacity-75"),
+                    tactCell("B", pr, "bg-light bg-opacity-75")),
+                  div(cls := "d-flex",
+                    tactCell("I", pl, "bg-success bg-opacity-75"),
+                    tactCell("C", pc_tact, "bg-info bg-opacity-75"),
+                    tactCell("D", pd, "bg-success bg-opacity-75"))
+                )
+              )
+            ),
+
+            // Acceso rápido — PRIORIDAD 4
+            div(cls := "row g-2",
+              Seq(
+                ("/scouting",       "🔍", "Scouting",   "#0ea5e9"),
+                ("/penalties",      "⛳", "Penaltis",   "#ef4444"),
+                ("/mapa-goles",     "🥅", "Mapa goles", "#3b82f6"),
+                ("/nutrition",      "🥗", "Nutrición",  "#20c997"),
+                ("/digital-twin",   "🤖", "Twin",       "#8b5cf6"),
+                ("/market-estimator","💰","Mercado",    "#f59e0b")
+              ).map { case (href, icon, label, color) =>
+                div(cls := "col-4",
+                  a(href := href, style := "text-decoration:none;",
+                    div(style := s"background:#fff; border:1px solid #e2e8f0; border-top:3px solid $color; border-radius:10px; padding:10px 6px; text-align:center;",
+                      div(style := "font-size:18px;", icon),
+                      div(style := s"font-size:9px; font-weight:800; color:$color; margin-top:3px;",
+                        label)
+                    )
+                  )
+                )
+              }: _*
+            )
+          )
+        )
+      )
     )
-      , script(raw("""
-      // ── NOTIFICACIONES PUSH GUARDIAN ELITE ──
-      (function() {
-        if (!('Notification' in window)) return;
-
-        function solicitarPermiso() {
-          Notification.requestPermission();
-        }
-
-        function lanzarNotif(titulo, cuerpo, tipo) {
-          if (Notification.permission !== 'granted') return;
-          var icono = tipo === 'danger' ? '🚨' : tipo === 'warning' ? '⚠️' : 'ℹ️';
-          new Notification('GUARDIAN ELITE — ' + titulo, {
-            body: icono + ' ' + cuerpo,
-            icon: '/favicon.ico',
-            tag: titulo
-          });
-        }
-
-        // Solicitar permiso si aun no concedido
-        if (Notification.permission === 'default') {
-          setTimeout(solicitarPermiso, 2000);
-        }
-
-        // Mostrar boton de activar notifs si no hay permiso
-        var btnNotif = document.getElementById('btnActivarNotif');
-        if (btnNotif) {
-          if (Notification.permission === 'granted') {
-            btnNotif.style.display = 'none';
-          } else {
-            btnNotif.addEventListener('click', function() {
-              Notification.requestPermission().then(function(p) {
-                if (p === 'granted') btnNotif.style.display = 'none';
-              });
-            });
-          }
-        }
-
-        // Lanzar alertas desde el servidor
-        fetch('/api/alertas').then(function(r) { return r.json(); }).then(function(alertas) {
-          var container = document.getElementById('alertasContainer');
-          if (!container) return;
-          if (alertas.length === 0) {
-            container.innerHTML = '<div class="text-muted small text-center py-2 fw-bold">Sin alertas activas</div>';
-            return;
-          }
-          alertas.forEach(function(a) {
-            lanzarNotif(a.titulo, a.mensaje, a.tipo);
-            var color = a.tipo === 'danger' ? '#dc3545' : a.tipo === 'warning' ? '#ffc107' : '#0dcaf0';
-            var icono = a.tipo === 'danger' ? '🚨' : a.tipo === 'warning' ? '⚠️' : '🔔';
-            var titulo = (a.titulo !== undefined && a.titulo !== null) ? a.titulo : '';
-            var mensaje = (a.mensaje !== undefined && a.mensaje !== null) ? a.mensaje : '';
-            container.innerHTML += '<div style="background:' + color + '18; border-left:3px solid ' + color + '; padding:10px 12px; margin-bottom:8px; border-radius:6px;">' +
-              '<div style="font-size:12px; font-weight:700; color:' + color + '; letter-spacing:0.5px;">' + icono + ' ' + titulo + '</div>' +
-              (mensaje ? '<div style="font-size:11px; color:#bbb; margin-top:3px;">' + mensaje + '</div>' : '') +
-              '</div>';
-          });
-        }).catch(function() {});
-      })();
-    """))
-      , script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""const ctxRadar=document.getElementById('radarChart');if(ctxRadar){new Chart(ctxRadar,{type:'radar',data:{labels:['DIV','HAN','KIC','REF','SPD','POS'],datasets:[{data:$radarData,backgroundColor:'rgba(212,175,55,0.4)',borderColor:'#d4af37',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{r:{angleLines:{color:'#444'},grid:{color:'#444'},pointLabels:{color:'#fff',font:{size:10}},ticks:{display:false},suggestedMin:40,suggestedMax:90}}}});""")))
     renderHtml(content)
   }
 
