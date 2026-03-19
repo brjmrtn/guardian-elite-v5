@@ -2594,17 +2594,22 @@ $penSection
     )
   }
 
-  @cask.postForm("/am/wellness/save")
-  def wellnessSave(request: cask.Request,
-    sueno: String, energia: String, animo: String, notas: String = "") =
+  @cask.post("/am/wellness/save")
+  def wellnessSave(request: cask.Request) =
     withAmAuth(request) { user =>
+      val body   = new String(request.data.readAllBytes(), "UTF-8")
+      val params = body.split("&").map { p =>
+        val kv = p.split("=", 2)
+        java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+          (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+      }.toMap
       val today = java.time.LocalDate.now().toString
       AmateurDatabaseManager.saveWellness(
         user.id, today,
-        try sueno.toInt   catch { case _: Exception => 0 },
-        try energia.toInt catch { case _: Exception => 0 },
-        try animo.toInt   catch { case _: Exception => 0 },
-        notas
+        try params.getOrElse("sueno","0").toInt   catch { case _: Exception => 0 },
+        try params.getOrElse("energia","0").toInt catch { case _: Exception => 0 },
+        try params.getOrElse("animo","0").toInt   catch { case _: Exception => 0 },
+        params.getOrElse("notas", "")
       )
       cask.Response(Array.emptyByteArray, 200)
     }
@@ -2769,10 +2774,18 @@ $penSection
     )
   }
 
-  @cask.postForm("/am/calendar/nlp/process")
-  def calendarNlpProcess(request: cask.Request, teamName: String,
-    texto: String = "", url: String = "") =
+  @cask.post("/am/calendar/nlp/process")
+  def calendarNlpProcess(request: cask.Request) =
     withAmAuth(request) { user =>
+      val body   = new String(request.data.readAllBytes(), "UTF-8")
+      val params = body.split("&").map { p =>
+        val kv = p.split("=", 2)
+        java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+          (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+      }.toMap
+      val teamName = params.getOrElse("teamName", "")
+      val texto    = params.getOrElse("texto", "")
+      val url      = params.getOrElse("url", "")
       val result = AmateurDatabaseManager.processCalendarNLP(user.id, texto, teamName, url)
       val json = ujson.Obj(
         "ok"       -> result.getOrElse("ok", false).asInstanceOf[Boolean],
@@ -2897,12 +2910,23 @@ $penSection
     )
   }
 
-  @cask.postForm("/am/league-config/save")
-  def leagueConfigSave(request: cask.Request, leagueUrl: String = "", teamName: String,
-    clasificacionUrl: String = "", goleadoresUrl: String = "", resumenUrl: String = "") =
+  @cask.post("/am/league-config/save")
+  def leagueConfigSave(request: cask.Request) =
     withAmAuth(request) { user =>
-      AmateurDatabaseManager.saveLeagueConfig(user.id, leagueUrl, teamName,
-        clasificacionUrl, goleadoresUrl, resumenUrl)
+      val body   = new String(request.data.readAllBytes(), "UTF-8")
+      val params = body.split("&").map { p =>
+        val kv = p.split("=", 2)
+        java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+          (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+      }.toMap
+      AmateurDatabaseManager.saveLeagueConfig(
+        user.id,
+        params.getOrElse("leagueUrl", ""),
+        params.getOrElse("teamName", ""),
+        params.getOrElse("clasificacionUrl", ""),
+        params.getOrElse("goleadoresUrl", ""),
+        params.getOrElse("resumenUrl", "")
+      )
       cask.Response(Array.emptyByteArray, 200)
     }
 
@@ -3460,17 +3484,23 @@ $penSection
     )
   }
 
-  @cask.postForm("/am/body/save")
-  def bodySave(request: cask.Request, peso: String, altura: String,
-    grasa: String = "", cintura: String = "", fecha: String = "") =
+  @cask.post("/am/body/save")
+  def bodySave(request: cask.Request) =
     withAmAuth(request) { user =>
-      val fechaFinal = if (fecha.nonEmpty) fecha else java.time.LocalDate.now().toString
+      val body   = new String(request.data.readAllBytes(), "UTF-8")
+      val params = body.split("&").map { p =>
+        val kv = p.split("=", 2)
+        java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+          (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+      }.toMap
+      def str(k: String) = params.getOrElse(k, "")
+      val fechaFinal = if (str("fecha").nonEmpty) str("fecha") else java.time.LocalDate.now().toString
       AmateurDatabaseManager.saveBodyMetrics(
         user.id, fechaFinal,
-        try peso.toDouble   catch { case _: Exception => 0.0 },
-        try altura.toDouble catch { case _: Exception => 0.0 },
-        if (grasa.nonEmpty)   try Some(grasa.toDouble)   catch { case _: Exception => None } else None,
-        if (cintura.nonEmpty) try Some(cintura.toDouble) catch { case _: Exception => None } else None,
+        try str("peso").toDouble   catch { case _: Exception => 0.0 },
+        try str("altura").toDouble catch { case _: Exception => 0.0 },
+        if (str("grasa").nonEmpty)   try Some(str("grasa").toDouble)   catch { case _: Exception => None } else None,
+        if (str("cintura").nonEmpty) try Some(str("cintura").toDouble) catch { case _: Exception => None } else None,
         ""
       )
       cask.Response(Array.emptyByteArray, 200)
