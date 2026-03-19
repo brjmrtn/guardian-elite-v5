@@ -2584,12 +2584,14 @@ $penSection
             fetch('/am/wellness/save', { method:'POST', body: params,
               headers: {'Content-Type':'application/x-www-form-urlencoded'} })
               .then(function(r) {
-                document.getElementById('btn-wellness').disabled = false;
-                document.getElementById('btn-wellness').textContent = '💾 Guardar check-in';
                 if (r.ok) {
                   window.location.reload();
                 } else {
-                  alert('Error al guardar (' + r.status + '). Inténtalo de nuevo.');
+                  r.text().then(function(msg) {
+                    document.getElementById('btn-wellness').disabled = false;
+                    document.getElementById('btn-wellness').textContent = '💾 Guardar check-in';
+                    alert('Error ' + r.status + ': ' + msg);
+                  });
                 }
               })
               .catch(function(e) {
@@ -3486,10 +3488,12 @@ $penSection
             fetch('/am/body/save',{method:'POST',body:params,
               headers:{'Content-Type':'application/x-www-form-urlencoded'}})
               .then(function(r){
-                document.getElementById('btn-body').disabled=false;
-                document.getElementById('btn-body').textContent='💾 Guardar métricas';
                 if(r.ok){ window.location.reload(); }
-                else { alert('Error al guardar (' + r.status + '). Inténtalo de nuevo.'); }
+                else { r.text().then(function(msg){
+                  document.getElementById('btn-body').disabled=false;
+                  document.getElementById('btn-body').textContent='💾 Guardar métricas';
+                  alert('Error ' + r.status + ': ' + msg);
+                }); }
               })
               .catch(function(e){
                 document.getElementById('btn-body').disabled=false;
