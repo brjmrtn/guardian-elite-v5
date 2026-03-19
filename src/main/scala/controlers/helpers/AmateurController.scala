@@ -2606,21 +2606,25 @@ $penSection
   @cask.post("/am/wellness/save")
   def wellnessSave(request: cask.Request) =
     withAmAuth(request) { user =>
-      val body   = new String(request.data.readAllBytes(), "UTF-8")
-      val params = body.split("&").map { p =>
-        val kv = p.split("=", 2)
-        java.net.URLDecoder.decode(kv(0), "UTF-8") ->
-          (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
-      }.toMap
-      val today = java.time.LocalDate.now().toString
-      AmateurDatabaseManager.saveWellness(
-        user.id, today,
-        try params.getOrElse("sueno","0").toInt   catch { case _: Exception => 0 },
-        try params.getOrElse("energia","0").toInt catch { case _: Exception => 0 },
-        try params.getOrElse("animo","0").toInt   catch { case _: Exception => 0 },
-        params.getOrElse("notas", "")
-      )
-      cask.Response(Array.emptyByteArray, 200)
+      try {
+        val body   = new String(request.data.readAllBytes(), "UTF-8")
+        val params = body.split("&").map { p =>
+          val kv = p.split("=", 2)
+          java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+            (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+        }.toMap
+        val sueno   = params.getOrElse("sueno","0").toIntOption.getOrElse(0)
+        val energia = params.getOrElse("energia","0").toIntOption.getOrElse(0)
+        val animo   = params.getOrElse("animo","0").toIntOption.getOrElse(0)
+        val notas   = params.getOrElse("notas", "")
+        val today   = java.time.LocalDate.now().toString
+        AmateurDatabaseManager.saveWellness(user.id, today, sueno, energia, animo, notas)
+        cask.Response(Array.emptyByteArray, 200)
+      } catch { case e: Exception =>
+        val msg = s"wellness error: ${e.getClass.getSimpleName}: ${e.getMessage}"
+        System.err.println(msg)
+        cask.Response(msg.getBytes("UTF-8"), 500)
+      }
     }
 
   // ── NLP CALENDARIO ────────────────────────────────────────────────────────
@@ -3502,23 +3506,29 @@ $penSection
   @cask.post("/am/body/save")
   def bodySave(request: cask.Request) =
     withAmAuth(request) { user =>
-      val body   = new String(request.data.readAllBytes(), "UTF-8")
-      val params = body.split("&").map { p =>
-        val kv = p.split("=", 2)
-        java.net.URLDecoder.decode(kv(0), "UTF-8") ->
-          (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
-      }.toMap
-      def str(k: String) = params.getOrElse(k, "")
-      val fechaFinal = if (str("fecha").nonEmpty) str("fecha") else java.time.LocalDate.now().toString
-      AmateurDatabaseManager.saveBodyMetrics(
-        user.id, fechaFinal,
-        try str("peso").toDouble   catch { case _: Exception => 0.0 },
-        try str("altura").toDouble catch { case _: Exception => 0.0 },
-        if (str("grasa").nonEmpty)   try Some(str("grasa").toDouble)   catch { case _: Exception => None } else None,
-        if (str("cintura").nonEmpty) try Some(str("cintura").toDouble) catch { case _: Exception => None } else None,
-        ""
-      )
-      cask.Response(Array.emptyByteArray, 200)
+      try {
+        val body   = new String(request.data.readAllBytes(), "UTF-8")
+        val params = body.split("&").map { p =>
+          val kv = p.split("=", 2)
+          java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+            (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+        }.toMap
+        def str(k: String) = params.getOrElse(k, "")
+        val fechaFinal = if (str("fecha").nonEmpty) str("fecha") else java.time.LocalDate.now().toString
+        AmateurDatabaseManager.saveBodyMetrics(
+          user.id, fechaFinal,
+          str("peso").toDoubleOption.getOrElse(0.0),
+          str("altura").toDoubleOption.getOrElse(0.0),
+          str("grasa").toDoubleOption.map(Some(_)).getOrElse(None),
+          str("cintura").toDoubleOption.map(Some(_)).getOrElse(None),
+          ""
+        )
+        cask.Response(Array.emptyByteArray, 200)
+      } catch { case e: Exception =>
+        val msg = s"body error: ${e.getClass.getSimpleName}: ${e.getMessage}"
+        System.err.println(msg)
+        cask.Response(msg.getBytes("UTF-8"), 500)
+      }
     }
 
   // ── AUDIO-DIARIO POST-PARTIDO ─────────────────────────────────────────────
