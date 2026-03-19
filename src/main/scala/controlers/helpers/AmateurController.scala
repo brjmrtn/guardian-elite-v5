@@ -2583,10 +2583,19 @@ $penSection
             document.getElementById('btn-wellness').textContent = 'Guardando...';
             fetch('/am/wellness/save', { method:'POST', body: params,
               headers: {'Content-Type':'application/x-www-form-urlencoded'} })
-              .then(function(r) { if (r.ok) window.location.reload(); })
-              .catch(function() {
+              .then(function(r) {
                 document.getElementById('btn-wellness').disabled = false;
                 document.getElementById('btn-wellness').textContent = '💾 Guardar check-in';
+                if (r.ok) {
+                  window.location.reload();
+                } else {
+                  alert('Error al guardar (' + r.status + '). Inténtalo de nuevo.');
+                }
+              })
+              .catch(function(e) {
+                document.getElementById('btn-wellness').disabled = false;
+                document.getElementById('btn-wellness').textContent = '💾 Guardar check-in';
+                alert('Error de red: ' + e.message);
               });
           }
         """))
@@ -3472,10 +3481,16 @@ $penSection
             document.getElementById('btn-body').textContent='Guardando...';
             fetch('/am/body/save',{method:'POST',body:params,
               headers:{'Content-Type':'application/x-www-form-urlencoded'}})
-              .then(function(r){if(r.ok)window.location.reload();})
-              .catch(function(){
+              .then(function(r){
                 document.getElementById('btn-body').disabled=false;
                 document.getElementById('btn-body').textContent='💾 Guardar métricas';
+                if(r.ok){ window.location.reload(); }
+                else { alert('Error al guardar (' + r.status + '). Inténtalo de nuevo.'); }
+              })
+              .catch(function(e){
+                document.getElementById('btn-body').disabled=false;
+                document.getElementById('btn-body').textContent='💾 Guardar métricas';
+                alert('Error de red: ' + e.message);
               });
           }
           calcIMC();
