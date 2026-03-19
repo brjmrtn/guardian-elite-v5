@@ -1216,7 +1216,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
     try {
       val ps = conn.prepareStatement("""
         INSERT INTO am_wellness (user_id, fecha, sueno, energia, animo, notas)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?::date, ?, ?, ?, ?)
         ON CONFLICT (user_id, fecha) DO UPDATE
           SET sueno = EXCLUDED.sueno, energia = EXCLUDED.energia,
               animo = EXCLUDED.animo, notas = EXCLUDED.notas
@@ -1820,7 +1820,7 @@ $jsonTpl"""
     try {
       val ps = conn.prepareStatement("""
         INSERT INTO am_body_metrics (user_id, fecha, peso, altura, grasa, cintura, notas)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?::date, ?, ?, ?, ?, ?)
         ON CONFLICT (user_id, fecha) DO UPDATE
           SET peso=EXCLUDED.peso, altura=EXCLUDED.altura,
               grasa=EXCLUDED.grasa, cintura=EXCLUDED.cintura, notas=EXCLUDED.notas
