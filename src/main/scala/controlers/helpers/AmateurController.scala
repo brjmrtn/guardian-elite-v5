@@ -3925,6 +3925,7 @@ $penSection
   // ── MINIFLOW IDENTITY ─────────────────────────────────────────────────────
   @cask.get("/am/miniflow")
   def miniflowPage(request: cask.Request) = withAmAuth(request) { user =>
+    val (fotoUrl, escudoUrl) = AmateurDatabaseManager.getProfileImages(user.id)
     val st       = AmateurDatabaseManager.getDashboardStats(user.id)
     val pj       = st("pj").asInstanceOf[Int]
     val nota     = st("notaMedia").asInstanceOf[Double]
@@ -3968,14 +3969,21 @@ $penSection
                 div(style := "font-size:14px;", "🇪🇸")
               ),
               div(style := "text-align:right;",
-                div(style := "font-size:28px;", "🌊"),
+                if (escudoUrl.nonEmpty)
+                  img(src := escudoUrl, style := "width:36px; height:36px; object-fit:contain;")
+                else
+                  div(style := "font-size:28px;", "🌊"),
                 div(style := "font-size:9px; opacity:.7;", "MINIFLOW FC")
               )
             ),
-            // Avatar placeholder
+            // Avatar — foto real si existe
             div(style := "text-align:center; margin:8px 0;",
-              div(style := "width:80px; height:80px; border-radius:50%; background:rgba(255,255,255,.15); display:inline-flex; align-items:center; justify-content:center; font-size:36px;",
-                "🧤")
+              if (fotoUrl.nonEmpty)
+                div(style := "width:80px; height:80px; border-radius:50%; overflow:hidden; display:inline-block;",
+                  img(src := fotoUrl, style := "width:100%; height:100%; object-fit:cover;"))
+              else
+                div(style := "width:80px; height:80px; border-radius:50%; background:rgba(255,255,255,.15); display:inline-flex; align-items:center; justify-content:center; font-size:36px;",
+                  "🧤")
             ),
             // Nombre
             div(style := "text-align:center; font-size:16px; font-weight:900; letter-spacing:1px; margin-bottom:12px;",
@@ -4034,7 +4042,8 @@ $penSection
           frag(Seq(
             ("/am/efecto-mariposa", "🦋", "Efecto Mariposa", "#f59e0b"),
             ("/am/progression",     "📈", "Progresión",      "#8b5cf6"),
-            ("/am/body",            "⚖️", "Cuerpo",          "#20c997")
+            ("/am/body",            "⚖️", "Cuerpo",          "#20c997"),
+            ("/am/perfil",          "🖼️", "Mi Perfil",       "#a78bfa")
           ).map { case (url, icon, lbl, color) =>
             div(cls := "col-4",
               a(href := url, style := "text-decoration:none;",
@@ -4050,6 +4059,147 @@ $penSection
       )
     )
   }
+
+  // ── PERFIL AMATEUR — Foto y escudo ──────────────────────────────────────
+  @cask.get("/am/perfil")
+  def perfilPage(request: cask.Request) = withAmAuth(request) { user =>
+    val (fotoUrl, escudoUrl) = AmateurDatabaseManager.getProfileImages(user.id)
+    renderAm("home", user.nombre,
+      div(
+        div(cls := "mb-3 d-flex justify-content-between align-items-center",
+          div(h5(cls := "fw-black text-white mb-0", "🖼️ Mi Perfil"),
+              span(cls := "text-muted small", "Foto y escudo del equipo")),
+          a(href := "/am/dashboard", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Inicio")
+        ),
+
+        // Preview actual
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "d-flex align-items-center gap-3 mb-3",
+            div(style := "width:80px; height:80px; border-radius:50%; background:rgba(255,255,255,.1); overflow:hidden; display:flex; align-items:center; justify-content:center;",
+              if (fotoUrl.nonEmpty)
+                img(src := fotoUrl, style := "width:100%; height:100%; object-fit:cover;")
+              else
+                span(style := "font-size:36px;", "🧤")
+            ),
+            div(
+              div(cls := "fw-black text-white", user.nombre.toUpperCase),
+              div(cls := "xx-small text-muted mt-1", "Amateur · Portero/Jugador")
+            ),
+            if (escudoUrl.nonEmpty)
+              img(src := escudoUrl, style := "width:40px; height:40px; object-fit:contain; margin-left:auto;")
+            else
+              div(style := "margin-left:auto; font-size:28px;", "🌊")
+          )
+        ),
+
+        // Formulario de subida
+        div(cls := "card-am p-3 mb-3",
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "📸 FOTO DEL JUGADOR"),
+            div(cls := "xx-small text-muted mb-1", "Formato: JPG o PNG — se convierte automáticamente a Base64"),
+            input(tpe := "file", id := "inputFoto", cls := "form-control mt-1",
+              attr("accept") := "image/*",
+              attr("onchange") := "convertirFoto(this)")
+          ),
+          div(id := "previewFoto", style := "display:none; margin-bottom:12px;",
+            img(id := "imgPreviewFoto", style := "width:80px; height:80px; border-radius:50%; object-fit:cover; border:2px solid #a78bfa;")
+          ),
+          div(cls := "mb-3",
+            label(cls := "xx-small fw-bold text-muted", "🛡️ ESCUDO DEL EQUIPO"),
+            div(cls := "xx-small text-muted mb-1", "Formato: PNG recomendado (fondo transparente si es posible)"),
+            input(tpe := "file", id := "inputEscudo", cls := "form-control mt-1",
+              attr("accept") := "image/*",
+              attr("onchange") := "convertirEscudo(this)")
+          ),
+          div(id := "previewEscudo", style := "display:none; margin-bottom:12px;",
+            img(id := "imgPreviewEscudo", style := "width:60px; height:60px; object-fit:contain; border:2px solid #a78bfa; border-radius:8px;")
+          ),
+          button(tpe := "button", id := "btn-perfil",
+            cls := "btn btn-primary w-100 fw-bold",
+            attr("onclick") := "guardarPerfil()",
+            "💾 Guardar perfil")
+        ),
+
+        script(raw("""
+          var _fotoB64 = '';
+          var _escudoB64 = '';
+
+          function convertirFoto(input) {
+            if (!input.files || !input.files[0]) return;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+              _fotoB64 = e.target.result;
+              document.getElementById('imgPreviewFoto').src = e.target.result;
+              document.getElementById('previewFoto').style.display = 'block';
+            };
+            reader.readAsDataURL(input.files[0]);
+          }
+
+          function convertirEscudo(input) {
+            if (!input.files || !input.files[0]) return;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+              _escudoB64 = e.target.result;
+              document.getElementById('imgPreviewEscudo').src = e.target.result;
+              document.getElementById('previewEscudo').style.display = 'block';
+            };
+            reader.readAsDataURL(input.files[0]);
+          }
+
+          function guardarPerfil() {
+            if (!_fotoB64 && !_escudoB64) {
+              alert('Selecciona al menos una imagen para guardar.');
+              return;
+            }
+            var btn = document.getElementById('btn-perfil');
+            btn.disabled = true;
+            btn.textContent = 'Guardando...';
+            var params = new URLSearchParams();
+            params.append('fotoUrl',   _fotoB64);
+            params.append('escudoUrl', _escudoB64);
+            fetch('/am/perfil/save', {
+              method: 'POST',
+              body: params,
+              headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+            }).then(function(r) {
+              btn.disabled = false;
+              btn.textContent = '💾 Guardar perfil';
+              if (r.ok) {
+                window.location.href = '/am/miniflow';
+              } else {
+                r.text().then(function(msg) { alert('Error: ' + msg); });
+              }
+            }).catch(function(e) {
+              btn.disabled = false;
+              btn.textContent = '💾 Guardar perfil';
+              alert('Error de red: ' + e.message);
+            });
+          }
+        """))
+      )
+    )
+  }
+
+  @cask.post("/am/perfil/save")
+  def perfilSave(request: cask.Request) =
+    withAmAuth(request) { user =>
+      try {
+        val body   = new String(request.data.readAllBytes(), "UTF-8")
+        val params = body.split("&").map { p =>
+          val kv = p.split("=", 2)
+          java.net.URLDecoder.decode(kv(0), "UTF-8") ->
+            (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+        }.toMap
+        AmateurDatabaseManager.saveProfileImages(
+          user.id,
+          params.getOrElse("fotoUrl", ""),
+          params.getOrElse("escudoUrl", "")
+        )
+        cask.Response(Array.emptyByteArray, 200)
+      } catch { case e: Exception =>
+        cask.Response(e.getMessage.getBytes("UTF-8"), 500)
+      }
+    }
 
   initialize()
 }
