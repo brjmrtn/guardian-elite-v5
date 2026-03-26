@@ -325,6 +325,8 @@ object AmateurDatabaseManager {
       // Temporadas — añadidas en v7.3
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS current_season INT DEFAULT 1")
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_url TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS foto_url TEXT DEFAULT ''")
+      s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS escudo_url TEXT DEFAULT ''")
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS team_name TEXT DEFAULT ''")
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_clasificacion_url TEXT DEFAULT ''")
       s.executeUpdate("ALTER TABLE am_users ADD COLUMN IF NOT EXISTS league_goleadores_url TEXT DEFAULT ''")
@@ -1298,6 +1300,33 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
 
     // Cache: el prompt incluye los datos reales → hash cambia automáticamente cuando hay nuevos partidos
     askCached(prompt)
+  }
+
+  def saveProfileImages(userId: Int, fotoUrl: String, escudoUrl: String): Unit = {
+    val conn = getConn()
+    try {
+      val parts = List.newBuilder[(String, String)]
+      if (fotoUrl.nonEmpty)   parts += ("foto_url = ?",   fotoUrl)
+      if (escudoUrl.nonEmpty) parts += ("escudo_url = ?", escudoUrl)
+      val items = parts.result()
+      if (items.isEmpty) return
+      val sql = s"UPDATE am_users SET ${items.map(_._1).mkString(", ")} WHERE id = ?"
+      val ps  = conn.prepareStatement(sql)
+      items.zipWithIndex.foreach { case ((_, v), i) => ps.setString(i + 1, v) }
+      ps.setInt(items.size + 1, userId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getProfileImages(userId: Int): (String, String) = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT COALESCE(foto_url,'') as f, COALESCE(escudo_url,'') as e FROM am_users WHERE id = ?")
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      if (rs.next()) (rs.getString("f"), rs.getString("e")) else ("", "")
+    } finally { conn.close() }
   }
 
   def saveLeagueConfig(userId: Int, leagueUrl: String, teamName: String,
