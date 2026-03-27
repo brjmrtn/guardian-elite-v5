@@ -1305,15 +1305,11 @@ Responde en español con exactamente 3 insights cortos (máximo 15 palabras cada
   def saveProfileImages(userId: Int, fotoUrl: String, escudoUrl: String): Unit = {
     val conn = getConn()
     try {
-      val parts = List.newBuilder[(String, String)]
-      if (fotoUrl.nonEmpty)   parts += ("foto_url = ?",   fotoUrl)
-      if (escudoUrl.nonEmpty) parts += ("escudo_url = ?", escudoUrl)
-      val items = parts.result()
-      if (items.isEmpty) return
-      val sql = s"UPDATE am_users SET ${items.map(_._1).mkString(", ")} WHERE id = ?"
-      val ps  = conn.prepareStatement(sql)
-      items.zipWithIndex.foreach { case ((_, v), i) => ps.setString(i + 1, v) }
-      ps.setInt(items.size + 1, userId)
+      val ps = conn.prepareStatement(
+        "UPDATE am_users SET foto_url = ?, escudo_url = ? WHERE id = ?")
+      ps.setString(1, if (fotoUrl.nonEmpty) fotoUrl else "")
+      ps.setString(2, if (escudoUrl.nonEmpty) escudoUrl else "")
+      ps.setInt(3, userId)
       ps.executeUpdate()
     } finally { conn.close() }
   }
