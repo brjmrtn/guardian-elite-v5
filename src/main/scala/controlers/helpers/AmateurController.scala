@@ -3953,43 +3953,54 @@ $penSection
           a(href := "/am/dashboard", cls := "btn btn-outline-secondary btn-sm xx-small fw-bold", "← Inicio")
         ),
 
-        // FUT Card Amateur
+        // FUT Card Amateur — dorado, foto grande sin fondo
         div(cls := "d-flex justify-content-center mb-4",
           div(style := """
-            width:220px; background:linear-gradient(135deg,#0f4c81,#1a7bc4,#0f4c81);
-            border-radius:16px; padding:16px; color:#fff;
-            box-shadow:0 8px 32px rgba(0,0,0,0.5);
-            border:1px solid rgba(255,255,255,0.2);
+            width:230px;
+            background: linear-gradient(160deg, #b8860b 0%, #ffd700 30%, #daa520 55%, #b8860b 80%, #8b6914 100%);
+            border-radius:18px; padding:14px 14px 16px; color:#1a0a00;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.3);
+            border: 2px solid rgba(255,215,0,0.6);
+            position:relative; overflow:hidden;
           """,
-            // Header
-            div(cls := "d-flex justify-content-between align-items-start mb-2",
+            // Brillo sutil en esquina superior
+            div(style := "position:absolute; top:-30px; right:-30px; width:100px; height:100px; background:radial-gradient(circle,rgba(255,255,255,0.25),transparent 70%); pointer-events:none;"),
+
+            // Header: rating + posición + escudo
+            div(cls := "d-flex justify-content-between align-items-start",
+              style := "margin-bottom:2px;",
               div(
-                div(style := "font-size:2.5rem; font-weight:900; line-height:1;", mediaCard.toString),
-                div(style := "font-size:12px; font-weight:700; opacity:.9;", "POR"),
-                div(style := "font-size:14px;", "🇪🇸")
+                div(style := "font-size:2.8rem; font-weight:900; line-height:1; color:#1a0a00; text-shadow:0 1px 0 rgba(255,255,255,0.3);", mediaCard.toString),
+                div(style := "font-size:11px; font-weight:800; color:#3d1a00; letter-spacing:.05em;", "POR"),
+                div(style := "font-size:13px;", "🇪🇸")
               ),
               div(style := "text-align:right;",
+                // Escudo sin fondo, tamaño generoso
                 if (escudoUrl.nonEmpty)
-                  img(src := escudoUrl, style := "width:36px; height:36px; object-fit:contain;")
+                  img(src := escudoUrl,
+                    style := "width:52px; height:52px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));")
                 else
-                  div(style := "font-size:28px;", "🌊"),
-                div(style := "font-size:9px; opacity:.7;", "MINIFLOW FC")
+                  div(style := "font-size:36px; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3));", "🌊"),
+                div(style := "font-size:8px; font-weight:700; color:#3d1a00; margin-top:2px; letter-spacing:.05em;", "MINIFLOW FC")
               )
             ),
-            // Avatar — foto real si existe
-            div(style := "text-align:center; margin:8px 0;",
+
+            // Foto del jugador — grande, sin fondo, integrada
+            div(style := "text-align:center; margin:-4px 0 -8px;",
               if (fotoUrl.nonEmpty)
-                div(style := "width:80px; height:80px; border-radius:50%; overflow:hidden; display:inline-block;",
-                  img(src := fotoUrl, style := "width:100%; height:100%; object-fit:cover;"))
+                img(src := fotoUrl,
+                  style := "width:150px; height:150px; object-fit:contain; filter:drop-shadow(0 4px 8px rgba(0,0,0,0.5)); display:inline-block;")
               else
-                div(style := "width:80px; height:80px; border-radius:50%; background:rgba(255,255,255,.15); display:inline-flex; align-items:center; justify-content:center; font-size:36px;",
+                div(style := "width:120px; height:120px; display:inline-flex; align-items:center; justify-content:center; font-size:72px; filter:drop-shadow(0 4px 8px rgba(0,0,0,0.3));",
                   "🧤")
             ),
+
             // Nombre
-            div(style := "text-align:center; font-size:16px; font-weight:900; letter-spacing:1px; margin-bottom:12px;",
+            div(style := "text-align:center; font-size:15px; font-weight:900; letter-spacing:1.5px; color:#1a0a00; text-shadow:0 1px 0 rgba(255,255,255,0.3); margin-bottom:10px; border-top:1px solid rgba(0,0,0,0.15); padding-top:6px;",
               user.nombre.toUpperCase),
+
             // Stats grid
-            div(style := "display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; text-align:center;",
+            div(style := "display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; text-align:center;",
               frag(Seq(
                 (attrNota.toString, "NOT"),
                 (attrCS.toString,   "CS"),
@@ -3999,8 +4010,8 @@ $penSection
                 (pj.toString,       "PJ")
               ).map { case (v, lbl) =>
                 div(
-                  div(style := "font-size:18px; font-weight:900;", v),
-                  div(style := "font-size:8px; opacity:.8;", lbl)
+                  div(style := "font-size:20px; font-weight:900; color:#1a0a00; line-height:1;", v),
+                  div(style := "font-size:8px; font-weight:700; color:#5a2d00; letter-spacing:.05em;", lbl)
                 )
               }: _*)
             )
