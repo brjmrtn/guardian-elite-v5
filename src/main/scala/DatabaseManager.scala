@@ -491,8 +491,8 @@ object DatabaseManager {
       // Usar siempre v1beta — soporta PDF y es compatible con cualquier API key de Google AI Studio
       val urls = Seq(
         s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=$apiKey",
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        // s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=$apiKey",
+        //s"https://generativelanguage.googleapis.com/v1beta/models/:generateContent?key=$apiKey"
       )
 
       println(s"DEBUG: isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
