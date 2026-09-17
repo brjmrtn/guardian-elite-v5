@@ -299,6 +299,35 @@ object DashboardController extends cask.Routes {
 
     // --- RENDERIZADO FINAL ---
 
+    // ── MODULO 2: CONTEXTO AMBIENTAL CRUZADO ─────────────────────────────
+    val contextPatterns = DatabaseManager.getContextPatterns().take(3)
+    val contextPhrase   = DatabaseManager.getContextOptimoPhrase()
+    val contextWidget = if (contextPatterns.isEmpty) div() else {
+      div(cls := "card bg-white border-0 shadow-sm mb-3",
+        style := "border-radius:12px; overflow:hidden;",
+        div(style := "background:linear-gradient(135deg,#0c4a6e,#0f172a); padding:10px 14px;",
+          span(style := "font-size:12px; font-weight:800; color:#7dd3fc;", "🌦 CONTEXTO ÓPTIMO")
+        ),
+        div(style := "padding:14px;",
+          p(style := "font-size:12px; color:#334155; font-style:italic; font-weight:600; text-align:center; margin-bottom:12px;",
+            contextPhrase),
+          div(cls := "row g-2",
+            frag(contextPatterns.map { c =>
+              val nota  = c("notaMedia").asInstanceOf[Double]
+              val color = if (nota >= 7) "#20c997" else if (nota >= 5) "#f59e0b" else "#ef4444"
+              div(cls := "col-4",
+                div(style := s"background:#f8fafc; border-top:3px solid $color; border-radius:8px; padding:8px; text-align:center;",
+                  div(style := s"font-size:16px; font-weight:900; color:$color;", f"$nota%.1f"),
+                  div(style := "font-size:9px; color:#64748b; margin-top:2px;", s"${c("clima")} · ${c("esLocal")}"),
+                  div(style := "font-size:9px; color:#94a3b8;", s"${c("estadoDescanso")} · ${c("partidos")} PJ")
+                )
+              )
+            }: _*)
+          )
+        )
+      )
+    }
+
     val content = basePage("home",
       div(
         // ── HERO HEADER (dark) ─────────────────────────────────────────────
@@ -362,6 +391,8 @@ object DashboardController extends cask.Routes {
             )
           )
         ),
+
+        contextWidget,
 
         // ── CONTENT AREA (light) ──────────────────────────────────────────
         div(cls := "row g-3",

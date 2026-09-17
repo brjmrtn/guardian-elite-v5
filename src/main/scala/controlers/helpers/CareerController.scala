@@ -5,6 +5,15 @@ import SharedLayout._
 
 object CareerController extends cask.Routes {
 
+  // Parseo manual de body application/x-www-form-urlencoded (mas fiable que @cask.postForm con fetch)
+  private def parseBody(request: cask.Request): Map[String, String] = {
+    val body = new String(request.data.readAllBytes(), "UTF-8")
+    body.split("&").filter(_.nonEmpty).map { p =>
+      val kv = p.split("=", 2)
+      java.net.URLDecoder.decode(kv(0), "UTF-8") -> (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+    }.toMap
+  }
+
   @cask.get("/gear")
   def gearPage(request: cask.Request) = withAuth(request) {
     val items = DatabaseManager.getActiveGear()
@@ -1031,10 +1040,49 @@ object CareerController extends cask.Routes {
       if (idx >= 0) idx else 999
     }
 
+    // ── MODULO 3: VENTANAS ACTIVAS AHORA ────────────────────────────────────
+    val cardData      = DatabaseManager.getLatestCardData()
+    val edadActual     = DatabaseManager.calcularEdadExacta(cardData.fechaNacimiento)
+    val activeWindows = DatabaseManager.getActiveWindows(edadActual)
+
+    val ventanasWidget = if (activeWindows.isEmpty) div() else {
+      div(cls := "card bg-dark border-info shadow mb-4",
+        div(cls := "card-header border-info text-info fw-bold small text-center", "⏰ VENTANAS ACTIVAS AHORA"),
+        div(cls := "card-body p-3",
+          frag(activeWindows.map { w =>
+            val ventana     = w("ventana").asInstanceOf[String]
+            val descripcion = w("descripcion").asInstanceOf[String]
+            val edadFin     = w("edadFin").asInstanceOf[Int]
+            val urgente     = w("urgente").asInstanceOf[Boolean]
+            val pendientes  = w("skillsPendientes").asInstanceOf[List[Map[String, Any]]]
+            div(cls := "mb-3 pb-3 border-bottom border-secondary",
+              div(cls := "d-flex justify-content-between align-items-start",
+                div(
+                  div(cls := "fw-bold text-white", ventana),
+                  div(cls := "xx-small text-muted", s"$descripcion · cierra a los $edadFin años")
+                ),
+                if (urgente) span(cls := "badge bg-danger", "⚠️ URGENTE") else span()
+              ),
+              if (pendientes.isEmpty)
+                div(cls := "xx-small text-success mt-1", "✅ Sin habilidades pendientes en esta ventana")
+              else
+                div(cls := "mt-2",
+                  frag(pendientes.map { p =>
+                    div(cls := "xx-small text-warning", s"⬜ ${p("habilidad").asInstanceOf[String]}")
+                  }: _*)
+                )
+            )
+          }: _*)
+        )
+      )
+    }
+
     val content = basePage("goalkeeper-skills",
       div(cls := "row justify-content-center",
         div(cls := "col-md-9 col-12",
           h2(cls := "text-white mb-4 text-center", "🧤 Checklist de Habilidades"),
+
+          ventanasWidget,
 
           div(cls := "card bg-dark border-secondary p-3 mb-4",
             div(cls := "d-flex justify-content-between small text-muted mb-1",
@@ -1093,6 +1141,8 @@ object CareerController extends cask.Routes {
     val opps = DatabaseManager.getOpportunities()
     val total = opps.size
     val pendientes = opps.count(o => o.seguimiento.nonEmpty && !o.seguimientoCompletado)
+    val contacts = DatabaseManager.getContacts()
+    val contactsById = contacts.map(c => c.id -> c).toMap
 
     val content = basePage("opportunities",
       div(cls := "row justify-content-center",
@@ -1156,6 +1206,13 @@ object CareerController extends cask.Routes {
                 input(tpe := "text", name := "seguimiento", cls := "form-control form-control-sm bg-dark text-white border-secondary",
                   placeholder := "Ej: Esperar respuesta del club en 2 semanas")
               ),
+              div(cls := "mb-3",
+                label(cls := "xx-small text-muted fw-bold", "CONTACTO ASOCIADO (opcional)"),
+                select(name := "contactId", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                  option(value := "", "— Sin contacto —"),
+                  frag(contacts.map(c => option(value := c.id.toString, fixEncoding(c.nombre))): _*)
+                )
+              ),
               button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar")
             )
           ),
@@ -1174,6 +1231,10 @@ object CareerController extends cask.Routes {
                   span(cls := "xx-small text-muted", o.fecha.take(10))
                 ),
                 if (o.descripcion.nonEmpty) div(cls := "small text-light mb-2", fixEncoding(o.descripcion)) else span(),
+                o.contactId.flatMap(contactsById.get) match {
+                  case Some(c) => div(cls := "xx-small text-info mb-2", "👥 ", a(href := s"/contacts/${c.id}", cls := "text-info", fixEncoding(c.nombre)))
+                  case None    => span()
+                },
                 form(action := "/opportunities/resultado", method := "post", cls := "d-flex gap-1 mb-2",
                   input(tpe := "hidden", name := "id", value := o.id.toString),
                   input(tpe := "text", name := "resultado", value := o.resultado,
@@ -1203,10 +1264,15 @@ object CareerController extends cask.Routes {
     renderHtml(content)
   }
 
-  @cask.postForm("/opportunities/save")
-  def saveOpportunity(fecha: String, tipo: String, clubOEntidad: String = "", descripcion: String = "",
-                       resultado: String = "", seguimiento: String = "") = {
-    DatabaseManager.saveOpportunity(fecha, tipo, descripcion, clubOEntidad, resultado, seguimiento)
+  @cask.post("/opportunities/save")
+  def saveOpportunity(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val contactId = p.getOrElse("contactId", "").toIntOption
+    DatabaseManager.saveOpportunity(
+      p.getOrElse("fecha", ""), p.getOrElse("tipo", "OTRO"),
+      p.getOrElse("descripcion", ""), p.getOrElse("clubOEntidad", ""),
+      p.getOrElse("resultado", ""), p.getOrElse("seguimiento", ""), contactId
+    )
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
   }
 
@@ -1628,6 +1694,607 @@ object CareerController extends cask.Routes {
     val precio = params.getOrElse("precio","0").toDoubleOption.getOrElse(0.0)
     DatabaseManager.updateGearPrecio(gearId, precio)
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/efecto-mariposa"))
+  }
+
+  // ── MODULO 1: MOTOR DE PREDICCION DE TECHO ──────────────────────────────
+  private def techoTendenciaColor(t: String): String = t match {
+    case "ACELERANDO" => "success"; case "DESACELERANDO" => "danger"; case _ => "warning"
+  }
+
+  @cask.get("/techo")
+  def techoPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getTechoPrediction()
+    val semaforo    = d("semaforo").asInstanceOf[String]
+    val atributos   = d("atributos").asInstanceOf[List[Map[String, Any]]]
+    val topAtributo = d("topAtributo").asInstanceOf[String]
+    val analisisIA  = d("analisisIA").asInstanceOf[String]
+    val edad        = d("edad").asInstanceOf[Int]
+
+    val (semColor, semLabel, semIcon) = semaforo match {
+      case "VERDE" => ("success", "ACELERANDO SU MEJORA", "🟢")
+      case "ROJO"  => ("danger", "DESACELERANDO", "🔴")
+      case _       => ("warning", "RITMO ESTABLE", "🟡")
+    }
+
+    val rows = atributos.map { a =>
+      val nombre    = a("nombre").asInstanceOf[String]
+      val actual    = a("actual").asInstanceOf[Double]
+      val proy10    = a("proy10").asInstanceOf[Double]
+      val proy14    = a("proy14").asInstanceOf[Double]
+      val tendencia = a("tendencia").asInstanceOf[String]
+      val flecha    = a("flecha").asInstanceOf[String]
+      tr(
+        td(cls := "fw-bold text-white", nombre),
+        td(cls := "text-center", f"$actual%.0f"),
+        td(cls := "text-center text-info", f"$proy10%.0f"),
+        td(cls := "text-center text-warning", f"$proy14%.0f"),
+        td(cls := "text-center",
+          span(cls := s"badge bg-${techoTendenciaColor(tendencia)}", s"$flecha $tendencia"),
+          if (nombre == topAtributo) span(cls := "badge bg-dark border border-warning text-warning ms-1", "⭐") else span()
+        )
+      )
+    }
+
+    val content = basePage("techo",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "🎯 Motor de Predicción de Techo"),
+
+          div(cls := s"card bg-dark border-$semColor shadow mb-4",
+            div(cls := "card-body text-center py-4",
+              div(style := "font-size:48px;", semIcon),
+              div(cls := s"h3 fw-bold text-$semColor mt-2", semLabel),
+              div(cls := "text-muted small mt-1", s"Héctor tiene $edad años · Basado en su evolución histórica de atributos")
+            )
+          ),
+
+          if (atributos.isEmpty)
+            div(cls := "alert alert-secondary text-center", "Necesitas al menos una temporada registrada para generar la predicción")
+          else div(
+            div(cls := "card bg-dark border-secondary shadow mb-4",
+              div(cls := "card-header text-white fw-bold small", "PROYECCIÓN POR ATRIBUTO"),
+              div(cls := "card-body p-0",
+                div(cls := "table-responsive",
+                  table(cls := "table table-dark table-sm mb-0",
+                    thead(tr(th("Atributo"), th(cls := "text-center", "Actual"), th(cls := "text-center", "A los 10"), th(cls := "text-center", "A los 14"), th(cls := "text-center", "Tendencia"))),
+                    tbody(rows)
+                  )
+                )
+              )
+            ),
+
+            div(cls := "card bg-dark border-warning shadow mb-4",
+              div(cls := "card-header text-warning fw-bold small", "🤖 ANÁLISIS IA"),
+              div(cls := "card-body text-light small", style := "white-space:pre-wrap;", analisisIA)
+            )
+          ),
+
+          form(action := "/techo/recalcular", method := "post",
+            button(tpe := "submit", cls := "btn btn-outline-warning w-100 fw-bold", "🔄 Recalcular")
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/techo/recalcular")
+  def recalcularTecho(request: cask.Request) = withAuth(request) {
+    DatabaseManager.invalidateTechoCache()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/techo"))
+  }
+
+  // ── MODULO 4: SIMULADOR DE ESCENARIOS "¿QUE PASA SI?" ───────────────────
+  private def simulatorForm(deltaNota: Double, limpiasExtra: Int, sesionesExtra: Int, atributo: String, deltaAtributo: Int) =
+    form(action := "/simulate", method := "post",
+      div(cls := "mb-3",
+        div(cls := "d-flex justify-content-between",
+          label(cls := "xx-small text-muted fw-bold", "SI MI NOTA MEDIA SUBIERA"),
+          span(cls := "xx-small text-warning fw-bold", f"+$deltaNota%.1f")
+        ),
+        input(tpe := "range", name := "deltaNota", cls := "form-range", min := "0", max := "2", step := "0.1", value := deltaNota.toString)
+      ),
+      div(cls := "mb-3",
+        div(cls := "d-flex justify-content-between",
+          label(cls := "xx-small text-muted fw-bold", "SI CONSIGUIERA X LIMPIAS MÁS"),
+          span(cls := "xx-small text-warning fw-bold", s"+$limpiasExtra")
+        ),
+        input(tpe := "range", name := "limpiasExtra", cls := "form-range", min := "0", max := "10", step := "1", value := limpiasExtra.toString)
+      ),
+      div(cls := "mb-3",
+        label(cls := "xx-small text-muted fw-bold", "SI AÑADIERA SESIONES EXTRA DE ACADEMIA AL MES"),
+        select(name := "sesionesExtra", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+          Seq(0, 1, 2, 4).map(n => if (n == sesionesExtra) option(value := n.toString, attr("selected") := "selected", n.toString) else option(value := n.toString, n.toString))
+        )
+      ),
+      div(cls := "row g-2 mb-3",
+        div(cls := "col-7",
+          label(cls := "xx-small text-muted fw-bold", "SI MEJORARA EL ATRIBUTO"),
+          select(name := "atributo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+            Seq("DIV", "HAN", "KIC", "REF", "SPD", "POS").map(a => if (a == atributo) option(value := a, attr("selected") := "selected", a) else option(value := a, a))
+          )
+        ),
+        div(cls := "col-5",
+          label(cls := "xx-small text-muted fw-bold", "EN X PUNTOS"),
+          select(name := "deltaAtributo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+            (0 to 10).map(n => if (n == deltaAtributo) option(value := n.toString, attr("selected") := "selected", n.toString) else option(value := n.toString, n.toString))
+          )
+        )
+      ),
+      button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", "🧠 Simular con IA")
+    )
+
+  private def simulatorResultBlocks(resultado: Map[String, String]) = {
+    val ratingTxt: String    = resultado.getOrElse("rating", "")
+    val percentilTxt: String = resultado.getOrElse("percentil", "")
+    val plazoTxt: String     = resultado.getOrElse("plazo", "")
+    div(
+      div(cls := "card bg-dark border-primary shadow mb-3",
+        div(cls := "card-header text-primary fw-bold small", "⭐ IMPACTO EN RATING FUT"),
+        div(cls := "card-body text-light small", style := "white-space:pre-wrap;", ratingTxt)
+      ),
+      div(cls := "card bg-dark border-info shadow mb-3",
+        div(cls := "card-header text-info fw-bold small", "📈 IMPACTO EN PERCENTIL"),
+        div(cls := "card-body text-light small", style := "white-space:pre-wrap;", percentilTxt)
+      ),
+      div(cls := "card bg-dark border-success shadow mb-3",
+        div(cls := "card-header text-success fw-bold small", "⏳ PLAZO PARA OBJETIVOS"),
+        div(cls := "card-body text-light small", style := "white-space:pre-wrap;", plazoTxt)
+      )
+    )
+  }
+
+  @cask.get("/simulate")
+  def simulatePage(request: cask.Request) = withAuth(request) {
+    val content = basePage("simulate",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-white mb-4 text-center", "🔮 Simulador de Escenarios"),
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "¿Qué pasa si...?"),
+            simulatorForm(0.0, 0, 0, "DIV", 0)
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/simulate")
+  def simulateAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val deltaNota      = p.getOrElse("deltaNota", "0").toDoubleOption.getOrElse(0.0)
+    val limpiasExtra   = p.getOrElse("limpiasExtra", "0").toIntOption.getOrElse(0)
+    val sesionesExtra  = p.getOrElse("sesionesExtra", "0").toIntOption.getOrElse(0)
+    val atributo       = p.getOrElse("atributo", "DIV")
+    val deltaAtributo  = p.getOrElse("deltaAtributo", "0").toIntOption.getOrElse(0)
+
+    val resultado = DatabaseManager.simulateScenario(deltaNota, limpiasExtra, sesionesExtra, atributo, deltaAtributo)
+
+    val content = basePage("simulate",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-white mb-4 text-center", "🔮 Simulador de Escenarios"),
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "¿Qué pasa si...?"),
+            simulatorForm(deltaNota, limpiasExtra, sesionesExtra, atributo, deltaAtributo)
+          ),
+          div(cls := "alert alert-secondary small fst-italic mb-3", s"Hipótesis: ${resultado.getOrElse("hipotesis", "")}"),
+          simulatorResultBlocks(resultado)
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  // ── MODULO 5: DIARIO NARRATIVO AUTOMATICO DE TEMPORADA ──────────────────
+  @cask.get("/diary")
+  def diaryPage(request: cask.Request) = withAuth(request) {
+    val entries = DatabaseManager.getSeasonDiaryEntries() // DESC por mes
+    val today = java.time.LocalDate.now()
+    val targetMonthDate = if (today.getDayOfMonth == today.lengthOfMonth()) today else today.minusMonths(1)
+    val targetMonth = targetMonthDate.toString.take(7)
+    val yaGenerado = entries.exists(_("mes").asInstanceOf[String] == targetMonth)
+
+    val entriesHtml = entries.zipWithIndex.map { case (e, idx) =>
+      val mes         = e("mes").asInstanceOf[String]
+      val contenido    = e("contenido").asInstanceOf[String]
+      val partidos     = e("partidosIncluidos").asInstanceOf[Int]
+      val hitos        = e("hitosIncluidos").asInstanceOf[Int]
+      val openMod: Modifier = if (idx == 0) attr("open") := "open" else frag()
+      tag("details")(cls := "border-bottom border-secondary py-2", openMod,
+        tag("summary")(cls := "text-warning fw-bold", style := "cursor:pointer;",
+          s"${DatabaseManager.mesLabel(mes).capitalize} · $partidos partidos · $hitos hitos"
+        ),
+        div(cls := "text-light small mt-2", style := "white-space:pre-wrap; line-height:1.6;", contenido)
+      )
+    }
+
+    val content = basePage("diary",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-4",
+            h2(cls := "text-white mb-0", "📖 Diario de Temporada"),
+            a(href := "/diary/export", cls := "btn btn-outline-secondary btn-sm fw-bold", target := "_blank", "🖨️ Exportar")
+          ),
+          if (!yaGenerado)
+            form(action := "/diary/generate", method := "post", cls := "mb-4",
+              input(tpe := "hidden", name := "mes", value := targetMonth),
+              button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", s"📖 Generar entrada de ${DatabaseManager.mesLabel(targetMonth)}")
+            )
+          else div(),
+          if (entries.isEmpty)
+            div(cls := "alert alert-secondary text-center", "Todavía no hay entradas en el diario")
+          else
+            div(cls := "card bg-dark border-secondary p-3",
+              frag(entriesHtml: _*)
+            )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/diary/generate")
+  def generateDiaryEntry(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val mes = p.getOrElse("mes", java.time.LocalDate.now().toString.take(7))
+    DatabaseManager.generateMonthlyDiary(mes)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/diary"))
+  }
+
+  @cask.get("/diary/export")
+  def exportDiary(request: cask.Request) = withAuth(request) {
+    val entries = DatabaseManager.getSeasonDiaryEntries().sortBy(_("mes").asInstanceOf[String]) // cronologico ASC
+    val entradasHtml = entries.map { e =>
+      val mes       = e("mes").asInstanceOf[String]
+      val contenido = e("contenido").asInstanceOf[String]
+      div(style := "margin-bottom:30px; page-break-inside:avoid;",
+        h3(style := "color:#b8860b;", DatabaseManager.mesLabel(mes).capitalize),
+        p(style := "white-space:pre-wrap; line-height:1.6;", contenido)
+      )
+    }
+    val htmlStr = "<!DOCTYPE html>" + html(
+      head(meta(charset := "utf-8"), tags2.title("Diario de Héctor — Temporada completa")),
+      body(style := "font-family: Georgia, serif; max-width:800px; margin:40px auto; padding:0 20px; color:#222;",
+        h1(style := "text-align:center;", "Diario de Héctor"),
+        p(style := "text-align:center; color:#888;", "Crónica de su desarrollo como portero"),
+        hr(),
+        frag(entradasHtml: _*)
+      )
+    ).render
+    cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // ── MODULO 6: COMPARATIVA TEMPORAL ENTRE EDADES ─────────────────────────
+  @cask.get("/temporal")
+  def temporalPage(request: cask.Request) = withAuth(request) {
+    val data = DatabaseManager.getTemporalComparison()
+    val currentSeasonId = data.lastOption.map(_("id").asInstanceOf[Int]).getOrElse(-1)
+
+    val labels   = data.map(d => fixEncoding(d("categoria").asInstanceOf[String]).replace("\"", ""))
+    val labelsJs = labels.map(l => s""""$l"""").mkString("[", ",", "]")
+
+    def seriesJs(key: String): String = data.map(d => f"${d(key).asInstanceOf[Double]}%.1f").mkString("[", ",", "]")
+    val divJs = seriesJs("div"); val hanJs = seriesJs("han"); val kicJs = seriesJs("kic")
+    val refJs = seriesJs("ref"); val spdJs = seriesJs("spd"); val posJs = seriesJs("pos")
+    val notaJs = seriesJs("notaMedia"); val gcJs = seriesJs("gcMedia")
+    val limpiasJs = data.map(d => d("limpias").asInstanceOf[Int].toString).mkString("[", ",", "]")
+
+    val (masCrecido, menosCrecido): ((String, Double), (String, Double)) = if (data.size >= 2) {
+      val first = data.head; val last = data.last
+      val attrs = Seq("DIV" -> "div", "HAN" -> "han", "KIC" -> "kic", "REF" -> "ref", "SPD" -> "spd", "POS" -> "pos")
+      val deltas = attrs.map { case (label, key) => (label, last(key).asInstanceOf[Double] - first(key).asInstanceOf[Double]) }
+      (deltas.maxBy(_._2), deltas.minBy(_._2))
+    } else (("—", 0.0), ("—", 0.0))
+    val masCrecidoLbl   = f"${masCrecido._1}%s (+${masCrecido._2}%.0f)"
+    val menosCrecidoLbl = f"${menosCrecido._1}%s (+${menosCrecido._2}%.0f)"
+
+    val rows = data.map { d =>
+      val isCurrent = d("id").asInstanceOf[Int] == currentSeasonId
+      tr(cls := (if (isCurrent) "table-warning" else ""),
+        td(cls := "fw-bold", fixEncoding(d("categoria").asInstanceOf[String])),
+        td(cls := "text-center", f"${d("div").asInstanceOf[Double]}%.0f"),
+        td(cls := "text-center", f"${d("han").asInstanceOf[Double]}%.0f"),
+        td(cls := "text-center", f"${d("kic").asInstanceOf[Double]}%.0f"),
+        td(cls := "text-center", f"${d("ref").asInstanceOf[Double]}%.0f"),
+        td(cls := "text-center", f"${d("spd").asInstanceOf[Double]}%.0f"),
+        td(cls := "text-center", f"${d("pos").asInstanceOf[Double]}%.0f"),
+        td(cls := "text-center", f"${d("notaMedia").asInstanceOf[Double]}%.1f"),
+        td(cls := "text-center", d("limpias").asInstanceOf[Int].toString),
+        td(cls := "text-center", d("partidos").asInstanceOf[Int].toString)
+      )
+    }
+
+    val content = basePage("temporal",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-11 col-12",
+          h2(cls := "text-white mb-4 text-center", "📈 Comparativa Temporal entre Edades"),
+
+          if (data.isEmpty) div(cls := "alert alert-secondary text-center", "Sin temporadas registradas")
+          else div(
+            div(cls := "row g-2 mb-4",
+              Seq(
+                (masCrecidoLbl,   "MÁS HA CRECIDO",   "success"),
+                (menosCrecidoLbl, "MENOS HA CRECIDO", "warning")
+              ).map { case (v, lbl, c) =>
+                div(cls := "col-6",
+                  div(cls := s"card bg-dark border-$c text-center py-3",
+                    div(cls := s"text-$c fw-bold fs-4", v),
+                    div(cls := "xx-small text-muted mt-1", lbl)
+                  )
+                )
+              }
+            ),
+
+            div(cls := "card bg-dark border-warning shadow mb-4",
+              div(cls := "card-header text-warning fw-bold small", "EVOLUCIÓN DE ATRIBUTOS POR TEMPORADA"),
+              div(cls := "card-body", div(style := "height:280px;", canvas(id := "chartAtributos")))
+            ),
+
+            div(cls := "card bg-dark border-info shadow mb-4",
+              div(cls := "card-header text-info fw-bold small", "NOTA MEDIA / GOLES CONTRA / PORTERÍAS A 0"),
+              div(cls := "card-body", div(style := "height:240px;", canvas(id := "chartRendimiento")))
+            ),
+
+            div(cls := "card bg-dark border-secondary shadow mb-4",
+              div(cls := "card-header text-white fw-bold small", "TABLA COMPARATIVA"),
+              div(cls := "card-body p-0",
+                div(cls := "table-responsive",
+                  table(cls := "table table-dark table-sm mb-0 small",
+                    thead(tr(th("Temp"), th(cls := "text-center", "DIV"), th(cls := "text-center", "HAN"), th(cls := "text-center", "KIC"),
+                      th(cls := "text-center", "REF"), th(cls := "text-center", "SPD"), th(cls := "text-center", "POS"),
+                      th(cls := "text-center", "Nota"), th(cls := "text-center", "Limpias"), th(cls := "text-center", "PJ"))),
+                    tbody(rows)
+                  )
+                )
+              )
+            ),
+
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
+              new Chart(document.getElementById('chartAtributos'), {
+                type: 'line',
+                data: {
+                  labels: $labelsJs,
+                  datasets: [
+                    { label: 'DIV', data: $divJs, borderColor: '#0dcaf0', tension: 0.3, fill: false },
+                    { label: 'HAN', data: $hanJs, borderColor: '#ffc107', tension: 0.3, fill: false },
+                    { label: 'KIC', data: $kicJs, borderColor: '#20c997', tension: 0.3, fill: false },
+                    { label: 'REF', data: $refJs, borderColor: '#dc3545', tension: 0.3, fill: false },
+                    { label: 'SPD', data: $spdJs, borderColor: '#8b5cf6', tension: 0.3, fill: false },
+                    { label: 'POS', data: $posJs, borderColor: '#d4af37', tension: 0.3, fill: false }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 10 } } } },
+                  scales: {
+                    x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { min: 0, max: 100, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                  }
+                }
+              });
+              new Chart(document.getElementById('chartRendimiento'), {
+                type: 'line',
+                data: {
+                  labels: $labelsJs,
+                  datasets: [
+                    { label: 'Nota media', data: $notaJs, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.1)', tension: 0.3, fill: true, yAxisID: 'y' },
+                    { label: 'GC media', data: $gcJs, borderColor: '#dc3545', tension: 0.3, fill: false, yAxisID: 'y' },
+                    { label: 'Limpias', data: $limpiasJs, borderColor: '#20c997', tension: 0.3, fill: false, yAxisID: 'y1' }
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 10 } } } },
+                  scales: {
+                    x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { position: 'left', ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y1: { position: 'right', ticks: { color: '#aaa' }, grid: { display: false } }
+                  }
+                }
+              });
+            """))
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  // ── MODULO 7: RED DE CONTACTOS (MINI CRM) ───────────────────────────────
+  private def contactRolInfo(rol: String): (String, String) = rol match {
+    case "OJEADOR"             => ("Ojeador", "#dc3545")
+    case "ENTRENADOR_ACADEMIA" => ("Entrenador Academia", "#0d6efd")
+    case "CLUB"                => ("Club", "#198754")
+    case "PADRE_CONTACTO"      => ("Padre/Contacto", "#fd7e14")
+    case "AGENTE"              => ("Agente", "#6f42c1")
+    case _                     => ("Otro", "#6c757d")
+  }
+
+  private def importanciaBadgeCls(imp: String): String = imp match {
+    case "ALTA" => "bg-danger"; case "MEDIA" => "bg-warning text-dark"; case _ => "bg-secondary"
+  }
+
+  @cask.get("/contacts")
+  def contactsPage(request: cask.Request) = withAuth(request) {
+    val contacts = DatabaseManager.getContacts()
+    val total = contacts.size
+    val altaCount = contacts.count(_.importancia == "ALTA")
+    val ultimoContacto = contacts.flatMap(_.ultimaInteraccion).sorted.lastOption.getOrElse("—")
+
+    val contactRows = contacts.map { c =>
+      val (rolLabel, rolColor) = contactRolInfo(c.rol)
+      val diasSinContacto = c.ultimaInteraccion.flatMap(f =>
+        try Some(java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(f), java.time.LocalDate.now()))
+        catch { case _: Exception => None })
+      val sinContacto = c.importancia == "ALTA" && (c.ultimaInteraccion.isEmpty || diasSinContacto.exists(_ > 30))
+
+      div(cls := "card bg-dark border-secondary p-3 mb-2",
+        div(cls := "d-flex justify-content-between align-items-start mb-1",
+          div(
+            a(href := s"/contacts/view/${c.id}", cls := "text-white fw-bold text-decoration-none", fixEncoding(c.nombre)),
+            div(cls := "d-flex gap-1 mt-1 flex-wrap",
+              span(cls := "badge", style := s"background:$rolColor;", rolLabel),
+              span(cls := s"badge ${importanciaBadgeCls(c.importancia)}", c.importancia),
+              if (sinContacto) span(cls := "badge bg-danger", "⚠️ Sin contacto") else span()
+            )
+          ),
+          span(cls := "xx-small text-muted", c.ultimaInteraccion.map(_.take(10)).getOrElse("Sin interacción"): String)
+        ),
+        if (c.clubOEntidad.nonEmpty) div(cls := "xx-small text-muted mb-1", fixEncoding(c.clubOEntidad)) else span(),
+        form(action := "/contacts/interaccion", method := "post", cls := "d-flex gap-1 mt-2",
+          input(tpe := "hidden", name := "id", value := c.id.toString),
+          input(tpe := "date", name := "fecha", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+            style := "max-width:140px;", value := java.time.LocalDate.now().toString),
+          input(tpe := "text", name := "nota", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+            placeholder := "📅 Registrar interacción..."),
+          button(tpe := "submit", cls := "btn btn-sm btn-outline-info", "💾")
+        )
+      )
+    }
+
+    val content = basePage("contacts",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "👥 Red de Contactos"),
+
+          div(cls := "row g-2 mb-4",
+            Seq(
+              (total.toString, "TOTAL CONTACTOS", "secondary"),
+              (altaCount.toString, "IMPORTANCIA ALTA", "danger"),
+              (ultimoContacto.take(10), "ÚLTIMO CONTACTO", "info")
+            ).map { case (v, lbl, c) =>
+              div(cls := "col-4",
+                div(cls := s"card bg-dark border-$c text-center py-3",
+                  div(cls := s"text-$c fw-bold", style := "font-size:18px;", v),
+                  div(cls := "xx-small text-muted mt-1", lbl)
+                )
+              )
+            }
+          ),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "➕ Nuevo contacto"),
+            form(action := "/contacts/save", method := "post",
+              div(cls := "mb-2",
+                input(tpe := "text", name := "nombre", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Nombre", required := true)
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "ROL"),
+                  select(name := "rol", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                    option(value := "ENTRENADOR_ACADEMIA", "Entrenador Academia"),
+                    option(value := "OJEADOR", "Ojeador"),
+                    option(value := "PADRE_CONTACTO", "Padre/Contacto"),
+                    option(value := "CLUB", "Club"),
+                    option(value := "AGENTE", "Agente"),
+                    option(value := "OTRO", "Otro")
+                  )
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "IMPORTANCIA"),
+                  select(name := "importancia", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                    option(value := "ALTA", "Alta"),
+                    option(value := "MEDIA", attr("selected") := "selected", "Media"),
+                    option(value := "BAJA", "Baja")
+                  )
+                )
+              ),
+              div(cls := "mb-2",
+                input(tpe := "text", name := "clubOEntidad", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Club / entidad")
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6", input(tpe := "text", name := "telefono", cls := "form-control form-control-sm bg-dark text-white border-secondary", placeholder := "Teléfono (opcional)")),
+                div(cls := "col-6", input(tpe := "email", name := "email", cls := "form-control form-control-sm bg-dark text-white border-secondary", placeholder := "Email (opcional)"))
+              ),
+              div(cls := "mb-2",
+                input(tpe := "text", name := "comoConocido", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "¿Cómo se conoció?")
+              ),
+              div(cls := "mb-3",
+                textarea(name := "notas", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "2", placeholder := "Notas")()
+              ),
+              button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar contacto")
+            )
+          ),
+
+          if (contacts.isEmpty) div(cls := "alert alert-secondary text-center", "Sin contactos registrados todavía")
+          else frag(contactRows: _*)
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.get("/contacts/view/:id")
+  def contactDetailPage(request: cask.Request, id: Int) = withAuth(request) {
+    DatabaseManager.getContactById(id) match {
+      case None => renderHtml(basePage("contacts", div(cls := "alert alert-secondary m-4", "Contacto no encontrado")))
+      case Some(c) =>
+        val (rolLabel, rolColor) = contactRolInfo(c.rol)
+        val linkedOpps = DatabaseManager.getOpportunitiesByContact(id)
+        val content = basePage("contacts",
+          div(cls := "row justify-content-center",
+            div(cls := "col-md-8 col-12",
+              div(cls := "d-flex justify-content-between align-items-center mb-4",
+                h2(cls := "text-white mb-0", fixEncoding(c.nombre)),
+                a(href := "/contacts", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Contactos")
+              ),
+              div(cls := "d-flex gap-1 mb-3",
+                span(cls := "badge", style := s"background:$rolColor;", rolLabel),
+                span(cls := s"badge ${importanciaBadgeCls(c.importancia)}", c.importancia)
+              ),
+              div(cls := "card bg-dark border-secondary p-3 mb-3",
+                if (c.clubOEntidad.nonEmpty) div(cls := "small text-white mb-1", strong("Entidad: "), fixEncoding(c.clubOEntidad)) else span(),
+                if (c.telefono.nonEmpty) div(cls := "small text-white mb-1", strong("Teléfono: "), c.telefono) else span(),
+                if (c.email.nonEmpty) div(cls := "small text-white mb-1", strong("Email: "), c.email) else span(),
+                if (c.comoConocido.nonEmpty) div(cls := "small text-light mb-1", strong("Cómo se conoció: "), fixEncoding(c.comoConocido)) else span(),
+                div(cls := "xx-small text-muted mt-2", s"Última interacción: ${c.ultimaInteraccion.getOrElse("Sin registrar")}")
+              ),
+              div(cls := "card bg-dark border-secondary p-3 mb-3",
+                div(cls := "fw-bold text-white small text-uppercase mb-2", "Historial de interacciones"),
+                if (c.notas.trim.isEmpty) div(cls := "text-muted small", "Sin interacciones registradas")
+                else pre(cls := "text-light small", style := "white-space:pre-wrap; font-family:inherit;", c.notas)
+              ),
+              if (linkedOpps.nonEmpty)
+                div(cls := "card bg-dark border-secondary p-3 mb-3",
+                  div(cls := "fw-bold text-white small text-uppercase mb-2", "Oportunidades vinculadas"),
+                  frag(linkedOpps.map { o =>
+                    div(cls := "xx-small text-light border-bottom border-secondary py-1",
+                      span(cls := "badge bg-secondary me-2", o.tipo), o.fecha.take(10),
+                      if (o.descripcion.nonEmpty) s" — ${fixEncoding(o.descripcion)}" else ""
+                    )
+                  }: _*)
+                )
+              else div()
+            )
+          )
+        )
+        renderHtml(content)
+    }
+  }
+
+  @cask.post("/contacts/save")
+  def saveContactAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.saveContact(
+      p.getOrElse("nombre", ""), p.getOrElse("rol", "OTRO"), p.getOrElse("clubOEntidad", ""),
+      p.getOrElse("telefono", ""), p.getOrElse("email", ""), p.getOrElse("comoConocido", ""),
+      p.getOrElse("notas", ""), p.getOrElse("importancia", "MEDIA")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/contacts"))
+  }
+
+  @cask.post("/contacts/interaccion")
+  def registrarInteraccionAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val id = p.getOrElse("id", "0").toIntOption.getOrElse(0)
+    DatabaseManager.registrarInteraccion(id, p.getOrElse("fecha", ""), p.getOrElse("nota", ""))
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/contacts"))
   }
 
   initialize()
