@@ -782,6 +782,153 @@ object MatchController extends cask.Routes {
       headers = Seq("Location" -> s"/match/edit/$matchId")
     )
   }
+  // ── MODULO 8: AUDIO-DIARIO (PARTIDO / ACADEMIA) — pagina dedicada ────────
+  @cask.get("/audio-diary/:tipo/:itemId")
+  def audioDiaryPage(request: cask.Request, tipo: String, itemId: Int, processing: String = "") = withAuth(request) {
+    val (headerLabel, existingAnalysis, backHref) = tipo match {
+      case "academia" =>
+        val t = DatabaseManager.getTrainingById(itemId)
+        (t.map(tt => s"Academia de porteros · ${tt.fecha.take(10)}").getOrElse("Sesión no encontrada"),
+         t.map(_.analisisVozAcademia).getOrElse(""), "/bio")
+      case _ =>
+        val m = DatabaseManager.getMatchById(itemId)
+        (m.map(mm => s"vs ${fixEncoding(mm.rival)} · ${mm.fecha.take(10)} · resultado ${mm.resultado}").getOrElse("Partido no encontrado"),
+         m.map(_.analisisVoz).getOrElse(""), "/history")
+    }
+    val isProcessing = processing == "1" && existingAnalysis.isEmpty
+
+    val content = basePage("history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-7 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h4(cls := "text-white fw-black mb-0", "🎙️ Audio-Diario"),
+            a(href := backHref, cls := "btn btn-outline-secondary btn-sm fw-bold", "← Volver")
+          ),
+          div(cls := "card bg-dark border-info shadow mb-3",
+            div(cls := "card-header text-info fw-bold small", headerLabel)
+          ),
+
+          if (isProcessing)
+            div(cls := "alert alert-info text-center",
+              "⏳ Analizando con Gemini... esta página se actualizará sola en unos segundos.",
+              script(raw("setTimeout(function(){ window.location.reload(); }, 4000);"))
+            )
+          else if (existingAnalysis.nonEmpty)
+            div(cls := "card bg-dark border-success shadow mb-3",
+              div(cls := "card-header text-success fw-bold small", "🧠 Análisis guardado"),
+              div(cls := "card-body text-light small", style := "white-space:pre-wrap;", fixEncoding(existingAnalysis))
+            )
+          else span(),
+
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small",
+              if (existingAnalysis.nonEmpty) "🔁 Regrabar o subir un nuevo audio" else "Grabar o subir audio"),
+            div(cls := "card-body p-3",
+              div(cls := "d-flex gap-2 mb-2 align-items-center",
+                button(id := "btnRecord", tpe := "button", cls := "btn btn-sm btn-outline-danger", onclick := "adToggleRecording()", "⏺ Grabar"),
+                button(id := "btnStop", tpe := "button", cls := "btn btn-sm btn-danger", style := "display:none;", onclick := "adStopRecording()", "⏹ Parar"),
+                span(id := "adTimer", cls := "text-muted small")
+              ),
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "O sube un archivo (MP3/M4A/WebM/OGG/MP4, máx. 10MB)"),
+                input(tpe := "file", id := "adFileUpload", accept := "audio/*",
+                  cls := "form-control form-control-sm bg-dark text-white", onchange := "adHandleFile(this)")
+              ),
+              audio(id := "adPreview", attr("controls") := "true", style := "width:100%; display:none; margin:8px 0;"),
+              div(id := "adStatus", cls := "xx-small text-muted mb-2"),
+              form(action := "/audio-diary/analyze", method := "post", id := "adForm",
+                input(tpe := "hidden", name := "tipo", value := tipo),
+                input(tpe := "hidden", name := "id", value := itemId.toString),
+                input(tpe := "hidden", name := "audioData", id := "adHiddenData"),
+                button(tpe := "button", id := "btnAnalyze", cls := "btn btn-info w-100 fw-bold",
+                  attr("disabled") := "disabled", onclick := "adSubmit()", "🧠 Analizar con Gemini")
+              )
+            )
+          )
+        )
+      ),
+      script(raw("""
+        let adMediaRecorder; let adChunks = []; let adTimerInterval; let adSeconds = 0;
+        const AD_MAX_BYTES = 10 * 1024 * 1024;
+        async function adToggleRecording() {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            adMediaRecorder = new MediaRecorder(stream);
+            adChunks = []; adSeconds = 0;
+            document.getElementById('adTimer').textContent = '0:00';
+            adMediaRecorder.start();
+            document.getElementById('btnRecord').style.display = 'none';
+            document.getElementById('btnStop').style.display = 'inline-block';
+            document.getElementById('btnAnalyze').disabled = true;
+            adTimerInterval = setInterval(function() {
+              adSeconds++;
+              var m = Math.floor(adSeconds / 60), s = adSeconds % 60;
+              document.getElementById('adTimer').textContent = m + ':' + String(s).padStart(2,'0');
+            }, 1000);
+            adMediaRecorder.ondataavailable = function(e) { adChunks.push(e.data); };
+            adMediaRecorder.onstop = function() {
+              clearInterval(adTimerInterval);
+              var blob = new Blob(adChunks, { type: 'audio/webm' });
+              var url = URL.createObjectURL(blob);
+              var el = document.getElementById('adPreview');
+              el.src = url; el.style.display = 'block';
+              var reader = new FileReader();
+              reader.onloadend = function() {
+                document.getElementById('adHiddenData').value = reader.result;
+                document.getElementById('btnAnalyze').disabled = false;
+                document.getElementById('adStatus').textContent = '✅ Grabación lista para analizar';
+              };
+              reader.readAsDataURL(blob);
+            };
+          } catch (err) { alert('Error de micrófono: ' + err); }
+        }
+        function adStopRecording() {
+          adMediaRecorder.stop();
+          document.getElementById('btnRecord').style.display = 'inline-block';
+          document.getElementById('btnStop').style.display = 'none';
+        }
+        function adHandleFile(input) {
+          if (input.files && input.files[0]) {
+            var file = input.files[0];
+            if (file.size > AD_MAX_BYTES) { alert('El archivo supera los 10MB'); input.value=''; return; }
+            var reader = new FileReader();
+            reader.onload = function(e) {
+              document.getElementById('adHiddenData').value = e.target.result;
+              document.getElementById('adPreview').src = e.target.result;
+              document.getElementById('adPreview').style.display = 'block';
+              document.getElementById('btnAnalyze').disabled = false;
+              document.getElementById('adStatus').textContent = '✅ Archivo listo para analizar';
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+        function adSubmit() {
+          document.getElementById('btnAnalyze').textContent = '⏳ Enviando...';
+          document.getElementById('btnAnalyze').disabled = true;
+          document.getElementById('adForm').submit();
+        }
+      """))
+    )
+    renderHtml(content)
+  }
+
+  @cask.postForm("/audio-diary/analyze")
+  def audioDiaryAnalyze(tipo: String, id: Int, audioData: String) = {
+    // Fire-and-forget en background thread: la nota queda sin referencias tras terminar
+    // (nunca se escribe en disco) y no bloquea la navegacion del padre.
+    val dataSnapshot = audioData
+    new Thread(new Runnable {
+      def run(): Unit = {
+        try {
+          if (tipo == "academia") DatabaseManager.analyzeAudioDiaryAcademia(id, dataSnapshot)
+          else DatabaseManager.analyzeAudioDiaryMatch(id, dataSnapshot)
+        } catch { case _: Exception => () }
+      }
+    }).start()
+
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> s"/audio-diary/$tipo/$id?processing=1"))
+  }
+
   @cask.postForm("/video/add_tag")
   def addVideoTag(matchId: Int, min: Int, sec: Int, tipo: String) = {
     DatabaseManager.addVideoTag(matchId, min, sec, tipo, "")

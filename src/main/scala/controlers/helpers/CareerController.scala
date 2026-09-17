@@ -143,6 +143,60 @@ object CareerController extends cask.Routes {
 
   // --- 5. BIO & EVALUACION (CORREGIDO MODO OSCURO) ---
 
+  private def resilienceWidget() = {
+    val resilience = DatabaseManager.getResilienceIndex()
+    val resIndice   = resilience("indice").asInstanceOf[Double]
+    val resPerfil   = resilience("perfil").asInstanceOf[String]
+    val resRecom    = resilience("recomendacion").asInstanceOf[String]
+    val resEventos  = resilience("eventos").asInstanceOf[List[Map[String, Any]]]
+
+    if (resIndice <= 0) span()
+    else {
+      val resColor = if (resIndice < 5) "danger" else if (resIndice <= 7) "warning" else "success"
+      val labelsJs  = resEventos.map(e => s""""${e("label").asInstanceOf[String]}"""").mkString("[", ",", "]")
+      val antesJs   = resEventos.map(e => f"${e("antes").asInstanceOf[Double]}%.1f").mkString("[", ",", "]")
+      val despuesJs = resEventos.map(e => f"${e("despues").asInstanceOf[Double]}%.1f").mkString("[", ",", "]")
+
+      div(cls := "card bg-dark border-secondary shadow mb-4 w-100",
+        div(cls := "card-header text-white fw-bold small text-center", "🧠 ÍNDICE DE RESILIENCIA MENTAL"),
+        div(cls := "card-body p-3",
+          div(cls := "d-flex align-items-center gap-3 mb-3",
+            div(cls := s"badge bg-$resColor", style := "font-size:1.6rem; padding:10px 18px;", f"$resIndice%.0f/10"),
+            div(cls := "text-white fw-bold small", resPerfil)
+          ),
+          if (resRecom.nonEmpty)
+            div(cls := "alert alert-secondary small mb-3",
+              strong("Recomendación para el padre: "), resRecom)
+          else span(),
+          if (resEventos.size >= 2) div(style := "height:200px;", canvas(id := "chartResilience")) else span()
+        ),
+        if (resEventos.size >= 2) frag(
+          script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+          script(raw(s"""
+            new Chart(document.getElementById('chartResilience'), {
+              type: 'line',
+              data: {
+                labels: $labelsJs,
+                datasets: [
+                  { label: 'Antes del evento', data: $antesJs, borderColor: '#6c757d', backgroundColor: 'transparent', borderDash: [4,4], tension: 0.3, pointRadius: 3 },
+                  { label: 'Después del evento', data: $despuesJs, borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.1)', fill: true, tension: 0.3, pointRadius: 3 }
+                ]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#ccc', font: { size: 10 } } } },
+                scales: {
+                  x: { ticks: { color: '#aaa', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                  y: { min: 0, max: 10, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                }
+              }
+            });
+          """))
+        ) else span()
+      )
+    }
+  }
+
   @cask.get("/career")
   def careerPage(request: cask.Request) = withAuth(request) {
     val c = DatabaseManager.getCareerSummary()
@@ -160,6 +214,7 @@ object CareerController extends cask.Routes {
           div(cls := "mb-3 w-100",
             a(href := "/career/legacy", cls := "btn btn-warning w-100 fw-bold", "⭐ MODO LEGADO (RPG)")
           ),
+          resilienceWidget(),
           raw(DatabaseManager.getLegendComparison()),
           div(cls := "card bg-secondary p-2 w-100 mt-3",
             form(action := "/career/new-season", method := "post", cls := "d-flex flex-column gap-2",
@@ -912,6 +967,462 @@ object CareerController extends cask.Routes {
       )
     }
     renderHtml(basePage("footbar", content))
+  }
+
+  // ── MODULO 2: CHECKLIST DE HABILIDADES DE PORTERO ───────────────────────
+  private val skillCategoryOrder = Seq("Tecnica basica", "Juego con los pies", "Comportamiento en el area", "Mental")
+
+  private def skillRow(s: GoalkeeperSkill) = {
+    val equipoWarning = if (s.conseguido && s.contextoConseguido.contains("EQUIPO"))
+      div(cls := "badge bg-warning text-dark xx-small mt-1", "⚠️ Confirmar en academia o partido")
+    else span()
+
+    div(cls := "d-flex align-items-start justify-content-between gap-2 py-2 border-bottom border-secondary",
+      div(cls := "flex-fill",
+        div(cls := "d-flex align-items-center gap-2",
+          span(if (s.conseguido) "✅" else "⬜"),
+          span(cls := (if (s.conseguido) "text-white fw-bold" else "text-muted"), s.habilidad)
+        ),
+        if (s.conseguido)
+          div(cls := "xx-small text-muted",
+            s"${s.fechaConseguido.getOrElse("")} · ${s.contextoConseguido.getOrElse("")}")
+        else span(),
+        equipoWarning,
+        form(action := "/goalkeeper-skills/notes", method := "post", cls := "d-flex gap-1 mt-1",
+          input(tpe := "hidden", name := "skillId", value := s.id.toString),
+          input(tpe := "text", name := "notas", value := s.notas,
+            cls := "form-control form-control-sm bg-dark text-white border-secondary xx-small",
+            placeholder := "Notas..."),
+          button(tpe := "submit", cls := "btn btn-sm btn-outline-secondary", "💾")
+        )
+      ),
+      div(
+        if (!s.conseguido)
+          form(action := "/goalkeeper-skills/toggle", method := "post", cls := "d-flex gap-1",
+            input(tpe := "hidden", name := "skillId", value := s.id.toString),
+            input(tpe := "hidden", name := "achieved", value := "true"),
+            select(name := "contexto", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+              option(value := "ACADEMIA", "Academia"),
+              option(value := "PARTIDO", "Partido"),
+              option(value := "EQUIPO", "Equipo")
+            ),
+            button(tpe := "submit", cls := "btn btn-sm btn-success", "✔")
+          )
+        else
+          form(action := "/goalkeeper-skills/toggle", method := "post",
+            input(tpe := "hidden", name := "skillId", value := s.id.toString),
+            input(tpe := "hidden", name := "achieved", value := "false"),
+            button(tpe := "submit", cls := "btn btn-sm btn-outline-danger", "✕")
+          )
+      )
+    )
+  }
+
+  @cask.get("/goalkeeper-skills")
+  def goalkeeperSkillsPage(request: cask.Request) = withAuth(request) {
+    val skills = DatabaseManager.getGoalkeeperSkills()
+    val total = skills.size
+    val conseguidas = skills.count(_.conseguido)
+    val pctGlobal = if (total > 0) conseguidas * 100 / total else 0
+    val pctColor = if (pctGlobal >= 70) "success" else if (pctGlobal >= 40) "warning" else "danger"
+
+    val porCategoria = skills.groupBy(_.categoria).toList.sortBy { case (cat, _) =>
+      val idx = skillCategoryOrder.indexOf(cat)
+      if (idx >= 0) idx else 999
+    }
+
+    val content = basePage("goalkeeper-skills",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "🧤 Checklist de Habilidades"),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "d-flex justify-content-between small text-muted mb-1",
+              span("PROGRESO GLOBAL"), span(s"$conseguidas/$total")
+            ),
+            div(cls := "progress", style := "height:20px;",
+              div(cls := s"progress-bar bg-$pctColor fw-bold", style := s"width:$pctGlobal%;", s"$pctGlobal%")
+            )
+          ),
+
+          frag(porCategoria.map { case (cat, catSkills) =>
+            val catTotal = catSkills.size
+            val catDone = catSkills.count(_.conseguido)
+            val catPct = if (catTotal > 0) catDone * 100 / catTotal else 0
+            div(cls := "card bg-dark border-secondary p-3 mb-3",
+              div(cls := "d-flex justify-content-between align-items-center mb-2",
+                span(cls := "fw-bold text-white", cat.toUpperCase),
+                span(cls := "badge bg-secondary", s"$catPct%")
+              ),
+              div(cls := "progress mb-3", style := "height:6px;",
+                div(cls := "progress-bar bg-info", style := s"width:$catPct%;")
+              ),
+              frag(catSkills.map(skillRow): _*)
+            )
+          }: _*)
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.postForm("/goalkeeper-skills/toggle")
+  def toggleSkill(skillId: Int, achieved: String, contexto: String = "") = {
+    DatabaseManager.setSkillAchieved(skillId, achieved == "true", contexto)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/goalkeeper-skills"))
+  }
+
+  @cask.postForm("/goalkeeper-skills/notes")
+  def saveSkillNotes(skillId: Int, notas: String) = {
+    DatabaseManager.updateSkillNotes(skillId, notas)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/goalkeeper-skills"))
+  }
+
+  // ── MODULO 3: VISIBILIDAD Y OPORTUNIDADES ───────────────────────────────
+  private def opportunityTypeColor(tipo: String): String = tipo match {
+    case "TORNEO"   => "primary"
+    case "PRUEBA"   => "warning"
+    case "CONTACTO" => "info"
+    case "OJEADOR"  => "success"
+    case "CAMPAMENTO" => "secondary"
+    case _          => "secondary"
+  }
+
+  @cask.get("/opportunities")
+  def opportunitiesPage(request: cask.Request) = withAuth(request) {
+    val opps = DatabaseManager.getOpportunities()
+    val total = opps.size
+    val pendientes = opps.count(o => o.seguimiento.nonEmpty && !o.seguimientoCompletado)
+
+    val content = basePage("opportunities",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "🏆 Visibilidad y Oportunidades"),
+
+          // KPIs
+          div(cls := "row g-2 mb-4",
+            div(cls := "col-6",
+              div(cls := "card bg-dark border-secondary text-center py-3",
+                div(cls := "text-white fw-bold", style := "font-size:28px;", total.toString),
+                div(cls := "xx-small text-muted mt-1", "OPORTUNIDADES TOTALES")
+              )
+            ),
+            div(cls := "col-6",
+              div(cls := s"card bg-dark border-${if (pendientes > 0) "danger" else "secondary"} text-center py-3",
+                div(cls := s"${if (pendientes > 0) "text-danger" else "text-white"} fw-bold", style := "font-size:28px;", pendientes.toString),
+                div(cls := "xx-small text-muted mt-1", "SEGUIMIENTO PENDIENTE"),
+                if (pendientes > 0) div(cls := "badge bg-danger mt-1", "⚠️ Requiere atención") else span()
+              )
+            )
+          ),
+
+          // Formulario nueva oportunidad
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "➕ Nueva oportunidad"),
+            form(action := "/opportunities/save", method := "post",
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                  input(tpe := "date", name := "fecha", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                    value := java.time.LocalDate.now().toString, required := true)
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "TIPO"),
+                  select(name := "tipo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                    option(value := "TORNEO", "Torneo"),
+                    option(value := "PRUEBA", "Prueba"),
+                    option(value := "CONTACTO", "Contacto"),
+                    option(value := "OJEADOR", "Ojeador"),
+                    option(value := "CAMPAMENTO", "Campamento")
+                  )
+                )
+              ),
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "CLUB / ENTIDAD"),
+                input(tpe := "text", name := "clubOEntidad", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Ej: Real Madrid Cantera")
+              ),
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "DESCRIPCIÓN"),
+                textarea(name := "descripcion", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "2")()
+              ),
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "RESULTADO (si ya se conoce)"),
+                input(tpe := "text", name := "resultado", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Ej: Convocado a segunda fase")
+              ),
+              div(cls := "mb-3",
+                label(cls := "xx-small text-muted fw-bold", "SEGUIMIENTO PENDIENTE (opcional)"),
+                input(tpe := "text", name := "seguimiento", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Ej: Esperar respuesta del club en 2 semanas")
+              ),
+              button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar")
+            )
+          ),
+
+          // Lista cronológica inversa
+          if (opps.isEmpty)
+            div(cls := "alert alert-secondary text-center", "Sin oportunidades registradas todavía")
+          else
+            frag(opps.map { o =>
+              div(cls := "card bg-dark border-secondary p-3 mb-2",
+                div(cls := "d-flex justify-content-between align-items-start mb-1",
+                  div(
+                    span(cls := s"badge bg-${opportunityTypeColor(o.tipo)} me-2", o.tipo),
+                    span(cls := "fw-bold text-white", if (o.clubOEntidad.nonEmpty) fixEncoding(o.clubOEntidad) else "—")
+                  ),
+                  span(cls := "xx-small text-muted", o.fecha.take(10))
+                ),
+                if (o.descripcion.nonEmpty) div(cls := "small text-light mb-2", fixEncoding(o.descripcion)) else span(),
+                form(action := "/opportunities/resultado", method := "post", cls := "d-flex gap-1 mb-2",
+                  input(tpe := "hidden", name := "id", value := o.id.toString),
+                  input(tpe := "text", name := "resultado", value := o.resultado,
+                    cls := "form-control form-control-sm bg-dark text-white border-secondary xx-small",
+                    placeholder := "Resultado..."),
+                  button(tpe := "submit", cls := "btn btn-sm btn-outline-secondary", "💾")
+                ),
+                if (o.seguimiento.nonEmpty)
+                  div(cls := "d-flex justify-content-between align-items-center",
+                    div(cls := "xx-small",
+                      span(cls := "text-muted fw-bold", "Seguimiento: "),
+                      span(cls := (if (o.seguimientoCompletado) "text-success" else "text-warning"), o.seguimiento)
+                    ),
+                    if (!o.seguimientoCompletado)
+                      form(action := "/opportunities/complete", method := "post",
+                        input(tpe := "hidden", name := "id", value := o.id.toString),
+                        button(tpe := "submit", cls := "btn btn-sm btn-success", "✅ Seguimiento completado")
+                      )
+                    else div(cls := "badge bg-success", "✅ Completado")
+                  )
+                else span()
+              )
+            }: _*)
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.postForm("/opportunities/save")
+  def saveOpportunity(fecha: String, tipo: String, clubOEntidad: String = "", descripcion: String = "",
+                       resultado: String = "", seguimiento: String = "") = {
+    DatabaseManager.saveOpportunity(fecha, tipo, descripcion, clubOEntidad, resultado, seguimiento)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
+  }
+
+  @cask.postForm("/opportunities/resultado")
+  def updateOpportunityResultado(id: Int, resultado: String) = {
+    DatabaseManager.updateOpportunityResultado(id, resultado)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
+  }
+
+  @cask.postForm("/opportunities/complete")
+  def completeOpportunitySeguimiento(id: Int) = {
+    DatabaseManager.completeSeguimiento(id)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
+  }
+
+  // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
+  @cask.get("/benchmark")
+  def benchmarkPage(request: cask.Request) = withAuth(request) {
+    val d = DatabaseManager.getBenchmark()
+    val sinDatos = d("sinDatos").asInstanceOf[Boolean]
+
+    val content = basePage("benchmark",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-4",
+            h2(cls := "text-white mb-0", "📊 Benchmark"),
+            form(action := "/benchmark/refresh", method := "post",
+              button(tpe := "submit", cls := "btn btn-outline-warning btn-sm fw-bold", "🔄 Actualizar benchmark"))
+          ),
+          if (sinDatos)
+            div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")
+          else frag(
+            div(cls := "card bg-dark border-primary shadow mb-3",
+              div(cls := "card-header text-primary fw-bold small", "📈 PERCENTIL DE PROGRESIÓN"),
+              div(cls := "card-body text-light small", d("percentil").asInstanceOf[String])
+            ),
+            div(cls := "card bg-dark border-warning shadow mb-3",
+              div(cls := "card-header text-warning fw-bold small", "🎯 ÁREAS PRIORITARIAS"),
+              div(cls := "card-body text-light small", d("areas").asInstanceOf[String])
+            ),
+            div(cls := "card bg-dark border-success shadow mb-3",
+              div(cls := "card-header text-success fw-bold small", "⭐ REFERENCIA REAL"),
+              div(cls := "card-body text-light small", d("referencia").asInstanceOf[String])
+            )
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.postForm("/benchmark/refresh")
+  def refreshBenchmark() = {
+    DatabaseManager.invalidateBenchmarkCache()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/benchmark"))
+  }
+
+  // ── MODULO 6: PERIODIZACION ANUAL ───────────────────────────────────────
+  private def periodizationTipoLabel(tipo: String): String = tipo match {
+    case "CARGA_ALTA"        => "Carga alta"
+    case "DESCARGA"          => "Descarga"
+    case "TORNEO_CLAVE"      => "Torneo clave"
+    case "VENTANA_ACADEMIAS" => "Ventana academias"
+    case "EVALUACION"        => "Evaluación"
+    case "DESCANSO"          => "Descanso"
+    case _                   => tipo
+  }
+
+  @cask.get("/periodization")
+  def periodizationPage(request: cask.Request) = withAuth(request) {
+    val blocks = DatabaseManager.getPeriodization()
+    val today = java.time.LocalDate.now()
+    val yearStart = java.time.LocalDate.of(today.getYear, 1, 1)
+    val yearLen = java.time.LocalDate.of(today.getYear, 12, 31).toEpochDay - yearStart.toEpochDay + 1
+    def pct(d: Long): Double = math.max(0.0, math.min(100.0, d.toDouble / yearLen * 100.0))
+    val hoyPct = pct(today.toEpochDay - yearStart.toEpochDay)
+
+    val activo = blocks.find { b =>
+      try {
+        val ini = java.time.LocalDate.parse(b.fechaInicio); val fin = java.time.LocalDate.parse(b.fechaFin)
+        !today.isBefore(ini) && !today.isAfter(fin)
+      } catch { case _: Exception => false }
+    }
+
+    val monthLabels = Seq("Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic")
+
+    val timelineBlocks = blocks.flatMap { b =>
+      try {
+        val ini = java.time.LocalDate.parse(b.fechaInicio); val fin = java.time.LocalDate.parse(b.fechaFin)
+        val yearEnd = yearStart.plusDays(yearLen - 1)
+        if (fin.isBefore(yearStart) || ini.isAfter(yearEnd)) None
+        else {
+          val startD = math.max(0L, ini.toEpochDay - yearStart.toEpochDay)
+          val endD   = math.min(yearLen, fin.toEpochDay - yearStart.toEpochDay + 1)
+          val left = pct(startD); val width = math.max(0.6, pct(endD) - pct(startD))
+          Some(div(cls := "position-absolute top-0 h-100 rounded",
+            style := s"left:$left%; width:$width%; background:${b.color}; opacity:0.85;",
+            attr("title") := s"${fixEncoding(b.nombre)} (${periodizationTipoLabel(b.tipo)})"))
+        }
+      } catch { case _: Exception => None }
+    }
+
+    val content = basePage("periodization",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "📅 Periodización Anual"),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-muted small text-uppercase mb-2", s"Año ${today.getYear}"),
+            div(cls := "position-relative", style := "height:50px; background:#1a1a1a; border-radius:6px; overflow:hidden; margin-top:16px;",
+              frag(timelineBlocks: _*),
+              div(cls := "position-absolute top-0 h-100", style := s"left:$hoyPct%; width:2px; background:#fff; z-index:5;"),
+              div(cls := "position-absolute", style := s"left:$hoyPct%; top:-16px; transform:translateX(-50%); font-size:9px; color:#fff; font-weight:bold; white-space:nowrap;", "▼ HOY")
+            ),
+            div(cls := "d-flex justify-content-between xx-small text-muted mt-2",
+              frag(monthLabels.map(m => span(m)): _*)
+            )
+          ),
+
+          activo match {
+            case Some(b) =>
+              div(cls := "card bg-dark shadow mb-4", style := s"border-color:${b.color};",
+                div(cls := "card-header fw-bold small", style := s"color:${b.color};", "PERÍODO ACTIVO"),
+                div(cls := "card-body",
+                  div(cls := "fw-bold text-white fs-5", fixEncoding(b.nombre)),
+                  div(cls := "small text-muted mb-2", s"${periodizationTipoLabel(b.tipo)} · ${b.fechaInicio} → ${b.fechaFin}"),
+                  if (b.notas.nonEmpty) div(cls := "small text-light fst-italic", fixEncoding(b.notas)) else span()
+                )
+              )
+            case None =>
+              div(cls := "alert alert-secondary text-center mb-4", "Sin período activo definido para hoy")
+          },
+
+          div(cls := "card bg-dark border-warning p-3 mb-4",
+            form(action := "/periodization/generate", method := "post",
+              button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", "🧠 Generar plan IA (próximos 6 meses)")
+            ),
+            div(cls := "xx-small text-muted mt-2 text-center", "Respeta la estructura semanal fija — no añade sesiones extra")
+          ),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "➕ Añadir período"),
+            form(action := "/periodization/save", method := "post",
+              div(cls := "mb-2",
+                input(tpe := "text", name := "nombre", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Nombre del período", required := true)
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "INICIO"),
+                  input(tpe := "date", name := "fechaInicio", cls := "form-control form-control-sm bg-dark text-white border-secondary", required := true)
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "FIN"),
+                  input(tpe := "date", name := "fechaFin", cls := "form-control form-control-sm bg-dark text-white border-secondary", required := true)
+                )
+              ),
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "TIPO"),
+                select(name := "tipo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                  option(value := "CARGA_ALTA", "Carga alta"),
+                  option(value := "DESCARGA", "Descarga"),
+                  option(value := "TORNEO_CLAVE", "Torneo clave"),
+                  option(value := "VENTANA_ACADEMIAS", "Ventana academias"),
+                  option(value := "EVALUACION", "Evaluación"),
+                  option(value := "DESCANSO", "Descanso")
+                )
+              ),
+              div(cls := "mb-3",
+                textarea(name := "notas", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "2", placeholder := "Notas / implicación...")()
+              ),
+              button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar período")
+            )
+          ),
+
+          if (blocks.nonEmpty)
+            div(cls := "card bg-dark border-secondary p-3",
+              div(cls := "fw-bold text-white small text-uppercase mb-3", "Períodos definidos"),
+              frag(blocks.map { b =>
+                div(cls := "d-flex align-items-center gap-2 py-2 border-bottom border-secondary",
+                  div(style := s"width:10px; height:10px; border-radius:50%; background:${b.color}; flex-shrink:0;"),
+                  div(cls := "flex-fill",
+                    div(cls := "text-white small fw-bold", fixEncoding(b.nombre)),
+                    div(cls := "xx-small text-muted", s"${periodizationTipoLabel(b.tipo)} · ${b.fechaInicio} → ${b.fechaFin}")
+                  )
+                )
+              }: _*)
+            )
+          else span()
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.postForm("/periodization/save")
+  def savePeriodizationBlock(nombre: String, fechaInicio: String, fechaFin: String, tipo: String, notas: String = "") = {
+    DatabaseManager.savePeriodization(nombre, fechaInicio, fechaFin, tipo, notas)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/periodization"))
+  }
+
+  @cask.postForm("/periodization/generate")
+  def generatePeriodizationAI() = {
+    val plan = DatabaseManager.generatePeriodizationPlan()
+    val content = basePage("periodization",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-warning mb-4 text-center", "🧠 Plan de Periodización IA"),
+          div(cls := "card bg-dark border-warning p-3 mb-4",
+            div(cls := "text-light small", style := "white-space:pre-wrap;", plan)
+          ),
+          a(href := "/periodization", cls := "btn btn-outline-secondary w-100 fw-bold", "← Volver")
+        )
+      )
+    )
+    renderHtml(content)
   }
 
   // ── EFECTO MARIPOSA ──────────────────────────────────────────────────────

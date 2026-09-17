@@ -25,6 +25,25 @@ case class TechReview(id: Int, fecha: String, blocaje: Int, pies: Int, aereo: In
 case class AcademicNote(id: Int, fecha: String, asignatura: String, nota: Double, tipo: String)
 // Vault Medico
 case class MedicalReport(id: Int, fecha: String, tipo: String, diagnostico: String, recomendaciones: String, esPrevio: Boolean)
+// Checklist de habilidades tecnicas de portero
+case class GoalkeeperSkill(
+  id: Int, categoria: String, habilidad: String, conseguido: Boolean,
+  fechaConseguido: Option[String], contextoConseguido: Option[String], notas: String
+)
+// Registro de visibilidad y oportunidades (torneos, pruebas, contactos, ojeadores...)
+case class Opportunity(
+  id: Int, fecha: String, tipo: String, descripcion: String, clubOEntidad: String,
+  resultado: String, seguimiento: String, seguimientoCompletado: Boolean
+)
+// Periodizacion anual del calendario de entrenamiento
+case class PeriodizationBlock(
+  id: Int, nombre: String, fechaInicio: String, fechaFin: String, tipo: String, notas: String, color: String
+)
+// Sesion de entrenamiento (usada para el listado de Academia y su audio-diario)
+case class TrainingSession(
+  id: Int, fecha: String, tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int,
+  analisisVozAcademia: String
+)
 // Footbar (sensor GPS de rendimiento fisico/tecnico)
 case class FootbarSession(
   matchId: Int, distanciaKm: Double, altaIntensidadM: Double, sprintMaxKmh: Double,
@@ -183,6 +202,8 @@ object DatabaseManager {
         atencion       INT,
         rutina_detalle TEXT
       )""")
+      // Modulo 8: Audio-diario de sesiones de academia
+      stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS analisis_voz_academia TEXT DEFAULT ''")
 
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS drills (
         id                SERIAL PRIMARY KEY,
@@ -360,6 +381,78 @@ object DatabaseManager {
         tiro_max_kmh         DOUBLE PRECISION DEFAULT 0,
         created_at           TIMESTAMP DEFAULT NOW(),
         UNIQUE(match_id)
+      )""")
+
+      // ── Modulo 2: Checklist de habilidades tecnicas de portero ──────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS goalkeeper_skills (
+        id                   SERIAL PRIMARY KEY,
+        categoria            TEXT NOT NULL,
+        habilidad            TEXT NOT NULL,
+        conseguido           BOOLEAN DEFAULT FALSE,
+        fecha_conseguido     DATE,
+        contexto_conseguido  TEXT,
+        notas                TEXT DEFAULT ''
+      )""")
+      val rsSkillsCount = stmt.executeQuery("SELECT COUNT(*) FROM goalkeeper_skills")
+      if (rsSkillsCount.next() && rsSkillsCount.getInt(1) == 0) {
+        val seedSkills = Seq(
+          ("Tecnica basica", "Posicion de manos correcta"),
+          ("Tecnica basica", "Posicion de pies antes de recibir"),
+          ("Tecnica basica", "Caida lateral derecha"),
+          ("Tecnica basica", "Caida lateral izquierda"),
+          ("Tecnica basica", "Saque con la mano rodada"),
+          ("Tecnica basica", "Saque con la mano en volea"),
+          ("Tecnica basica", "Despeje de puños"),
+          ("Tecnica basica", "Blocaje de balon en carrera"),
+          ("Juego con los pies", "Pase corto con el interior"),
+          ("Juego con los pies", "Pase largo con el empeine"),
+          ("Juego con los pies", "Control y conduccion bajo presion"),
+          ("Juego con los pies", "Distribucion rapida"),
+          ("Comportamiento en el area", "Manda en el area con voz"),
+          ("Comportamiento en el area", "Sale a por balones aereos"),
+          ("Comportamiento en el area", "Posicionamiento en tiros lejanos"),
+          ("Comportamiento en el area", "Anticipacion en el 1v1"),
+          ("Mental", "Concentracion tras error"),
+          ("Mental", "Liderazgo y comunicacion con la defensa"),
+          ("Mental", "Reaccion tras gol encajado"),
+          ("Mental", "Constancia en el entreno")
+        )
+        val insSkill = conn.prepareStatement("INSERT INTO goalkeeper_skills (categoria, habilidad) VALUES (?, ?)")
+        seedSkills.foreach { case (cat, hab) =>
+          insSkill.setString(1, cat); insSkill.setString(2, hab); insSkill.executeUpdate()
+        }
+      }
+
+      // ── Modulo 3: Registro de visibilidad y oportunidades ───────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS opportunities (
+        id                     SERIAL PRIMARY KEY,
+        fecha                  DATE DEFAULT CURRENT_DATE,
+        tipo                   TEXT NOT NULL,
+        descripcion            TEXT DEFAULT '',
+        club_o_entidad         TEXT DEFAULT '',
+        resultado              TEXT DEFAULT '',
+        seguimiento            TEXT DEFAULT '',
+        seguimiento_completado BOOLEAN DEFAULT FALSE,
+        created_at             TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // ── Cache generico de features IA con expiracion por tiempo (7 dias) ────
+      // Reutilizado por el Indice de Resiliencia (Modulo 4) y el Benchmark (Modulo 5)
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS feature_cache (
+        cache_key  TEXT PRIMARY KEY,
+        payload    TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // ── Modulo 6: Periodizacion anual ────────────────────────────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS periodization (
+        id           SERIAL PRIMARY KEY,
+        nombre       TEXT NOT NULL,
+        fecha_inicio DATE NOT NULL,
+        fecha_fin    DATE NOT NULL,
+        tipo         TEXT NOT NULL,
+        notas        TEXT DEFAULT '',
+        color        TEXT DEFAULT '#6c757d'
       )""")
 
       println("[OK] initDB: todas las tablas verificadas.")
@@ -915,6 +1008,451 @@ object DatabaseManager {
         "correlacionNota" -> getFootbarCorrelacion()
       )
     } finally { conn.close() }
+  }
+
+  // ── MODULO 2: CHECKLIST DE HABILIDADES DE PORTERO ───────────────────────
+  def getGoalkeeperSkills(): List[GoalkeeperSkill] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT * FROM goalkeeper_skills ORDER BY id ASC")
+      var list = List[GoalkeeperSkill]()
+      while (rs.next()) {
+        list = list :+ GoalkeeperSkill(
+          rs.getInt("id"), rs.getString("categoria"), rs.getString("habilidad"),
+          rs.getBoolean("conseguido"),
+          Option(rs.getDate("fecha_conseguido")).map(_.toString),
+          Option(rs.getString("contexto_conseguido")),
+          Option(rs.getString("notas")).getOrElse("")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def setSkillAchieved(id: Int, achieved: Boolean, contexto: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "UPDATE goalkeeper_skills SET conseguido = ?, fecha_conseguido = ?, contexto_conseguido = ? WHERE id = ?"
+      )
+      ps.setBoolean(1, achieved)
+      if (achieved) {
+        ps.setDate(2, Date.valueOf(LocalDate.now()))
+        ps.setString(3, contexto)
+      } else {
+        ps.setNull(2, java.sql.Types.DATE)
+        ps.setNull(3, java.sql.Types.VARCHAR)
+      }
+      ps.setInt(4, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def updateSkillNotes(id: Int, notas: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE goalkeeper_skills SET notas = ? WHERE id = ?")
+      ps.setString(1, fixEncoding(notas))
+      ps.setInt(2, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ── MODULO 3: VISIBILIDAD Y OPORTUNIDADES ───────────────────────────────
+  def getOpportunities(): List[Opportunity] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT * FROM opportunities ORDER BY fecha DESC, id DESC")
+      var list = List[Opportunity]()
+      while (rs.next()) {
+        list = list :+ Opportunity(
+          rs.getInt("id"), rs.getDate("fecha").toString, rs.getString("tipo"),
+          Option(rs.getString("descripcion")).getOrElse(""),
+          Option(rs.getString("club_o_entidad")).getOrElse(""),
+          Option(rs.getString("resultado")).getOrElse(""),
+          Option(rs.getString("seguimiento")).getOrElse(""),
+          rs.getBoolean("seguimiento_completado")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def saveOpportunity(fecha: String, tipo: String, descripcion: String, clubOEntidad: String,
+                       resultado: String, seguimiento: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO opportunities (fecha, tipo, descripcion, club_o_entidad, resultado, seguimiento)
+        VALUES (?, ?, ?, ?, ?, ?)
+      """)
+      ps.setDate(1, Date.valueOf(if (fecha.nonEmpty) fecha else LocalDate.now().toString))
+      ps.setString(2, tipo)
+      ps.setString(3, fixEncoding(descripcion))
+      ps.setString(4, fixEncoding(clubOEntidad))
+      ps.setString(5, fixEncoding(resultado))
+      ps.setString(6, fixEncoding(seguimiento))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def updateOpportunityResultado(id: Int, resultado: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE opportunities SET resultado = ? WHERE id = ?")
+      ps.setString(1, fixEncoding(resultado))
+      ps.setInt(2, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def completeSeguimiento(id: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE opportunities SET seguimiento_completado = TRUE WHERE id = ?")
+      ps.setInt(1, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ── MODULO 4: INDICE DE RESILIENCIA MENTAL ──────────────────────────────
+  def getResilienceIndex(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Cache: 7 dias
+      val rsCache = conn.prepareStatement(
+        "SELECT payload FROM feature_cache WHERE cache_key = 'resilience_index' AND updated_at > NOW() - INTERVAL '7 days'"
+      ).executeQuery()
+      if (rsCache.next()) {
+        val json = ujson.read(rsCache.getString("payload"))
+        return Map(
+          "indice"        -> json("indice").num,
+          "perfil"        -> json("perfil").str,
+          "recomendacion" -> json("recomendacion").str,
+          "eventos"       -> json("eventos").arr.map(e => Map(
+            "label" -> e("label").str, "antes" -> e("antes").num, "despues" -> e("despues").num
+          )).toList
+        )
+      }
+
+      case class M(fecha: String, nota: Double, gc: Int)
+      val rsMatches = conn.createStatement().executeQuery(
+        "SELECT fecha, nota, goles_contra FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"
+      )
+      var all = List[M]()
+      while (rsMatches.next())
+        all = all :+ M(rsMatches.getString("fecha"), rsMatches.getDouble("nota"), rsMatches.getInt("goles_contra"))
+
+      // Post-goleada (GC >= 3): nota del partido siguiente
+      var postGoleada = List[Double]()
+      var eventos = List[(String, Double, Double)]() // (label, antes, despues)
+      for (i <- all.indices) {
+        if (all(i).gc >= 3 && i + 1 < all.size) {
+          postGoleada = postGoleada :+ all(i + 1).nota
+          eventos = eventos :+ ((s"GC${all(i).gc} (${all(i).fecha.take(10)})", all(i).nota, all(i + 1).nota))
+        }
+      }
+
+      // Post-lesion: primer partido con fecha posterior al alta de cada lesion
+      val rsInjuries = conn.createStatement().executeQuery(
+        "SELECT fecha_alta FROM injuries WHERE fecha_alta IS NOT NULL ORDER BY fecha_alta ASC"
+      )
+      var fechasAlta = List[String]()
+      while (rsInjuries.next()) fechasAlta = fechasAlta :+ rsInjuries.getString("fecha_alta")
+
+      var postLesion = List[Double]()
+      fechasAlta.foreach { fAlta =>
+        val despuesOpt = all.find(_.fecha > fAlta)
+        val antesOpt   = all.filter(_.fecha < fAlta).lastOption
+        despuesOpt.foreach { d =>
+          postLesion = postLesion :+ d.nota
+          eventos = eventos :+ ((s"Vuelta lesión (${fAlta.take(10)})", antesOpt.map(_.nota).getOrElse(0.0), d.nota))
+        }
+      }
+
+      if (postGoleada.isEmpty && postLesion.isEmpty) {
+        return Map("indice" -> 0.0, "perfil" -> "Sin datos suficientes todavía", "recomendacion" -> "", "eventos" -> List.empty[Map[String, Any]])
+      }
+
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+
+      val prompt = s"""Eres psicólogo deportivo especializado en fútbol base. Héctor es un portero de $edad años.
+Tras partidos con 3 o más goles encajados, sus notas siguientes fueron: ${postGoleada.mkString(", ")}.
+Tras lesiones, sus notas de vuelta fueron: ${postLesion.mkString(", ")}.
+Analiza su resiliencia mental. Dame:
+1) Un índice numérico del 1 al 10
+2) Una frase de máximo 15 palabras describiendo su perfil mental
+3) Una recomendación concreta para el padre
+Responde en texto plano con exactamente este formato (sin markdown):
+INDICE: <numero>
+PERFIL: <frase>
+RECOMENDACION: <texto>"""
+
+      val respuesta = AIProvider.ask(prompt)
+
+      def extract(tag: String): String = {
+        val regex = s"(?i)$tag:\\s*(.+)".r
+        regex.findFirstMatchIn(respuesta).map(_.group(1).trim).getOrElse("")
+      }
+      val indice = extract("INDICE").takeWhile(c => c.isDigit || c == '.').toDoubleOption.getOrElse(5.0)
+      val perfil = extract("PERFIL")
+      val recomendacion = extract("RECOMENDACION")
+
+      val eventosJson = ujson.Arr(eventos.map { case (label, antes, despues) =>
+        ujson.Obj("label" -> label, "antes" -> antes, "despues" -> despues): ujson.Value
+      }: _*)
+      val payload = ujson.Obj("indice" -> indice, "perfil" -> perfil, "recomendacion" -> recomendacion, "eventos" -> eventosJson)
+
+      val upsert = conn.prepareStatement("""
+        INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('resilience_index', ?, NOW())
+        ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+      """)
+      upsert.setString(1, ujson.write(payload))
+      upsert.executeUpdate()
+
+      Map(
+        "indice" -> indice, "perfil" -> perfil, "recomendacion" -> recomendacion,
+        "eventos" -> eventos.map { case (l, a, d) => Map("label" -> l, "antes" -> a, "despues" -> d) }
+      )
+    } finally { conn.close() }
+  }
+
+  // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
+  def getBenchmark(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rsCache = conn.prepareStatement(
+        "SELECT payload FROM feature_cache WHERE cache_key = 'benchmark' AND updated_at > NOW() - INTERVAL '7 days'"
+      ).executeQuery()
+      if (rsCache.next()) {
+        val json = ujson.read(rsCache.getString("payload"))
+        return Map("percentil" -> json("percentil").str, "areas" -> json("areas").str,
+                   "referencia" -> json("referencia").str, "sinDatos" -> false)
+      }
+
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+      val matches = getMatchesList() // ORDER BY fecha DESC
+      val pj = matches.size
+
+      if (pj < 3) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> true)
+
+      val notaMedia = matches.map(_.nota).sum / pj
+      def gcOf(m: MatchLog): Int = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(1)
+      val cleanSheets = matches.count(gcOf(_) == 0)
+      val pctCS = cleanSheets * 100 / pj
+      val acute = getWorkloads(7); val chronic = getWorkloads(28)
+      val acwr = StatsCalculator.calculateACWR(acute, chronic)
+      val racha = matches.takeWhile(gcOf(_) == 0).size
+
+      val prompt = s"""Héctor tiene $edad años, es portero de fútbol base español. Sus estadísticas actuales: nota media ${f"$notaMedia%.1f"}, clean sheets $cleanSheets de $pj partidos ($pctCS%), ACWR ${f"$acwr%.2f"}, racha actual $racha partidos.
+Entrena 2 días con su equipo, 1 día de academia específica de porteros semanalmente, y 2 días de judo.
+Basándote en perfiles públicos de porteros que llegaron a academias de Primera División española con 8-10 años:
+1) Percentil estimado de progresión (0-100) con justificación breve
+2) Las 2 áreas que debería priorizar para mejorar su proyección
+3) Una referencia real de portero español que empezó con un perfil similar a esta edad
+Responde en texto plano, máximo 4 líneas por punto, con exactamente este formato:
+PERCENTIL: <texto>
+AREAS: <texto>
+REFERENCIA: <texto>"""
+
+      val respuesta = AIProvider.ask(prompt)
+
+      def extractSection(resp: String, tag: String, nextTag: Option[String]): String = {
+        val upper = resp.toUpperCase
+        val startIdx = upper.indexOf(s"$tag:")
+        if (startIdx < 0) return ""
+        val contentStart = startIdx + tag.length + 1
+        val endIdx = nextTag.map(nt => upper.indexOf(s"$nt:", contentStart)).filter(_ >= 0).getOrElse(resp.length)
+        resp.substring(contentStart, endIdx).trim
+      }
+      val percentilTxt  = extractSection(respuesta, "PERCENTIL", Some("AREAS"))
+      val areasTxt      = extractSection(respuesta, "AREAS", Some("REFERENCIA"))
+      val referenciaTxt = extractSection(respuesta, "REFERENCIA", None)
+
+      val payload = ujson.Obj("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt)
+      val upsert = conn.prepareStatement("""
+        INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('benchmark', ?, NOW())
+        ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+      """)
+      upsert.setString(1, ujson.write(payload))
+      upsert.executeUpdate()
+
+      Map("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt, "sinDatos" -> false)
+    } finally { conn.close() }
+  }
+
+  def invalidateBenchmarkCache(): Unit = {
+    val conn = getConnection()
+    try { conn.createStatement().executeUpdate("DELETE FROM feature_cache WHERE cache_key = 'benchmark'") }
+    finally { conn.close() }
+  }
+
+  // ── MODULO 6: PERIODIZACION ANUAL ───────────────────────────────────────
+  def periodizationTipoColor(tipo: String): String = tipo match {
+    case "CARGA_ALTA"          => "#dc3545"
+    case "DESCARGA"            => "#20c997"
+    case "TORNEO_CLAVE"        => "#ffc107"
+    case "VENTANA_ACADEMIAS"   => "#0dcaf0"
+    case "EVALUACION"          => "#8b5cf6"
+    case "DESCANSO"            => "#6c757d"
+    case _                     => "#6c757d"
+  }
+
+  def getPeriodization(): List[PeriodizationBlock] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT * FROM periodization ORDER BY fecha_inicio ASC")
+      var list = List[PeriodizationBlock]()
+      while (rs.next()) {
+        list = list :+ PeriodizationBlock(
+          rs.getInt("id"), rs.getString("nombre"), rs.getDate("fecha_inicio").toString,
+          rs.getDate("fecha_fin").toString, rs.getString("tipo"),
+          Option(rs.getString("notas")).getOrElse(""), Option(rs.getString("color")).getOrElse("#6c757d")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def savePeriodization(nombre: String, fechaInicio: String, fechaFin: String, tipo: String, notas: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO periodization (nombre, fecha_inicio, fecha_fin, tipo, notas, color) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      ps.setString(1, fixEncoding(nombre))
+      ps.setDate(2, Date.valueOf(fechaInicio))
+      ps.setDate(3, Date.valueOf(fechaFin))
+      ps.setString(4, tipo)
+      ps.setString(5, fixEncoding(notas))
+      ps.setString(6, periodizationTipoColor(tipo))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // Sugerencia de periodizacion de los proximos 6 meses respetando la estructura semanal fija
+  def generatePeriodizationPlan(): String = {
+    val conn = getConnection()
+    try {
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+      val rsMatches = conn.createStatement().executeQuery(
+        "SELECT fecha, rival FROM matches WHERE status='SCHEDULED' ORDER BY fecha ASC LIMIT 20"
+      )
+      var partidos = List[String]()
+      while (rsMatches.next()) partidos = partidos :+ s"${rsMatches.getDate("fecha")}: vs ${fixEncoding(rsMatches.getString("rival"))}"
+      val partidosStr = if (partidos.isEmpty) "Sin partidos programados registrados todavia" else partidos.mkString("\n")
+
+      val prompt = s"""Eres preparador físico y planificador deportivo especializado en fútbol base.
+Héctor es un portero de $edad años con esta estructura semanal FIJA e inamovible:
+- Lunes y Miércoles: Judo
+- Martes y Jueves: Entrenamiento colectivo con el equipo (no específico de portero)
+- Domingo: Academia específica de porteros
+- Sábado: Partido oficial cuando toca
+
+Calendario de partidos ya programados:
+$partidosStr
+
+Sugiere una periodización para los próximos 6 meses (bloques de carga alta, descarga, ventanas de evaluación, semanas clave de torneo) que respete estrictamente esta estructura semanal — NO añadas sesiones extra, la carga ya es alta para su edad. Responde en texto plano, en formato de lista breve por mes."""
+
+      AIProvider.ask(prompt)
+    } finally { conn.close() }
+  }
+
+  // ── MODULO 8: AUDIO-DIARIO (PARTIDO / ACADEMIA) ─────────────────────────
+  def getAcademiaSessions(): List[TrainingSession] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT * FROM trainings WHERE tipo = 'Academia' ORDER BY fecha DESC")
+      var list = List[TrainingSession]()
+      while (rs.next()) {
+        list = list :+ TrainingSession(
+          rs.getInt("id"), rs.getDate("fecha").toString, rs.getString("tipo"),
+          Option(rs.getString("foco")).getOrElse(""), rs.getInt("rpe"), rs.getInt("calidad"), rs.getInt("atencion"),
+          Option(rs.getString("analisis_voz_academia")).getOrElse("")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def getTrainingById(id: Int): Option[TrainingSession] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT * FROM trainings WHERE id = ?")
+      ps.setInt(1, id)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(TrainingSession(
+        rs.getInt("id"), rs.getDate("fecha").toString, rs.getString("tipo"),
+        Option(rs.getString("foco")).getOrElse(""), rs.getInt("rpe"), rs.getInt("calidad"), rs.getInt("atencion"),
+        Option(rs.getString("analisis_voz_academia")).getOrElse("")
+      )) else None
+    } finally { conn.close() }
+  }
+
+  private def audioDiaryMimeType(audioBase64: String): String =
+    if (audioBase64.startsWith("data:audio/webm")) "audio/webm"
+    else if (audioBase64.startsWith("data:audio/mp4")) "audio/mp4"
+    else if (audioBase64.startsWith("data:audio/mpeg")) "audio/mpeg"
+    else if (audioBase64.startsWith("data:audio/ogg")) "audio/ogg"
+    else "audio/webm"
+
+  private def audioDiaryDataOnly(audioBase64: String): String =
+    if (audioBase64.contains(",")) audioBase64.split(",", 2)(1) else audioBase64
+
+  // Prompt especifico para Hector (7 anos) traduciendo su lenguaje infantil a lenguaje tecnico
+  private def audioDiaryPrompt(contexto: String): String =
+    s"""Eres el psicólogo deportivo y analista técnico de Héctor, un portero de 7 años. El siguiente audio es una grabación espontánea de Héctor hablando libremente después de $contexto. Héctor habla como un niño de 7 años — traduce su lenguaje infantil al lenguaje técnico de un entrenador de porteros de élite. El padre ha grabado sin hacer preguntas guiadas.
+
+Extrae y devuelve en texto plano estas 4 secciones:
+
+ESTADO EMOCIONAL: Detecta su nivel de motivación, confianza o frustración. ¿Está disfrutando? ¿Hay alguna señal de miedo, presión o inseguridad?
+
+PERCEPCIÓN TÉCNICA: ¿Qué aspectos técnicos menciona aunque sea con palabras de niño? ¿Habla de paradas, caídas, salidas, posición? ¿Los describe con seguridad o con duda?
+
+SEÑAL SOCIAL: ¿Menciona a compañeros, al entrenador, a rivales? ¿Hay algo que indique cómo se relaciona con el entorno del equipo o la academia?
+
+CONSEJO PARA EL PADRE: Una acción concreta que el padre puede hacer en las próximas 24 horas para reforzar lo positivo o trabajar lo negativo detectado. Adaptada a 7 años — sin presión, enfocada en el disfrute y la confianza.
+
+Si el audio no contiene información sobre alguna sección escribe 'No mencionado'. Nunca inventes información que no esté en el audio."""
+
+  // Procesamiento efimero: el base64 vive solo en memoria durante esta llamada (nunca a disco).
+  def analyzeAudioDiaryMatch(matchId: Int, audioBase64: String): String = {
+    val m = getMatchById(matchId)
+    val contexto = m.map(mm => s"un partido vs ${fixEncoding(mm.rival)} con resultado ${mm.resultado}")
+      .getOrElse("un partido")
+    val mime = audioDiaryMimeType(audioBase64)
+    val data = audioDiaryDataOnly(audioBase64)
+    val res = AIProvider.ask(audioDiaryPrompt(contexto), Some((mime, data)), bypassCache = true)
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?")
+      ps.setString(1, fixEncoding(res)); ps.setInt(2, matchId); ps.executeUpdate()
+    } finally { conn.close() }
+    res
+  }
+
+  def analyzeAudioDiaryAcademia(trainingId: Int, audioBase64: String): String = {
+    val mime = audioDiaryMimeType(audioBase64)
+    val data = audioDiaryDataOnly(audioBase64)
+    val res = AIProvider.ask(audioDiaryPrompt("una sesión de academia de porteros"), Some((mime, data)), bypassCache = true)
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE trainings SET analisis_voz_academia = ? WHERE id = ?")
+      ps.setString(1, fixEncoding(res)); ps.setInt(2, trainingId); ps.executeUpdate()
+    } finally { conn.close() }
+    res
+  }
+
+  // ── MODULO 7: INFORME DE CAPTACION EXPORTABLE ───────────────────────────
+  def getScoutingReportNarrative(edad: Int, notaMedia: Double, pctCS: Int, winRate: Int, acwr: Double, pj: Int): String = {
+    val prompt = s"""Eres un ojeador profesional de fútbol base español redactando un informe de captación.
+Portero de $edad años. Estadísticas: nota media ${f"$notaMedia%.1f"}/10, porterías a cero $pctCS%, win rate $winRate%, ACWR actual ${f"$acwr%.2f"}, $pj partidos registrados.
+Entrena con su equipo (colectivo), asiste semanalmente a una academia específica de porteros, y complementa con judo como trabajo físico y de caídas.
+Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional de un informe de ojeador, que mencione explícitamente que combina entrenamiento colectivo + academia específica semanal + judo como complemento físico. Responde en texto plano, sin markdown."""
+    AIProvider.ask(prompt)
   }
 
   // ACWR fisico real basado en Footbar: carga GPS objetiva (distancia x % actividad)

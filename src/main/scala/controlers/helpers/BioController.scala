@@ -63,6 +63,7 @@ object BioController extends cask.Routes {
     val rpg = DatabaseManager.getRPGStatus()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
     val medicalReports = DatabaseManager.getMedicalReports()
+    val academiaSessions = DatabaseManager.getAcademiaSessions().take(5)
     // --- WIDGET 1: ANALISIS COGNITIVO ---
     val cognitiveWidget = div(cls:="card bg-dark border-info shadow mb-3",
       div(cls:="card-header border-info text-info fw-bold py-1 text-center small", "🧠 ANALISTA COGNITIVO"),
@@ -213,7 +214,24 @@ object BioController extends cask.Routes {
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "PROGRESO TECNICO"), div(cls := "card-body p-2", canvas(id:="techChart", style:="max-height:200px;"))),
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "CURVA DE CRECIMIENTO"), div(cls := "card-body p-2", canvas(id:="growthChart", style:="max-height:150px;"))),
         div(cls := "card bg-dark text-white border-success shadow mb-3", div(cls := "card-header bg-success text-dark fw-bold text-center", "REGISTRO ENTRENO"), div(cls := "card-body p-3", form(action := "/bio/save_training", method := "post", div(cls:="mb-3", label(cls:="small fw-bold", "Tipo"), select(name:="tipo", id:="trainingType", onchange:="toggleDrills()", cls:="form-select bg-dark text-white fw-bold", option(value:="Club", "Club"), option(value:="Academia", "Academia"), option(value:="Judo", "🥋 Judo"), option(value:="Papa", "Papa (Portero)"), option(value:="Papa (Jugador)", "Papa (Jugador)"))), drillList, div(cls:="mb-3", label(cls:="small fw-bold", "Foco / Actividad"), div(cls:="d-flex gap-2", input(tpe:="text", name:="foco", id:="drillFocus", cls:="form-control fw-bold", placeholder:="Ej: Tiros, Resistencia...", required:=true), button(tpe:="button", id:="aiBtn", cls:="btn btn-warning fw-bold", onclick:="generateAI()", style:="display:none;", "🤖 IA"))), div(id:="manualDesign", style:="display:none;", textarea(name:="rutina", id:="rutinaText", cls:="form-control mb-3 fw-bold", rows:="4", placeholder:="Detalle de la sesion...")), div(cls:="row mb-3", div(cls:="col-4 text-center", label(cls:="small fw-bold", "RPE"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="rpe", value:="7", min:="1", max:="10")), div(cls:="col-4 text-center", label(cls:="small fw-bold", "Calidad"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="calidad", value:="8", min:="1", max:="10")), div(cls:="col-4 text-center", label(cls:="small fw-bold", "Atencion"), input(tpe:="number", cls:="form-control text-center p-1 fw-bold", name:="atencion", value:="8", min:="1", max:="10"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success fw-bold", "Guardar Sesion")))),
-          div(cls:="card bg-secondary bg-opacity-10 border-secondary", div(cls:="card-body p-2", h6(cls:="text-muted small mb-2", "+ Anadir Mision Tecnica (10 Sesiones)"), form(action:="/bio/add_drill", method:="post", cls:="d-flex gap-2", input(tpe:="text", name:="nombre", cls:="form-control form-control-sm fw-bold", placeholder:="Ej: Control Orientado", required:=true), button(tpe:="submit", cls:="btn btn-sm btn-secondary fw-bold", "Crear"))))
+          div(cls:="card bg-secondary bg-opacity-10 border-secondary", div(cls:="card-body p-2", h6(cls:="text-muted small mb-2", "+ Anadir Mision Tecnica (10 Sesiones)"), form(action:="/bio/add_drill", method:="post", cls:="d-flex gap-2", input(tpe:="text", name:="nombre", cls:="form-control form-control-sm fw-bold", placeholder:="Ej: Control Orientado", required:=true), button(tpe:="submit", cls:="btn btn-sm btn-secondary fw-bold", "Crear")))),
+
+          // --- MODULO 8: SESIONES DE ACADEMIA (con audio-diario) ---
+          div(cls:="card bg-dark border-info shadow mt-3",
+            div(cls:="card-header text-info fw-bold text-center small", "🥅 SESIONES DE ACADEMIA"),
+            div(cls:="card-body p-2",
+              if (academiaSessions.isEmpty)
+                div(cls:="text-muted small text-center py-2", "Sin sesiones de academia registradas")
+              else
+                frag(academiaSessions.map { t =>
+                  val audioIcon = if (t.analisisVozAcademia.nonEmpty) span(style:="color:#8b5cf6;", "🎙️") else span("🎤")
+                  div(cls:="d-flex justify-content-between align-items-center py-1 border-bottom border-secondary",
+                    div(cls:="small text-white", t.fecha.take(10), span(cls:="text-muted xx-small ms-2", s"RPE ${t.rpe}")),
+                    a(href:=s"/audio-diary/academia/${t.id}", cls:="text-decoration-none", audioIcon)
+                  )
+                }: _*)
+            )
+          )
         )
       ), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""
       const gCtx=document.getElementById('growthChart');const gData=$growthData;if(gCtx){new Chart(gCtx,{type:'line',data:{labels:gData.labels,datasets:[{label:'Altura (cm)',data:gData.data,borderColor:'#0dcaf0',borderWidth:3,tension:0.3,pointBackgroundColor:'#fff',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#eee',font:{weight:'bold'}},grid:{color:'#444'},pointLabels:{color:'#fff'}},x:{display:false}}}});}

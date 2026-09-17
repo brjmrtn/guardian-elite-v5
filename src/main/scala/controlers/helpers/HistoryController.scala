@@ -4716,5 +4716,196 @@ object HistoryController extends cask.Routes {
     renderHtml(pageContent)
   }
 
+  // ── MODULO 7: INFORME DE CAPTACION EXPORTABLE (PRINT / PDF) ─────────────
+  @cask.get("/scouting-report")
+  def scoutingReportPage(request: cask.Request) = withAuth(request) {
+    val card      = DatabaseManager.getLatestCardData()
+    val edad      = DatabaseManager.calcularEdadExacta(card.fechaNacimiento)
+    val seasons   = DatabaseManager.getCareerSummary()
+    val matches   = DatabaseManager.getMatchesList()
+    val evolution = DatabaseManager.getSeasonEvolution()
+    val opps      = DatabaseManager.getOpportunities().take(3)
+    val skills    = DatabaseManager.getGoalkeeperSkills()
+
+    val pj = matches.size
+    val notaMedia = if (pj > 0) matches.map(_.nota).sum / pj else 0.0
+    def gfOf(m: MatchLog): Int = m.resultado.split("-").headOption.flatMap(_.trim.toIntOption).getOrElse(0)
+    def gcOf(m: MatchLog): Int = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(0)
+    val cleanSheets = matches.count(gcOf(_) == 0)
+    val pctCS       = if (pj > 0) cleanSheets * 100 / pj else 0
+    val ganados     = matches.count(m => gfOf(m) > gcOf(m))
+    val winRate     = if (pj > 0) ganados * 100 / pj else 0
+    val minutosTotales = matches.map(_.minutos).sum
+    val acute   = DatabaseManager.getWorkloads(7)
+    val chronic = DatabaseManager.getWorkloads(28)
+    val acwr    = StatsCalculator.calculateACWR(acute, chronic)
+
+    val analisisIA = if (pj >= 3)
+      DatabaseManager.getScoutingReportNarrative(edad, notaMedia, pctCS, winRate, acwr, pj)
+    else "Se necesitan al menos 3 partidos registrados para generar el análisis de ojeador."
+
+    val aniosJs  = evolution.map(e => s""""${e._1}"""").mkString("[", ",", "]")
+    val mediasJs = evolution.map(e => f"${e._2}%.1f").mkString("[", ",", "]")
+
+    val skillsByCategoria = skills.groupBy(_.categoria).map { case (cat, list) =>
+      val pct = if (list.nonEmpty) list.count(_.conseguido) * 100 / list.size else 0
+      (cat, pct)
+    }
+
+    val matchRows = matches.take(30).map { m =>
+      val notaColor = if (m.nota >= 7) "#27ae60" else if (m.nota >= 5) "#e67e22" else "#c0392b"
+      s"""<tr><td>${m.fecha}</td><td><b>${DatabaseManager.escHtml(DatabaseManager.fixEncoding(m.rival))}</b></td>
+        <td style="text-align:center;">${m.resultado}</td>
+        <td style="text-align:center; color:$notaColor; font-weight:bold;">${m.nota}</td></tr>"""
+    }.mkString("")
+
+    val seasonRows = seasons.map { s =>
+      s"""<tr><td>${DatabaseManager.escHtml(s.categoria)}</td>
+        <td style="text-align:center;">${s.partidosJugados}</td>
+        <td style="text-align:center;">${s.golesContra}</td>
+        <td style="text-align:center;">${s.mediaFinal}</td></tr>"""
+    }.mkString("")
+
+    val oppRows = if (opps.isEmpty) "<tr><td colspan=\"3\">Sin oportunidades registradas</td></tr>" else
+      opps.map { o =>
+        s"""<tr><td>${o.fecha.take(10)}</td>
+          <td>${DatabaseManager.escHtml(o.tipo)} — ${DatabaseManager.escHtml(DatabaseManager.fixEncoding(o.clubOEntidad))}</td>
+          <td>${DatabaseManager.escHtml(DatabaseManager.fixEncoding(o.resultado))}</td></tr>"""
+      }.mkString("")
+
+    val skillsBoxes = skillsByCategoria.map { case (cat, pct) =>
+      s"""<div class="attr-box"><div class="av" style="font-size:18px;color:#d4af37;">$pct%</div><div class="al">${DatabaseManager.escHtml(cat)}</div></div>"""
+    }.mkString("")
+
+    val htmlStr = s"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>Informe de Captación — ${DatabaseManager.escHtml(card.nombre)}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Oswald', sans-serif; color: #1a1a1a; background: #fff; padding: 20px; }
+  .no-print { text-align:center; margin-bottom:24px; }
+  .print-btn { background:#d4af37; color:#000; border:none; padding:12px 32px; font-size:16px; font-weight:700; border-radius:6px; cursor:pointer; letter-spacing:1px; }
+  .header { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #d4af37; padding-bottom:16px; margin-bottom:24px; }
+  .header-title h1 { font-size:26px; color:#1a1a1a; letter-spacing:2px; }
+  .header-title p { color:#666; font-size:13px; margin-top:4px; }
+  .stats-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-bottom:24px; }
+  .stat-card { border:2px solid #e0e0e0; border-radius:8px; text-align:center; padding:10px; }
+  .stat-card .value { font-size:22px; font-weight:700; color:#d4af37; }
+  .stat-card .label { font-size:10px; color:#888; margin-top:4px; text-transform:uppercase; letter-spacing:0.5px; }
+  .attrs-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:24px; }
+  .attr-box { border:1px solid #ddd; border-radius:6px; text-align:center; padding:10px 6px; }
+  .attr-box .av { font-size:24px; font-weight:700; }
+  .attr-box .al { font-size:10px; color:#888; }
+  .charts-row { display:grid; grid-template-columns:1fr; gap:20px; margin-bottom:24px; }
+  .chart-box { border:1px solid #e0e0e0; border-radius:8px; padding:16px; }
+  .chart-box h3 { font-size:13px; color:#666; margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:24px; }
+  thead tr { background:#1a1a1a; color:white; }
+  th,td { border:1px solid #e0e0e0; padding:7px 10px; }
+  tbody tr:nth-child(even) { background:#f9f9f9; }
+  .section-title { font-size:16px; font-weight:700; color:#1a1a1a; border-left:4px solid #d4af37; padding-left:10px; margin-bottom:12px; }
+  .narrative { border:1px solid #e0e0e0; border-radius:8px; padding:16px; margin-bottom:24px; font-size:13px; line-height:1.7; text-align:justify; }
+  .footer { margin-top:24px; text-align:center; color:#aaa; font-size:11px; border-top:1px solid #eee; padding-top:12px; }
+  @media print {
+    .no-print { display:none; }
+    body { padding:10px; }
+    .charts-row canvas { max-height:200px; }
+  }
+</style>
+</head>
+<body>
+<div class="no-print">
+  <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+</div>
+
+<div class="header">
+  <div style="display:flex; align-items:center; gap:16px;">
+    ${if (card.fotoUrl.nonEmpty) s"""<img src="${card.fotoUrl}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid #d4af37;"/>""" else ""}
+    <div class="header-title">
+      <h1>${DatabaseManager.escHtml(card.nombre)}</h1>
+      <p>$edad años · ${DatabaseManager.escHtml(card.clubNombre)} · ${DatabaseManager.escHtml(card.posicion)} · ${seasons.size} temporadas registradas</p>
+    </div>
+  </div>
+  <div style="text-align:right;">
+    <div style="font-size:36px; font-weight:700; color:#d4af37;">${card.media}</div>
+    <div style="font-size:11px; color:#666;">MEDIA GLOBAL</div>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card"><div class="value">${f"$notaMedia%.1f"}</div><div class="label">Nota media</div></div>
+  <div class="stat-card"><div class="value" style="color:#27ae60;">$pctCS%</div><div class="label">Clean sheets ($cleanSheets/$pj)</div></div>
+  <div class="stat-card"><div class="value">$winRate%</div><div class="label">Win rate</div></div>
+  <div class="stat-card"><div class="value">$minutosTotales</div><div class="label">Minutos totales</div></div>
+  <div class="stat-card"><div class="value" style="color:${if (acwr > 1.5) "#c0392b" else "#27ae60"};">${f"$acwr%.2f"}</div><div class="label">ACWR actual</div></div>
+  <div class="stat-card"><div class="value">$pj</div><div class="label">Partidos</div></div>
+</div>
+
+<p class="section-title">ATRIBUTOS ACTUALES</p>
+<div class="attrs-grid">
+  <div class="attr-box"><div class="av" style="color:#3498db;">${card.div}</div><div class="al">DIV</div></div>
+  <div class="attr-box"><div class="av" style="color:#9b59b6;">${card.han}</div><div class="al">HAN</div></div>
+  <div class="attr-box"><div class="av" style="color:#e67e22;">${card.kic}</div><div class="al">KIC</div></div>
+  <div class="attr-box"><div class="av" style="color:#e74c3c;">${card.ref}</div><div class="al">REF</div></div>
+  <div class="attr-box"><div class="av" style="color:#2ecc71;">${card.spd}</div><div class="al">SPD</div></div>
+  <div class="attr-box"><div class="av" style="color:#f1c40f;">${card.pos}</div><div class="al">POS</div></div>
+</div>
+
+<div class="charts-row">
+  <div class="chart-box">
+    <h3>Progresión de media por temporada</h3>
+    <canvas id="chartEvol" height="120"></canvas>
+  </div>
+</div>
+
+<p class="section-title">RESUMEN POR TEMPORADA</p>
+<table>
+  <thead><tr><th>Categoría</th><th>PJ</th><th>GC</th><th>Media</th></tr></thead>
+  <tbody>$seasonRows</tbody>
+</table>
+
+<p class="section-title">ANÁLISIS DE OJEADOR (IA)</p>
+<div class="narrative">${DatabaseManager.escHtml(analisisIA)}</div>
+
+<p class="section-title">OPORTUNIDADES RECIENTES</p>
+<table>
+  <thead><tr><th>Fecha</th><th>Tipo / Entidad</th><th>Resultado</th></tr></thead>
+  <tbody>$oppRows</tbody>
+</table>
+
+<p class="section-title">CHECKLIST DE HABILIDADES POR CATEGORÍA</p>
+<div class="attrs-grid">$skillsBoxes</div>
+
+<p class="section-title">HISTORIAL DE PARTIDOS (ÚLTIMOS 30)</p>
+<table>
+  <thead><tr><th>Fecha</th><th>Rival</th><th>Res.</th><th>Nota</th></tr></thead>
+  <tbody>$matchRows</tbody>
+</table>
+
+<div class="footer">
+  Guardian Elite — Informe de Captación generado automáticamente — combina entrenamiento colectivo, academia específica de porteros y judo como complemento físico.
+</div>
+
+<script>
+  const anios = $aniosJs;
+  const medias = $mediasJs;
+  if (anios.length > 0) {
+    new Chart(document.getElementById('chartEvol'), {
+      type: 'line',
+      data: { labels: anios, datasets: [{ label: 'Nota', data: medias, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, fill:true, tension:0.3 }] },
+      options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:100 } } }
+    });
+  }
+</script>
+</body>
+</html>"""
+
+    cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
   initialize()
 }
