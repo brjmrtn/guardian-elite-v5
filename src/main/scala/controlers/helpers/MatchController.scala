@@ -220,12 +220,42 @@ object MatchController extends cask.Routes {
                   input(tpe:="hidden", name:="goalsData", id:="goalsDataInput", value:="")
                 ),
 
+                // ── FOOTBAR (SENSOR GPS DE RENDIMIENTO) — OPCIONAL ───────
+                div(cls:="mb-4 p-3 border border-info rounded", style:="background:rgba(13,202,240,0.05);",
+                  div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;", onclick:="toggleFootbar()",
+                    label(cls:="text-info fw-bold small mb-0", style:="cursor:pointer;", "🦵 DATOS FOOTBAR (opcional)"),
+                    span(id:="footbarChevron", cls:="text-info small", "▼")
+                  ),
+                  div(id:="footbarPanel", style:="display:none;",
+                    div(cls:="xx-small text-muted mt-2 mb-2", "Introduce los datos del sensor Footbar tras el partido. Se guardan solo si rellenas la distancia."),
+                    div(cls:="xx-small text-info fw-bold mb-1", "INFORME FISICO"),
+                    div(cls:="row g-2 mb-2",
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Distancia (km)"), input(tpe:="number", step:="0.01", min:="0", name:="fbDistancia", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Alta intensidad (m)"), input(tpe:="number", step:="1", min:="0", name:="fbAltaIntensidad", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Sprint max (km/h)"), input(tpe:="number", step:="0.1", min:="0", name:="fbSprintMax", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "% Actividad"), input(tpe:="number", step:="0.1", min:="0", max:="100", name:="fbPctActividad", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiempo actividad (min)"), input(tpe:="number", step:="1", min:="0", name:="fbTiempoActividad", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Aceleraciones"), input(tpe:="number", step:="1", min:="0", name:="fbAceleraciones", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Desaceleraciones"), input(tpe:="number", step:="1", min:="0", name:="fbDesaceleraciones", cls:="form-control form-control-sm bg-dark text-white border-info"))
+                    ),
+                    div(cls:="xx-small text-info fw-bold mb-1 mt-2", "INFORME TECNICO"),
+                    div(cls:="row g-2",
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Balones"), input(tpe:="number", step:="1", min:="0", name:="fbBalones", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Pases"), input(tpe:="number", step:="1", min:="0", name:="fbPases", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiempo con balon (s)"), input(tpe:="number", step:="1", min:="0", name:="fbTiempoBalon", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Disparos"), input(tpe:="number", step:="1", min:="0", name:="fbDisparos", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiro max (km/h)"), input(tpe:="number", step:="0.1", min:="0", name:="fbTiroMax", cls:="form-control form-control-sm bg-dark text-white border-info"))
+                    )
+                  )
+                ),
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
 
             // SCRIPTS
             script(raw("""
+              function toggleFootbar(){var p=document.getElementById('footbarPanel');var c=document.getElementById('footbarChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
               var currentMode='save';var goals=[];var saves=[];var origins=[];
               function setMode(mode){currentMode=mode;}
               function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
@@ -359,6 +389,20 @@ object MatchController extends cask.Routes {
       case _       => None
     }
 
+    // Footbar (sensor GPS de rendimiento) — opcional
+    val fbDistancia        = getDouble("fbDistancia")
+    val fbAltaIntensidad   = getDouble("fbAltaIntensidad")
+    val fbSprintMax        = getDouble("fbSprintMax")
+    val fbPctActividad     = getDouble("fbPctActividad")
+    val fbTiempoActividad  = getInt("fbTiempoActividad")
+    val fbAceleraciones    = getInt("fbAceleraciones")
+    val fbDesaceleraciones = getInt("fbDesaceleraciones")
+    val fbBalones          = getInt("fbBalones")
+    val fbPases            = getInt("fbPases")
+    val fbTiempoBalon      = getInt("fbTiempoBalon")
+    val fbDisparos         = getInt("fbDisparos")
+    val fbTiroMax          = getDouble("fbTiroMax")
+
     // --- LOGICA DE PROCESAMIENTO (Base de datos y calculos) ---
     val pArr = passData.split(",").map(s => try s.toInt catch { case _:Exception => 0 })
     val (pcTot, pcOk, plTot, plOk) = if(pArr.length >= 4) (pArr(0), pArr(1), pArr(2), pArr(3)) else (0,0,0,0)
@@ -396,6 +440,16 @@ object MatchController extends cask.Routes {
           DatabaseManager.saveMatchGoal(matchId, minuto, origen, situacion, resp, parable, zona, notaG)
         }
       }
+    }
+
+    // Guardar datos Footbar (solo si se ha introducido distancia)
+    if (fbDistancia > 0) {
+      val footbarMatchId = if (scheduleId > 0) scheduleId else DatabaseManager.getLastMatchId()
+      DatabaseManager.saveFootbar(
+        footbarMatchId, fbDistancia, fbAltaIntensidad, fbSprintMax, fbPctActividad,
+        fbTiempoActividad, fbAceleraciones, fbDesaceleraciones,
+        fbBalones, fbPases, fbTiempoBalon, fbDisparos, fbTiroMax
+      )
     }
 
     // Respuesta visual renderizada como Array[Byte] para cumplir con withAuth
