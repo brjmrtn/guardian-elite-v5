@@ -662,7 +662,7 @@ object CareerController extends cask.Routes {
 
     // Barras de las 5 dimensiones (normalizadas 0-100)
     val dims = List(
-      ("Nota Media",    math.min(100, ((notaMedia - 40.0) / 60.0 * 100).toInt), "primary"),
+      ("Nota Media",    math.max(0, math.min(100, ((notaMedia * 10.0 - 40.0) / 60.0 * 100).toInt)), "primary"),
       ("SPV Score",     math.min(100, spvEfic.toInt),                           "info"),
       ("Bypass Efic.",  math.min(100, (bypassEfic * 100).toInt),                "warning"),
       ("PSxG+",         math.min(100, math.max(0, ((psxgDelta + 2.0) / 4.0 * 100).toInt)), "success"),

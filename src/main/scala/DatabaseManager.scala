@@ -516,8 +516,8 @@ object DatabaseManager {
 
       // Usar siempre v1beta — soporta PDF y es compatible con cualquier API key de Google AI Studio
       val urls = Seq(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
-        // s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey",
+        // s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-exp:generateContent?key=$apiKey",
         //s"https://generativelanguage.googleapis.com/v1beta/models/:generateContent?key=$apiKey"
       )
 
@@ -3676,7 +3676,9 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       //     + win_rate          * 10
       //     + bio_factor_boost  *  5
       // Resultado en unidades de "puntuación de valor" (0-100) → mapeado a €
-      val notaNorm:   Double = math.max(0, math.min(1.0, (notaMedia - 40.0) / 60.0))
+      // notaMedia esta en escala 0-10 (campo "nota" del Match Center) — se escala a
+      // 0-100 antes de normalizar contra el rango de referencia 40-100.
+      val notaNorm:   Double = math.max(0, math.min(1.0, (notaMedia * 10.0 - 40.0) / 60.0))
       val spvNorm:    Double = math.max(0, math.min(1.0, spvEfic / 100.0))
       val bypassNorm: Double = math.max(0, math.min(1.0, bypassEfic))
       val psxgNorm:   Double = math.max(0, math.min(1.0, (psxgDelta + 2.0) / 4.0))

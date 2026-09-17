@@ -11,6 +11,7 @@ object DashboardController extends cask.Routes {
     val techAlerts = DatabaseManager.getTechnicalAlerts() // Auditoria tecnica recurrente
     val weatherStats = DatabaseManager.getWeatherPerformance() // Correlacion nota vs clima
     val smartInsights = DatabaseManager.getSmartInsights()
+    val smartInsightsText = smartInsights.replaceAll("<[^>]+>", "").trim
     val card = DatabaseManager.getLatestCardData()
     val matches = DatabaseManager.getMatchesList()
     val chartData = DatabaseManager.getChartData()
@@ -426,7 +427,7 @@ object DashboardController extends cask.Routes {
                 frag(Seq(
                   ("CLIMA",      weatherStats.headOption.map(w => w._1).getOrElse("—"),        "#0ea5e9"),
                   ("NOTA CLIMA", weatherStats.headOption.map(w => f"${w._2._1}%.1f").getOrElse("—"), "#0ea5e9"),
-                  ("INTELIGENCIA", smartInsights.take(30) + "...",          "#8b5cf6"),
+                  ("INTELIGENCIA", smartInsightsText.take(30) + (if (smartInsightsText.length > 30) "..." else ""), "#8b5cf6"),
                   ("ACWR HOY",   f"$acwr%.2f",                             if(acwr>1.5)"#ef4444" else "#20c997")
                 ).take(4).map { case (lbl, v, color) =>
                   div(cls := "col-6",
