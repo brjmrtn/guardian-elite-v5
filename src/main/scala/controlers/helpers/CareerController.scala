@@ -811,6 +811,109 @@ object CareerController extends cask.Routes {
     renderHtml(basePage("market-estimator", content))
   }
 
+  // ── FOOTBAR (SENSOR GPS DE RENDIMIENTO) ─────────────────────────────────
+  @cask.get("/footbar")
+  def footbarPage(request: cask.Request) = withAuth(request) {
+    val d          = DatabaseManager.getFootbarPageData()
+    val rows        = d("rows").asInstanceOf[List[Map[String, Any]]]
+    val totalSesiones = d("totalSesiones").asInstanceOf[Int]
+
+    val content = if (totalSesiones < 3) {
+      div(
+        h4(cls := "fw-black text-white mb-4", "🦵 Footbar"),
+        div(cls := "alert alert-secondary text-center",
+          "Necesitas al menos 3 partidos con datos Footbar para ver patrones")
+      )
+    } else {
+      val avgDistanciaKm  = d("avgDistanciaKm").asInstanceOf[Double]
+      val maxSprintKmh    = d("maxSprintKmh").asInstanceOf[Double]
+      val avgPases        = d("avgPases").asInstanceOf[Double]
+      val correlacionNota = d("correlacionNota").asInstanceOf[Double]
+
+      val scatterData = rows.map { r =>
+        val dist = r("distanciaKm").asInstanceOf[Double]
+        val nota = r("nota").asInstanceOf[Double]
+        s"{x:$dist,y:$nota}"
+      }.mkString("[", ",", "]")
+
+      div(
+        h4(cls := "fw-black text-white mb-4", "🦵 Footbar"),
+
+        // ── KPIs ──
+        div(cls := "row g-3 mb-4",
+          Seq(
+            ("Distancia media/partido", f"$avgDistanciaKm%.2f km", "primary"),
+            ("Sprint máx histórico",    f"$maxSprintKmh%.1f km/h", "danger"),
+            ("Pases medios/partido",    f"$avgPases%.0f",          "info"),
+            ("Correlación dist↔nota",   f"$correlacionNota%.2f",   "warning")
+          ).map { case (label, v, color) =>
+            div(cls := "col-md-3 col-6",
+              div(cls := s"card bg-dark border-$color text-center p-3",
+                div(cls := s"text-$color fw-bold xx-small mb-1", label.toUpperCase),
+                div(cls := "h3 fw-black text-white mb-0", v)
+              )
+            )
+          }
+        ),
+
+        // ── Gráfico scatter distancia vs nota ──
+        div(cls := "card bg-dark border-secondary p-3 mb-4",
+          div(cls := "fw-bold text-muted small text-uppercase mb-3", "Distancia (km) vs. Nota"),
+          div(style := "height:260px;", canvas(id := "chartFootbarScatter")),
+          script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"),
+          script(raw(s"""
+            new Chart(document.getElementById('chartFootbarScatter'), {
+              type: 'scatter',
+              data: { datasets: [{
+                label: 'Partidos',
+                data: $scatterData,
+                backgroundColor: 'rgba(255,193,7,0.7)',
+                pointRadius: 6
+              }]},
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  x: { title: { display: true, text: 'Distancia (km)', color: '#aaa' },
+                       ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                  y: { title: { display: true, text: 'Nota', color: '#aaa' }, min: 0, max: 10,
+                       ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                }
+              }
+            });
+          """))
+        ),
+
+        // ── Tabla por partido ──
+        div(cls := "card bg-dark border-secondary p-3 mb-4",
+          div(cls := "fw-bold text-muted small text-uppercase mb-3", "Partidos con datos Footbar"),
+          div(style := "overflow-x:auto;",
+            table(cls := "table table-dark table-sm mb-0",
+              thead(tr(
+                th("Fecha"), th("Rival"), th("Nota"), th("Distancia"),
+                th("Sprint máx"), th("Pases"), th("Disparos")
+              )),
+              tbody(
+                frag(rows.map { r =>
+                  tr(
+                    td(r("fecha").asInstanceOf[String].take(10)),
+                    td(fixEncoding(r("rival").asInstanceOf[String])),
+                    td(f"${r("nota").asInstanceOf[Double]}%.1f"),
+                    td(f"${r("distanciaKm").asInstanceOf[Double]}%.2f km"),
+                    td(f"${r("sprintMaxKmh").asInstanceOf[Double]}%.1f km/h"),
+                    td(r("pases").asInstanceOf[Int].toString),
+                    td(r("disparos").asInstanceOf[Int].toString)
+                  )
+                }: _*)
+              )
+            )
+          )
+        )
+      )
+    }
+    renderHtml(basePage("footbar", content))
+  }
+
   // ── EFECTO MARIPOSA ──────────────────────────────────────────────────────
   @cask.get("/efecto-mariposa")
   def efectoMariposaPage(request: cask.Request) = withAuth(request) {

@@ -130,6 +130,12 @@ object DashboardController extends cask.Routes {
     else if(acwr > 1.5) ("text-warning", "SOBRECARGA")
     else ("text-success", "OPTIMO")
 
+    // ACWR GPS (Footbar): carga fisica objetiva medida por el sensor, no estimada
+    val acwrGps = DatabaseManager.getFootbarACWR()
+    val acwrGpsStr = if (acwrGps > 0) f"$acwrGps%.2f" else "—"
+    val acwrGpsColor = if (acwrGps <= 0) "#94a3b8"
+      else if (acwrGps > 1.5) "#ef4444" else if (acwrGps > 1.2) "#f59e0b" else "#20c997"
+
     // 4. METODOS AUXILIARES Y CALCULOS TACTICOS
     // Definimos pct una sola vez como valor interno para evitar "ambiguous reference"
     val calculatePct = (n: Double, d: Double) => if(d > 0) ((n/d)*100).toInt else 0
@@ -428,8 +434,9 @@ object DashboardController extends cask.Routes {
                   ("CLIMA",      weatherStats.headOption.map(w => w._1).getOrElse("—"),        "#0ea5e9"),
                   ("NOTA CLIMA", weatherStats.headOption.map(w => f"${w._2._1}%.1f").getOrElse("—"), "#0ea5e9"),
                   ("INTELIGENCIA", smartInsightsText.take(30) + (if (smartInsightsText.length > 30) "..." else ""), "#8b5cf6"),
-                  ("ACWR HOY",   f"$acwr%.2f",                             if(acwr>1.5)"#ef4444" else "#20c997")
-                ).take(4).map { case (lbl, v, color) =>
+                  ("ACWR HOY",   f"$acwr%.2f",                             if(acwr>1.5)"#ef4444" else "#20c997"),
+                  ("ACWR GPS",   acwrGpsStr,                                acwrGpsColor)
+                ).map { case (lbl, v, color) =>
                   div(cls := "col-6",
                     div(style := s"background:#f8fafc; border-left:3px solid $color; border-radius:6px; padding:8px;",
                       div(style := "font-size:9px; font-weight:700; color:#94a3b8;", lbl),

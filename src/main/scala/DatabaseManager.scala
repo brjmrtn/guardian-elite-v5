@@ -878,17 +878,82 @@ object DatabaseManager {
     } finally { conn.close() }
   }
 
+  // Datos para la pagina /footbar: KPIs medios, tabla por partido y serie distancia/nota
+  def getFootbarPageData(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT f.*, m.rival, m.fecha, m.nota
+        FROM footbar_sessions f
+        JOIN matches m ON m.id = f.match_id
+        WHERE m.status='PLAYED'
+        ORDER BY m.fecha DESC
+      """)
+      var rows = List[Map[String, Any]]()
+      while (rs.next()) {
+        rows = rows :+ Map(
+          "matchId"        -> rs.getInt("match_id"),
+          "rival"          -> Option(rs.getString("rival")).getOrElse(""),
+          "fecha"          -> rs.getDate("fecha").toString,
+          "nota"           -> rs.getDouble("nota"),
+          "distanciaKm"    -> rs.getDouble("distancia_km"),
+          "sprintMaxKmh"   -> rs.getDouble("sprint_max_kmh"),
+          "pases"          -> rs.getInt("pases"),
+          "disparos"       -> rs.getInt("disparos")
+        )
+      }
+
+      def avg(f: Map[String, Any] => Double): Double =
+        if (rows.isEmpty) 0.0 else rows.map(f).sum / rows.size
+
+      Map(
+        "rows"            -> rows,
+        "totalSesiones"   -> rows.size,
+        "avgDistanciaKm"  -> avg(_("distanciaKm").asInstanceOf[Double]),
+        "maxSprintKmh"    -> (if (rows.isEmpty) 0.0 else rows.map(_("sprintMaxKmh").asInstanceOf[Double]).max),
+        "avgPases"        -> avg(_("pases").asInstanceOf[Int].toDouble),
+        "correlacionNota" -> getFootbarCorrelacion()
+      )
+    } finally { conn.close() }
+  }
+
+  // ACWR fisico real basado en Footbar: carga GPS objetiva (distancia x % actividad)
+  // en lugar de la estimacion por minutos jugados. Devuelve 0.0 si no hay datos
+  // suficientes en footbar_sessions durante los ultimos 28 dias.
+  def getFootbarACWR(): Double = {
+    val conn = getConnection()
+    try {
+      val rsAcute = conn.createStatement().executeQuery("""
+        SELECT COALESCE(SUM(f.distancia_km * (f.pct_actividad / 100.0)), 0) AS carga
+        FROM matches m JOIN footbar_sessions f ON f.match_id = m.id
+        WHERE m.status='PLAYED' AND m.fecha >= CURRENT_DATE - 7
+      """)
+      val acuteSum = if (rsAcute.next()) rsAcute.getDouble("carga") else 0.0
+
+      val rsChronic = conn.createStatement().executeQuery("""
+        SELECT COALESCE(SUM(f.distancia_km * (f.pct_actividad / 100.0)), 0) AS carga
+        FROM matches m JOIN footbar_sessions f ON f.match_id = m.id
+        WHERE m.status='PLAYED' AND m.fecha >= CURRENT_DATE - 28
+      """)
+      val chronicSum = if (rsChronic.next()) rsChronic.getDouble("carga") else 0.0
+      val chronicAvg = chronicSum / 4.0  // 28 dias = 4 semanas, equivalente semanal
+
+      if (chronicAvg > 0) acuteSum / chronicAvg else 0.0
+    } finally { conn.close() }
+  }
+
   def playScheduledMatch(
                           id: Int, gf: Int, gc: Int, min: Int, nota: Double, paradas: Int,
                           notas: String, video: String, reaccion: String, clima: String, estadio: String,
                           zonaGoles: String, zonaTiros: String, zonaParadas: String,
                           p1v1: Int, pAir: Int, pPie: Int, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
-                          mapaCampo: String // <--- NUEVO PARAMETRO
+                          mapaCampo: String, // <--- NUEVO PARAMETRO
+                          distanciaKm: Double = 0.0 // <--- FOOTBAR
                         ): Unit = {
     val conn = getConnection()
     try {
       val c = getLatestCardData()
-      val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas, pcTot, pcOk, plTot, plOk)
+      val n = StatsCalculator.calculateGrowth(c, min, gc, nota, paradas, pcTot, pcOk, plTot, plOk, distanciaKm)
       updateStats(n)
 
       val ps = conn.prepareStatement("""
@@ -935,12 +1000,21 @@ object DatabaseManager {
     try {
       conn=getConnection(); val sb=new StringBuilder(); val card=getLatestCardData(); val edad=calcularEdadExacta(card.fechaNacimiento);
       sb.append(s"Analista Elite ($edad anos). Tendencias:\n");
-      val rs=conn.createStatement().executeQuery("SELECT fecha, rival, nota FROM matches WHERE status='PLAYED' ORDER BY fecha ASC");
-      var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString(1)}|${rs.getString(2)}|${rs.getDouble(3)}\n") };
+      val rs=conn.createStatement().executeQuery("""
+        SELECT m.fecha, m.rival, m.nota,
+               COALESCE(f.distancia_km, 0)      AS dist_km,
+               COALESCE(f.sprint_max_kmh, 0)    AS sprint_max,
+               COALESCE(f.pases, 0)             AS pases
+        FROM matches m
+        LEFT JOIN footbar_sessions f ON f.match_id = m.id
+        WHERE m.status='PLAYED'
+        ORDER BY m.fecha ASC
+      """);
+      var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString("fecha")}|${rs.getString("rival")}|${rs.getDouble("nota")}|${rs.getDouble("dist_km")}|${rs.getDouble("sprint_max")}|${rs.getInt("pases")}\n") };
       if(c<2) return "Pocos datos.";
       // Cambio aqui: Llamamos a AIProvider.ask
       val prompt = s"""Eres un analista de rendimiento de porteros de élite.
-Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota:
+Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
 ${sb.toString()}
 
@@ -951,7 +1025,7 @@ Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de cód
 <p><strong>Punto de atención:</strong> [describe el momento más bajo y posibles causas]</p>
 <p><strong>Conclusión:</strong> [una frase motivadora y concreta sobre qué trabajar para la próxima semana]</p>
 
-No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda persona dirigiéndote a Hector directamente."""
+No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda persona dirigiéndote a Hector directamente. Si hay datos de distancia y sprint, analiza si hay correlación entre carga física y rendimiento. Si distancia > 3km con nota baja, o sprint alto con nota baja, menciónalo como señal de fatiga."""
       AIProvider.ask(prompt).replace("```html","").replace("```","").trim
     } catch {
       case e:Exception =>
@@ -2949,7 +3023,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
           if (rsTech.next()) {
             val prevCoord = rsTech.getInt("coordinacion")
             if (currCoord < prevCoord) {
-              sb.append("<div class='alert alert-danger p-2 small mb-2'><strong>[!] ALERTA BIO-MECANICA:</strong> Crecimiento acelerado detectado (+"+growthSpeed+"cm) coincidiendo con bajada de coordinacion. Riesgo de 'Torpeza del Estiron'. <br>Recomendacion: <em>Simplificar tareas tecnicas y trabajar propiocepcion.</em></div>")
+              sb.append(s"⚠️ ALERTA BIO-MECÁNICA: Crecimiento acelerado detectado (+${growthSpeed}cm) coincidiendo con bajada de coordinación. Riesgo de 'Torpeza del Estirón'. Recomendación: simplificar tareas técnicas y trabajar propiocepción.\n")
             }
           }
         }
@@ -2971,14 +3045,14 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       var lastContext = ""
       while(rsPain.next()) {
         painCount += 1
-        lastContext = escHtml(fixEncoding(rsPain.getString("tipo"))) + " (" + escHtml(fixEncoding(rsPain.getString("foco"))) + ")"
+        lastContext = fixEncoding(rsPain.getString("tipo")) + " (" + fixEncoding(rsPain.getString("foco")) + ")"
       }
 
       if (painCount >= 2) {
-        sb.append(s"<div class='alert alert-warning p-2 small mb-0'><strong>[buscar] PATRON DE DOLOR:</strong> Detectadas $painCount sesiones recientes con dolor. Contexto frecuente: $lastContext. <br>Revisar calzado o dureza del terreno.</div>")
+        sb.append(s"🔍 PATRÓN DE DOLOR: Detectadas $painCount sesiones recientes con dolor. Contexto frecuente: $lastContext. Revisar calzado o dureza del terreno.\n")
       }
 
-      if (sb.isEmpty) "<div class='text-muted small text-center fst-italic'>Sin anomalias biometricas detectadas hoy.</div>" else sb.toString()
+      if (sb.isEmpty) "Sin anomalías biométricas detectadas hoy." else sb.toString().trim
 
     } catch {
       case e: Exception => "Error calculando insights."
@@ -3211,7 +3285,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       val rsTrain = conn.createStatement().executeQuery("SELECT AVG(atencion) FROM trainings WHERE fecha > CURRENT_DATE - 30")
       val avgAtt = if(rsTrain.next()) rsTrain.getDouble(1) else 0.0
 
-      if (avgAcad > 0 && avgAtt > 0) {
+      val baseMsg = if (avgAcad > 0 && avgAtt > 0) {
         if (avgAcad < 6.0 && avgAtt < 7.0)
           "[IA] **ALERTA COGNITIVA**: Baja concentracion detectada en ambos entornos. Posible fatiga mental general."
         else if (avgAcad > 8.0 && avgAtt < 6.0)
@@ -3219,6 +3293,25 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         else
           "[OK] **SINERGIA OPTIMA**: Equilibrio detectado entre estudios y deporte."
       } else "Faltan datos para analisis cognitivo."
+
+      // Footbar: contexto de carga fisica de los ultimos 5 partidos (senal de fatiga)
+      val rsFb = conn.createStatement().executeQuery("""
+        SELECT AVG(f.distancia_km) AS dist_media, AVG(f.sprint_max_kmh) AS sprint_media,
+               AVG(m.nota) AS nota_media, COUNT(*) AS n
+        FROM (SELECT id, nota FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 5) m
+        JOIN footbar_sessions f ON f.match_id = m.id
+      """)
+      val fatigaMsg =
+        if (rsFb.next() && rsFb.getInt("n") >= 2) {
+          val distMedia = rsFb.getDouble("dist_media")
+          val sprintMedia = rsFb.getDouble("sprint_media")
+          val notaMediaFb = rsFb.getDouble("nota_media")
+          if (notaMediaFb < 6.0 && (distMedia > 3.0 || sprintMedia > 24.0))
+            " [Footbar] **CARGA FISICA ALTA**: Los ultimos partidos con datos Footbar muestran distancia/sprint elevados junto a notas bajas — posible senal de fatiga."
+          else ""
+        } else ""
+
+      baseMsg + fatigaMsg
     } finally { conn.close() }
   }
 

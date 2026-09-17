@@ -15,7 +15,8 @@ object StatsCalculator {
                        golesContra: Int,
                        valoracion: Double,
                        paradas: Int,
-                       pcTot: Int, pcOk: Int, plTot: Int, plOk: Int // <--- NUEVOS DATOS DE PASES
+                       pcTot: Int, pcOk: Int, plTot: Int, plOk: Int, // <--- NUEVOS DATOS DE PASES
+                       distanciaKm: Double = 0.0 // <--- FOOTBAR: distancia recorrida (0.0 si no hay datos)
                      ): PlayerCardData = {
 
     // 1. XP BASE
@@ -57,7 +58,12 @@ object StatsCalculator {
     val newKic = currentStats.kicRaw + xpMinutos + xpKic
 
     val newRef = currentStats.refRaw + xpMinutos + (xpRendimiento * 1.5) + (xpParadas * 1.2)
-    val newSpd = currentStats.spdRaw + 0.02
+    // Footbar: mas distancia recorrida = mayor exigencia fisica real = mas XP de velocidad
+    val spdBonus =
+      if (distanciaKm > 3.0) 0.05
+      else if (distanciaKm > 2.0) 0.035
+      else 0.02 // sin datos Footbar (0.0) o distancia baja: bonus fijo de siempre
+    val newSpd = currentStats.spdRaw + spdBonus
     val factorGoles = if(golesContra < 2) 0.2 else 0.0
     val newPos = currentStats.posRaw + xpMinutos + factorGoles
 
