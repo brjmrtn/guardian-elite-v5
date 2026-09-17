@@ -193,6 +193,9 @@ object AmateurController extends cask.Routes {
           a(href := "/am/progression",
             cls := s"nav-item ${if (activeLink == "progression") "active" else ""}",
             span(cls := "nav-icon", "📈"), span("Progreso")),
+          a(href := "/am/footbar",
+            cls := s"nav-item ${if (activeLink == "footbar") "active" else ""}",
+            span(cls := "nav-icon", "🦵"), span("Footbar")),
           a(href := "/am/mapa-goles",
             cls := s"nav-item ${if (activeLink == "goals") "active" else ""}",
             span(cls := "nav-icon", "🥅"), span("Mapa")),
@@ -949,12 +952,44 @@ object AmateurController extends cask.Routes {
             input(tpe := "hidden", name := "audioData", id := "amAudioData")
           ),
 
+          // Footbar (sensor GPS de rendimiento) — opcional
+          div(cls := "card-am p-3 mb-3", style := "border-left:3px solid #0d6efd;",
+            div(cls := "d-flex justify-content-between align-items-center",
+              style := "cursor:pointer;", attr("onclick") := "toggleFootbarAm()",
+              div(cls := "xx-small fw-bold text-muted", "🦵 DATOS FOOTBAR (opcional)"),
+              span(id := "footbarChevronAm", cls := "text-primary small", "▼")
+            ),
+            div(id := "footbarPanelAm", style := "display:none;",
+              div(cls := "xx-small text-muted mt-2 mb-2",
+                "Introduce los datos del sensor Footbar tras el partido. Se guardan solo si rellenas la distancia."),
+              div(cls := "xx-small text-primary fw-bold mb-1", "INFORME FÍSICO"),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Distancia (km)"), input(tpe := "number", step := "0.01", min := "0", name := "fbDistancia", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Alta intensidad (m)"), input(tpe := "number", step := "1", min := "0", name := "fbAltaIntensidad", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Sprint máx (km/h)"), input(tpe := "number", step := "0.1", min := "0", name := "fbSprintMax", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "% Actividad"), input(tpe := "number", step := "0.1", min := "0", max := "100", name := "fbPctActividad", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Tiempo actividad (min)"), input(tpe := "number", step := "1", min := "0", name := "fbTiempoActividad", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Aceleraciones"), input(tpe := "number", step := "1", min := "0", name := "fbAceleraciones", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Desaceleraciones"), input(tpe := "number", step := "1", min := "0", name := "fbDesaceleraciones", cls := "form-control form-control-sm"))
+              ),
+              div(cls := "xx-small text-primary fw-bold mb-1 mt-2", "INFORME TÉCNICO"),
+              div(cls := "row g-2",
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Balones"), input(tpe := "number", step := "1", min := "0", name := "fbBalones", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Pases"), input(tpe := "number", step := "1", min := "0", name := "fbPases", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Tiempo con balón (s)"), input(tpe := "number", step := "1", min := "0", name := "fbTiempoBalon", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Disparos"), input(tpe := "number", step := "1", min := "0", name := "fbDisparos", cls := "form-control form-control-sm")),
+                div(cls := "col-6", label(cls := "xx-small text-muted fw-bold", "Tiro máx (km/h)"), input(tpe := "number", step := "0.1", min := "0", name := "fbTiroMax", cls := "form-control form-control-sm"))
+              )
+            )
+          ),
+
           button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold py-3 mb-2",
             "GUARDAR PARTIDO")
         ),
 
         // JavaScript para el formulario
         script(raw("""
+          function toggleFootbarAm(){var p=document.getElementById('footbarPanelAm');var c=document.getElementById('footbarChevronAm');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
           var goalCount = 0;
           var goals = [];
           var zones = ['TL','TC','TR','ML','MC','MR','BL','BC','BR'];
@@ -1184,6 +1219,16 @@ object AmateurController extends cask.Routes {
           )
         }
       }
+    }
+
+    // Guardar datos Footbar (solo si se ha introducido distancia)
+    val fbDistancia = dbl("fbDistancia")
+    if (fbDistancia > 0 && matchId > 0) {
+      AmateurDatabaseManager.saveFootbar(
+        matchId, fbDistancia, dbl("fbAltaIntensidad"), dbl("fbSprintMax"), dbl("fbPctActividad"),
+        int("fbTiempoActividad"), int("fbAceleraciones"), int("fbDesaceleraciones"),
+        int("fbBalones"), int("fbPases"), int("fbTiempoBalon"), int("fbDisparos"), dbl("fbTiroMax")
+      )
     }
 
     // Audio-Diario efímero: procesar y descartar (nunca se escribe en disco)
@@ -3201,6 +3246,151 @@ $penSection
         ),
 
         script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js")
+      )
+    )
+  }
+
+  // ── FOOTBAR (SENSOR GPS DE RENDIMIENTO) ─────────────────────────────────────
+  @cask.get("/am/footbar")
+  def footbarPage(request: cask.Request) = withAmAuth(request) { user =>
+    val d = AmateurDatabaseManager.getFootbarPageData(user.id)
+    val rows          = d("rows").asInstanceOf[List[Map[String, Any]]]
+    val totalSesiones = d("totalSesiones").asInstanceOf[Int]
+
+    renderAm("footbar", user.nombre,
+      div(
+        div(cls := "mb-3",
+          h5(cls := "fw-black text-white mb-0", "🦵 Footbar"),
+          span(cls := "text-muted small", s"$totalSesiones sesiones registradas")
+        ),
+
+        if (totalSesiones == 0)
+          div(cls := "card-am p-4 text-center",
+            div(style := "font-size:48px; opacity:0.4", "🦵"),
+            h5(cls := "text-muted mt-3", "Sin datos de Footbar aún"),
+            p(cls := "text-secondary small",
+              "Rellena el panel opcional \"DATOS FOOTBAR\" al registrar un partido para ver tus KPIs aquí."),
+            a(href := "/am/match-center", cls := "btn btn-primary mt-2 fw-bold", "Registrar partido")
+          )
+        else {
+          val avgDistanciaKm     = d("avgDistanciaKm").asInstanceOf[Double]
+          val avgAltaIntensidadM = d("avgAltaIntensidadM").asInstanceOf[Double]
+          val avgSprintMaxKmh    = d("avgSprintMaxKmh").asInstanceOf[Double]
+          val avgPctActividad    = d("avgPctActividad").asInstanceOf[Double]
+          val avgPases           = d("avgPases").asInstanceOf[Double]
+          val avgTiroMaxKmh      = d("avgTiroMaxKmh").asInstanceOf[Double]
+          val correlacionNota    = d("correlacionNota").asInstanceOf[Double]
+
+          val scatterData = rows.map { r =>
+            val dist = r("distanciaKm").asInstanceOf[Double]
+            val nota = r("nota").asInstanceOf[Double]
+            s"{x:$dist,y:$nota}"
+          }.mkString("[", ",", "]")
+
+          val corrLabel = if (rows.size < 3) "Pocos datos"
+            else if (correlacionNota > 0.3) "A más distancia, mejor nota"
+            else if (correlacionNota < -0.3) "A más distancia, peor nota"
+            else "Sin relación clara"
+          val corrColor = if (rows.size < 3) "#6c757d"
+            else if (correlacionNota > 0.3) "#20c997"
+            else if (correlacionNota < -0.3) "#dc3545"
+            else "#ffc107"
+
+          frag(
+            // KPIs medios
+            div(cls := "row g-2 mb-3",
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "xx-small text-muted", "DISTANCIA MEDIA"),
+                  div(cls := "fw-black text-primary", style := "font-size:1.5rem;", f"$avgDistanciaKm%.1f km"))),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "xx-small text-muted", "ALTA INTENSIDAD MEDIA"),
+                  div(cls := "fw-black", style := "font-size:1.5rem; color:#8b5cf6;", f"$avgAltaIntensidadM%.0f m"))),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "xx-small text-muted", "SPRINT MÁX MEDIO"),
+                  div(cls := "fw-black text-danger", style := "font-size:1.5rem;", f"$avgSprintMaxKmh%.1f km/h"))),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "xx-small text-muted", "% ACTIVIDAD MEDIO"),
+                  div(cls := "fw-black text-success", style := "font-size:1.5rem;", f"$avgPctActividad%.0f%%"))),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "xx-small text-muted", "PASES MEDIOS"),
+                  div(cls := "fw-black", style := "font-size:1.5rem; color:#0d6efd;", f"$avgPases%.0f"))),
+              div(cls := "col-6",
+                div(cls := "card-am p-2 text-center",
+                  div(cls := "xx-small text-muted", "TIRO MÁX MEDIO"),
+                  div(cls := "fw-black", style := "font-size:1.5rem; color:#f59e0b;", f"$avgTiroMaxKmh%.1f km/h")))
+            ),
+
+            // Correlación distancia / nota
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "d-flex align-items-center gap-3",
+                div(style := s"font-size:2rem; color:$corrColor; font-weight:900;", f"$correlacionNota%.2f"),
+                div(
+                  div(cls := "fw-bold text-white", corrLabel),
+                  div(cls := "xx-small text-muted", "Correlación de Pearson: distancia recorrida vs. tu nota")
+                )
+              )
+            ),
+
+            // Gráfico scatter distancia vs nota
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "DISTANCIA (km) VS. NOTA"),
+              div(style := "height:220px;", canvas(id := "chartFootbarScatter")),
+              script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"),
+              script(raw(s"""
+                new Chart(document.getElementById('chartFootbarScatter'), {
+                  type: 'scatter',
+                  data: { datasets: [{
+                    label: 'Partidos',
+                    data: $scatterData,
+                    backgroundColor: 'rgba(13,110,253,0.7)',
+                    pointRadius: 6
+                  }]},
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                      x: { title: { display: true, text: 'Distancia (km)', color: '#888' },
+                           ticks: { color: '#888' }, grid: { color: 'rgba(0,0,0,0.06)' } },
+                      y: { title: { display: true, text: 'Nota', color: '#888' }, min: 0, max: 10,
+                           ticks: { color: '#888' }, grid: { color: 'rgba(0,0,0,0.06)' } }
+                    }
+                  }
+                });
+              """))
+            ),
+
+            // Tabla por partido
+            div(cls := "card-am p-3 mb-3",
+              div(cls := "fw-bold small text-muted mb-2", "SESIONES POR PARTIDO"),
+              div(style := "overflow-x:auto;",
+                table(cls := "table table-sm mb-0",
+                  thead(tr(
+                    th("Fecha"), th("Rival"), th("Nota"),
+                    th("Dist. (km)"), th("Sprint máx"), th("Pases"), th("Tiro máx")
+                  )),
+                  tbody(
+                    frag(rows.map { r =>
+                      tr(
+                        td(r("fecha").asInstanceOf[String].take(10)),
+                        td(r("rival").asInstanceOf[String]),
+                        td(f"${r("nota").asInstanceOf[Double]}%.1f"),
+                        td(f"${r("distanciaKm").asInstanceOf[Double]}%.2f"),
+                        td(f"${r("sprintMaxKmh").asInstanceOf[Double]}%.1f"),
+                        td(r("pases").asInstanceOf[Int].toString),
+                        td(f"${r("tiroMaxKmh").asInstanceOf[Double]}%.1f")
+                      )
+                    }: _*)
+                  )
+                )
+              )
+            )
+          )
+        }
       )
     )
   }

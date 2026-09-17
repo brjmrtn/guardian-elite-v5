@@ -25,6 +25,12 @@ case class TechReview(id: Int, fecha: String, blocaje: Int, pies: Int, aereo: In
 case class AcademicNote(id: Int, fecha: String, asignatura: String, nota: Double, tipo: String)
 // Vault Medico
 case class MedicalReport(id: Int, fecha: String, tipo: String, diagnostico: String, recomendaciones: String, esPrevio: Boolean)
+// Footbar (sensor GPS de rendimiento fisico/tecnico)
+case class FootbarSession(
+  matchId: Int, distanciaKm: Double, altaIntensidadM: Double, sprintMaxKmh: Double,
+  pctActividad: Double, tiempoActividadMin: Int, aceleraciones: Int, desaceleraciones: Int,
+  balones: Int, pases: Int, tiempoBalonSeg: Int, disparos: Int, tiroMaxKmh: Double
+)
 
 object DatabaseManager {
   private val dbHost = sys.env.getOrElse("DB_HOST", "ep-fancy-cherry-abkfneqp-pooler.eu-west-2.aws.neon.tech")
@@ -334,6 +340,26 @@ object DatabaseManager {
         nota_ultimo  DOUBLE PRECISION DEFAULT 6.0,
         plan_ia      TEXT DEFAULT '',
         created_at   TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // ── Footbar: sensor GPS de rendimiento fisico/tecnico (opcional por partido) ──
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS footbar_sessions (
+        id                   SERIAL PRIMARY KEY,
+        match_id             INT REFERENCES matches(id) ON DELETE CASCADE,
+        distancia_km         DOUBLE PRECISION DEFAULT 0,
+        alta_intensidad_m    DOUBLE PRECISION DEFAULT 0,
+        sprint_max_kmh       DOUBLE PRECISION DEFAULT 0,
+        pct_actividad        DOUBLE PRECISION DEFAULT 0,
+        tiempo_actividad_min INT DEFAULT 0,
+        aceleraciones        INT DEFAULT 0,
+        desaceleraciones     INT DEFAULT 0,
+        balones              INT DEFAULT 0,
+        pases                INT DEFAULT 0,
+        tiempo_balon_seg     INT DEFAULT 0,
+        disparos             INT DEFAULT 0,
+        tiro_max_kmh         DOUBLE PRECISION DEFAULT 0,
+        created_at           TIMESTAMP DEFAULT NOW(),
+        UNIQUE(match_id)
       )""")
 
       println("[OK] initDB: todas las tablas verificadas.")
@@ -785,6 +811,73 @@ object DatabaseManager {
       conn.close()
     }
   }
+  // --- FOOTBAR (SENSOR GPS DE RENDIMIENTO FISICO/TECNICO) ---
+  def saveFootbar(
+    matchId: Int, distanciaKm: Double, altaIntensidadM: Double, sprintMaxKmh: Double,
+    pctActividad: Double, tiempoActividadMin: Int, aceleraciones: Int, desaceleraciones: Int,
+    balones: Int, pases: Int, tiempoBalonSeg: Int, disparos: Int, tiroMaxKmh: Double
+  ): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO footbar_sessions
+          (match_id, distancia_km, alta_intensidad_m, sprint_max_kmh, pct_actividad,
+           tiempo_actividad_min, aceleraciones, desaceleraciones, balones, pases,
+           tiempo_balon_seg, disparos, tiro_max_kmh)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT (match_id) DO UPDATE SET
+          distancia_km = EXCLUDED.distancia_km, alta_intensidad_m = EXCLUDED.alta_intensidad_m,
+          sprint_max_kmh = EXCLUDED.sprint_max_kmh, pct_actividad = EXCLUDED.pct_actividad,
+          tiempo_actividad_min = EXCLUDED.tiempo_actividad_min, aceleraciones = EXCLUDED.aceleraciones,
+          desaceleraciones = EXCLUDED.desaceleraciones, balones = EXCLUDED.balones, pases = EXCLUDED.pases,
+          tiempo_balon_seg = EXCLUDED.tiempo_balon_seg, disparos = EXCLUDED.disparos, tiro_max_kmh = EXCLUDED.tiro_max_kmh
+      """)
+      ps.setInt(1, matchId)
+      ps.setDouble(2, distanciaKm)
+      ps.setDouble(3, altaIntensidadM)
+      ps.setDouble(4, sprintMaxKmh)
+      ps.setDouble(5, pctActividad)
+      ps.setInt(6, tiempoActividadMin)
+      ps.setInt(7, aceleraciones)
+      ps.setInt(8, desaceleraciones)
+      ps.setInt(9, balones)
+      ps.setInt(10, pases)
+      ps.setInt(11, tiempoBalonSeg)
+      ps.setInt(12, disparos)
+      ps.setDouble(13, tiroMaxKmh)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getFootbar(matchId: Int): Option[FootbarSession] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT * FROM footbar_sessions WHERE match_id = ?")
+      ps.setInt(1, matchId)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(FootbarSession(
+        matchId, rs.getDouble("distancia_km"), rs.getDouble("alta_intensidad_m"), rs.getDouble("sprint_max_kmh"),
+        rs.getDouble("pct_actividad"), rs.getInt("tiempo_actividad_min"), rs.getInt("aceleraciones"), rs.getInt("desaceleraciones"),
+        rs.getInt("balones"), rs.getInt("pases"), rs.getInt("tiempo_balon_seg"), rs.getInt("disparos"), rs.getDouble("tiro_max_kmh")
+      )) else None
+    } finally { conn.close() }
+  }
+
+  // Correlacion Pearson entre distancia recorrida (Footbar) y nota del partido
+  def getFootbarCorrelacion(): Double = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT f.distancia_km, m.nota FROM footbar_sessions f
+        JOIN matches m ON m.id = f.match_id
+        WHERE f.distancia_km > 0
+      """)
+      var pairs = List[(Double, Double)]()
+      while (rs.next()) pairs = pairs :+ (rs.getDouble("distancia_km"), rs.getDouble("nota"))
+      calcCorrelation(pairs)
+    } finally { conn.close() }
+  }
+
   def playScheduledMatch(
                           id: Int, gf: Int, gc: Int, min: Int, nota: Double, paradas: Int,
                           notas: String, video: String, reaccion: String, clima: String, estadio: String,

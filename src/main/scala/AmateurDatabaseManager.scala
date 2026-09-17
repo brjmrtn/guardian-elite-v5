@@ -43,6 +43,12 @@ case class AmSchedule(
   matchId: Option[Int]
 )
 
+case class AmFootbarSession(
+  matchId: Int, distanciaKm: Double, altaIntensidadM: Double, sprintMaxKmh: Double,
+  pctActividad: Double, tiempoActividadMin: Int, aceleraciones: Int, desaceleraciones: Int,
+  balones: Int, pases: Int, tiempoBalonSeg: Int, disparos: Int, tiroMaxKmh: Double
+)
+
 // ─────────────────────────────────────────────────────────────────────────────
 object AmateurDatabaseManager {
 
@@ -345,6 +351,26 @@ object AmateurDatabaseManager {
         limpias     INT DEFAULT 0
       )""")
 
+      // Footbar — sensor GPS de rendimiento fisico/tecnico (opcional por partido)
+      s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_footbar_sessions (
+        id                   SERIAL PRIMARY KEY,
+        match_id             INT REFERENCES am_matches(id) ON DELETE CASCADE,
+        distancia_km         DOUBLE PRECISION DEFAULT 0,
+        alta_intensidad_m    DOUBLE PRECISION DEFAULT 0,
+        sprint_max_kmh       DOUBLE PRECISION DEFAULT 0,
+        pct_actividad        DOUBLE PRECISION DEFAULT 0,
+        tiempo_actividad_min INT DEFAULT 0,
+        aceleraciones        INT DEFAULT 0,
+        desaceleraciones     INT DEFAULT 0,
+        balones              INT DEFAULT 0,
+        pases                INT DEFAULT 0,
+        tiempo_balon_seg     INT DEFAULT 0,
+        disparos             INT DEFAULT 0,
+        tiro_max_kmh         DOUBLE PRECISION DEFAULT 0,
+        created_at           TIMESTAMP DEFAULT NOW(),
+        UNIQUE(match_id)
+      )""")
+
     } finally { conn.close() }
   }
 
@@ -466,6 +492,138 @@ object AmateurDatabaseManager {
       // Invalida la caché IA para que los insights se recalculen con el nuevo partido
       if (newId > 0) invalidateAiCache(userId)
       newId
+    } finally { conn.close() }
+  }
+
+  // ── FOOTBAR (SENSOR GPS DE RENDIMIENTO FISICO/TECNICO) ──────────────────────
+  def saveFootbar(
+    matchId: Int, distanciaKm: Double, altaIntensidadM: Double, sprintMaxKmh: Double,
+    pctActividad: Double, tiempoActividadMin: Int, aceleraciones: Int, desaceleraciones: Int,
+    balones: Int, pases: Int, tiempoBalonSeg: Int, disparos: Int, tiroMaxKmh: Double
+  ): Unit = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO am_footbar_sessions
+          (match_id, distancia_km, alta_intensidad_m, sprint_max_kmh, pct_actividad,
+           tiempo_actividad_min, aceleraciones, desaceleraciones, balones, pases,
+           tiempo_balon_seg, disparos, tiro_max_kmh)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT (match_id) DO UPDATE SET
+          distancia_km = EXCLUDED.distancia_km, alta_intensidad_m = EXCLUDED.alta_intensidad_m,
+          sprint_max_kmh = EXCLUDED.sprint_max_kmh, pct_actividad = EXCLUDED.pct_actividad,
+          tiempo_actividad_min = EXCLUDED.tiempo_actividad_min, aceleraciones = EXCLUDED.aceleraciones,
+          desaceleraciones = EXCLUDED.desaceleraciones, balones = EXCLUDED.balones, pases = EXCLUDED.pases,
+          tiempo_balon_seg = EXCLUDED.tiempo_balon_seg, disparos = EXCLUDED.disparos, tiro_max_kmh = EXCLUDED.tiro_max_kmh
+      """)
+      ps.setInt(1, matchId)
+      ps.setDouble(2, distanciaKm)
+      ps.setDouble(3, altaIntensidadM)
+      ps.setDouble(4, sprintMaxKmh)
+      ps.setDouble(5, pctActividad)
+      ps.setInt(6, tiempoActividadMin)
+      ps.setInt(7, aceleraciones)
+      ps.setInt(8, desaceleraciones)
+      ps.setInt(9, balones)
+      ps.setInt(10, pases)
+      ps.setInt(11, tiempoBalonSeg)
+      ps.setInt(12, disparos)
+      ps.setDouble(13, tiroMaxKmh)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getFootbar(matchId: Int): Option[AmFootbarSession] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("SELECT * FROM am_footbar_sessions WHERE match_id = ?")
+      ps.setInt(1, matchId)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(AmFootbarSession(
+        matchId, rs.getDouble("distancia_km"), rs.getDouble("alta_intensidad_m"), rs.getDouble("sprint_max_kmh"),
+        rs.getDouble("pct_actividad"), rs.getInt("tiempo_actividad_min"), rs.getInt("aceleraciones"), rs.getInt("desaceleraciones"),
+        rs.getInt("balones"), rs.getInt("pases"), rs.getInt("tiempo_balon_seg"), rs.getInt("disparos"), rs.getDouble("tiro_max_kmh")
+      )) else None
+    } finally { conn.close() }
+  }
+
+  private def calcCorrelation(pairs: List[(Double, Double)]): Double = {
+    if (pairs.size < 3) return 0.0
+    val n = pairs.size.toDouble
+    val meanX = pairs.map(_._1).sum / n
+    val meanY = pairs.map(_._2).sum / n
+    val num   = pairs.map(p => (p._1 - meanX) * (p._2 - meanY)).sum
+    val denX  = math.sqrt(pairs.map(p => math.pow(p._1 - meanX, 2)).sum)
+    val denY  = math.sqrt(pairs.map(p => math.pow(p._2 - meanY, 2)).sum)
+    if (denX * denY == 0) 0.0 else num / (denX * denY)
+  }
+
+  // Correlacion Pearson entre distancia recorrida (Footbar) y nota del partido, para un usuario
+  def getFootbarCorrelacion(userId: Int): Double = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT f.distancia_km, m.nota FROM am_footbar_sessions f
+        JOIN am_matches m ON m.id = f.match_id
+        WHERE m.user_id = ? AND f.distancia_km > 0
+      """)
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var pairs = List[(Double, Double)]()
+      while (rs.next()) pairs = pairs :+ (rs.getDouble("distancia_km"), rs.getDouble("nota"))
+      calcCorrelation(pairs)
+    } finally { conn.close() }
+  }
+
+  // Datos para la pagina /am/footbar: KPIs medios, tabla por partido y serie distancia/nota
+  def getFootbarPageData(userId: Int): Map[String, Any] = {
+    val conn = getConn()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT f.*, m.rival, m.fecha, m.nota
+        FROM am_footbar_sessions f
+        JOIN am_matches m ON m.id = f.match_id
+        WHERE m.user_id = ?
+        ORDER BY m.fecha DESC
+      """)
+      ps.setInt(1, userId)
+      val rs = ps.executeQuery()
+      var rows = List[Map[String, Any]]()
+      while (rs.next()) {
+        rows = rows :+ Map(
+          "matchId"             -> rs.getInt("match_id"),
+          "rival"               -> Option(rs.getString("rival")).getOrElse(""),
+          "fecha"               -> rs.getDate("fecha").toString,
+          "nota"                -> rs.getDouble("nota"),
+          "distanciaKm"         -> rs.getDouble("distancia_km"),
+          "altaIntensidadM"     -> rs.getDouble("alta_intensidad_m"),
+          "sprintMaxKmh"        -> rs.getDouble("sprint_max_kmh"),
+          "pctActividad"        -> rs.getDouble("pct_actividad"),
+          "tiempoActividadMin"  -> rs.getInt("tiempo_actividad_min"),
+          "aceleraciones"       -> rs.getInt("aceleraciones"),
+          "desaceleraciones"    -> rs.getInt("desaceleraciones"),
+          "balones"             -> rs.getInt("balones"),
+          "pases"               -> rs.getInt("pases"),
+          "tiempoBalonSeg"      -> rs.getInt("tiempo_balon_seg"),
+          "disparos"            -> rs.getInt("disparos"),
+          "tiroMaxKmh"          -> rs.getDouble("tiro_max_kmh")
+        )
+      }
+
+      def avg(f: Map[String, Any] => Double): Double =
+        if (rows.isEmpty) 0.0 else rows.map(f).sum / rows.size
+
+      Map(
+        "rows"               -> rows,
+        "totalSesiones"      -> rows.size,
+        "avgDistanciaKm"     -> avg(_("distanciaKm").asInstanceOf[Double]),
+        "avgAltaIntensidadM" -> avg(_("altaIntensidadM").asInstanceOf[Double]),
+        "avgSprintMaxKmh"    -> avg(_("sprintMaxKmh").asInstanceOf[Double]),
+        "avgPctActividad"    -> avg(_("pctActividad").asInstanceOf[Double]),
+        "avgPases"           -> avg(_("pases").asInstanceOf[Int].toDouble),
+        "avgTiroMaxKmh"      -> avg(_("tiroMaxKmh").asInstanceOf[Double]),
+        "correlacionNota"    -> getFootbarCorrelacion(userId)
+      )
     } finally { conn.close() }
   }
 
