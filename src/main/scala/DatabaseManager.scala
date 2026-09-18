@@ -168,6 +168,9 @@ object DatabaseManager {
         notas_conducta TEXT,
         estado_fisico TEXT DEFAULT 'DISPONIBLE'
       )""")
+      stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS sueno_profundo_min INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS sueno_ligero_min INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS sueno_despierto_min INT DEFAULT NULL")
 
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS match_goals (
         id              SERIAL PRIMARY KEY,
@@ -3859,7 +3862,18 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   def getPenaltyStats(): List[PenaltyStat] = { val l = scala.collection.mutable.ListBuffer[PenaltyStat](); val conn = getConnection(); try { val rs = conn.createStatement().executeQuery("SELECT zona_tiro, COUNT(*) as total, SUM(CASE WHEN es_gol THEN 1 ELSE 0 END) as goles FROM penalties GROUP BY zona_tiro"); while(rs.next()) l += PenaltyStat(rs.getString("zona_tiro"), rs.getInt("total"), rs.getInt("goles")) } finally { conn.close() }; l.toList }
   def addNewGear(nombre: String, tipo: String, vida: Int, img: String): Unit = { val conn=getConnection(); try { val r=conn.prepareStatement("UPDATE gear SET activo=FALSE WHERE tipo=? AND activo=TRUE"); r.setString(1,tipo); r.executeUpdate(); val a=conn.prepareStatement("INSERT INTO gear (nombre, tipo, vida_util_estimada, usos_actuales, activo, imagen_url) VALUES (?,?,?,0,TRUE, ?)"); a.setString(1,fixEncoding(nombre)); a.setString(2,tipo); a.setInt(3,vida); a.setString(4, img); a.executeUpdate() } finally { conn.close() } }
   def getActiveGear(): List[GearItem] = { var l=List[GearItem](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT * FROM gear WHERE activo = TRUE ORDER BY tipo DESC"); while(rs.next()) { val (u,max)=(rs.getInt("usos_actuales"),rs.getInt("vida_util_estimada")); l=l:+GearItem(rs.getInt("id"),rs.getString("nombre"),rs.getString("tipo"),u,max,if(max>0 && u.toDouble/max > 0.9) "Critico" else "Optimo", Option(rs.getString("imagen_url")).getOrElse("")) } } finally { conn.close() }; l }
-  def logWellness(sueno: Int, horas: Double, energia: Int, dolor: Int, zona: String, altura: Int, peso: Double, animo: Int, notas: String, estadoFisico: String): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("INSERT INTO wellness (sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico) VALUES (?,?,?,?,?,?,?,?,?,?)"); s.setInt(1,sueno); s.setDouble(2, horas); s.setInt(3,energia); s.setInt(4,dolor); s.setString(5,fixEncoding(zona)); s.setInt(6, altura); s.setDouble(7, peso); s.setInt(8, animo); s.setString(9, fixEncoding(notas)); s.setString(10, estadoFisico); s.executeUpdate(); if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso) } finally { conn.close() } }
+  def logWellness(sueno: Int, horas: Double, energia: Int, dolor: Int, zona: String, altura: Int, peso: Double, animo: Int, notas: String, estadoFisico: String,
+                   suenoProfundoMin: Option[Int] = None, suenoLigeroMin: Option[Int] = None, suenoDespiertoMin: Option[Int] = None): Unit = {
+    val conn=getConnection()
+    try {
+      val s=conn.prepareStatement("INSERT INTO wellness (sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      s.setInt(1,sueno); s.setDouble(2, horas); s.setInt(3,energia); s.setInt(4,dolor); s.setString(5,fixEncoding(zona)); s.setInt(6, altura); s.setDouble(7, peso); s.setInt(8, animo); s.setString(9, fixEncoding(notas)); s.setString(10, estadoFisico)
+      def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => s.setInt(idx, x); case None => s.setNull(idx, java.sql.Types.INTEGER) }
+      setOptInt(11, suenoProfundoMin); setOptInt(12, suenoLigeroMin); setOptInt(13, suenoDespiertoMin)
+      s.executeUpdate()
+      if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso)
+    } finally { conn.close() }
+  }
   def logTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int, rutina: String): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle) VALUES (?,?,?,?,?,?)"); s.setString(1,tipo); s.setString(2,fixEncoding(foco)); s.setInt(3,rpe); s.setInt(4,calidad); s.setInt(5, atencion); s.setString(6,fixEncoding(rutina)); s.executeUpdate(); conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE"); if (tipo.contains("Papa")) progressDrills() } finally { conn.close() } }
   // --- EN: DatabaseManager.scala ---
 
@@ -4059,6 +4073,215 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       while (rs.next()) l = l :+ (rs.getString(1), rs.getDouble(2), rs.getInt(3), rs.getInt(4))
     } finally { conn.close() }
     l
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DIARIO DE CARGA Y SUENO — CORRELACIONES SUENO-RENDIMIENTO (smartwatch)
+  // ─────────────────────────────────────────────────────────────────────────────
+  case class RegistroPartido(
+    fecha: String, suenoProfundoMin: Option[Int], suenoLigeroMin: Option[Int], suenoDespiertoMin: Option[Int],
+    horasSueno: Double, calidad: Int, energia: Int, animo: Int, notaPartido: Double,
+    acuteLoad: Double, chronicLoad: Double
+  ) {
+    def acwr: Double = if (chronicLoad > 0) acuteLoad / chronicLoad else 0.0
+  }
+
+  private def fetchRegistrosPartido(): List[RegistroPartido] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT w.fecha::TEXT as w_fecha,
+               w.sueno_profundo_min, w.sueno_ligero_min, w.sueno_despierto_min,
+               w.horas_sueno, w.sueno as calidad, w.energia, w.animo,
+               m.nota,
+               (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 7.0
+                  FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+                        UNION ALL
+                        (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                  WHERE fecha <= w.fecha AND fecha > w.fecha - 7) as acute_load,
+               (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
+                  FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+                        UNION ALL
+                        (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                  WHERE fecha <= w.fecha AND fecha > w.fecha - 28) as chronic_load
+        FROM wellness w
+        JOIN matches m ON m.status = 'PLAYED' AND m.fecha > w.fecha AND m.fecha <= w.fecha + 2
+        ORDER BY w.fecha ASC
+      """)
+      var list = List[RegistroPartido]()
+      while (rs.next()) {
+        val spObj = rs.getObject("sueno_profundo_min");  val sp = if (spObj == null) None else Some(rs.getInt("sueno_profundo_min"))
+        val slObj = rs.getObject("sueno_ligero_min");     val sl = if (slObj == null) None else Some(rs.getInt("sueno_ligero_min"))
+        val sdObj = rs.getObject("sueno_despierto_min");  val sd = if (sdObj == null) None else Some(rs.getInt("sueno_despierto_min"))
+        list = list :+ RegistroPartido(
+          rs.getString("w_fecha"), sp, sl, sd, rs.getDouble("horas_sueno"),
+          rs.getInt("calidad"), rs.getInt("energia"), rs.getInt("animo"), rs.getDouble("nota"),
+          rs.getDouble("acute_load"), rs.getDouble("chronic_load")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  private def suenoProfundoNivel(sp: Option[Int]): String = sp match {
+    case Some(v) if v > 90 => "ALTO"; case Some(v) if v >= 60 => "MEDIO"; case _ => "BAJO"
+  }
+  private def horasNivel(h: Double): String = if (h >= 9) "MUCHO" else if (h >= 7) "NORMAL" else "POCO"
+  private def escala15Nivel(v: Int): String = if (v >= 4) "ALTO" else if (v == 3) "MEDIO" else "BAJO"
+  private def acwrNivel(v: Double): String = if (v > 1.3) "ALTO" else if (v >= 0.8) "NORMAL" else "BAJO"
+
+  private def nivelStats(regs: List[RegistroPartido], niveles: List[String], nivelFn: RegistroPartido => String): List[Map[String, Any]] =
+    niveles.map { n =>
+      val grp = regs.filter(r => nivelFn(r) == n)
+      Map[String, Any]("nivel" -> n, "notaMedia" -> (if (grp.nonEmpty) grp.map(_.notaPartido).sum / grp.size else 0.0), "partidos" -> grp.size)
+    }
+
+  def getSleepCorrelations(): Map[String, Any] = {
+    val all = fetchRegistrosPartido()
+    val totalPares = all.size
+
+    val conSuenoProfundo = all.filter(_.suenoProfundoMin.isDefined)
+    val suenoProfundoList = if (conSuenoProfundo.size >= 3) nivelStats(conSuenoProfundo, List("ALTO", "MEDIO", "BAJO"), r => suenoProfundoNivel(r.suenoProfundoMin)) else List.empty[Map[String, Any]]
+
+    val conHoras = all.filter(_.horasSueno > 0)
+    val horasList = if (conHoras.size >= 3) nivelStats(conHoras, List("MUCHO", "NORMAL", "POCO"), r => horasNivel(r.horasSueno)) else List.empty[Map[String, Any]]
+
+    val conCalidad = all.filter(_.calidad > 0)
+    val calidadList = if (conCalidad.size >= 3) nivelStats(conCalidad, List("ALTO", "MEDIO", "BAJO"), r => escala15Nivel(r.calidad)) else List.empty[Map[String, Any]]
+
+    val conEnergia = all.filter(_.energia > 0)
+    val energiaList = if (conEnergia.size >= 3) nivelStats(conEnergia, List("ALTO", "MEDIO", "BAJO"), r => escala15Nivel(r.energia)) else List.empty[Map[String, Any]]
+
+    val conAnimo = all.filter(_.animo > 0)
+    val animoList = if (conAnimo.size >= 3) nivelStats(conAnimo, List("ALTO", "MEDIO", "BAJO"), r => escala15Nivel(r.animo)) else List.empty[Map[String, Any]]
+
+    // Combinacion optima: busca la combinacion horas x sueno profundo x energia con mejor nota media (min 2 pares)
+    val combinacionOptima: Option[Map[String, Any]] = {
+      val candidatos = all.filter(r => r.horasSueno > 0 && r.energia > 0)
+      if (candidatos.size < 2) None
+      else {
+        val grupos = candidatos.groupBy(r => (horasNivel(r.horasSueno), suenoProfundoNivel(r.suenoProfundoMin), escala15Nivel(r.energia)))
+        val validos = grupos.filter(_._2.size >= 2)
+        if (validos.isEmpty) None
+        else {
+          val ((hNivel, spNivel, eNivel), mejores) = validos.maxBy { case (_, grp) => grp.map(_.notaPartido).sum / grp.size }
+          val notaMedia = mejores.map(_.notaPartido).sum / mejores.size
+          def hLabel(n: String) = n match { case "MUCHO" => "más de 9h"; case "NORMAL" => "entre 7 y 9h"; case _ => "menos de 7h" }
+          def spLabel(n: String) = n match { case "ALTO" => "más de 90min"; case "MEDIO" => "entre 60 y 90min"; case _ => "menos de 60min (o sin datos)" }
+          def eLabel(n: String) = n match { case "ALTO" => "≥4"; case "MEDIO" => "=3"; case _ => "≤2" }
+          val texto = s"Cuando duerme ${hLabel(hNivel)} + sueño profundo ${spLabel(spNivel)} + energía ${eLabel(eNivel)}, su nota media es ${f"$notaMedia%.1f"}"
+          Some(Map[String, Any]("texto" -> texto, "notaMedia" -> notaMedia, "partidos" -> mejores.size))
+        }
+      }
+    }
+
+    // ACWR vs sueno: para cada nivel de ACWR, horas medias de sueno del registro
+    val conAcwr = all.filter(r => r.chronicLoad > 0 && r.horasSueno > 0)
+    val acwrSuenoList = if (conAcwr.size >= 3) {
+      List("ALTO", "NORMAL", "BAJO").map { n =>
+        val grp = conAcwr.filter(r => acwrNivel(r.acwr) == n)
+        Map[String, Any]("nivel" -> n, "horasMedia" -> (if (grp.nonEmpty) grp.map(_.horasSueno).sum / grp.size else 0.0), "partidos" -> grp.size)
+      }
+    } else List.empty[Map[String, Any]]
+
+    Map(
+      "totalPares"        -> totalPares,
+      "suenoProfundo"     -> suenoProfundoList,
+      "horasTotales"      -> horasList,
+      "calidad"           -> calidadList,
+      "energia"           -> energiaList,
+      "animo"             -> animoList,
+      "combinacionOptima" -> combinacionOptima,
+      "acwrSueno"         -> acwrSuenoList
+    )
+  }
+
+  // Lectura desde cache unicamente — nunca llama a Gemini en el render de pagina
+  def getSleepAnalysisCached(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT payload FROM feature_cache WHERE cache_key = 'sleep_correlations_ia' AND updated_at > NOW() - INTERVAL '7 days'"
+      )
+      if (rs.next()) Some(ujson.read(rs.getString("payload"))("analisis").str) else None
+    } finally { conn.close() }
+  }
+
+  // Llamada real a Gemini — SOLO se invoca desde el boton POST explicito "Analisis IA completo"
+  def generateSleepAnalysisIA(): String = {
+    val conn = getConnection()
+    try {
+      val d = getSleepCorrelations()
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+
+      def fmtList(nombre: String, l: List[Map[String, Any]]): String =
+        if (l.isEmpty) s"$nombre: sin datos suficientes"
+        else s"$nombre: " + l.map(x => s"${x("nivel")}=${f"${x("notaMedia").asInstanceOf[Double]}%.1f"}(${x("partidos")}p)").mkString(", ")
+
+      val suenoProfundo     = d("suenoProfundo").asInstanceOf[List[Map[String, Any]]]
+      val horasTotales      = d("horasTotales").asInstanceOf[List[Map[String, Any]]]
+      val calidad           = d("calidad").asInstanceOf[List[Map[String, Any]]]
+      val energia            = d("energia").asInstanceOf[List[Map[String, Any]]]
+      val animo               = d("animo").asInstanceOf[List[Map[String, Any]]]
+      val combinacionOptima   = d("combinacionOptima").asInstanceOf[Option[Map[String, Any]]]
+      val acwrSueno            = d("acwrSueno").asInstanceOf[List[Map[String, Any]]]
+
+      val datosStr = List(
+        fmtList("Sueño profundo", suenoProfundo), fmtList("Horas totales", horasTotales),
+        fmtList("Calidad subjetiva", calidad), fmtList("Energía", energia), fmtList("Ánimo", animo),
+        combinacionOptima.map(c => s"Combinación óptima: ${c("texto")}").getOrElse("Combinación óptima: sin datos suficientes"),
+        (if (acwrSueno.nonEmpty) "ACWR vs horas de sueño: " + acwrSueno.map(x => s"${x("nivel")}=${f"${x("horasMedia").asInstanceOf[Double]}%.1f"}h(${x("partidos")}p)").mkString(", ") else "ACWR vs sueño: sin datos suficientes")
+      ).mkString(". ")
+
+      val prompt = s"""Eres el analista de rendimiento de Héctor, portero de $edad años. Estos son sus datos de correlación entre sueño y rendimiento en partido: $datosStr. Analiza: 1) Cuál es el factor de sueño que más impacta en su rendimiento, 2) Qué pauta de sueño debería seguir la noche antes de un partido, 3) Si hay alguna señal de que la carga de entrenamiento está afectando la calidad del sueño. Responde en texto plano, máximo 3 líneas por punto. Adapta el lenguaje para que el padre pueda entenderlo y actuar."""
+
+      val analisis = AIProvider.ask(prompt, None, bypassCache = true)
+
+      val payload = ujson.Obj("analisis" -> analisis)
+      val upsert = conn.prepareStatement("""
+        INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('sleep_correlations_ia', ?, NOW())
+        ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+      """)
+      upsert.setString(1, ujson.write(payload))
+      upsert.executeUpdate()
+
+      analisis
+    } finally { conn.close() }
+  }
+
+  // Insight deterministico (sin Gemini) para el dashboard — se puede llamar en el render
+  case class SleepFactorDef(mejorLabel: String, key: String, nivelMejor: String, nivelPeor: String)
+  private val sleepDashboardFactores = List(
+    SleepFactorDef("más de 90min de sueño profundo", "suenoProfundo", "ALTO", "BAJO"),
+    SleepFactorDef("más de 9h de sueño", "horasTotales", "MUCHO", "POCO"),
+    SleepFactorDef("una calidad de sueño alta (4-5)", "calidad", "ALTO", "BAJO"),
+    SleepFactorDef("un nivel alto de energía", "energia", "ALTO", "BAJO"),
+    SleepFactorDef("un buen estado de ánimo", "animo", "ALTO", "BAJO")
+  )
+
+  def getSleepDashboardInsight(): Option[String] = {
+    val d = getSleepCorrelations()
+    val totalPares = d("totalPares").asInstanceOf[Int]
+    if (totalPares < 5) return None
+
+    val diffs = sleepDashboardFactores.flatMap { f =>
+      val niveles = d(f.key).asInstanceOf[List[Map[String, Any]]]
+      val mejor = niveles.find(n => n("nivel") == f.nivelMejor && n("partidos").asInstanceOf[Int] > 0)
+      val peor  = niveles.find(n => n("nivel") == f.nivelPeor  && n("partidos").asInstanceOf[Int] > 0)
+      (mejor, peor) match {
+        case (Some(m), Some(p)) =>
+          val diff = m("notaMedia").asInstanceOf[Double] - p("notaMedia").asInstanceOf[Double]
+          Some((f, diff))
+        case _ => None
+      }
+    }
+
+    if (diffs.isEmpty) None
+    else {
+      val (mejorFactor, diff) = diffs.maxBy(_._2)
+      if (diff <= 0) None else Some(f"💤 Cuando duerme ${mejorFactor.mejorLabel}, su nota sube $diff%.1f puntos de media.")
+    }
   }
 
   def getFatigaDetector(days: Int = 30): List[(String, Int, Double, Int)] = {

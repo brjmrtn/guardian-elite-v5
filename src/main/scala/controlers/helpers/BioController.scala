@@ -197,7 +197,7 @@ object BioController extends cask.Routes {
 
 
         // WELLNESS
-        div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUENO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠ Molestias"), option(value:="LESION", "X Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueno (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
+        div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUENO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠ Molestias"), option(value:="LESION", "X Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueno (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📱 Datos del smartwatch (opcional)"), div(cls:="row g-2", div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño profundo (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoProfundoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño ligero (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoLigeroMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Despierto (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoDespiertoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
 
         // NUEVO: EVALUACION TECNICA (LABELS BLANCOS FORZADOS)
         div(cls:="card bg-secondary bg-opacity-25 border-warning shadow", div(cls:="card-header bg-warning text-dark fw-bold text-center", "EVALUACION TECNICA (MENSUAL)"), div(cls:="card-body p-3",
@@ -248,13 +248,35 @@ object BioController extends cask.Routes {
     DatabaseManager.saveAcademicNote(asignatura, nota, tipo, comentarios)
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
   }
-  @cask.postForm("/bio/save_wellness")
-  def saveWellness(sueno: Int, horas: String, energia: Int, dolor: Int, zona: String,
-                   altura: String, peso: String, animo: Int, notas_conducta: String, estadoFisico: String) = {
-    val h   = if (horas.nonEmpty)   horas.toDouble  else 0.0
-    val alt = if (altura.nonEmpty)  altura.toInt    else 0
-    val pes = if (peso.nonEmpty)    peso.toDouble   else 0.0
-    DatabaseManager.logWellness(sueno, h, energia, dolor, zona, alt, pes, animo, notas_conducta, estadoFisico)
+  private def parseBody(request: cask.Request): Map[String, String] = {
+    val body = new String(request.data.readAllBytes(), "UTF-8")
+    body.split("&").filter(_.nonEmpty).map { p =>
+      val kv = p.split("=", 2)
+      java.net.URLDecoder.decode(kv(0), "UTF-8") -> (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+    }.toMap
+  }
+
+  @cask.post("/bio/save_wellness")
+  def saveWellness(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val sueno    = p.getOrElse("sueno", "3").toIntOption.getOrElse(3)
+    val horas    = p.getOrElse("horas", "")
+    val energia  = p.getOrElse("energia", "3").toIntOption.getOrElse(3)
+    val dolor    = p.getOrElse("dolor", "1").toIntOption.getOrElse(1)
+    val zona     = p.getOrElse("zona", "")
+    val altura   = p.getOrElse("altura", "")
+    val peso     = p.getOrElse("peso", "")
+    val animo    = p.getOrElse("animo", "3").toIntOption.getOrElse(3)
+    val notas_conducta = p.getOrElse("notas_conducta", "")
+    val estadoFisico   = p.getOrElse("estadoFisico", "DISPONIBLE")
+    val h   = horas.toDoubleOption.getOrElse(0.0)
+    val alt = altura.toIntOption.getOrElse(0)
+    val pes = peso.toDoubleOption.getOrElse(0.0)
+    val suenoProfundoMin   = p.getOrElse("suenoProfundoMin", "").toIntOption
+    val suenoLigeroMin     = p.getOrElse("suenoLigeroMin", "").toIntOption
+    val suenoDespiertoMin  = p.getOrElse("suenoDespiertoMin", "").toIntOption
+    DatabaseManager.logWellness(sueno, h, energia, dolor, zona, alt, pes, animo, notas_conducta, estadoFisico,
+      suenoProfundoMin, suenoLigeroMin, suenoDespiertoMin)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
   }
   @cask.postForm("/bio/save_training")
@@ -506,10 +528,89 @@ object BioController extends cask.Routes {
   }
 
   // ── FASE 2: CORRELACION SUENO-RENDIMIENTO ─────────────────────────────────
+  // ── Correlaciones sueno-rendimiento (smartwatch) ─────────────────────────
+  private def sleepFactorCard(titulo: String, niveles: List[Map[String, Any]]) = {
+    if (niveles.isEmpty) {
+      div(cls := "card bg-dark border-secondary p-2 h-100",
+        div(cls := "xx-small fw-bold text-white mb-1 text-center", titulo),
+        div(cls := "xx-small text-muted text-center py-3", "Sin datos suficientes")
+      )
+    } else {
+      div(cls := "card bg-dark border-secondary p-2 h-100",
+        div(cls := "xx-small fw-bold text-white mb-2 text-center", titulo),
+        frag(niveles.map { n =>
+          val nivel      = n("nivel").asInstanceOf[String]
+          val notaMedia  = n.getOrElse("notaMedia", 0.0).asInstanceOf[Double]
+          val partidos   = n("partidos").asInstanceOf[Int]
+          val color      = if (partidos == 0) "#495057" else if (notaMedia > 7) "#20c997" else if (notaMedia >= 5) "#ffc107" else "#dc3545"
+          val pct        = if (partidos == 0) 0 else math.min(100, (notaMedia / 10.0 * 100).toInt)
+          val valorTxt: String = if (partidos > 0) f"$notaMedia%.1f ($partidos)" else "—"
+          div(cls := "mb-2",
+            div(cls := "d-flex justify-content-between xx-small",
+              span(cls := "text-muted fw-bold", nivel),
+              span(cls := "fw-bold", style := s"color:$color;", valorTxt)
+            ),
+            div(cls := "progress", style := "height:6px;",
+              div(cls := "progress-bar", style := s"width:$pct%; background:$color;")
+            )
+          )
+        }: _*)
+      )
+    }
+  }
+
   @cask.get("/bio/sueno")
   def suenoPage(request: cask.Request) = withAuth(request) {
     val correlation = DatabaseManager.getSleepMatchCorrelation()
     val sleepHist   = DatabaseManager.getSleepHistory(60)
+
+    val correlaciones            = DatabaseManager.getSleepCorrelations()
+    val totalParesSmartwatch     = correlaciones("totalPares").asInstanceOf[Int]
+    val suenoProfundoNiveles     = correlaciones("suenoProfundo").asInstanceOf[List[Map[String, Any]]]
+    val horasNiveles             = correlaciones("horasTotales").asInstanceOf[List[Map[String, Any]]]
+    val calidadNiveles           = correlaciones("calidad").asInstanceOf[List[Map[String, Any]]]
+    val energiaNiveles           = correlaciones("energia").asInstanceOf[List[Map[String, Any]]]
+    val animoNiveles             = correlaciones("animo").asInstanceOf[List[Map[String, Any]]]
+    val combinacionOptima        = correlaciones("combinacionOptima").asInstanceOf[Option[Map[String, Any]]]
+    val analisisIACacheado       = DatabaseManager.getSleepAnalysisCached()
+
+    val correlacionesSection = div(cls := "card bg-dark border-warning shadow mb-4",
+      div(cls := "card-header text-warning fw-bold small", "🧠 CORRELACIONES SUEÑO-RENDIMIENTO"),
+      div(cls := "card-body p-3",
+        if (totalParesSmartwatch == 0)
+          div(cls := "text-muted small text-center py-3",
+            "Registra el sueño en el Diario de Carga (con datos de smartwatch si es posible) para ver correlaciones con el rendimiento en partido")
+        else div(
+          div(cls := "row g-2 mb-3",
+            div(cls := "col-6 col-md-4", sleepFactorCard("😴 Sueño profundo", suenoProfundoNiveles)),
+            div(cls := "col-6 col-md-4", sleepFactorCard("🕐 Horas totales", horasNiveles)),
+            div(cls := "col-6 col-md-4", sleepFactorCard("⭐ Calidad subjetiva", calidadNiveles)),
+            div(cls := "col-6 col-md-4", sleepFactorCard("⚡ Energía", energiaNiveles)),
+            div(cls := "col-6 col-md-4", sleepFactorCard("🙂 Ánimo", animoNiveles))
+          ),
+          combinacionOptima match {
+            case Some(c) =>
+              val texto = c("texto").asInstanceOf[String]
+              val partidosC = c("partidos").asInstanceOf[Int]
+              div(cls := "alert alert-success small mb-3",
+                div(cls := "fw-bold mb-1", "✨ COMBINACIÓN ÓPTIMA"),
+                div(s"$texto ($partidosC partidos)")
+              )
+            case None =>
+              div(cls := "alert alert-secondary small mb-3", "✨ Sin datos suficientes todavía para detectar la combinación óptima")
+          },
+          analisisIACacheado match {
+            case Some(texto) =>
+              div(cls := "alert alert-dark border-warning small mb-3", style := "white-space:pre-wrap;", texto)
+            case None =>
+              div(cls := "text-muted small mb-3 fst-italic", "Sin análisis IA generado todavía — pulsa el botón")
+          },
+          form(action := "/bio/sueno/analizar", method := "post",
+            button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", "🧠 Análisis IA completo")
+          )
+        )
+      )
+    )
 
     val avgHoras = if (sleepHist.nonEmpty) f"${sleepHist.map(_._2).sum / sleepHist.size}%.1f" else "—"
     val avgCalidad = if (sleepHist.nonEmpty) f"${sleepHist.map(_._3).sum.toDouble / sleepHist.size}%.1f" else "—"
@@ -563,6 +664,8 @@ object BioController extends cask.Routes {
               )
             }
           ),
+
+          correlacionesSection,
 
           if (sleepHist.isEmpty) {
             div(cls := "alert alert-secondary text-center py-5",
@@ -666,6 +769,13 @@ object BioController extends cask.Routes {
       )
     )
     renderHtml(content)
+  }
+
+  // Llamada explicita a Gemini disparada por boton POST — nunca en el render de pagina
+  @cask.post("/bio/sueno/analizar")
+  def analizarSueno(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generateSleepAnalysisIA()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/bio/sueno"))
   }
 
   // ── FASE 2: DETECTOR DE FATIGA MENTAL ─────────────────────────────────────

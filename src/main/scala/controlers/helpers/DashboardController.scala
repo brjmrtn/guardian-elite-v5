@@ -58,6 +58,13 @@ object DashboardController extends cask.Routes {
       }
     } catch { case _: Exception => () }
 
+    // 6. Correlacion sueno-rendimiento — insight deterministico, sin llamada a Gemini en el render
+    try {
+      DatabaseManager.getSleepDashboardInsight().foreach { insight =>
+        eliteConsejos += (("💤", "Sueño", insight))
+      }
+    } catch { case _: Exception => () }
+
     val cognitiveWidget = div(cls:="card bg-dark border-info shadow mb-3",
       div(cls:="card-header border-info text-info fw-bold py-1 text-center small", "🧠 ANALISTA COGNITIVO"),
       div(cls:="card-body p-2",
