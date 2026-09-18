@@ -5134,7 +5134,7 @@ Solo HTML limpio."""
           AVG(nota) as nota_media, COUNT(*) as partidos
         FROM (
           SELECT m.nota, m.clima, m.es_local,
-            m.fecha - LAG(m.fecha) OVER (ORDER BY m.fecha) as dias_descanso
+            EXTRACT(EPOCH FROM (m.fecha::timestamp - LAG(m.fecha::timestamp) OVER (ORDER BY m.fecha))) / 86400 as dias_descanso
           FROM matches m WHERE m.status = 'PLAYED'
         ) sub
         WHERE dias_descanso IS NOT NULL
