@@ -206,6 +206,112 @@ object CareerController extends cask.Routes {
     }
   }
 
+  // ── MODULO 2 (sesion actual): VELOCIDAD DE APRENDIZAJE ──────────────────
+  private def learningVelocityWidget() = {
+    val d = DatabaseManager.getLearningVelocityIndex()
+    val suficiente = d("suficiente").asInstanceOf[Boolean]
+
+    if (!suficiente) {
+      div(cls := "card bg-dark border-secondary shadow mb-4 w-100",
+        div(cls := "card-header text-white fw-bold small text-center", "⚡ VELOCIDAD DE APRENDIZAJE"),
+        div(cls := "card-body text-center text-muted small py-4",
+          "Registra las fechas de inicio de trabajo para calcular el índice")
+      )
+    } else {
+      val indice       = d("indice").asInstanceOf[Double]
+      val porHabilidad = d("porHabilidad").asInstanceOf[List[Map[String, Any]]]
+      val analisisIA   = d("analisisIA").asInstanceOf[String]
+      val color = if (indice < 60) "danger" else if (indice <= 100) "warning" else "success"
+
+      val labelsJs = porHabilidad.map(h => s""""${h("habilidad").asInstanceOf[String].replace("\"", "")}"""").mkString("[", ",", "]")
+      val diasJs   = porHabilidad.map(h => h("dias").asInstanceOf[Int].toString).mkString("[", ",", "]")
+
+      div(cls := s"card bg-dark border-$color shadow mb-4 w-100",
+        div(cls := "card-header text-white fw-bold small text-center", "⚡ VELOCIDAD DE APRENDIZAJE"),
+        div(cls := "card-body p-3",
+          div(cls := "text-center mb-3",
+            div(cls := s"display-4 fw-bold text-$color", f"$indice%.0f"),
+            div(cls := "xx-small text-muted", "ÍNDICE (100 = referencia · 30 días de media)")
+          ),
+          div(style := "height:180px;", canvas(id := "chartLearningVelocity")),
+          if (analisisIA.nonEmpty)
+            div(cls := "alert alert-secondary small mt-3 mb-0", style := "white-space:pre-wrap;", analisisIA)
+          else span()
+        ),
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+        script(raw(s"""
+          new Chart(document.getElementById('chartLearningVelocity'), {
+            type: 'bar',
+            data: {
+              labels: $labelsJs,
+              datasets: [{ label: 'Días para consolidar', data: $diasJs, backgroundColor: 'rgba(212,175,55,0.7)', borderColor: '#d4af37', borderWidth: 1, borderRadius: 4 }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { ticks: { color: '#aaa', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
+              }
+            }
+          });
+        """))
+      )
+    }
+  }
+
+  // ── MODULO 3 (sesion actual): PERFIL BAJO PRESION ────────────────────────
+  private def presionWidget() = {
+    val d = DatabaseManager.getPresionPattern()
+    val total = d("total").asInstanceOf[Int]
+
+    if (total == 0) {
+      div(cls := "card bg-dark border-secondary shadow mb-4 w-100",
+        div(cls := "card-header text-white fw-bold small text-center", "🧠 PERFIL BAJO PRESIÓN"),
+        div(cls := "card-body text-center text-muted small py-4",
+          "Sin partidos con goles encajados registrados todavía")
+      )
+    } else {
+      val distribucion = d("distribucion").asInstanceOf[List[Map[String, Any]]]
+      val masFrecuente = d("masFrecuente").asInstanceOf[String]
+      val analisisIA   = d("analisisIA").asInstanceOf[String]
+
+      val labelsJs = distribucion.map(x => s""""${x("label").asInstanceOf[String]}"""").mkString("[", ",", "]")
+      val dataJs   = distribucion.map(x => x("pct").asInstanceOf[Int].toString).mkString("[", ",", "]")
+
+      div(cls := "card bg-dark border-info shadow mb-4 w-100",
+        div(cls := "card-header text-info fw-bold small text-center", "🧠 PERFIL BAJO PRESIÓN"),
+        div(cls := "card-body p-3",
+          div(cls := "text-center mb-3",
+            div(cls := "h4 fw-bold text-info", masFrecuente),
+            div(cls := "xx-small text-muted", "COMPORTAMIENTO MÁS FRECUENTE")
+          ),
+          div(style := "height:200px;", canvas(id := "chartPresion")),
+          if (total < 5)
+            div(cls := "alert alert-secondary small mt-3 mb-0", "Registra al menos 5 partidos con goles encajados para ver el patrón")
+          else if (analisisIA.nonEmpty)
+            div(cls := "alert alert-secondary small mt-3 mb-0", style := "white-space:pre-wrap;", analisisIA)
+          else span()
+        ),
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+        script(raw(s"""
+          new Chart(document.getElementById('chartPresion'), {
+            type: 'doughnut',
+            data: {
+              labels: $labelsJs,
+              datasets: [{ data: $dataJs, backgroundColor: ['#20c997','#0dcaf0','#8b5cf6','#dc3545','#ffc107','#6c757d'] }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom', labels: { color: '#ccc', font: { size: 9 } } } }
+            }
+          });
+        """))
+      )
+    }
+  }
+
   @cask.get("/career")
   def careerPage(request: cask.Request) = withAuth(request) {
     val c = DatabaseManager.getCareerSummary()
@@ -224,6 +330,8 @@ object CareerController extends cask.Routes {
             a(href := "/career/legacy", cls := "btn btn-warning w-100 fw-bold", "⭐ MODO LEGADO (RPG)")
           ),
           resilienceWidget(),
+          learningVelocityWidget(),
+          presionWidget(),
           raw(DatabaseManager.getLegendComparison()),
           div(cls := "card bg-secondary p-2 w-100 mt-3",
             form(action := "/career/new-season", method := "post", cls := "d-flex flex-column gap-2",
@@ -1007,15 +1115,24 @@ object CareerController extends cask.Routes {
       ),
       div(
         if (!s.conseguido)
-          form(action := "/goalkeeper-skills/toggle", method := "post", cls := "d-flex gap-1",
+          form(action := "/goalkeeper-skills/toggle", method := "post", cls := "d-flex flex-column gap-1", style := "min-width:170px;",
             input(tpe := "hidden", name := "skillId", value := s.id.toString),
             input(tpe := "hidden", name := "achieved", value := "true"),
-            select(name := "contexto", cls := "form-select form-select-sm bg-dark text-white border-secondary",
-              option(value := "ACADEMIA", "Academia"),
-              option(value := "PARTIDO", "Partido"),
-              option(value := "EQUIPO", "Equipo")
-            ),
-            button(tpe := "submit", cls := "btn btn-sm btn-success", "✔")
+            if (s.fechaInicioTrabajo.isEmpty)
+              div(
+                label(cls := "xx-small text-muted", "¿Cuándo empezaste a trabajarla? (opcional)"),
+                input(tpe := "date", name := "fechaInicioTrabajo",
+                  cls := "form-control form-control-sm bg-dark text-white border-secondary")
+              )
+            else span(),
+            div(cls := "d-flex gap-1",
+              select(name := "contexto", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                option(value := "ACADEMIA", "Academia"),
+                option(value := "PARTIDO", "Partido"),
+                option(value := "EQUIPO", "Equipo")
+              ),
+              button(tpe := "submit", cls := "btn btn-sm btn-success", "✔")
+            )
           )
         else
           form(action := "/goalkeeper-skills/toggle", method := "post",
@@ -1114,15 +1231,22 @@ object CareerController extends cask.Routes {
     renderHtml(content)
   }
 
-  @cask.postForm("/goalkeeper-skills/toggle")
-  def toggleSkill(skillId: Int, achieved: String, contexto: String = "") = {
-    DatabaseManager.setSkillAchieved(skillId, achieved == "true", contexto)
+  @cask.post("/goalkeeper-skills/toggle")
+  def toggleSkill(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val skillId = p.getOrElse("skillId", "0").toIntOption.getOrElse(0)
+    val achieved = p.getOrElse("achieved", "false") == "true"
+    val contexto = p.getOrElse("contexto", "")
+    val fechaInicioTrabajo = p.getOrElse("fechaInicioTrabajo", "")
+    DatabaseManager.setSkillAchieved(skillId, achieved, contexto, fechaInicioTrabajo)
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/goalkeeper-skills"))
   }
 
-  @cask.postForm("/goalkeeper-skills/notes")
-  def saveSkillNotes(skillId: Int, notas: String) = {
-    DatabaseManager.updateSkillNotes(skillId, notas)
+  @cask.post("/goalkeeper-skills/notes")
+  def saveSkillNotes(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val skillId = p.getOrElse("skillId", "0").toIntOption.getOrElse(0)
+    DatabaseManager.updateSkillNotes(skillId, p.getOrElse("notas", ""))
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/goalkeeper-skills"))
   }
 
@@ -1293,6 +1417,33 @@ object CareerController extends cask.Routes {
   def benchmarkPage(request: cask.Request) = withAuth(request) {
     val d = DatabaseManager.getBenchmark()
     val sinDatos = d("sinDatos").asInstanceOf[Boolean]
+    val raeFactor     = d("raeFactor").asInstanceOf[Double]
+    val notaMediaReal = d("notaMediaReal").asInstanceOf[Double]
+    val notaMediaRae  = d("notaMediaRae").asInstanceOf[Double]
+    val pctCSReal     = d("pctCSReal").asInstanceOf[Int]
+    val pctCSRae      = d("pctCSRae").asInstanceOf[Int]
+    val winRateReal   = d("winRateReal").asInstanceOf[Int]
+    val winRateRae    = d("winRateRae").asInstanceOf[Int]
+
+    val raeTable = div(cls := "card bg-dark border-info shadow mb-3",
+      div(cls := "card-header text-info fw-bold small", "⚖️ AJUSTE POR EDAD RELATIVA (RAE)"),
+      div(cls := "card-body p-0",
+        div(cls := "table-responsive",
+          table(cls := "table table-dark table-sm mb-0 small",
+            thead(tr(th("Métrica"), th(cls := "text-center", "Valor real"), th(cls := "text-center", "Valor RAE-ajustado"))),
+            tbody(
+              tr(td("Nota media"), td(cls := "text-center", f"$notaMediaReal%.1f"), td(cls := "text-center text-info fw-bold", f"$notaMediaRae%.1f")),
+              tr(td("Porterías a 0"), td(cls := "text-center", s"$pctCSReal%"), td(cls := "text-center text-info fw-bold", s"$pctCSRae%")),
+              tr(td("Win rate"), td(cls := "text-center", s"$winRateReal%"), td(cls := "text-center text-info fw-bold", s"$winRateRae%"))
+            )
+          )
+        )
+      ),
+      div(cls := "card-body pt-0",
+        div(cls := "xx-small text-muted fst-italic",
+          f"Ajuste por Efecto de Edad Relativa (factor $raeFactor%.2f) — Héctor nació en junio. Los jugadores nacidos en enero-marzo tienen hasta 6 meses más de desarrollo físico y cognitivo a esta edad.")
+      )
+    )
 
     val content = basePage("benchmark",
       div(cls := "row justify-content-center",
@@ -1305,6 +1456,7 @@ object CareerController extends cask.Routes {
           if (sinDatos)
             div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")
           else frag(
+            raeTable,
             div(cls := "card bg-dark border-primary shadow mb-3",
               div(cls := "card-header text-primary fw-bold small", "📈 PERCENTIL DE PROGRESIÓN"),
               div(cls := "card-body text-light small", d("percentil").asInstanceOf[String])
@@ -1324,8 +1476,8 @@ object CareerController extends cask.Routes {
     renderHtml(content)
   }
 
-  @cask.postForm("/benchmark/refresh")
-  def refreshBenchmark() = {
+  @cask.post("/benchmark/refresh")
+  def refreshBenchmark(request: cask.Request) = withAuth(request) {
     DatabaseManager.invalidateBenchmarkCache()
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/benchmark"))
   }
@@ -2295,6 +2447,204 @@ object CareerController extends cask.Routes {
     val id = p.getOrElse("id", "0").toIntOption.getOrElse(0)
     DatabaseManager.registrarInteraccion(id, p.getOrElse("fecha", ""), p.getOrElse("nota", ""))
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/contacts"))
+  }
+
+  // ── MODULO 4 (sesion actual): MAPA DE VISIBILIDAD Y EVENTOS CLAVE ───────
+  private def visibilidadNivelInfo(nivel: String): (String, String) = nivel match {
+    case "ALTO"  => ("Alto", "#dc3545")
+    case "MEDIO" => ("Medio", "#ffc107")
+    case _       => ("Bajo", "#6c757d")
+  }
+
+  private def visibilidadTipoLabel(tipo: String): String = tipo match {
+    case "TORNEO"        => "Torneo"
+    case "LIGA_REGIONAL" => "Liga regional"
+    case "CAMPUS"        => "Campus"
+    case "PRUEBA_CLUB"   => "Prueba de club"
+    case _                => "Otro"
+  }
+
+  @cask.get("/visibility")
+  def visibilityPage(request: cask.Request) = withAuth(request) {
+    val events = DatabaseManager.getVisibilityEvents()
+    val ojeadoresContacts = DatabaseManager.getContacts().filter(_.rol == "OJEADOR")
+
+    val altoCount            = events.count(_("nivelVisibilidad").asInstanceOf[String] == "ALTO")
+    val participamosCount    = events.count(_("participamos").asInstanceOf[Boolean])
+    val ojeadoresConfirmados = events.count(e => e("ojeadoresPresentes").asInstanceOf[Option[Boolean]].contains(true))
+
+    val eventCards = events.map { e =>
+      val id                 = e("id").asInstanceOf[Int]
+      val nombre              = e("nombre").asInstanceOf[String]
+      val fecha                = e("fecha").asInstanceOf[String]
+      val tipo                = e("tipo").asInstanceOf[String]
+      val organizador          = e("organizador").asInstanceOf[String]
+      val nivel                = e("nivelVisibilidad").asInstanceOf[String]
+      val participamos         = e("participamos").asInstanceOf[Boolean]
+      val ojeadoresPresentes   = e("ojeadoresPresentes").asInstanceOf[Option[Boolean]]
+      val contactoNombre       = e("contactoNombre").asInstanceOf[String]
+      val (nivelLabel, nivelColor) = visibilidadNivelInfo(nivel)
+
+      div(cls := "card bg-dark border-secondary p-3 mb-2",
+        div(cls := "d-flex justify-content-between align-items-start mb-1",
+          div(
+            div(cls := "fw-bold text-white", fixEncoding(nombre)),
+            div(cls := "xx-small text-muted", s"${visibilidadTipoLabel(tipo)}${if (organizador.nonEmpty) s" · $organizador" else ""}")
+          ),
+          div(cls := "text-end",
+            span(cls := "badge mb-1", style := s"background:$nivelColor;", nivelLabel),
+            div(cls := "xx-small text-muted", fecha)
+          )
+        ),
+        form(action := "/visibility/participamos", method := "post", cls := "d-flex align-items-center gap-2 mt-2",
+          input(tpe := "hidden", name := "id", value := id.toString),
+          input(tpe := "hidden", name := "participamos", value := (!participamos).toString),
+          button(tpe := "submit", cls := s"btn btn-sm ${if (participamos) "btn-success" else "btn-outline-secondary"} fw-bold",
+            if (participamos) "✅ Participamos" else "¿Participamos?")
+        ),
+        if (participamos)
+          div(cls := "mt-2",
+            ojeadoresPresentes match {
+              case Some(true) =>
+                div(cls := "d-flex align-items-center gap-2",
+                  span(cls := "badge bg-danger", "🔍 Hubo ojeadores"),
+                  if (contactoNombre.nonEmpty) span(cls := "xx-small text-info", s"— ${fixEncoding(contactoNombre)}") else span()
+                )
+              case Some(false) => span(cls := "badge bg-secondary", "Sin ojeadores confirmados")
+              case None =>
+                form(action := "/visibility/ojeadores", method := "post", cls := "d-flex gap-1 align-items-center flex-wrap",
+                  input(tpe := "hidden", name := "id", value := id.toString),
+                  label(cls := "xx-small text-muted", "¿Hubo ojeadores?"),
+                  select(name := "contactId", cls := "form-select form-select-sm bg-dark text-white border-secondary", style := "max-width:160px;",
+                    option(value := "", "— Sin identificar —"),
+                    frag(ojeadoresContacts.map(c => option(value := c.id.toString, fixEncoding(c.nombre))): _*)
+                  ),
+                  button(tpe := "submit", name := "hubo", value := "true", cls := "btn btn-sm btn-outline-danger", "Sí"),
+                  button(tpe := "submit", name := "hubo", value := "false", cls := "btn btn-sm btn-outline-secondary", "No")
+                )
+            }
+          )
+        else span()
+      )
+    }
+
+    val content = basePage("visibility",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "🗺️ Mapa de Visibilidad"),
+
+          div(cls := "row g-2 mb-4",
+            Seq(
+              (altoCount.toString, "EVENTOS NIVEL ALTO", "danger"),
+              (participamosCount.toString, "PARTICIPAMOS", "success"),
+              (ojeadoresConfirmados.toString, "CON OJEADORES", "info")
+            ).map { case (v, lbl, c) =>
+              div(cls := "col-4",
+                div(cls := s"card bg-dark border-$c text-center py-3",
+                  div(cls := s"text-$c fw-bold fs-4", v),
+                  div(cls := "xx-small text-muted mt-1", lbl)
+                )
+              )
+            }
+          ),
+
+          div(cls := "card bg-dark border-warning p-3 mb-4",
+            form(action := "/visibility/recomendar", method := "post",
+              button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", "🧠 Recomendar próximos eventos")
+            )
+          ),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "➕ Añadir evento"),
+            form(action := "/visibility/save", method := "post",
+              div(cls := "mb-2",
+                input(tpe := "text", name := "nombre", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Nombre del evento", required := true)
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                  input(tpe := "date", name := "fecha", cls := "form-control form-control-sm bg-dark text-white border-secondary", required := true)
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "TIPO"),
+                  select(name := "tipo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                    option(value := "TORNEO", "Torneo"),
+                    option(value := "LIGA_REGIONAL", "Liga regional"),
+                    option(value := "CAMPUS", "Campus"),
+                    option(value := "PRUEBA_CLUB", "Prueba de club"),
+                    option(value := "OTRO", "Otro")
+                  )
+                )
+              ),
+              div(cls := "mb-2",
+                input(tpe := "text", name := "organizador", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  placeholder := "Organizador")
+              ),
+              div(cls := "mb-3",
+                label(cls := "xx-small text-muted fw-bold", "NIVEL DE VISIBILIDAD ESTIMADO"),
+                select(name := "nivelVisibilidad", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                  option(value := "ALTO", "Alto"),
+                  option(value := "MEDIO", attr("selected") := "selected", "Medio"),
+                  option(value := "BAJO", "Bajo")
+                )
+              ),
+              button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar evento")
+            )
+          ),
+
+          if (events.isEmpty) div(cls := "alert alert-secondary text-center", "Sin eventos registrados este año")
+          else frag(eventCards: _*)
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/visibility/save")
+  def saveVisibilityEventAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.saveVisibilityEvent(
+      p.getOrElse("nombre", ""), p.getOrElse("fecha", java.time.LocalDate.now().toString),
+      p.getOrElse("tipo", "OTRO"), p.getOrElse("organizador", ""), p.getOrElse("nivelVisibilidad", "MEDIO")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/visibility"))
+  }
+
+  @cask.post("/visibility/participamos")
+  def toggleParticipamosAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val id = p.getOrElse("id", "0").toIntOption.getOrElse(0)
+    val participamos = p.getOrElse("participamos", "false") == "true"
+    DatabaseManager.updateVisibilityParticipamos(id, participamos)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/visibility"))
+  }
+
+  @cask.post("/visibility/ojeadores")
+  def updateOjeadoresAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val id = p.getOrElse("id", "0").toIntOption.getOrElse(0)
+    val hubo = p.getOrElse("hubo", "false") == "true"
+    val contactId = p.getOrElse("contactId", "").toIntOption
+    DatabaseManager.updateVisibilityOjeadores(id, hubo, contactId)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/visibility"))
+  }
+
+  @cask.post("/visibility/recomendar")
+  def recommendVisibilityAction(request: cask.Request) = withAuth(request) {
+    val recomendacion = DatabaseManager.recommendVisibilityEvents()
+    val content = basePage("visibility",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-warning mb-4 text-center", "🧠 Recomendación de Eventos"),
+          div(cls := "card bg-dark border-warning p-3 mb-4",
+            div(cls := "text-light small", style := "white-space:pre-wrap;", recomendacion)
+          ),
+          a(href := "/visibility", cls := "btn btn-outline-secondary w-100 fw-bold", "← Volver")
+        )
+      )
+    )
+    renderHtml(content)
   }
 
   initialize()

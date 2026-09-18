@@ -249,6 +249,19 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
+                // ── COMPORTAMIENTO BAJO PRESION ──────────────────────────
+                div(cls := "mb-4 p-2 border border-info rounded bg-info bg-opacity-10",
+                  label(cls := "form-label text-info small fw-bold w-100 text-center", "🧠 COMPORTAMIENTO TRAS GOLES ENCAJADOS"),
+                  select(name := "comportamientoPresion", cls := "form-select form-select-sm bg-dark text-white fw-bold",
+                    option(value := "NA", "— Sin goles encajados / No aplica"),
+                    option(value := "RAPIDO", "✅ Se repuso rápido — recuperó concentración en menos de 2 minutos"),
+                    option(value := "LIDER", "💪 Lideró al equipo — animó a los compañeros o dirigió la defensa"),
+                    option(value := "NEUTRO", "😐 Neutro — ni se afectó ni lideró"),
+                    option(value := "AFECTADO", "😟 Se afectó visiblemente — bajó el nivel en los siguientes minutos"),
+                    option(value := "INTENSO", "🔥 Reaccionó con más intensidad — el gol le activó")
+                  )
+                ),
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
@@ -388,6 +401,7 @@ object MatchController extends cask.Routes {
       case "false" => Some(false)
       case _       => None
     }
+    val comportamientoPresion = getStr("comportamientoPresion")
 
     // Footbar (sensor GPS de rendimiento) — opcional
     val fbDistancia        = getDouble("fbDistancia")
@@ -420,9 +434,9 @@ object MatchController extends cask.Routes {
     DatabaseManager.updateStats(n)
 
     if (scheduleId > 0) {
-      DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo, fbDistancia)
+      DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo, fbDistancia, comportamientoPresion)
     } else {
-      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt)
+      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt, comportamientoPresion)
     }
 
     // Guardar contexto de goles encajados

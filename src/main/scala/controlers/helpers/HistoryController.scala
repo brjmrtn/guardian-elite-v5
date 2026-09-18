@@ -4744,6 +4744,16 @@ object HistoryController extends cask.Routes {
       DatabaseManager.getScoutingReportNarrative(edad, notaMedia, pctCS, winRate, acwr, pj)
     else "Se necesitan al menos 3 partidos registrados para generar el análisis de ojeador."
 
+    val rae = DatabaseManager.getRaeAdjustedStats()
+    val raeFactor     = rae("raeFactor").asInstanceOf[Double]
+    val notaMediaRae  = rae("notaMediaRae").asInstanceOf[Double]
+    val pctCSRae      = rae("pctCSRae").asInstanceOf[Int]
+    val winRateRae    = rae("winRateRae").asInstanceOf[Int]
+
+    val presion = DatabaseManager.getPresionPattern()
+    val presionTotal = presion("total").asInstanceOf[Int]
+    val presionDist  = presion("distribucion").asInstanceOf[List[Map[String, Any]]]
+
     val aniosJs  = evolution.map(e => s""""${e._1}"""").mkString("[", ",", "]")
     val mediasJs = evolution.map(e => f"${e._2}%.1f").mkString("[", ",", "]")
 
@@ -4775,6 +4785,12 @@ object HistoryController extends cask.Routes {
 
     val skillsBoxes = skillsByCategoria.map { case (cat, pct) =>
       s"""<div class="attr-box"><div class="av" style="font-size:18px;color:#d4af37;">$pct%</div><div class="al">${DatabaseManager.escHtml(cat)}</div></div>"""
+    }.mkString("")
+
+    val presionRows = if (presionDist.isEmpty)
+      "<tr><td colspan=\"2\">Sin datos suficientes de comportamiento bajo presión</td></tr>"
+    else presionDist.map { d =>
+      s"""<tr><td>${DatabaseManager.escHtml(d("label").asInstanceOf[String])}</td><td style="text-align:center;">${d("pct")}%</td></tr>"""
     }.mkString("")
 
     val htmlStr = s"""<!DOCTYPE html>
@@ -4845,6 +4861,17 @@ object HistoryController extends cask.Routes {
   <div class="stat-card"><div class="value">$pj</div><div class="label">Partidos</div></div>
 </div>
 
+<p class="section-title">EFECTO DE EDAD RELATIVA (RAE)</p>
+<table>
+  <thead><tr><th>Métrica</th><th>Valor real</th><th>Valor RAE-ajustado</th></tr></thead>
+  <tbody>
+    <tr><td>Nota media</td><td style="text-align:center;">${f"$notaMedia%.1f"}</td><td style="text-align:center; color:#2980b9; font-weight:bold;">${f"$notaMediaRae%.1f"}</td></tr>
+    <tr><td>Porterías a 0</td><td style="text-align:center;">$pctCS%</td><td style="text-align:center; color:#2980b9; font-weight:bold;">$pctCSRae%</td></tr>
+    <tr><td>Win rate</td><td style="text-align:center;">$winRate%</td><td style="text-align:center; color:#2980b9; font-weight:bold;">$winRateRae%</td></tr>
+  </tbody>
+</table>
+<div class="narrative" style="font-size:12px;">Nota metodológica: Las métricas de Héctor se presentan en valor real y valor ajustado por Efecto de Edad Relativa (RAE). Nacido en junio, compite contra jugadores con hasta 6 meses más de madurez biológica. El valor ajustado (factor ${f"$raeFactor%.2f"}) refleja su rendimiento normalizado contra un hipotético cohorte de iguales madurativos.</div>
+
 <p class="section-title">ATRIBUTOS ACTUALES</p>
 <div class="attrs-grid">
   <div class="attr-box"><div class="av" style="color:#3498db;">${card.div}</div><div class="al">DIV</div></div>
@@ -4876,6 +4903,13 @@ object HistoryController extends cask.Routes {
   <thead><tr><th>Fecha</th><th>Tipo / Entidad</th><th>Resultado</th></tr></thead>
   <tbody>$oppRows</tbody>
 </table>
+
+<p class="section-title">PERFIL PSICOLÓGICO BAJO PRESIÓN</p>
+<table>
+  <thead><tr><th>Comportamiento tras gol encajado</th><th>% de partidos</th></tr></thead>
+  <tbody>$presionRows</tbody>
+</table>
+${if (presionTotal > 0 && presionTotal < 5) "<div class=\"narrative\" style=\"font-size:12px;\">Distribución basada en " + presionTotal + " partido(s) con goles encajados — se necesitan al menos 5 para un patrón robusto.</div>" else ""}
 
 <p class="section-title">CHECKLIST DE HABILIDADES POR CATEGORÍA</p>
 <div class="attrs-grid">$skillsBoxes</div>

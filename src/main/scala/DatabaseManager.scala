@@ -28,7 +28,8 @@ case class MedicalReport(id: Int, fecha: String, tipo: String, diagnostico: Stri
 // Checklist de habilidades tecnicas de portero
 case class GoalkeeperSkill(
   id: Int, categoria: String, habilidad: String, conseguido: Boolean,
-  fechaConseguido: Option[String], contextoConseguido: Option[String], notas: String
+  fechaConseguido: Option[String], contextoConseguido: Option[String], notas: String,
+  fechaInicioTrabajo: Option[String] = None
 )
 // Registro de visibilidad y oportunidades (torneos, pruebas, contactos, ojeadores...)
 case class Opportunity(
@@ -335,6 +336,7 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS acciones_preventivas INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS scanning_rate INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS es_local BOOLEAN DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS comportamiento_presion TEXT")
 
       // ── v7.2: NLP Scouting Aggregator ──────────────────────────────────────
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS scouting_reports (
@@ -398,6 +400,7 @@ object DatabaseManager {
         contexto_conseguido  TEXT,
         notas                TEXT DEFAULT ''
       )""")
+      stmt.executeUpdate("ALTER TABLE goalkeeper_skills ADD COLUMN IF NOT EXISTS fecha_inicio_trabajo DATE")
       val rsSkillsCount = stmt.executeQuery("SELECT COUNT(*) FROM goalkeeper_skills")
       if (rsSkillsCount.next() && rsSkillsCount.getInt(1) == 0) {
         val seedSkills = Seq(
@@ -489,6 +492,39 @@ object DatabaseManager {
         created_at           TIMESTAMP DEFAULT NOW()
       )""")
       stmt.executeUpdate("ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS contact_id INT")
+
+      // ── Modulo 4 (sesion actual): Mapa de visibilidad y eventos clave ────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS visibility_events (
+        id                   SERIAL PRIMARY KEY,
+        nombre               TEXT NOT NULL,
+        fecha                DATE NOT NULL,
+        tipo                 TEXT NOT NULL DEFAULT 'OTRO',
+        organizador          TEXT DEFAULT '',
+        nivel_visibilidad    TEXT NOT NULL DEFAULT 'MEDIO',
+        participamos         BOOLEAN DEFAULT FALSE,
+        ojeadores_presentes  BOOLEAN,
+        contact_id           INT,
+        notas                TEXT DEFAULT '',
+        created_at           TIMESTAMP DEFAULT NOW()
+      )""")
+      val rsVisCount = stmt.executeQuery("SELECT COUNT(*) FROM visibility_events")
+      if (rsVisCount.next() && rsVisCount.getInt(1) == 0) {
+        val seedEvents = Seq(
+          ("Torneo de Navidad RFFM", "2026-12-20", "TORNEO", "RFFM", "ALTO", ""),
+          ("Torneo de Semana Santa", "2027-03-29", "TORNEO", "Club organizador", "ALTO", ""),
+          ("Copa Federación Madrid Prebenjamín", "2027-05-15", "LIGA_REGIONAL", "RFFM", "MEDIO", ""),
+          ("Campus de verano ATM/Rayo/Getafe", "2027-07-06", "CAMPUS", "Multiclub", "MEDIO", ""),
+          ("Jornada de detección RFFM", "2027-02-07", "PRUEBA_CLUB", "RFFM", "ALTO", "Fecha estimada — confirmar con RFFM, suele variar cada temporada")
+        )
+        val insVis = conn.prepareStatement(
+          "INSERT INTO visibility_events (nombre, fecha, tipo, organizador, nivel_visibilidad, notas) VALUES (?, ?::date, ?, ?, ?, ?)"
+        )
+        seedEvents.foreach { case (n, f, t, o, nv, notas) =>
+          insVis.setString(1, n); insVis.setString(2, f); insVis.setString(3, t)
+          insVis.setString(4, o); insVis.setString(5, nv); insVis.setString(6, notas)
+          insVis.executeUpdate()
+        }
+      }
 
       // ── Modulo 5: Diario narrativo automatico de temporada ───────────────────
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS season_diary (
@@ -903,7 +939,8 @@ object DatabaseManager {
                 reaccion: String, fechaStr: String, tipo: String,
                 pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
                 mapaCampo: String,
-                lineasSup: Int = 0, scanningRate: Int = 0, esLocal: Option[Boolean] = None
+                lineasSup: Int = 0, scanningRate: Int = 0, esLocal: Option[Boolean] = None,
+                comportamientoPresion: String = ""
               ): Unit = {
     val conn = getConnection()
     try {
@@ -955,6 +992,14 @@ object DatabaseManager {
           case None    => s.setNull(30, java.sql.Types.BOOLEAN)
         }
         s.executeUpdate()
+        if (comportamientoPresion.nonEmpty && comportamientoPresion != "NA") {
+          val idRs = conn.createStatement().executeQuery("SELECT MAX(id) as id FROM matches")
+          if (idRs.next()) {
+            val ps2 = conn.prepareStatement("UPDATE matches SET comportamiento_presion = ? WHERE id = ?")
+            ps2.setString(1, comportamientoPresion); ps2.setInt(2, idRs.getInt("id"))
+            ps2.executeUpdate()
+          }
+        }
       }
     } finally {
       conn.close()
@@ -1078,14 +1123,15 @@ object DatabaseManager {
           rs.getBoolean("conseguido"),
           Option(rs.getDate("fecha_conseguido")).map(_.toString),
           Option(rs.getString("contexto_conseguido")),
-          Option(rs.getString("notas")).getOrElse("")
+          Option(rs.getString("notas")).getOrElse(""),
+          Option(rs.getDate("fecha_inicio_trabajo")).map(_.toString)
         )
       }
       list
     } finally { conn.close() }
   }
 
-  def setSkillAchieved(id: Int, achieved: Boolean, contexto: String): Unit = {
+  def setSkillAchieved(id: Int, achieved: Boolean, contexto: String, fechaInicioTrabajo: String = ""): Unit = {
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement(
@@ -1101,6 +1147,15 @@ object DatabaseManager {
       }
       ps.setInt(4, id)
       ps.executeUpdate()
+
+      // Solo se guarda la primera vez (no sobreescribe un fecha_inicio_trabajo ya registrado)
+      if (achieved && fechaInicioTrabajo.nonEmpty) {
+        val ps2 = conn.prepareStatement(
+          "UPDATE goalkeeper_skills SET fecha_inicio_trabajo = ?::date WHERE id = ? AND fecha_inicio_trabajo IS NULL"
+        )
+        ps2.setString(1, fechaInicioTrabajo); ps2.setInt(2, id)
+        ps2.executeUpdate()
+      }
     } finally { conn.close() }
   }
 
@@ -1111,6 +1166,155 @@ object DatabaseManager {
       ps.setString(1, fixEncoding(notas))
       ps.setInt(2, id)
       ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO 2 — INDICE DE VELOCIDAD DE APRENDIZAJE
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getLearningVelocityIndex(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rsCache = conn.prepareStatement(
+        "SELECT payload FROM feature_cache WHERE cache_key = 'learning_velocity' AND updated_at > NOW() - INTERVAL '7 days'"
+      ).executeQuery()
+      if (rsCache.next()) {
+        val json = ujson.read(rsCache.getString("payload"))
+        return Map(
+          "suficiente" -> json("suficiente").bool,
+          "indice"     -> json("indice").num,
+          "mediaDias"  -> json("mediaDias").num,
+          "porCategoria" -> json("porCategoria").arr.map(c => Map(
+            "categoria" -> c("categoria").str, "mediaDias" -> c("mediaDias").num
+          )).toList,
+          "porHabilidad" -> json("porHabilidad").arr.map(h => Map(
+            "habilidad" -> h("habilidad").str, "dias" -> h("dias").num.toInt
+          )).toList,
+          "analisisIA" -> json("analisisIA").str
+        )
+      }
+
+      case class SkillDuration(habilidad: String, categoria: String, dias: Int)
+      val rs = conn.createStatement().executeQuery("""
+        SELECT habilidad, categoria, fecha_inicio_trabajo, fecha_conseguido
+        FROM goalkeeper_skills
+        WHERE conseguido = TRUE AND fecha_inicio_trabajo IS NOT NULL AND fecha_conseguido IS NOT NULL
+        ORDER BY fecha_conseguido ASC
+      """)
+      var durations = List[SkillDuration]()
+      while (rs.next()) {
+        val inicio = rs.getDate("fecha_inicio_trabajo").toLocalDate
+        val fin = rs.getDate("fecha_conseguido").toLocalDate
+        val dias = math.max(1, java.time.temporal.ChronoUnit.DAYS.between(inicio, fin).toInt)
+        durations = durations :+ SkillDuration(fixEncoding(rs.getString("habilidad")), rs.getString("categoria"), dias)
+      }
+
+      if (durations.size < 3) {
+        return Map("suficiente" -> false, "indice" -> 0.0, "mediaDias" -> 0.0,
+          "porCategoria" -> List.empty[Map[String, Any]], "porHabilidad" -> List.empty[Map[String, Any]],
+          "analisisIA" -> "")
+      }
+
+      val mediaDias = durations.map(_.dias).sum.toDouble / durations.size
+      val indice = 100.0 / (mediaDias / 30.0)
+
+      val porCategoria = durations.groupBy(_.categoria).map { case (cat, ds) =>
+        Map("categoria" -> cat, "mediaDias" -> (ds.map(_.dias).sum.toDouble / ds.size))
+      }.toList
+
+      val porHabilidad = durations.sortBy(_.dias).map(d => Map("habilidad" -> d.habilidad, "dias" -> d.dias))
+
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+      val categoriasStr = porCategoria.map(c => s"${c("categoria")}=${f"${c("mediaDias").asInstanceOf[Double]}%.0f"}días").mkString(", ")
+
+      val prompt = s"""Héctor, portero de $edad años, tarda en media ${f"$mediaDias%.0f"} días en consolidar una habilidad nueva. Por categorías: $categoriasStr. Según la metodología de detección de talento en fútbol base, ¿qué indica esta velocidad de aprendizaje sobre su potencial de desarrollo? Dame: 1) Evaluación del índice (lento/normal/rápido para su edad), 2) La categoría donde aprende más rápido y qué implica, 3) Una recomendación para el entrenador de academia. Máximo 3 líneas por punto."""
+
+      val analisisIA = AIProvider.ask(prompt)
+
+      val payload = ujson.Obj(
+        "suficiente" -> true, "indice" -> indice, "mediaDias" -> mediaDias,
+        "porCategoria" -> ujson.Arr(porCategoria.map(c => ujson.Obj(
+          "categoria" -> c("categoria").asInstanceOf[String], "mediaDias" -> c("mediaDias").asInstanceOf[Double]
+        ): ujson.Value): _*),
+        "porHabilidad" -> ujson.Arr(porHabilidad.map(h => ujson.Obj(
+          "habilidad" -> h("habilidad").asInstanceOf[String], "dias" -> h("dias").asInstanceOf[Int]
+        ): ujson.Value): _*),
+        "analisisIA" -> analisisIA
+      )
+      val upsert = conn.prepareStatement("""
+        INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('learning_velocity', ?, NOW())
+        ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+      """)
+      upsert.setString(1, ujson.write(payload))
+      upsert.executeUpdate()
+
+      Map("suficiente" -> true, "indice" -> indice, "mediaDias" -> mediaDias,
+        "porCategoria" -> porCategoria, "porHabilidad" -> porHabilidad, "analisisIA" -> analisisIA)
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO 3 (sesion actual) — COMPORTAMIENTO BAJO PRESION
+  // ─────────────────────────────────────────────────────────────────────────────
+  private val presionLabels: Map[String, String] = Map(
+    "RAPIDO"   -> "✅ Se repuso rápido",
+    "LIDER"    -> "💪 Lideró al equipo",
+    "NEUTRO"   -> "😐 Neutro",
+    "AFECTADO" -> "😟 Se afectó visiblemente",
+    "INTENSO"  -> "🔥 Reaccionó con más intensidad"
+  )
+
+  def getPresionPattern(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT comportamiento_presion, COUNT(*) as cnt
+        FROM matches
+        WHERE status='PLAYED' AND goles_contra > 0
+          AND comportamiento_presion IS NOT NULL AND comportamiento_presion <> '' AND comportamiento_presion <> 'NA'
+        GROUP BY comportamiento_presion
+        ORDER BY cnt DESC
+      """)
+      var counts = List[(String, Int)]()
+      while (rs.next()) counts = counts :+ (rs.getString("comportamiento_presion"), rs.getInt("cnt"))
+      val total = counts.map(_._2).sum
+
+      if (total == 0)
+        return Map("total" -> 0, "distribucion" -> List.empty[Map[String, Any]], "masFrecuente" -> "", "analisisIA" -> "")
+
+      val distribucion = counts.map { case (tipo, cnt) =>
+        Map[String, Any]("tipo" -> tipo, "label" -> presionLabels.getOrElse(tipo, tipo), "count" -> cnt, "pct" -> (cnt * 100 / total))
+      }
+      val masFrecuente = presionLabels.getOrElse(counts.head._1, counts.head._1)
+
+      if (total < 5)
+        return Map("total" -> total, "distribucion" -> distribucion, "masFrecuente" -> masFrecuente, "analisisIA" -> "")
+
+      val rsCache = conn.prepareStatement(
+        "SELECT payload FROM feature_cache WHERE cache_key = 'presion_pattern' AND updated_at > NOW() - INTERVAL '7 days'"
+      ).executeQuery()
+      if (rsCache.next()) {
+        val json = ujson.read(rsCache.getString("payload"))
+        return Map("total" -> total, "distribucion" -> distribucion, "masFrecuente" -> masFrecuente, "analisisIA" -> json("analisisIA").str)
+      }
+
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+      val distribucionStr = distribucion.map(d => s"${d("label")}: ${d("pct")}%").mkString(", ")
+
+      val prompt = s"""Héctor, portero de $edad años. Cuando encaja goles en partido, su comportamiento registrado es: $distribucionStr. Analiza su perfil psicológico bajo presión en 3 líneas. ¿Es una señal positiva o requiere trabajo específico?"""
+      val analisisIA = AIProvider.ask(prompt)
+
+      val payload = ujson.Obj("analisisIA" -> analisisIA)
+      val upsert = conn.prepareStatement("""
+        INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('presion_pattern', ?, NOW())
+        ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+      """)
+      upsert.setString(1, ujson.write(payload))
+      upsert.executeUpdate()
+
+      Map("total" -> total, "distribucion" -> distribucion, "masFrecuente" -> masFrecuente, "analisisIA" -> analisisIA)
     } finally { conn.close() }
   }
 
@@ -1284,17 +1488,56 @@ RECOMENDACION: <texto>"""
     } finally { conn.close() }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO 1 (RAE) — CORRECTOR DE EDAD RELATIVA
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Factor RAE por trimestre de nacimiento. Hector nacio el 19 de junio (T2) -> 1.06.
+  def raeFactorForMonth(month: Int): Double = month match {
+    case 1 | 2 | 3  => 1.00
+    case 4 | 5 | 6  => 1.06
+    case 7 | 8 | 9  => 1.12
+    case _          => 1.20
+  }
+
+  def getRaeAdjustedStats(): Map[String, Any] = {
+    val card = getLatestCardData()
+    val birthMonth = try LocalDate.parse(card.fechaNacimiento).getMonthValue catch { case _: Exception => 6 }
+    val raeFactor = raeFactorForMonth(birthMonth)
+    val matches = getMatchesList()
+    val pj = matches.size
+    val notaMedia = if (pj > 0) matches.map(_.nota).sum / pj else 0.0
+    def gcOf(m: MatchLog): Int = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(1)
+    def gfOf(m: MatchLog): Int = m.resultado.split("-").headOption.flatMap(_.trim.toIntOption).getOrElse(0)
+    val cleanSheets = matches.count(gcOf(_) == 0)
+    val pctCS = if (pj > 0) cleanSheets * 100 / pj else 0
+    val ganados = matches.count(m => gfOf(m) > gcOf(m))
+    val winRate = if (pj > 0) ganados * 100 / pj else 0
+
+    Map(
+      "raeFactor"     -> raeFactor,
+      "pj"            -> pj,
+      "notaMediaReal" -> notaMedia,
+      "notaMediaRae"  -> math.min(10.0, notaMedia * raeFactor),
+      "pctCSReal"     -> pctCS,
+      "pctCSRae"      -> math.min(100, (pctCS * raeFactor).toInt),
+      "winRateReal"   -> winRate,
+      "winRateRae"    -> math.min(100, (winRate * raeFactor).toInt)
+    )
+  }
+
   // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
   def getBenchmark(): Map[String, Any] = {
     val conn = getConnection()
     try {
+      val rae = getRaeAdjustedStats()
+
       val rsCache = conn.prepareStatement(
         "SELECT payload FROM feature_cache WHERE cache_key = 'benchmark' AND updated_at > NOW() - INTERVAL '7 days'"
       ).executeQuery()
       if (rsCache.next()) {
         val json = ujson.read(rsCache.getString("payload"))
         return Map("percentil" -> json("percentil").str, "areas" -> json("areas").str,
-                   "referencia" -> json("referencia").str, "sinDatos" -> false)
+                   "referencia" -> json("referencia").str, "sinDatos" -> false) ++ rae
       }
 
       val card = getLatestCardData()
@@ -1302,7 +1545,7 @@ RECOMENDACION: <texto>"""
       val matches = getMatchesList() // ORDER BY fecha DESC
       val pj = matches.size
 
-      if (pj < 3) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> true)
+      if (pj < 3) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> true) ++ rae
 
       val notaMedia = matches.map(_.nota).sum / pj
       def gcOf(m: MatchLog): Int = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(1)
@@ -1311,8 +1554,10 @@ RECOMENDACION: <texto>"""
       val acute = getWorkloads(7); val chronic = getWorkloads(28)
       val acwr = StatsCalculator.calculateACWR(acute, chronic)
       val racha = matches.takeWhile(gcOf(_) == 0).size
+      val raeFactor = rae("raeFactor").asInstanceOf[Double]
 
       val prompt = s"""Héctor tiene $edad años, es portero de fútbol base español. Sus estadísticas actuales: nota media ${f"$notaMedia%.1f"}, clean sheets $cleanSheets de $pj partidos ($pctCS%), ACWR ${f"$acwr%.2f"}, racha actual $racha partidos.
+IMPORTANTE: Héctor nació en junio (segundo trimestre). Aplica el Efecto de Edad Relativa en tu análisis — sus métricas reales deben interpretarse con un factor de ajuste de ${f"$raeFactor%.2f"} respecto a jugadores nacidos en enero-marzo. Esto significa que su rendimiento real es un ${((raeFactor - 1.0) * 100).toInt}% más alto de lo que muestran los números brutos.
 Entrena 2 días con su equipo, 1 día de academia específica de porteros semanalmente, y 2 días de judo.
 Basándote en perfiles públicos de porteros que llegaron a academias de Primera División española con 8-10 años:
 1) Percentil estimado de progresión (0-100) con justificación breve
@@ -1345,7 +1590,7 @@ REFERENCIA: <texto>"""
       upsert.setString(1, ujson.write(payload))
       upsert.executeUpdate()
 
-      Map("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt, "sinDatos" -> false)
+      Map("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt, "sinDatos" -> false) ++ rae
     } finally { conn.close() }
   }
 
@@ -1552,7 +1797,8 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
                           zonaGoles: String, zonaTiros: String, zonaParadas: String,
                           p1v1: Int, pAir: Int, pPie: Int, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
                           mapaCampo: String, // <--- NUEVO PARAMETRO
-                          distanciaKm: Double = 0.0 // <--- FOOTBAR
+                          distanciaKm: Double = 0.0, // <--- FOOTBAR
+                          comportamientoPresion: String = ""
                         ): Unit = {
     val conn = getConnection()
     try {
@@ -1579,6 +1825,12 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
       ps.setInt(22, id)
 
       ps.executeUpdate()
+
+      if (comportamientoPresion.nonEmpty && comportamientoPresion != "NA") {
+        val ps2 = conn.prepareStatement("UPDATE matches SET comportamiento_presion = ? WHERE id = ?")
+        ps2.setString(1, comportamientoPresion); ps2.setInt(2, id)
+        ps2.executeUpdate()
+      }
     } finally {
       conn.close()
     }
@@ -5250,6 +5502,103 @@ PLAZO: <texto>"""
       ps.setInt(4, id)
       ps.executeUpdate()
     } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO 4 (sesion actual) — MAPA DE VISIBILIDAD Y EVENTOS CLAVE
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getVisibilityEvents(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT v.*, c.nombre AS contacto_nombre
+        FROM visibility_events v
+        LEFT JOIN contacts c ON c.id = v.contact_id
+        WHERE EXTRACT(YEAR FROM v.fecha) = EXTRACT(YEAR FROM CURRENT_DATE)
+        ORDER BY v.fecha ASC
+      """)
+      var list = List[Map[String, Any]]()
+      while (rs.next()) {
+        val ojeadoresObj = rs.getObject("ojeadores_presentes")
+        val ojeadoresOpt: Option[Boolean] = if (ojeadoresObj == null) None else Some(rs.getBoolean("ojeadores_presentes"))
+        val contactIdObj = rs.getInt("contact_id")
+        val contactIdOpt: Option[Int] = if (rs.wasNull()) None else Some(contactIdObj)
+        list = list :+ Map(
+          "id"                  -> rs.getInt("id"),
+          "nombre"              -> fixEncoding(rs.getString("nombre")),
+          "fecha"               -> rs.getDate("fecha").toString,
+          "tipo"                -> rs.getString("tipo"),
+          "organizador"         -> Option(rs.getString("organizador")).map(fixEncoding).getOrElse(""),
+          "nivelVisibilidad"    -> rs.getString("nivel_visibilidad"),
+          "participamos"        -> rs.getBoolean("participamos"),
+          "ojeadoresPresentes"  -> ojeadoresOpt,
+          "contactId"           -> contactIdOpt,
+          "contactoNombre"      -> Option(rs.getString("contacto_nombre")).map(fixEncoding).getOrElse(""),
+          "notas"               -> Option(rs.getString("notas")).map(fixEncoding).getOrElse("")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  def saveVisibilityEvent(nombre: String, fecha: String, tipo: String, organizador: String, nivelVisibilidad: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO visibility_events (nombre, fecha, tipo, organizador, nivel_visibilidad) VALUES (?, ?::date, ?, ?, ?)"
+      )
+      ps.setString(1, fixEncoding(nombre)); ps.setString(2, fecha); ps.setString(3, tipo)
+      ps.setString(4, fixEncoding(organizador)); ps.setString(5, nivelVisibilidad)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def updateVisibilityParticipamos(id: Int, participamos: Boolean): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE visibility_events SET participamos = ? WHERE id = ?")
+      ps.setBoolean(1, participamos); ps.setInt(2, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def updateVisibilityOjeadores(id: Int, ojeadoresPresentes: Boolean, contactId: Option[Int]): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE visibility_events SET ojeadores_presentes = ?, contact_id = ? WHERE id = ?")
+      ps.setBoolean(1, ojeadoresPresentes)
+      contactId match {
+        case Some(cid) => ps.setInt(2, cid)
+        case None      => ps.setNull(2, java.sql.Types.INTEGER)
+      }
+      ps.setInt(3, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // Llamada explicita a Gemini disparada por boton POST — nunca en el render de pagina
+  def recommendVisibilityEvents(): String = {
+    val events = getVisibilityEvents()
+    if (events.isEmpty) return "No hay eventos registrados para recomendar."
+
+    val card = getLatestCardData()
+    val edad = calcularEdadExacta(card.fechaNacimiento)
+    val upcoming = getUpcomingMatches().take(10)
+
+    val eventosStr = events.map { e =>
+      val nivel = e("nivelVisibilidad").asInstanceOf[String]
+      val participamos = if (e("participamos").asInstanceOf[Boolean]) "YA CONFIRMADO" else "sin confirmar"
+      s"${e("fecha")}: ${e("nombre")} (${e("tipo")}, visibilidad $nivel, $participamos)"
+    }.mkString("; ")
+    val partidosStr = if (upcoming.isEmpty) "Sin partidos programados todavía"
+      else upcoming.map(m => s"${m.fecha} vs ${fixEncoding(m.rival)}").mkString("; ")
+
+    val prompt = s"""Eres asesor de captación en fútbol base español. Héctor es portero de $edad años.
+Eventos de visibilidad disponibles esta temporada: $eventosStr.
+Calendario de partidos oficiales ya programados: $partidosStr.
+Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos priorizar para maximizar la visibilidad ante ojeadores, evitando solapamientos con el calendario de partidos y sin sobrecargar su temporada. Responde en texto plano, en formato de lista breve, máximo 5 líneas."""
+
+    AIProvider.ask(prompt, None, bypassCache = true)
   }
 
 }
