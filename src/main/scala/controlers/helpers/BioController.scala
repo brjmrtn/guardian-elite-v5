@@ -64,6 +64,72 @@ object BioController extends cask.Routes {
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
     val medicalReports = DatabaseManager.getMedicalReports()
     val academiaSessions = DatabaseManager.getAcademiaSessions().take(5)
+
+    // --- BLOQUE A4: VALIDACION DEL INDICE DE FORMA (solo lectura/calculo, sin Gemini) ---
+    val formaCorrelacion = DatabaseManager.getFormaCorrelacion()
+    val formaSuficiente = formaCorrelacion("suficiente").asInstanceOf[Boolean]
+    val formaValidacionWidget: Modifier =
+      if (!formaSuficiente)
+        div(cls := "card bg-dark border-secondary shadow mt-3",
+          div(cls := "card-header text-white fw-bold text-center small", "📊 VALIDACIÓN DEL ÍNDICE DE FORMA"),
+          div(cls := "card-body text-center text-muted small p-3", "Necesitas al menos 10 partidos con datos de forma para ver la validación.")
+        )
+      else {
+        val rVal: Double = formaCorrelacion("r").asInstanceOf[Double]
+        val notaAlta: Double = formaCorrelacion("notaMediaAlta").asInstanceOf[Double]
+        val notaBaja: Double = formaCorrelacion("notaMediaBaja").asInstanceOf[Double]
+        val nVal: Int = formaCorrelacion("n").asInstanceOf[Int]
+        val corrTxt: String = f"El modelo tiene una correlación de r=$rVal%.2f con el rendimiento real de Héctor."
+        val n15Modifier: Modifier =
+          if (nVal >= 15) div(cls := "xx-small text-info mt-2", "Con más de 15 partidos, el índice ya predice con precisión estadística el rendimiento de Héctor.")
+          else div()
+        div(cls := "card bg-dark border-secondary shadow mt-3",
+          div(cls := "card-header text-white fw-bold text-center small", "📊 VALIDACIÓN DEL ÍNDICE DE FORMA"),
+          div(cls := "card-body p-3",
+            canvas(id := "formaScatterChart", style := "max-height:220px;"),
+            div(cls := "small text-white mt-3", corrTxt),
+            div(cls := "row text-center mt-2",
+              div(cls := "col-6",
+                div(cls := "xx-small text-muted", "Nota media con FORMA ≥8"),
+                div(cls := "fw-bold text-success", f"$notaAlta%.1f")
+              ),
+              div(cls := "col-6",
+                div(cls := "xx-small text-muted", "Nota media con FORMA <6"),
+                div(cls := "fw-bold text-danger", f"$notaBaja%.1f")
+              )
+            ),
+            n15Modifier
+          )
+        )
+      }
+
+    val formaChartJs: String =
+      if (!formaSuficiente) ""
+      else {
+        val puntos = formaCorrelacion("puntos").asInstanceOf[List[Map[String, Double]]]
+        val pendiente = formaCorrelacion("pendiente").asInstanceOf[Double]
+        val intercepto = formaCorrelacion("intercepto").asInstanceOf[Double]
+        val puntosJs = puntos.map(p => s"""{x:${p("x")},y:${p("y")}}""").mkString("[", ",", "]")
+        val xMin = puntos.map(_("x")).min
+        val xMax = puntos.map(_("x")).max
+        val lineaJs = s"""[{x:$xMin, y:${pendiente * xMin + intercepto}},{x:$xMax, y:${pendiente * xMax + intercepto}}]"""
+        s"""
+        var ctxForma = document.getElementById('formaScatterChart');
+        if (ctxForma) {
+          new Chart(ctxForma, {
+            type: 'scatter',
+            data: { datasets: [
+              { label: 'Partidos', data: $puntosJs, backgroundColor: '#d4af37' },
+              { label: 'Tendencia', data: $lineaJs, type: 'line', borderColor: '#0dcaf0', borderWidth:2, pointRadius:0, fill:false }
+            ]},
+            options: { responsive:true, plugins:{ legend:{ labels:{ color:'#fff' } } },
+              scales: { x: { title:{display:true,text:'Índice de forma',color:'#aaa'}, ticks:{color:'#aaa'}, grid:{color:'#333'} },
+                        y: { title:{display:true,text:'Nota partido',color:'#aaa'}, min:0, max:10, ticks:{color:'#aaa'}, grid:{color:'#333'} } }
+            }
+          });
+        }
+        """
+      }
     // --- WIDGET 1: ANALISIS COGNITIVO ---
     val cognitiveWidget = div(cls:="card bg-dark border-info shadow mb-3",
       div(cls:="card-header border-info text-info fw-bold py-1 text-center small", "🧠 ANALISTA COGNITIVO"),
@@ -197,7 +263,7 @@ object BioController extends cask.Routes {
 
 
         // WELLNESS
-        div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUENO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠ Molestias"), option(value:="LESION", "X Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueno (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📱 Datos del smartwatch (opcional)"), div(cls:="row g-2", div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño profundo (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoProfundoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño ligero (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoLigeroMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Despierto (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoDespiertoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
+        div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUENO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠ Molestias"), option(value:="LESION", "X Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueno (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📱 Datos del smartwatch (opcional)"), div(cls:="row g-2", div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño profundo (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoProfundoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño ligero (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoLigeroMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Despierto (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoDespiertoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="row mb-3", div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Talla sentado (cm)"), input(tpe:="number", step:="0.1", name:="tallaSentado", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)")), div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Long. pierna (cm)"), input(tpe:="number", step:="0.1", name:="longitudPierna", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)"))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
 
         // NUEVO: EVALUACION TECNICA (LABELS BLANCOS FORZADOS)
         div(cls:="card bg-secondary bg-opacity-25 border-warning shadow", div(cls:="card-header bg-warning text-dark fw-bold text-center", "EVALUACION TECNICA (MENSUAL)"), div(cls:="card-body p-3",
@@ -231,11 +297,14 @@ object BioController extends cask.Routes {
                   )
                 }: _*)
             )
-          )
+          ),
+
+          formaValidacionWidget
         )
       ), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""
       const gCtx=document.getElementById('growthChart');const gData=$growthData;if(gCtx){new Chart(gCtx,{type:'line',data:{labels:gData.labels,datasets:[{label:'Altura (cm)',data:gData.data,borderColor:'#0dcaf0',borderWidth:3,tension:0.3,pointBackgroundColor:'#fff',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#eee',font:{weight:'bold'}},grid:{color:'#444'},pointLabels:{color:'#fff'}},x:{display:false}}}});}
       const tCtx=document.getElementById('techChart');const tData=$techChart;if(tCtx){new Chart(tCtx,{type:'line',data:tData,options:{responsive:true,maintainAspectRatio:false,scales:{y:{min:0,max:10,ticks:{color:'#eee'},grid:{color:'#444'}},x:{ticks:{color:'#eee'}}}}});}
+      $formaChartJs
       function toggleDrills(){ var type=document.getElementById('trainingType').value; var container=document.getElementById('drillsContainer'); var manual=document.getElementById('manualDesign'); var aiBtn = document.getElementById('aiBtn'); if(container){if(type.includes('Papa') && !type.includes('Jugador')) container.style.display='block'; else container.style.display='none';} if(manual){if(type.includes('Papa')) manual.style.display='block'; else manual.style.display='none';} if(aiBtn){if(type.includes('Papa')) aiBtn.style.display='block'; else aiBtn.style.display='none';} }
       function generateAI(){ var focus = document.getElementById('drillFocus').value; var type = document.getElementById('trainingType').value; if(!focus) { alert('Pon un objetivo primero (ej: Velocidad)'); return; } document.getElementById('rutinaText').value = "Generando..."; fetch('/bio/ai_gen?focus='+encodeURIComponent(focus)+'&mode='+encodeURIComponent(type)).then(r=>r.text()).then(t => document.getElementById('rutinaText').value = t); }
       window.addEventListener('DOMContentLoaded', toggleDrills);
@@ -275,8 +344,10 @@ object BioController extends cask.Routes {
     val suenoProfundoMin   = p.getOrElse("suenoProfundoMin", "").toIntOption
     val suenoLigeroMin     = p.getOrElse("suenoLigeroMin", "").toIntOption
     val suenoDespiertoMin  = p.getOrElse("suenoDespiertoMin", "").toIntOption
+    val tallaSentado       = p.getOrElse("tallaSentado", "").toDoubleOption
+    val longitudPierna     = p.getOrElse("longitudPierna", "").toDoubleOption
     DatabaseManager.logWellness(sueno, h, energia, dolor, zona, alt, pes, animo, notas_conducta, estadoFisico,
-      suenoProfundoMin, suenoLigeroMin, suenoDespiertoMin)
+      suenoProfundoMin, suenoLigeroMin, suenoDespiertoMin, tallaSentado, longitudPierna)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
   }
   @cask.postForm("/bio/save_training")
@@ -572,7 +643,36 @@ object BioController extends cask.Routes {
     val energiaNiveles           = correlaciones("energia").asInstanceOf[List[Map[String, Any]]]
     val animoNiveles             = correlaciones("animo").asInstanceOf[List[Map[String, Any]]]
     val combinacionOptima        = correlaciones("combinacionOptima").asInstanceOf[Option[Map[String, Any]]]
+    val nutricionNiveles         = correlaciones("nutricion").asInstanceOf[List[Map[String, Any]]]
     val analisisIACacheado       = DatabaseManager.getSleepAnalysisCached()
+
+    val nutricionLabels = Map(
+      "completa" -> "Comida completa", "ligera" -> "Comida ligera", "snack" -> "Solo snack",
+      "sin_comer" -> "Sin comer", "no_adecuada" -> "No adecuada"
+    )
+    val nutricionCard = div(cls := "card bg-dark border-secondary p-2 h-100",
+      div(cls := "xx-small fw-bold text-white mb-2 text-center", "🍽️ Nutrición prepartido"),
+      if (nutricionNiveles.isEmpty)
+        div(cls := "xx-small text-muted text-center py-3", "Registra la comida prepartido en al menos 5 partidos para ver esta correlación")
+      else frag(nutricionNiveles.map { n =>
+        val tipo = n("tipo").asInstanceOf[String]
+        val notaMedia = n("notaMedia").asInstanceOf[Double]
+        val partidos = n("partidos").asInstanceOf[Int]
+        val color = if (notaMedia > 7) "#20c997" else if (notaMedia >= 5) "#ffc107" else "#dc3545"
+        val pct = math.min(100, (notaMedia / 10.0 * 100).toInt)
+        val tipoLabel: String = nutricionLabels.getOrElse(tipo, tipo)
+        val valorTxt: String = f"$notaMedia%.1f ($partidos)"
+        div(cls := "mb-2",
+          div(cls := "d-flex justify-content-between xx-small",
+            span(cls := "text-muted fw-bold", tipoLabel),
+            span(cls := "fw-bold", style := s"color:$color;", valorTxt)
+          ),
+          div(cls := "progress", style := "height:6px;",
+            div(cls := "progress-bar", style := s"width:$pct%; background:$color;")
+          )
+        )
+      }: _*)
+    )
 
     val correlacionesSection = div(cls := "card bg-dark border-warning shadow mb-4",
       div(cls := "card-header text-warning fw-bold small", "🧠 CORRELACIONES SUEÑO-RENDIMIENTO"),
@@ -608,6 +708,9 @@ object BioController extends cask.Routes {
           form(action := "/bio/sueno/analizar", method := "post",
             button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", "🧠 Análisis IA completo")
           )
+        ),
+        div(cls := "row g-2 mt-1",
+          div(cls := "col-6 col-md-4", nutricionCard)
         )
       )
     )

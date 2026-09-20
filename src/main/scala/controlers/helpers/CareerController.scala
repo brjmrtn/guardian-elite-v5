@@ -275,7 +275,7 @@ object CareerController extends cask.Routes {
     } else {
       val distribucion = d("distribucion").asInstanceOf[List[Map[String, Any]]]
       val masFrecuente = d("masFrecuente").asInstanceOf[String]
-      val analisisIA   = d("analisisIA").asInstanceOf[String]
+      val analisisIA   = d("analisisIA").asInstanceOf[Option[String]]
 
       val labelsJs = distribucion.map(x => s""""${x("label").asInstanceOf[String]}"""").mkString("[", ",", "]")
       val dataJs   = distribucion.map(x => x("pct").asInstanceOf[Int].toString).mkString("[", ",", "]")
@@ -290,9 +290,15 @@ object CareerController extends cask.Routes {
           div(style := "height:200px;", canvas(id := "chartPresion")),
           if (total < 5)
             div(cls := "alert alert-secondary small mt-3 mb-0", "Registra al menos 5 partidos con goles encajados para ver el patrón")
-          else if (analisisIA.nonEmpty)
-            div(cls := "alert alert-secondary small mt-3 mb-0", style := "white-space:pre-wrap;", analisisIA)
-          else span()
+          else div(cls := "mt-3",
+            analisisIA match {
+              case Some(texto) => div(cls := "alert alert-secondary small mb-2", style := "white-space:pre-wrap;", texto)
+              case None => div(cls := "text-muted small mb-2 fst-italic", "Sin análisis IA generado todavía")
+            },
+            form(action := "/career/presion/analizar", method := "post",
+              button(tpe := "submit", cls := "btn btn-outline-info btn-sm w-100 fw-bold", "🧠 Análisis IA")
+            )
+          )
         ),
         script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
         script(raw(s"""
@@ -305,6 +311,93 @@ object CareerController extends cask.Routes {
             options: {
               responsive: true, maintainAspectRatio: false,
               plugins: { legend: { position: 'bottom', labels: { color: '#ccc', font: { size: 9 } } } }
+            }
+          });
+        """))
+      )
+    }
+  }
+
+  // ── BLOQUE D3: HORAS DE PRÁCTICA DELIBERADA ─────────────────────────────
+  private def horasPracticaWidget() = {
+    val d = DatabaseManager.getHorasPracticaDeliberada()
+    val totalHoras = d("totalHoras").asInstanceOf[Double]
+
+    if (totalHoras <= 0) {
+      div(cls := "card bg-dark border-secondary shadow mb-4 w-100",
+        div(cls := "card-header text-white fw-bold small text-center", "⏱️ HORAS DE PRÁCTICA DELIBERADA"),
+        div(cls := "card-body text-center text-muted small py-4", "Sin sesiones registradas todavía")
+      )
+    } else {
+      val desglose = d("desglose").asInstanceOf[List[Map[String, Any]]]
+      val categorias = d("categorias").asInstanceOf[List[String]]
+      val porMes = d("porMes").asInstanceOf[List[Map[String, Any]]]
+      val proyeccionAnio1000 = d("proyeccionAnio1000").asInstanceOf[String]
+
+      val hitos = Seq((1000, "Base sólida de portero"), (3000, "Nivel academia profesional"), (10000, "Portero de élite (referencia Ericsson)"))
+      val pctBarra = math.min(100.0, totalHoras / 10000.0 * 100.0)
+
+      val mesesJs = porMes.map(m => s""""${m("mes").asInstanceOf[String]}"""").mkString("[", ",", "]")
+      val coloresPorCategoria = Map("Academia" -> "#d4af37", "Partido" -> "#20c997", "Club/Equipo" -> "#0dcaf0", "Judo" -> "#8b5cf6", "Papá/Portero" -> "#ffc107")
+      val datasetsJs = categorias.map { cat =>
+        val color = coloresPorCategoria.getOrElse(cat, "#6c757d")
+        val dataJs = porMes.map(m => m("porCategoria").asInstanceOf[Map[String, Double]].getOrElse(cat, 0.0).toString).mkString("[", ",", "]")
+        s"""{ label: '$cat', data: $dataJs, backgroundColor: '$color' }"""
+      }.mkString(",")
+
+      div(cls := "card bg-dark border-warning shadow mb-4 w-100",
+        div(cls := "card-header text-warning fw-bold small text-center", "⏱️ HORAS DE PRÁCTICA DELIBERADA"),
+        div(cls := "card-body p-3",
+          div(cls := "text-center mb-3",
+            div(cls := "display-5 fw-bold text-warning", f"$totalHoras%.0f h"),
+            div(cls := "xx-small text-muted", "TOTAL PONDERADO ACUMULADO")
+          ),
+
+          div(cls := "row g-2 mb-3",
+            frag(desglose.map { x =>
+              val cat = x("categoria").asInstanceOf[String]
+              val horasBrutas = x("horasBrutas").asInstanceOf[Double]
+              div(cls := "col-6 col-md-4",
+                div(cls := "card bg-secondary bg-opacity-10 border-secondary text-center p-2",
+                  div(cls := "fw-bold text-white", f"$horasBrutas%.0fh"),
+                  div(cls := "xx-small text-muted", cat)
+                )
+              )
+            }: _*)
+          ),
+
+          div(style := "height:180px;", canvas(id := "chartPracticaMensual")),
+
+          div(cls := "mt-3",
+            div(cls := "xx-small text-muted mb-1 text-center",
+              if (proyeccionAnio1000 == "Ya alcanzado") "✅ Ya ha superado las 1.000h específicas"
+              else s"A este ritmo, alcanzará 1.000h específicas en $proyeccionAnio1000"
+            ),
+            div(cls := "position-relative", style := "height:26px; background:#1a1a1a; border-radius:6px; overflow:hidden; margin-top:8px;",
+              div(style := s"height:100%; width:$pctBarra%; background:linear-gradient(90deg,#d4af37,#ffc107);")
+            ),
+            div(cls := "d-flex justify-content-between mt-1",
+              frag(hitos.map { case (h, label) =>
+                div(cls := "text-center", style := "flex:1;",
+                  div(cls := s"xx-small fw-bold ${if (totalHoras >= h) "text-warning" else "text-muted"}", s"${h}h"),
+                  div(cls := "xx-small text-muted", style := "font-size:8px;", label)
+                )
+              }: _*)
+            )
+          )
+        ),
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+        script(raw(s"""
+          new Chart(document.getElementById('chartPracticaMensual'), {
+            type: 'bar',
+            data: { labels: $mesesJs, datasets: [$datasetsJs] },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { labels: { color: '#ccc', font: { size: 8 } } } },
+              scales: {
+                x: { stacked: true, ticks: { color: '#aaa', font: { size: 8 } } },
+                y: { stacked: true, ticks: { color: '#aaa' } }
+              }
             }
           });
         """))
@@ -332,6 +425,7 @@ object CareerController extends cask.Routes {
           resilienceWidget(),
           learningVelocityWidget(),
           presionWidget(),
+          horasPracticaWidget(),
           raw(DatabaseManager.getLegendComparison()),
           div(cls := "card bg-secondary p-2 w-100 mt-3",
             form(action := "/career/new-season", method := "post", cls := "d-flex flex-column gap-2",
@@ -2645,6 +2739,858 @@ object CareerController extends cask.Routes {
       )
     )
     renderHtml(content)
+  }
+
+  // ── BLOQUE C3: TEST FÍSICOS TRIMESTRALES ────────────────────────────────
+  private def bestOf(vals: List[(Double, String)], lowerIsBetter: Boolean): Option[(Double, String)] =
+    if (vals.isEmpty) None else Some(if (lowerIsBetter) vals.minBy(_._1) else vals.maxBy(_._1))
+
+  private def bestMarkCard(label: String, best: Option[(Double, String)], sufijo: String, decimales: Int) = {
+    val valorTxt: String = best.map { case (v, _) => if (decimales > 0) f"$v%.2f$sufijo" else f"${v.toInt}%d$sufijo" }.getOrElse("—")
+    val fechaTxt: String = best.map(_._2).getOrElse("")
+    div(cls := "col-6 col-md-4",
+      div(cls := "card bg-dark border-warning text-center py-3",
+        div(cls := "text-warning fw-bold fs-5", valorTxt),
+        div(cls := "xx-small text-muted", label),
+        div(cls := "xx-small text-muted", fechaTxt)
+      )
+    )
+  }
+
+  @cask.get("/physical-tests")
+  def physicalTestsPage(request: cask.Request) = withAuth(request) {
+    val tests = DatabaseManager.getPhysicalTests()
+    val analisisIA = DatabaseManager.getPhysicalTestsAnalysisCached()
+
+    val diasDesdeUltimo = tests.lastOption.flatMap { t =>
+      try Some(java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.parse(t("fecha").asInstanceOf[String]), java.time.LocalDate.now()))
+      catch { case _: Exception => None }
+    }
+    val alertaTest = diasDesdeUltimo.exists(_ > 90)
+
+    def fechaOf(t: Map[String, Any]): String = t("fecha").asInstanceOf[String]
+    val v10Vals = tests.flatMap(t => t("velocidad10m").asInstanceOf[Option[Double]].map(v => (v, fechaOf(t))))
+    val v30Vals = tests.flatMap(t => t("velocidad30m").asInstanceOf[Option[Double]].map(v => (v, fechaOf(t))))
+    val svVals  = tests.flatMap(t => t("saltoVertical").asInstanceOf[Option[Int]].map(v => (v.toDouble, fechaOf(t))))
+    val agVals  = tests.flatMap(t => t("agilidadIllinois").asInstanceOf[Option[Double]].map(v => (v, fechaOf(t))))
+    val lmVals  = tests.flatMap(t => t("lanzamientoMedicinal").asInstanceOf[Option[Int]].map(v => (v.toDouble, fechaOf(t))))
+
+    val bestV10 = bestOf(v10Vals, lowerIsBetter = true)
+    val bestV30 = bestOf(v30Vals, lowerIsBetter = true)
+    val bestSV  = bestOf(svVals, lowerIsBetter = false)
+    val bestAg  = bestOf(agVals, lowerIsBetter = true)
+    val bestLM  = bestOf(lmVals, lowerIsBetter = false)
+
+    val fechasJs = tests.map(t => s""""${fechaOf(t)}"""").mkString("[", ",", "]")
+    def seriesJs(vals: List[(Double, String)], allFechas: List[String]): String =
+      allFechas.map(f => vals.find(_._2 == f).map(_._1.toString).getOrElse("null")).mkString("[", ",", "]")
+    val allFechas = tests.map(fechaOf)
+    val v10Js = seriesJs(v10Vals, allFechas); val v30Js = seriesJs(v30Vals, allFechas)
+    val svJs  = seriesJs(svVals, allFechas);  val agJs  = seriesJs(agVals, allFechas); val lmJs = seriesJs(lmVals, allFechas)
+
+    val content = basePage("physical-tests",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-10 col-12",
+          h2(cls := "text-white mb-4 text-center", "💪 Test Físicos Trimestrales"),
+
+          if (alertaTest)
+            div(cls := "alert alert-warning text-center fw-bold mb-4", "📅 Más de 3 meses sin test físico — considera una nueva batería")
+          else span(),
+
+          div(cls := "row g-2 mb-4",
+            bestMarkCard("Mejor 10m", bestV10, "s", 2),
+            bestMarkCard("Mejor 30m", bestV30, "s", 2),
+            bestMarkCard("Mejor salto vertical", bestSV, "cm", 0),
+            bestMarkCard("Mejor Illinois", bestAg, "s", 2),
+            bestMarkCard("Mejor lanzamiento", bestLM, "cm", 0)
+          ),
+
+          if (tests.isEmpty)
+            div(cls := "alert alert-secondary text-center", "Sin test físicos registrados todavía")
+          else div(
+            div(cls := "card bg-dark border-info shadow mb-4",
+              div(cls := "card-header text-info fw-bold small", "VELOCIDAD (10m / 30m) — ↓ mejor"),
+              div(cls := "card-body", div(style := "height:220px;", canvas(id := "chartVelocidad")))
+            ),
+            div(cls := "card bg-dark border-success shadow mb-4",
+              div(cls := "card-header text-success fw-bold small", "SALTO VERTICAL / LANZAMIENTO MEDICINAL — ↑ mejor"),
+              div(cls := "card-body", div(style := "height:220px;", canvas(id := "chartPotencia")))
+            ),
+            div(cls := "card bg-dark border-warning shadow mb-4",
+              div(cls := "card-header text-warning fw-bold small", "AGILIDAD ILLINOIS — ↓ mejor"),
+              div(cls := "card-body", div(style := "height:200px;", canvas(id := "chartAgilidad")))
+            ),
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
+              const fechas = $fechasJs;
+              new Chart(document.getElementById('chartVelocidad'), {
+                type: 'line',
+                data: { labels: fechas, datasets: [
+                  { label: '10m (s)', data: $v10Js, borderColor: '#0dcaf0', tension: 0.3, spanGaps: true },
+                  { label: '30m (s)', data: $v30Js, borderColor: '#ffc107', tension: 0.3, spanGaps: true }
+                ]},
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc' } } },
+                  scales: { x: { ticks: { color: '#aaa' } }, y: { reverse: true, ticks: { color: '#aaa' }, title: { display: true, text: '↓ mejor', color: '#888' } } }
+                }
+              });
+              new Chart(document.getElementById('chartPotencia'), {
+                type: 'line',
+                data: { labels: fechas, datasets: [
+                  { label: 'Salto vertical (cm)', data: $svJs, borderColor: '#20c997', tension: 0.3, spanGaps: true },
+                  { label: 'Lanzamiento medicinal (cm)', data: $lmJs, borderColor: '#d4af37', tension: 0.3, spanGaps: true }
+                ]},
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc' } } },
+                  scales: { x: { ticks: { color: '#aaa' } }, y: { ticks: { color: '#aaa' } } }
+                }
+              });
+              new Chart(document.getElementById('chartAgilidad'), {
+                type: 'line',
+                data: { labels: fechas, datasets: [{ label: 'Illinois (s)', data: $agJs, borderColor: '#dc3545', tension: 0.3, spanGaps: true }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: { x: { ticks: { color: '#aaa' } }, y: { reverse: true, ticks: { color: '#aaa' }, title: { display: true, text: '↓ mejor', color: '#888' } } }
+                }
+              });
+            """))
+          ),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "➕ Registrar nueva batería"),
+            div(cls := "xx-small text-muted mb-3",
+              "10m/30m: sprint cronometrado con fotocélulas o cronómetro manual desde parado. ",
+              "Salto vertical: test de Sargent (alcance con salto - alcance parado). ",
+              "Illinois: circuito de agilidad estándar de 10x5m con conos. ",
+              "Lanzamiento medicinal: balón medicinal 2-3kg a dos manos desde el pecho."
+            ),
+            form(action := "/physical-tests/save", method := "post",
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                input(tpe := "date", name := "fecha", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  value := java.time.LocalDate.now().toString, required := true)
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Velocidad 10m (s)"),
+                  input(tpe := "number", step := "0.01", name := "velocidad10m", cls := "form-control form-control-sm bg-dark text-white border-secondary")),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Velocidad 30m (s)"),
+                  input(tpe := "number", step := "0.01", name := "velocidad30m", cls := "form-control form-control-sm bg-dark text-white border-secondary"))
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Salto vertical (cm)"),
+                  input(tpe := "number", name := "saltoVertical", cls := "form-control form-control-sm bg-dark text-white border-secondary")),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Agilidad Illinois (s)"),
+                  input(tpe := "number", step := "0.01", name := "agilidadIllinois", cls := "form-control form-control-sm bg-dark text-white border-secondary"))
+              ),
+              div(cls := "mb-3",
+                label(cls := "xx-small text-muted fw-bold", "Lanzamiento medicinal (cm)"),
+                input(tpe := "number", name := "lanzamientoMedicinal", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+              ),
+              button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar batería")
+            )
+          ),
+
+          div(cls := "card bg-dark border-warning p-3 mb-4",
+            div(cls := "fw-bold text-warning small text-uppercase mb-2", "🧠 Análisis IA"),
+            if (analisisIA.isDefined) div(cls := "text-light small mb-3", style := "white-space:pre-wrap;", analisisIA.get)
+            else div(cls := "text-muted small mb-3", "Sin análisis generado todavía"),
+            form(action := "/physical-tests/analizar", method := "post",
+              button(tpe := "submit", cls := "btn btn-outline-warning w-100 btn-sm fw-bold", "🧠 Análisis IA")
+            )
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/physical-tests/save")
+  def savePhysicalTestAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.savePhysicalTest(
+      p.getOrElse("fecha", java.time.LocalDate.now().toString),
+      p.getOrElse("velocidad10m", "").toDoubleOption,
+      p.getOrElse("velocidad30m", "").toDoubleOption,
+      p.getOrElse("saltoVertical", "").toIntOption,
+      p.getOrElse("agilidadIllinois", "").toDoubleOption,
+      p.getOrElse("lanzamientoMedicinal", "").toIntOption,
+      p.getOrElse("notas", "")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/physical-tests"))
+  }
+
+  @cask.post("/physical-tests/analizar")
+  def analizarPhysicalTests(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generatePhysicalTestsAnalysis()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/physical-tests"))
+  }
+
+  @cask.post("/career/presion/analizar")
+  def analizarPresionAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generatePresionAnalysis()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/career"))
+  }
+
+  // ── BLOQUE D2: REGISTRO PSICOLÓGICO TRIMESTRAL ──────────────────────────
+  private val psychDimensiones = Seq(
+    ("motivacion",          "Motivación",              "¿Quiere ir a entrenar o hay que convencerle?"),
+    ("presionPercibida",    "Presión percibida",       "¿Se agobia cuando las cosas no salen bien?"),
+    ("relacionErrores",     "Relación con errores",    "¿Acepta los errores o se hunde?"),
+    ("miedoFracaso",        "Miedo al fracaso",        "¿Evita situaciones donde puede fallar?"),
+    ("disfrute",            "Disfrute",                "¿Disfruta jugando o lo vive como obligación?"),
+    ("relacionEntrenador",  "Relación con el entrenador", "¿Confía en su entrenador?"),
+    ("relacionEquipo",      "Relación con el equipo",  "¿Se siente parte del grupo?")
+  )
+
+  @cask.get("/psych")
+  def psychPage(request: cask.Request) = withAuth(request) {
+    val records = DatabaseManager.getPsychRecords()
+    val ultimo = records.lastOption
+    val alertaMotivacion = DatabaseManager.getAlertaMotivacionBaja()
+    val analisisIA = DatabaseManager.getPsychAnalysisCached()
+
+    val motivacionActual = ultimo.map(_("motivacion").asInstanceOf[Int]).getOrElse(0)
+
+    val radarLabelsJs = psychDimensiones.map(d => s""""${d._2}"""").mkString("[", ",", "]")
+    val radarDataJs = ultimo match {
+      case Some(r) => psychDimensiones.map { case (key, _, _) => r(key).asInstanceOf[Int].toString }.mkString("[", ",", "]")
+      case None => psychDimensiones.map(_ => "0").mkString("[", ",", "]")
+    }
+
+    val fechasJs = records.map(r => s""""${r("fecha").asInstanceOf[String]}"""").mkString("[", ",", "]")
+    val evolucionDatasetsJs = psychDimensiones.zipWithIndex.map { case ((key, label, _), idx) =>
+      val colores = Seq("#d4af37", "#dc3545", "#0dcaf0", "#ffc107", "#20c997", "#8b5cf6", "#fd7e14")
+      val color = colores(idx % colores.size)
+      val dataJs = records.map(r => r(key).asInstanceOf[Int].toString).mkString("[", ",", "]")
+      s"""{ label: '$label', data: $dataJs, borderColor: '$color', tension: 0.3, spanGaps: true }"""
+    }.mkString(",")
+
+    val content = basePage("psych",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "🧠 Registro Psicológico"),
+
+          div(cls := "card bg-dark border-warning shadow mb-4",
+            div(cls := "card-body text-center py-4",
+              div(cls := "display-4 fw-bold text-warning", motivacionActual.toString),
+              div(cls := "text-white fw-bold small mt-1", "MOTIVACIÓN INTRÍNSECA"),
+              div(cls := "xx-small text-muted mt-1", "El predictor más importante de llegada al profesionalismo")
+            )
+          ),
+
+          if (alertaMotivacion)
+            div(cls := "alert alert-warning small mb-4",
+              "⚠️ La motivación de Héctor lleva dos registros consecutivos por debajo de 3. Considera hablar con él sin presión sobre si está disfrutando del fútbol — sin que sienta que debe responder lo que esperas oír.")
+          else span(),
+
+          if (records.isEmpty)
+            div(cls := "alert alert-secondary text-center mb-4", "Sin registros psicológicos todavía")
+          else div(
+            div(cls := "row g-3 mb-4",
+              div(cls := "col-md-6",
+                div(cls := "card bg-dark border-secondary shadow h-100",
+                  div(cls := "card-header text-white fw-bold small", "PERFIL ACTUAL (último registro)"),
+                  div(cls := "card-body", div(style := "height:260px;", canvas(id := "chartRadar")))
+                )
+              ),
+              div(cls := "col-md-6",
+                div(cls := "card bg-dark border-secondary shadow h-100",
+                  div(cls := "card-header text-white fw-bold small", "EVOLUCIÓN HISTÓRICA"),
+                  div(cls := "card-body", div(style := "height:260px;", canvas(id := "chartEvolucionPsico")))
+                )
+              )
+            ),
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
+              new Chart(document.getElementById('chartRadar'), {
+                type: 'radar',
+                data: { labels: $radarLabelsJs, datasets: [{ label: 'Último registro', data: $radarDataJs, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.2)', pointBackgroundColor: '#d4af37' }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: { r: { min: 0, max: 5, ticks: { color: '#aaa', backdropColor: 'transparent' }, grid: { color: 'rgba(255,255,255,0.1)' }, pointLabels: { color: '#ccc', font: { size: 9 } } } }
+                }
+              });
+              new Chart(document.getElementById('chartEvolucionPsico'), {
+                type: 'line',
+                data: { labels: $fechasJs, datasets: [$evolucionDatasetsJs] },
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc', font: { size: 8 } } } },
+                  scales: { x: { ticks: { color: '#aaa', font: { size: 8 } } }, y: { min: 0, max: 5, ticks: { color: '#aaa' } } }
+                }
+              });
+            """))
+          ),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "➕ Nuevo registro trimestral"),
+            form(action := "/psych/save", method := "post",
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                input(tpe := "date", name := "fecha", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                  value := java.time.LocalDate.now().toString, required := true)
+              ),
+              frag(psychDimensiones.map { case (key, nombreDim, guia) =>
+                div(cls := "mb-3",
+                  div(cls := "d-flex justify-content-between",
+                    label(cls := "small fw-bold text-white", nombreDim),
+                    span(cls := "xx-small text-muted", "1 - 5")
+                  ),
+                  div(cls := "xx-small text-muted fst-italic mb-1", guia),
+                  input(tpe := "range", name := key, cls := "form-range", min := "1", max := "5", value := "3")
+                )
+              }: _*),
+              div(cls := "mb-3",
+                label(cls := "xx-small text-muted fw-bold", "Notas"),
+                textarea(name := "notas", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "2")()
+              ),
+              button(tpe := "submit", cls := "btn btn-primary w-100 fw-bold", "Guardar registro")
+            )
+          ),
+
+          div(cls := "card bg-dark border-warning p-3 mb-4",
+            div(cls := "fw-bold text-warning small text-uppercase mb-2", "🧠 Análisis IA"),
+            analisisIA match {
+              case Some(texto) => div(cls := "text-light small mb-3", style := "white-space:pre-wrap;", texto)
+              case None => div(cls := "text-muted small mb-3", "Sin análisis generado todavía")
+            },
+            form(action := "/psych/analizar", method := "post",
+              button(tpe := "submit", cls := "btn btn-outline-warning w-100 btn-sm fw-bold", "🧠 Análisis IA")
+            )
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/psych/save")
+  def savePsychRecordAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    def getI(k: String): Int = p.getOrElse(k, "3").toIntOption.getOrElse(3)
+    DatabaseManager.savePsychRecord(
+      p.getOrElse("fecha", java.time.LocalDate.now().toString),
+      getI("motivacion"), getI("presionPercibida"), getI("relacionErrores"), getI("miedoFracaso"),
+      getI("disfrute"), getI("relacionEntrenador"), getI("relacionEquipo"), p.getOrElse("notas", "")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/psych"))
+  }
+
+  @cask.post("/psych/analizar")
+  def analizarPsychAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generatePsychAnalysis()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/psych"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE B4 — IDP: PAGINA Y ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/idp")
+  def idpPage(request: cask.Request, processing: String = "") = withAuth(request) {
+    DatabaseManager.getActiveIdpTemporada() match {
+      case None =>
+        val anioActual = java.time.LocalDate.now().getYear
+        val anioSiguiente = anioActual + 1
+        val temporadaLabel = s"$anioActual-$anioSiguiente"
+        val fechaInicioDefault = s"$anioActual-09-01"
+        val fechaFinDefault = s"$anioSiguiente-06-30"
+        val isProcessing = processing == "1"
+
+        val bodyBlock: Modifier = if (isProcessing)
+          div(cls := "alert alert-info text-center",
+            "⏳ Generando IDP con Gemini... esta página se actualizará sola.",
+            script(raw("""
+              var idpPoll = setInterval(function() {
+                fetch('/idp/status').then(function(r){return r.json();}).then(function(j){
+                  if (j.ready) { clearInterval(idpPoll); window.location.href = '/idp'; }
+                }).catch(function(){});
+              }, 5000);
+            """))
+          )
+        else
+          form(action := "/idp/generar", method := "post",
+            input(tpe := "hidden", name := "temporada", value := temporadaLabel),
+            input(tpe := "hidden", name := "fechaInicio", value := fechaInicioDefault),
+            input(tpe := "hidden", name := "fechaFin", value := fechaFinDefault),
+            button(tpe := "submit", cls := "btn btn-warning fw-bold w-100", s"🗺️ Generar IDP de la temporada $temporadaLabel")
+          )
+
+        val content = basePage("idp",
+          div(cls := "row justify-content-center",
+            div(cls := "col-md-7 col-12",
+              div(cls := "d-flex justify-content-between align-items-center mb-3",
+                h4(cls := "text-white fw-black mb-0", "🗺️ Plan de Desarrollo Individual")
+              ),
+              div(cls := "card bg-dark border-secondary shadow",
+                div(cls := "card-body p-4 text-center",
+                  p(cls := "text-muted small", "El IDP define 4 objetivos SMART (técnico, físico, mental y de visibilidad) para la temporada, generados con IA a partir del estado actual de Héctor, y hace seguimiento mensual del progreso."),
+                  bodyBlock
+                )
+              )
+            )
+          )
+        )
+        renderHtml(content)
+
+      case Some(temp) =>
+        val temporadaId = temp("id").asInstanceOf[Int]
+        DatabaseManager.actualizarProgresoIDP(temporadaId)
+        val objetivos = DatabaseManager.getIdpObjetivos(temporadaId)
+        val revisiones = DatabaseManager.getIdpRevisiones(temporadaId)
+        val pctGlobal = if (objetivos.nonEmpty) objetivos.map(_("progresoPct").asInstanceOf[Int]).sum / objetivos.size else 0
+
+        val objetivoCards = objetivos.map { o =>
+          val dim = o("dimension").asInstanceOf[String]
+          val (dimIcon, dimColor) = dim match {
+            case "TECNICO"     => ("🧤", "#20c997")
+            case "FISICO"      => ("💪", "#0dcaf0")
+            case "MENTAL"      => ("🧠", "#fd7e14")
+            case "VISIBILIDAD" => ("🗺️", "#8b5cf6")
+            case _             => ("🎯", "#6c757d")
+          }
+          val progreso: Int = o("progresoPct").asInstanceOf[Int]
+          val progresoColor = if (progreso > 66) "#20c997" else if (progreso >= 33) "#ffc107" else "#dc3545"
+          val estado = o("estado").asInstanceOf[String]
+          val estadoBadgeColor = estado match {
+            case "CONSEGUIDO" => "success"
+            case "AJUSTADO"   => "warning"
+            case _            => "secondary"
+          }
+          val objId = o("id").asInstanceOf[Int]
+          val objetivoTxt: String = o("objetivo").asInstanceOf[String]
+          val metricaTxt: String = o("metrica").asInstanceOf[String]
+          val valorActualTxt: String = o("valorActual").asInstanceOf[String]
+          val valorObjetivoTxt: String = o("valorObjetivo").asInstanceOf[String]
+          val fechaLimiteTxt: String = o("fechaLimite").asInstanceOf[String]
+          val notasTxt: String = o("notas").asInstanceOf[String]
+
+          div(cls := "col-md-6 col-12 mb-3",
+            div(cls := "card bg-dark shadow h-100", style := s"border: 1px solid $dimColor;",
+              div(cls := "card-header d-flex justify-content-between align-items-center", style := s"border-bottom: 1px solid $dimColor;",
+                span(style := s"color:$dimColor; font-weight:bold;", s"$dimIcon $dim"),
+                span(cls := s"badge bg-$estadoBadgeColor", estado)
+              ),
+              div(cls := "card-body p-3",
+                p(cls := "text-white small mb-2", objetivoTxt),
+                div(cls := "xx-small text-muted mb-1", metricaTxt),
+                div(cls := "d-flex justify-content-between xx-small text-muted mb-1",
+                  span(valorActualTxt), span("→"), span(valorObjetivoTxt)
+                ),
+                div(cls := "progress mb-2", style := "height:10px;",
+                  div(cls := "progress-bar", style := s"width:$progreso%; background:$progresoColor;")
+                ),
+                div(cls := "xx-small text-muted mb-2", s"Fecha límite: $fechaLimiteTxt"),
+                form(action := s"/idp/objetivo/$objId/notas", method := "post", cls := "mb-2",
+                  textarea(name := "notas", cls := "form-control form-control-sm bg-dark text-white border-secondary",
+                    rows := "2", placeholder := "Notas...", notasTxt),
+                  button(tpe := "submit", cls := "btn btn-sm btn-outline-secondary mt-1", "💾 Guardar notas")
+                ),
+                button(tpe := "button", cls := "btn btn-sm btn-outline-warning", onclick := s"toggleAjustar($objId)", "✏️ Ajustar"),
+                div(id := s"ajustarForm$objId", style := "display:none;", cls := "mt-2",
+                  form(action := s"/idp/objetivo/$objId/ajustar", method := "post",
+                    input(tpe := "text", name := "nuevoValor", cls := "form-control form-control-sm bg-dark text-white border-secondary mb-1",
+                      placeholder := "Nuevo valor objetivo", value := valorObjetivoTxt),
+                    input(tpe := "date", name := "nuevaFecha", cls := "form-control form-control-sm bg-dark text-white border-secondary mb-1",
+                      value := fechaLimiteTxt),
+                    button(tpe := "submit", cls := "btn btn-sm btn-warning fw-bold w-100", "Guardar ajuste")
+                  )
+                )
+              )
+            )
+          )
+        }
+
+        val revisionesList: Modifier = if (revisiones.isEmpty)
+          div(cls := "text-muted small", "Sin revisiones todavía.")
+        else
+          frag(revisiones.map { r =>
+            val tipoTxt: String = r("tipo").asInstanceOf[String]
+            val fechaTxt: String = r("fecha").asInstanceOf[String]
+            val resumenTxt: String = r("resumen").asInstanceOf[String]
+            val analisisTxt: String = r("analisisIa").asInstanceOf[String]
+            div(cls := "border-start border-secondary border-3 ps-2 mb-2",
+              div(cls := "fw-bold small text-white", s"$tipoTxt — $fechaTxt"),
+              div(cls := "xx-small text-light", resumenTxt),
+              if (analisisTxt.nonEmpty)
+                div(cls := "xx-small text-info mt-1", style := "white-space:pre-wrap;", "🧠 ", analisisTxt)
+              else
+                div(cls := "xx-small text-muted mt-1", "Analizando con IA...")
+            )
+          }: _*)
+
+        val temporadaTxt: String = temp("temporada").asInstanceOf[String]
+        val fechaInicioTxt: String = temp("fechaInicio").asInstanceOf[String]
+        val fechaFinTxt: String = temp("fechaFin").asInstanceOf[String]
+
+        val content = basePage("idp",
+          div(cls := "row justify-content-center",
+            div(cls := "col-md-9 col-12",
+              div(cls := "d-flex justify-content-between align-items-center mb-3",
+                h4(cls := "text-white fw-black mb-0", "🗺️ Plan de Desarrollo Individual"),
+                a(href := "/idp/export-pdf", target := "_blank", cls := "btn btn-outline-warning btn-sm fw-bold", "📄 Exportar PDF")
+              ),
+              div(cls := "card bg-dark border-warning shadow mb-3",
+                div(cls := "card-body p-3 d-flex justify-content-between align-items-center flex-wrap gap-2",
+                  div(
+                    h5(cls := "text-white mb-0", temporadaTxt),
+                    div(cls := "xx-small text-muted", s"$fechaInicioTxt → $fechaFinTxt")
+                  ),
+                  div(cls := "text-center",
+                    div(cls := "display-6 fw-bold text-warning", s"$pctGlobal%"),
+                    div(cls := "xx-small text-muted", "PROGRESO GLOBAL")
+                  )
+                )
+              ),
+              div(cls := "row", objetivoCards),
+              div(cls := "card bg-dark border-secondary shadow mt-3",
+                div(cls := "card-header text-white fw-bold small", "📅 REVISIONES"),
+                div(cls := "card-body p-3", revisionesList)
+              ),
+              div(cls := "card bg-dark border-secondary shadow mt-3",
+                div(cls := "card-header text-white fw-bold small", "➕ Revisión mensual"),
+                div(cls := "card-body p-3",
+                  form(action := "/idp/revision/save", method := "post",
+                    div(cls := "mb-2",
+                      label(cls := "xx-small text-muted fw-bold", "RESUMEN DEL MES"),
+                      textarea(name := "resumen", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "3")
+                    ),
+                    div(cls := "mb-2",
+                      label(cls := "xx-small text-muted fw-bold", "AJUSTES NECESARIOS"),
+                      textarea(name := "ajustes", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "2")
+                    ),
+                    button(tpe := "submit", cls := "btn btn-info fw-bold w-100", "Guardar revisión")
+                  )
+                )
+              )
+            )
+          ),
+          script(raw("""
+            function toggleAjustar(id) {
+              var el = document.getElementById('ajustarForm' + id);
+              el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'block' : 'none';
+            }
+          """))
+        )
+        renderHtml(content)
+    }
+  }
+
+  @cask.post("/idp/generar")
+  def idpGenerarAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val temporada = p.getOrElse("temporada", "")
+    val fechaInicio = p.getOrElse("fechaInicio", "")
+    val fechaFin = p.getOrElse("fechaFin", "")
+    new Thread(new Runnable {
+      def run(): Unit = {
+        try { DatabaseManager.generarIDP(temporada, fechaInicio, fechaFin) }
+        catch { case _: Exception => () }
+      }
+    }).start()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/idp?processing=1"))
+  }
+
+  // Lectura desde BD unicamente — nunca llama a Gemini
+  @cask.get("/idp/status")
+  def idpStatusAction() = {
+    val ready = DatabaseManager.getActiveIdpTemporada().isDefined
+    val json = ujson.Obj("ready" -> ready)
+    cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
+  }
+
+  @cask.post("/idp/objetivo/:id/notas")
+  def idpObjetivoNotasAction(request: cask.Request, id: Int) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.updateIdpObjetivoNotas(id, p.getOrElse("notas", ""))
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/idp"))
+  }
+
+  @cask.post("/idp/objetivo/:id/ajustar")
+  def idpObjetivoAjustarAction(request: cask.Request, id: Int) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.ajustarIdpObjetivo(id, p.getOrElse("nuevoValor", ""), p.getOrElse("nuevaFecha", ""))
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/idp"))
+  }
+
+  @cask.post("/idp/revision/save")
+  def idpRevisionSaveAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.getActiveIdpTemporada().foreach { temp =>
+      val temporadaId = temp("id").asInstanceOf[Int]
+      val revisionId = DatabaseManager.saveIdpRevision(temporadaId, "MENSUAL", p.getOrElse("resumen", ""), p.getOrElse("ajustes", ""))
+      if (revisionId > 0) {
+        new Thread(new Runnable {
+          def run(): Unit = {
+            try { DatabaseManager.generateIdpRevisionAnalysis(revisionId) }
+            catch { case _: Exception => () }
+          }
+        }).start()
+      }
+    }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/idp"))
+  }
+
+  @cask.get("/idp/export-pdf")
+  def idpExportPdfAction(request: cask.Request) = withAuth(request) {
+    val card = DatabaseManager.getLatestCardData()
+    val edad = DatabaseManager.calcularEdadExacta(card.fechaNacimiento)
+    DatabaseManager.getActiveIdpTemporada() match {
+      case None =>
+        val htmlStr = "<html><body style='font-family:sans-serif;text-align:center;padding-top:60px;'><h2>Sin temporada IDP activa</h2><a href='/idp'>Volver</a></body></html>"
+        cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+      case Some(temp) =>
+        val temporadaId = temp("id").asInstanceOf[Int]
+        val objetivos = DatabaseManager.getIdpObjetivos(temporadaId)
+        val revisiones = DatabaseManager.getIdpRevisiones(temporadaId)
+
+        val objetivosRows = objetivos.map { o =>
+          s"""<tr><td>${DatabaseManager.escHtml(o("dimension").asInstanceOf[String])}</td>
+            <td>${DatabaseManager.escHtml(o("objetivo").asInstanceOf[String])}</td>
+            <td>${DatabaseManager.escHtml(o("valorActual").asInstanceOf[String])} &rarr; ${DatabaseManager.escHtml(o("valorObjetivo").asInstanceOf[String])}</td>
+            <td style="text-align:center;">${o("progresoPct")}%</td>
+            <td>${DatabaseManager.escHtml(o("estado").asInstanceOf[String])}</td></tr>"""
+        }.mkString("")
+
+        val revisionesHtml = if (revisiones.isEmpty) "<p>Sin revisiones registradas.</p>" else
+          revisiones.map { r =>
+            val analisisTxt = r("analisisIa").asInstanceOf[String]
+            val analisisHtml = if (analisisTxt.nonEmpty) s"""<p class="ia">${DatabaseManager.escHtml(analisisTxt)}</p>""" else ""
+            s"""<div class="rev"><b>${DatabaseManager.escHtml(r("tipo").asInstanceOf[String])} — ${r("fecha").asInstanceOf[String]}</b>
+              <p>${DatabaseManager.escHtml(r("resumen").asInstanceOf[String])}</p>
+              $analisisHtml
+            </div>"""
+          }.mkString("")
+
+        val htmlStr = s"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>IDP — ${DatabaseManager.escHtml(card.nombre)}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap');
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Oswald',sans-serif; color:#1a1a1a; background:#fff; padding:20px; }
+  .no-print { text-align:center; margin-bottom:24px; }
+  .print-btn { background:#d4af37; color:#000; border:none; padding:12px 32px; font-size:16px; font-weight:700; border-radius:6px; cursor:pointer; letter-spacing:1px; }
+  h1 { font-size:24px; border-bottom:3px solid #d4af37; padding-bottom:10px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:20px; }
+  th,td { border:1px solid #e0e0e0; padding:7px 10px; }
+  thead tr { background:#1a1a1a; color:#fff; }
+  .rev { border-left:3px solid #d4af37; padding-left:10px; margin-bottom:12px; font-size:12px; }
+  .ia { color:#2980b9; font-style:italic; }
+  .footer { margin-top:24px; text-align:center; color:#aaa; font-size:11px; }
+  @media print { .no-print { display:none; } body { padding:10px; } }
+</style>
+</head>
+<body>
+<div class="no-print"><button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
+<h1>Plan de Desarrollo Individual — ${DatabaseManager.escHtml(card.nombre)}</h1>
+<p>$edad años · ${DatabaseManager.escHtml(card.clubNombre)} · Temporada ${DatabaseManager.escHtml(temp("temporada").asInstanceOf[String])}</p>
+<h2 style="font-size:16px;margin:20px 0 10px;">Objetivos</h2>
+<table>
+<thead><tr><th>Dimensión</th><th>Objetivo</th><th>Valor</th><th>Progreso</th><th>Estado</th></tr></thead>
+<tbody>$objetivosRows</tbody>
+</table>
+<h2 style="font-size:16px;margin:20px 0 10px;">Revisiones</h2>
+$revisionesHtml
+<div class="footer">Generado con Guardian Elite</div>
+</body>
+</html>"""
+        cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE B — INDICE DE COGNICION ANTICIPATORIA
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/cognitivo")
+  def cognitivoPage(request: cask.Request) = withAuth(request) {
+    val card = DatabaseManager.getLatestCardData()
+    val edad = DatabaseManager.calcularEdadExacta(card.fechaNacimiento)
+    val tests = DatabaseManager.getCognitivoTests()
+    val analisisCached = DatabaseManager.getCognitivoAnalysisCached()
+
+    def interpretacion(indice: Double): String =
+      if (indice < 40) "Desarrollo inicial"
+      else if (indice < 65) "En progreso"
+      else if (indice < 80) "Avanzado"
+      else "Élite para su edad"
+
+    val ultimoTest = tests.lastOption
+
+    val cabeceraIndice: Modifier = ultimoTest match {
+      case Some(t) =>
+        val indice: Double = t("indice").asInstanceOf[Double]
+        div(cls := "text-center mb-3",
+          div(style := "font-size:48px; font-weight:900; color:#d4af37;", f"$indice%.0f"),
+          div(cls := "text-muted small fw-bold text-uppercase", interpretacion(indice))
+        )
+      case None =>
+        div(cls := "text-center mb-3 text-muted small", "Sin tests cognitivos registrados todavía.")
+    }
+
+    val alertaLectura: Modifier = {
+      val ultimos2 = tests.reverse.take(2)
+      val esBajaConsecutiva = ultimos2.size == 2 && ultimos2.forall { t =>
+        val normReaccion = t("reaccionAciertos").asInstanceOf[Int] * 10
+        val normLectura = t("lecturaSenales").asInstanceOf[Int] * 20
+        val normVelocidad = t("velocidadDecision").asInstanceOf[Int] * 20
+        val normPausa = t("pausaCognitiva").asInstanceOf[Int] * 20
+        val minVal = List(normReaccion, normLectura, normVelocidad, normPausa).min
+        normLectura == minVal
+      }
+      if (esBajaConsecutiva)
+        div(cls := "alert alert-warning small mb-3",
+          "⚠️ Héctor tiende a seguir el balón en lugar de leer la pierna del tirador — este es el rasgo más diferenciador de los porteros de élite. Pídele al entrenador de academia que trabaje específicamente la anticipación visual.")
+      else div()
+    }
+
+    val labelsJs = tests.map(t => s""""${t("fecha").asInstanceOf[String]}"""").mkString("[", ",", "]")
+    val indicesJs = tests.map(t => f"${t("indice").asInstanceOf[Double]}%.1f").mkString("[", ",", "]")
+
+    val radarJs = ultimoTest match {
+      case Some(t) =>
+        val normReaccion = t("reaccionAciertos").asInstanceOf[Int] * 10
+        val normLectura = t("lecturaSenales").asInstanceOf[Int] * 20
+        val normVelocidad = t("velocidadDecision").asInstanceOf[Int] * 20
+        val normPausa = t("pausaCognitiva").asInstanceOf[Int] * 20
+        s"[$normReaccion,$normLectura,$normVelocidad,$normPausa]"
+      case None => "[0,0,0,0]"
+    }
+
+    val historialRows: Modifier = if (tests.isEmpty) div(cls := "text-muted small text-center", "Sin registros.")
+    else frag(tests.reverse.map { t =>
+      val fechaTxt: String = t("fecha").asInstanceOf[String]
+      val indiceTxt: Double = t("indice").asInstanceOf[Double]
+      div(cls := "d-flex justify-content-between border-bottom border-secondary py-1 small",
+        span(fechaTxt), span(cls := "fw-bold text-warning", f"$indiceTxt%.0f")
+      )
+    }: _*)
+
+    val analisisSection: Modifier = analisisCached match {
+      case Some(a) => div(cls := "card bg-dark border-info shadow mt-3",
+        div(cls := "card-header text-info fw-bold small", "🧠 Análisis IA"),
+        div(cls := "card-body text-light small", style := "white-space:pre-wrap;", DatabaseManager.fixEncoding(a)))
+      case None => div()
+    }
+
+    val content = basePage("cognitivo",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h4(cls := "text-white fw-black mb-0", "🧠 Cognición Anticipatoria")
+          ),
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-body p-3",
+              p(cls := "text-muted small mb-0",
+                "La cognición anticipatoria es el factor más predictivo del techo profesional en porteros. Los porteros de élite toman decisiones en 240-260ms, los novatos en 290-310ms. Este test trimestral mide el desarrollo cognitivo específico de portero de Héctor.")
+            )
+          ),
+          div(cls := "card bg-dark border-warning shadow mb-3",
+            div(cls := "card-body p-3", cabeceraIndice, alertaLectura)
+          ),
+          div(cls := "row",
+            div(cls := "col-md-6 mb-3",
+              div(cls := "card bg-dark border-secondary shadow h-100",
+                div(cls := "card-header text-white fw-bold small text-center", "Evolución trimestral"),
+                div(cls := "card-body", tag("canvas")(id := "cognitivoLineChart", style := "max-height:220px;"))
+              )
+            ),
+            div(cls := "col-md-6 mb-3",
+              div(cls := "card bg-dark border-secondary shadow h-100",
+                div(cls := "card-header text-white fw-bold small text-center", "Perfil del último test"),
+                div(cls := "card-body", tag("canvas")(id := "cognitivoRadarChart", style := "max-height:220px;"))
+              )
+            )
+          ),
+          div(cls := "d-grid mb-3",
+            form(action := "/cognitivo/analizar", method := "post",
+              button(tpe := "submit", cls := "btn btn-info fw-bold w-100", "🧠 Análisis IA")
+            )
+          ),
+          analisisSection,
+          div(cls := "card bg-dark border-secondary shadow mt-3",
+            div(cls := "card-header text-white fw-bold small", "📜 Historial"),
+            div(cls := "card-body p-3", historialRows)
+          ),
+          div(cls := "card bg-dark border-secondary shadow mt-3",
+            div(cls := "card-header text-white fw-bold small", "➕ Nuevo test trimestral"),
+            div(cls := "card-body p-3",
+              form(action := "/cognitivo/save", method := "post",
+                div(cls := "mb-3",
+                  label(cls := "small fw-bold text-white d-block", "Test 1 — Tiempo de reacción (10 intentos)"),
+                  p(cls := "xx-small text-muted", "El padre lanza balones variados desde fuera del ángulo de visión de Héctor. Héctor intenta reaccionar y tocar/parar el balón. Registra cuántos aciertos de 10 intentos."),
+                  input(tpe := "number", name := "reaccionAciertos", cls := "form-control bg-dark text-white border-secondary",
+                    attr("min") := "0", attr("max") := "10", value := "5", required := true)
+                ),
+                div(cls := "mb-3",
+                  label(cls := "small fw-bold text-white d-block", "Test 2 — Lectura de señales corporales (1-5)"),
+                  p(cls := "xx-small text-muted", "Observa en el próximo partido o entrenamiento: cuando alguien va a chutar, ¿Héctor mira la pierna que golpea o sigue el balón? Los porteros de élite fijan la vista en la pierna. 1=siempre sigue el balón, 3=a veces mira la pierna, 5=consistentemente mira la pierna antes del golpeo."),
+                  input(tpe := "range", name := "lecturaSenales", cls := "form-range", attr("min") := "1", attr("max") := "5", value := "3")
+                ),
+                div(cls := "mb-3",
+                  label(cls := "small fw-bold text-white d-block", "Test 3 — Velocidad de decisión en 1v1 (1-5)"),
+                  p(cls := "xx-small text-muted", "Cuando viene un delantero solo hacia la portería, ¿cuándo decide Héctor si sale o se queda? 1=siempre llega tarde, 3=a veces en el momento justo, 5=siempre anticipa correctamente."),
+                  input(tpe := "range", name := "velocidadDecision", cls := "form-range", attr("min") := "1", attr("max") := "5", value := "3")
+                ),
+                div(cls := "mb-3",
+                  label(cls := "small fw-bold text-white d-block", "Test 4 — Pausa cognitiva (1-5)"),
+                  p(cls := "xx-small text-muted", "Comparado con otros porteros de su edad, ¿parece que Héctor tiene más tiempo? 1=siempre va detrás del juego, 3=similar a los demás, 5=siempre parece tener más tiempo."),
+                  input(tpe := "range", name := "pausaCognitiva", cls := "form-range", attr("min") := "1", attr("max") := "5", value := "3")
+                ),
+                div(cls := "mb-3",
+                  label(cls := "small fw-bold text-muted", "Notas"),
+                  textarea(name := "notas", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "2")
+                ),
+                button(tpe := "submit", cls := "btn btn-warning fw-bold w-100", "Guardar test")
+              )
+            )
+          )
+        )
+      ),
+      script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+      script(raw(s"""
+        var ctxLine = document.getElementById('cognitivoLineChart');
+        if (ctxLine) {
+          new Chart(ctxLine, {
+            type: 'line',
+            data: { labels: $labelsJs, datasets: [{ label: 'Índice cognitivo', data: $indicesJs, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, fill:true, tension:0.3 }] },
+            options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:100 } } }
+          });
+        }
+        var ctxRadar = document.getElementById('cognitivoRadarChart');
+        if (ctxRadar) {
+          new Chart(ctxRadar, {
+            type: 'radar',
+            data: { labels: ['Reacción', 'Lectura señales', 'Decisión 1v1', 'Pausa cognitiva'],
+              datasets: [{ label: 'Último test', data: $radarJs, borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.2)' }] },
+            options: { responsive:true, scales:{ r:{ min:0, max:100, ticks:{ color:'#aaa', backdropColor:'transparent' }, grid:{ color:'#444' }, pointLabels:{ color:'#eee', font:{size:10} } } }, plugins:{ legend:{ labels:{ color:'#fff' } } } }
+          });
+        }
+      """))
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/cognitivo/save")
+  def cognitivoSaveAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val reaccionAciertos = p.getOrElse("reaccionAciertos", "0").toIntOption.getOrElse(0)
+    val lecturaSenales = p.getOrElse("lecturaSenales", "3").toIntOption.getOrElse(3)
+    val velocidadDecision = p.getOrElse("velocidadDecision", "3").toIntOption.getOrElse(3)
+    val pausaCognitiva = p.getOrElse("pausaCognitiva", "3").toIntOption.getOrElse(3)
+    val notas = p.getOrElse("notas", "")
+    DatabaseManager.saveCognitivoTest(java.time.LocalDate.now().toString, reaccionAciertos, 10, lecturaSenales, velocidadDecision, pausaCognitiva, notas)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/cognitivo"))
+  }
+
+  @cask.post("/cognitivo/analizar")
+  def cognitivoAnalizarAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generateCognitivoAnalysis()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/cognitivo"))
   }
 
   initialize()

@@ -5,6 +5,79 @@ import SharedLayout._
 
 object HistoryController extends cask.Routes {
 
+  // Parseo manual de body application/x-www-form-urlencoded (mas fiable que @cask.postForm con fetch)
+  private def parseBody(request: cask.Request): Map[String, String] = {
+    val body = new String(request.data.readAllBytes(), "UTF-8")
+    body.split("&").filter(_.nonEmpty).map { p =>
+      val kv = p.split("=", 2)
+      java.net.URLDecoder.decode(kv(0), "UTF-8") -> (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+    }.toMap
+  }
+
+  // ── Parseo manual de multipart/form-data (subida binaria de video) ─────────
+  private val B_CR: Byte = '\r'.toByte
+  private val B_LF: Byte = '\n'.toByte
+  private val B_DASH: Byte = '-'.toByte
+
+  private def indexOfBytes(hay: Array[Byte], needle: Array[Byte], from: Int): Int = {
+    val n = needle.length
+    if (n == 0 || from < 0) return -1
+    var i = from
+    val limit = hay.length - n
+    while (i <= limit) {
+      var j = 0
+      while (j < n && hay(i + j) == needle(j)) j += 1
+      if (j == n) return i
+      i += 1
+    }
+    -1
+  }
+
+  private case class MultipartField(filename: Option[String], contentType: Option[String], data: Array[Byte])
+
+  private def parseMultipart(bodyBytes: Array[Byte], contentTypeHeader: String): Map[String, MultipartField] = {
+    val marker = "boundary="
+    val bIdx = if (contentTypeHeader == null) -1 else contentTypeHeader.indexOf(marker)
+    if (bIdx < 0) return Map.empty
+    var boundary = contentTypeHeader.substring(bIdx + marker.length).split(";").head.trim
+    if (boundary.startsWith("\"") && boundary.endsWith("\"")) boundary = boundary.substring(1, boundary.length - 1)
+    val delim = ("--" + boundary).getBytes("ISO-8859-1")
+    val headerEnd = Array(B_CR, B_LF, B_CR, B_LF)
+
+    var fields = Map[String, MultipartField]()
+    var searchFrom = 0
+    var continue = true
+    while (continue) {
+      val delimPos = indexOfBytes(bodyBytes, delim, searchFrom)
+      if (delimPos < 0) { continue = false } else {
+        var partStart = delimPos + delim.length
+        val isFinal = partStart + 1 < bodyBytes.length && bodyBytes(partStart) == B_DASH && bodyBytes(partStart + 1) == B_DASH
+        if (isFinal) { continue = false } else {
+          if (partStart + 1 < bodyBytes.length && bodyBytes(partStart) == B_CR && bodyBytes(partStart + 1) == B_LF) partStart += 2
+          val hEnd = indexOfBytes(bodyBytes, headerEnd, partStart)
+          if (hEnd < 0) { continue = false } else {
+            val headersStr = new String(bodyBytes, partStart, hEnd - partStart, "UTF-8")
+            val dataStart = hEnd + headerEnd.length
+            val nextDelimPos = indexOfBytes(bodyBytes, delim, dataStart)
+            if (nextDelimPos < 0) { continue = false } else {
+              var dataEnd = nextDelimPos
+              if (dataEnd >= dataStart + 2 && bodyBytes(dataEnd - 2) == B_CR && bodyBytes(dataEnd - 1) == B_LF) dataEnd -= 2
+              val nameOpt = """name="([^"]*)"""".r.findFirstMatchIn(headersStr).map(_.group(1))
+              val fileOpt = """filename="([^"]*)"""".r.findFirstMatchIn(headersStr).map(_.group(1))
+              val ctOpt = """(?i)Content-Type:\s*([^\r\n]+)""".r.findFirstMatchIn(headersStr).map(_.group(1).trim)
+              nameOpt.foreach { name =>
+                val data = java.util.Arrays.copyOfRange(bodyBytes, dataStart, math.max(dataStart, dataEnd))
+                fields = fields + (name -> MultipartField(fileOpt, ctOpt, data))
+              }
+              searchFrom = nextDelimPos
+            }
+          }
+        }
+      }
+    }
+    fields
+  }
+
   @cask.get("/scouting")
   def scoutingPage(request: cask.Request, query: String = "") = withAuth(request) {
 
@@ -112,11 +185,15 @@ object HistoryController extends cask.Routes {
   def historyPage(request: cask.Request) = withAuth(request) {
     val matches = DatabaseManager.getMatchesList()
 
+    // B1: Z-Score de rendimiento por contexto (solo activo con >=15 partidos totales)
+    val zScoresByMatchId: Map[Int, Double] = DatabaseManager.getZScoreRendimiento()
+      .map(z => z("matchId").asInstanceOf[Int] -> z("zScore").asInstanceOf[Double]).toMap
+
     // 1. Generamos las filas de la tabla
     val tableRows = if (matches.isEmpty) {
       Seq(tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")))
     } else {
-      matches.map(m => renderMatchRow(m))
+      matches.map(m => renderMatchRow(m, zScoresByMatchId.get(m.id)))
     }
 
     // 2. Definimos el contenido central (SIN llamar a basePage aqui)
@@ -386,7 +463,9 @@ object HistoryController extends cask.Routes {
     val injuries  = DatabaseManager.getInjuries()
     val activa    = injuries.find(_.activa)
     val historico = injuries.filter(!_.activa)
-    val totalDias = historico.map(_.diasBaja).sum
+    val totalDias = injuries.map(_.diasBaja).sum
+    val zonasRecurrentes = DatabaseManager.getZonasRecurrentes()
+    val analisisIA = DatabaseManager.getInjuryPatternAnalysisCached().getOrElse("")
 
     def gravedadBadge(g: String) = g match {
       case "GRAVE"   => span(cls:="badge bg-danger fw-bold", g)
@@ -403,6 +482,27 @@ object HistoryController extends cask.Routes {
       case _ => "🩹"
     }
 
+    val zonaMasAfectada = if (injuries.nonEmpty) injuries.groupBy(_.zona).maxBy(_._2.size)._1 else "—"
+    val tipoMasFrecuente = if (injuries.nonEmpty) injuries.groupBy(_.tipoClasificado).maxBy(_._2.size)._1 else "—"
+
+    // Timeline visual: bloques horizontales ordenados cronologicamente
+    val timelineOrdenado = injuries.sortBy(_.fechaInicio)
+    val timelineBlocks = if (timelineOrdenado.isEmpty) div(cls := "text-muted small text-center py-3", "Sin lesiones para mostrar en la línea de tiempo")
+    else div(cls := "d-flex flex-column gap-1",
+      frag(timelineOrdenado.map { inj =>
+        val color = DatabaseManager.injuryTipoColor(inj.tipoClasificado)
+        val zonaRec = zonasRecurrentes.contains(inj.zona.toLowerCase.trim)
+        div(cls := "d-flex align-items-center gap-2",
+          div(style := "width:90px; font-size:9px; color:#94a3b8; text-align:right; flex-shrink:0;", inj.fechaInicio),
+          div(style := s"flex:1; height:22px; background:$color; border-radius:4px; display:flex; align-items:center; padding:0 8px; overflow:hidden;",
+            span(style := "font-size:10px; font-weight:700; color:#111; white-space:nowrap;",
+              s"${inj.zona} — ${inj.tipoClasificado}${if (inj.diasBaja > 0) s" (${inj.diasBaja}d)" else ""}")
+          ),
+          if (zonaRec) span(cls := "badge bg-danger", "⚠️ Zona recurrente") else span()
+        )
+      }: _*)
+    )
+
     val content = basePage("history",
       div(cls:="row justify-content-center",
         div(cls:="col-md-10 col-12",
@@ -416,16 +516,34 @@ object HistoryController extends cask.Routes {
             Seq(
               ("Lesiones totales", injuries.size.toString, "secondary"),
               ("Dias de baja total", totalDias.toString, "danger"),
-              ("Estado actual", if(activa.isDefined) "LESIONADO" else "DISPONIBLE",
-                if(activa.isDefined) "danger" else "success")
+              ("Zona más afectada", zonaMasAfectada, "warning"),
+              ("Tipo más frecuente", tipoMasFrecuente, "info")
             ).map { case (lbl, v, c) =>
-              div(cls:="col-4",
+              div(cls:="col-3",
                 div(cls:=s"card bg-dark border-$c text-center py-3",
-                  div(cls:=s"text-$c fw-bold fs-4", v),
+                  div(cls:=s"text-$c fw-bold fs-5", v),
                   div(cls:="xx-small text-muted", lbl)
                 )
               )
             }
+          ),
+
+          // Linea de tiempo
+          div(cls := "card bg-dark border-secondary shadow mb-4",
+            div(cls := "card-header text-white fw-bold small", "📅 LÍNEA DE TIEMPO"),
+            div(cls := "card-body", timelineBlocks)
+          ),
+
+          // Analisis IA de patrones
+          div(cls := "card bg-dark border-warning shadow mb-4",
+            div(cls := "card-header text-warning fw-bold small", "🧠 DETECTOR DE PATRONES"),
+            div(cls := "card-body",
+              if (analisisIA.nonEmpty) div(cls := "text-light small mb-3", style := "white-space:pre-wrap;", analisisIA)
+              else div(cls := "text-muted small mb-3", "Sin análisis generado todavía"),
+              form(action := "/lesiones/patrones", method := "post",
+                button(tpe := "submit", cls := "btn btn-outline-warning w-100 btn-sm fw-bold", "🧠 Detectar patrones")
+              )
+            )
           ),
 
           // Alerta lesion activa
@@ -485,6 +603,36 @@ object HistoryController extends cask.Routes {
                       placeholder:="Que ocurrio...")
                   )
                 ),
+                div(cls:="row g-2 mb-2",
+                  div(cls:="col-4",
+                    label(cls:="xx-small text-muted fw-bold", "Tipo clasificado"),
+                    select(name:="tipoClasificado", cls:="form-select form-select-sm fw-bold",
+                      option(value:="MUSCULAR", "Muscular"),
+                      option(value:="OSEA", "Ósea"),
+                      option(value:="ARTICULAR", "Articular"),
+                      option(value:="SOBREUSO", "Sobreuso"),
+                      option(value:="APOFISITIS", "Apofisitis"),
+                      option(value:="CONTUSION", "Contusión"),
+                      option(value:="ENFERMEDAD", "Enfermedad"),
+                      option(value:="OTRO", "Otro")
+                    )
+                  ),
+                  div(cls:="col-4",
+                    label(cls:="xx-small text-muted fw-bold", "Lado"),
+                    select(name:="lado", cls:="form-select form-select-sm fw-bold",
+                      option(value:="NA", "N/A"), option(value:="IZQUIERDO", "Izquierdo"), option(value:="DERECHO", "Derecho")
+                    )
+                  ),
+                  div(cls:="col-4",
+                    label(cls:="xx-small text-muted fw-bold", "Partidos perdidos"),
+                    input(tpe:="number", name:="partidosPerdidos", cls:="form-control form-control-sm fw-bold", value:="0", min:="0")
+                  )
+                ),
+                div(cls:="mb-2",
+                  label(cls:="xx-small text-muted fw-bold", "Causa probable"),
+                  input(tpe:="text", name:="causaProbable", cls:="form-control form-control-sm fw-bold",
+                    placeholder:="Ej: sobrecarga tras carga alta, gesto brusco...")
+                ),
                 button(tpe:="submit", cls:="btn btn-danger w-100 btn-sm fw-bold mt-1", "Registrar")
               )
             )
@@ -521,16 +669,29 @@ object HistoryController extends cask.Routes {
     renderHtml(content)
   }
 
-  @cask.postForm("/lesiones/nueva")
-  def nuevaLesion(request: cask.Request, zona: String, tipo: String, gravedad: String, desc: String) = {
-    DatabaseManager.logInjury(zona, tipo, gravedad, desc)
+  @cask.post("/lesiones/nueva")
+  def nuevaLesion(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.logInjury(
+      p.getOrElse("zona", ""), p.getOrElse("tipo", "Otro"), p.getOrElse("gravedad", "LEVE"), p.getOrElse("desc", ""),
+      p.getOrElse("tipoClasificado", "OTRO"), p.getOrElse("lado", "NA"), p.getOrElse("causaProbable", ""),
+      p.getOrElse("partidosPerdidos", "0").toIntOption.getOrElse(0)
+    )
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location"->"/lesiones"))
   }
 
-  @cask.postForm("/lesiones/alta")
-  def darAlta(request: cask.Request, id: Int, fechaAlta: String, diasBaja: Int) = {
-    DatabaseManager.closeInjury(id, fechaAlta, diasBaja)
+  @cask.post("/lesiones/alta")
+  def darAlta(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val id = p.getOrElse("id", "0").toIntOption.getOrElse(0)
+    DatabaseManager.closeInjury(id, p.getOrElse("fechaAlta", ""), p.getOrElse("diasBaja", "0").toIntOption.getOrElse(0))
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location"->"/lesiones"))
+  }
+
+  @cask.post("/lesiones/patrones")
+  def detectarPatronesLesiones(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generateInjuryPatternAnalysis()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/lesiones"))
   }
 
   // ── FLASH-CARDS PRE-PARTIDO ───────────────────────────────────────────────
@@ -576,6 +737,25 @@ object HistoryController extends cask.Routes {
       }.headOption.getOrElse("")
     }
 
+    // B3: Predictor de nota pre-partido (regresion OLS, activo con >=30 partidos historicos)
+    val prediccionData = DatabaseManager.getRendimientoPrediccionAuto()
+    val prediccionWidget = if (prediccionData.getOrElse("activo", false).asInstanceOf[Boolean]) {
+      val prediccion = prediccionData("prediccion").asInstanceOf[Double]
+      val factorPositivo = prediccionData("factorPositivo").asInstanceOf[String]
+      val factorNegativo = prediccionData("factorNegativo").asInstanceOf[String]
+      div(cls := "card bg-dark border-info shadow mb-4",
+        div(cls := "card-header text-info fw-bold small", "📊 PREDICTOR DE RENDIMIENTO"),
+        div(cls := "card-body p-3 text-center",
+          div(cls := "display-6 fw-bold text-info", f"$prediccion%.1f ± 0.8"),
+          div(cls := "xx-small text-muted mb-2", "Nota esperada según su modelo histórico"),
+          div(cls := "d-flex justify-content-center gap-3 xx-small mt-2",
+            span(cls := "text-success", s"↑ $factorPositivo"),
+            span(cls := "text-danger", s"↓ $factorNegativo")
+          )
+        )
+      )
+    } else div()
+
     val content = basePage("match-center",
       div(cls:="row justify-content-center",
         div(cls:="col-md-10 col-12",
@@ -585,6 +765,8 @@ object HistoryController extends cask.Routes {
             h2(cls:="text-warning mb-0", "FLASH-CARDS PRE-PARTIDO"),
             a(href:="/match-center", cls:="btn btn-outline-secondary btn-sm fw-bold", "← Match Center")
           ),
+
+          prediccionWidget,
 
           // Selector de rival
           div(cls:="card bg-dark border-secondary shadow mb-4",
@@ -4717,6 +4899,145 @@ object HistoryController extends cask.Routes {
   }
 
   // ── MODULO 7: INFORME DE CAPTACION EXPORTABLE (PRINT / PDF) ─────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE A2 — SUBIDA Y ANALISIS DE VIDEO REAL CON GEMINI VISION
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.post("/video/analyze-real/:matchId")
+  def analyzeVideoRealAction(request: cask.Request, matchId: Int) = withAuth(request) {
+    val contentType = request.exchange.getRequestHeaders.getFirst("Content-Type")
+    val bodyBytes = request.data.readAllBytes()
+    val maxBytes = 1.8d * 1024 * 1024 * 1024 // 1.8GB
+
+    if (bodyBytes.length.toDouble > maxBytes) {
+      val json = ujson.Obj("status" -> "error",
+        "error" -> "El vídeo es demasiado grande. Sube solo el fragmento donde aparece Héctor (menos de 15 minutos) para reducir el tamaño.")
+      cask.Response(json.render().getBytes("UTF-8"), statusCode = 413, headers = Seq("Content-Type" -> "application/json"))
+    } else {
+      val fields = parseMultipart(bodyBytes, contentType)
+      val videoFieldOpt = fields.get("video").filter(_.data.nonEmpty)
+      videoFieldOpt match {
+        case None =>
+          val json = ujson.Obj("status" -> "error", "error" -> "No se ha recibido ningún vídeo.")
+          cask.Response(json.render().getBytes("UTF-8"), statusCode = 400, headers = Seq("Content-Type" -> "application/json"))
+        case Some(videoField) =>
+          val filenameLower = videoField.filename.getOrElse("video.mp4").toLowerCase
+          val mediaType =
+            if (filenameLower.endsWith(".webm")) "video/webm"
+            else if (filenameLower.endsWith(".mov")) "video/quicktime"
+            else "video/mp4"
+
+          val base64Data = java.util.Base64.getEncoder.encodeToString(videoField.data)
+
+          new Thread(new Runnable {
+            def run(): Unit = {
+              try { DatabaseManager.analyzeVideoReal(matchId, base64Data, mediaType) }
+              catch { case _: Exception => () }
+            }
+          }).start()
+
+          val json = ujson.Obj("status" -> "processing")
+          cask.Response(json.render().getBytes("UTF-8"), statusCode = 202, headers = Seq("Content-Type" -> "application/json"))
+      }
+    }
+  }
+
+  // Lectura desde BD unicamente — nunca llama a Gemini
+  @cask.get("/video/analyze-status/:matchId")
+  def videoAnalyzeStatusAction(matchId: Int) = {
+    val status = DatabaseManager.getVideoAnalysisStatus(matchId)
+    val json = status.get("status") match {
+      case Some("done") => ujson.Obj(
+        "status"   -> "done",
+        "analisis" -> status("analisis").asInstanceOf[String],
+        "fecha"    -> status("fecha").asInstanceOf[String]
+      )
+      case _ => ujson.Obj("status" -> "pending")
+    }
+    cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE A4 — HISTORIAL DE ANALISIS DE VIDEO
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/video-history")
+  def videoHistoryPage(request: cask.Request) = withAuth(request) {
+    val hist = DatabaseManager.getVideoAnalysisHistory()
+    val evolCached = DatabaseManager.getVideoEvolutionAnalysisCached()
+
+    def notaTecFmt(h: Map[String, Any]): String =
+      h("notaTecnica").asInstanceOf[Option[Double]].map(n => f"$n%.1f").getOrElse("—")
+
+    val rows = if (hist.isEmpty)
+      tr(td(attr("colspan") := "3", cls := "text-center text-muted", "Sin análisis de vídeo todavía."))
+    else
+      frag(hist.map { h =>
+        val notaTxt: String = notaTecFmt(h)
+        tr(
+          td(fixEncoding(h("rival").asInstanceOf[String])),
+          td(h("fecha").asInstanceOf[String]),
+          td(cls := "text-center", notaTxt)
+        )
+      }: _*)
+
+    val labelsJs = hist.map(h => s""""${h("fecha").asInstanceOf[String]}"""").mkString("[", ",", "]")
+    val notasJs = hist.map(h => h("notaTecnica").asInstanceOf[Option[Double]].getOrElse(0.0).toString).mkString("[", ",", "]")
+
+    val evolSection = evolCached match {
+      case Some(a) => div(cls := "card bg-dark border-info shadow mb-3",
+        div(cls := "card-header text-info fw-bold small", "🧠 Evolución técnica IA"),
+        div(cls := "card-body text-light small", style := "white-space:pre-wrap;", fixEncoding(a)))
+      case None => div()
+    }
+
+    val disabledAttr: Modifier = if (hist.size < 2) attr("disabled") := "disabled" else frag()
+
+    val content = basePage("video-history",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h4(cls := "text-white fw-black mb-0", "🎬 Historial de Vídeo IA"),
+            a(href := "/history", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Historial")
+          ),
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "Evolución de la nota técnica"),
+            div(cls := "card-body", tag("canvas")(id := "chartVideoEvol", style := "max-height:220px;"))
+          ),
+          div(cls := "d-grid mb-3",
+            form(action := "/video-history/evolucion", method := "post",
+              button(tpe := "submit", cls := "btn btn-info fw-bold w-100", disabledAttr, "🧠 Evolución técnica IA")
+            )
+          ),
+          evolSection,
+          div(cls := "card bg-dark border-secondary shadow",
+            div(cls := "card-header text-white fw-bold small", "Partidos analizados"),
+            table(cls := "table table-dark table-sm mb-0",
+              thead(tr(th("Rival"), th("Fecha"), th(cls := "text-center", "Nota técnica"))),
+              tbody(rows)
+            )
+          )
+        )
+      ),
+      script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+      script(raw(s"""
+        var ctxVE = document.getElementById('chartVideoEvol');
+        if (ctxVE) {
+          new Chart(ctxVE, {
+            type: 'line',
+            data: { labels: $labelsJs, datasets: [{ label: 'Nota técnica', data: $notasJs, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, fill:true, tension:0.3 }] },
+            options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:10 } } }
+          });
+        }
+      """))
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/video-history/evolucion")
+  def videoHistoryEvolucionAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generateVideoEvolutionAnalysis()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/video-history"))
+  }
+
   @cask.get("/scouting-report")
   def scoutingReportPage(request: cask.Request) = withAuth(request) {
     val card      = DatabaseManager.getLatestCardData()
@@ -4786,6 +5107,59 @@ object HistoryController extends cask.Routes {
     val skillsBoxes = skillsByCategoria.map { case (cat, pct) =>
       s"""<div class="attr-box"><div class="av" style="font-size:18px;color:#d4af37;">$pct%</div><div class="al">${DatabaseManager.escHtml(cat)}</div></div>"""
     }.mkString("")
+
+    // ── BLOQUE A5: ultimo analisis de video IA — solo lectura de BD ────────
+    val videoIaSectionHtml = matches.headOption.flatMap { ultimo =>
+      val status = DatabaseManager.getVideoAnalysisStatus(ultimo.id)
+      status.get("status") match {
+        case Some("done") =>
+          val secciones = DatabaseManager.parseVideoAnalysisSections(status("analisis").asInstanceOf[String])
+          val fuertes = secciones.getOrElse("PUNTOS FUERTES", "")
+          val notaTec = secciones.getOrElse("NOTA TÉCNICA GLOBAL", "")
+          Some(s"""
+<p class="section-title">🎬 ÚLTIMO ANÁLISIS TÉCNICO DE VÍDEO IA</p>
+<div class="narrative" style="font-size:12px;">
+  <b>vs ${DatabaseManager.escHtml(DatabaseManager.fixEncoding(ultimo.rival))} (${ultimo.fecha})</b><br/><br/>
+  <b>Puntos fuertes:</b> ${DatabaseManager.escHtml(fuertes)}<br/><br/>
+  <b>Nota técnica global:</b> ${DatabaseManager.escHtml(notaTec)}
+</div>""")
+        case _ => None
+      }
+    }.getOrElse("")
+
+    // ── BLOQUE B (cognicion): perfil cognitivo — solo lectura/calculo de BD ─
+    val cognitivoTests = DatabaseManager.getCognitivoTests()
+    val cognitivoSectionHtml = cognitivoTests.lastOption.map { t =>
+      val indiceActual: Double = t("indice").asInstanceOf[Double]
+      val evolRows = cognitivoTests.map { tt =>
+        s"""<tr><td>${tt("fecha").asInstanceOf[String]}</td><td style="text-align:center;">${f"${tt("indice").asInstanceOf[Double]}%.0f"}</td></tr>"""
+      }.mkString("")
+      s"""
+<p class="section-title">🧠 PERFIL COGNITIVO</p>
+<div class="stats-grid" style="grid-template-columns:repeat(1,1fr); margin-bottom:12px;">
+  <div class="stat-card"><div class="value">${f"$indiceActual%.0f"}</div><div class="label">Índice de cognición anticipatoria actual</div></div>
+</div>
+<table>
+  <thead><tr><th>Fecha</th><th>Índice</th></tr></thead>
+  <tbody>$evolRows</tbody>
+</table>"""
+    }.getOrElse("")
+
+    // ── BLOQUE B6: plan de desarrollo individual activo — solo lectura de BD ─
+    val idpSectionHtml = DatabaseManager.getActiveIdpTemporada().map { temp =>
+      val objetivos = DatabaseManager.getIdpObjetivos(temp("id").asInstanceOf[Int])
+      val objetivosRows = objetivos.map { o =>
+        s"""<tr><td>${DatabaseManager.escHtml(o("dimension").asInstanceOf[String])}</td>
+          <td>${DatabaseManager.escHtml(o("objetivo").asInstanceOf[String])}</td>
+          <td style="text-align:center;">${o("progresoPct")}%</td></tr>"""
+      }.mkString("")
+      s"""
+<p class="section-title">🗺️ PLAN DE DESARROLLO INDIVIDUAL — TEMPORADA ${DatabaseManager.escHtml(temp("temporada").asInstanceOf[String])}</p>
+<table>
+  <thead><tr><th>Dimensión</th><th>Objetivo</th><th>Progreso</th></tr></thead>
+  <tbody>$objetivosRows</tbody>
+</table>"""
+    }.getOrElse("")
 
     val presionRows = if (presionDist.isEmpty)
       "<tr><td colspan=\"2\">Sin datos suficientes de comportamiento bajo presión</td></tr>"
@@ -4913,6 +5287,9 @@ ${if (presionTotal > 0 && presionTotal < 5) "<div class=\"narrative\" style=\"fo
 
 <p class="section-title">CHECKLIST DE HABILIDADES POR CATEGORÍA</p>
 <div class="attrs-grid">$skillsBoxes</div>
+$videoIaSectionHtml
+$idpSectionHtml
+$cognitivoSectionHtml
 
 <p class="section-title">HISTORIAL DE PARTIDOS (ÚLTIMOS 30)</p>
 <table>

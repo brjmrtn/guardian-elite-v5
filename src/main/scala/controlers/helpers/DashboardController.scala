@@ -18,6 +18,58 @@ object DashboardController extends cask.Routes {
     val aiMessage = DatabaseManager.getDeepAnalysis()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
 
+    // ── BLOQUE A3: INDICE DE FORMA DIARIO (solo SQL/matematicas, sin Gemini) ──
+    val formaHoy = DatabaseManager.calcularFormaHoy()
+    val esDiaDePartido = DatabaseManager.hayPartidoProximo()
+    val formaWidget: Modifier = {
+      val indice = formaHoy("indiceForma").asInstanceOf[Double]
+      val semaforo = if (indice >= 7.5) "🟢" else if (indice >= 5.0) "🟡" else "🔴"
+      val frase =
+        if (indice >= 8.5) "Condiciones óptimas — partido ideal para rendir al máximo"
+        else if (indice >= 7.0) "Buenas condiciones — rendimiento sólido esperado"
+        else if (indice >= 5.0) "Condiciones normales — rendimiento estándar"
+        else if (indice >= 3.0) "Señales de fatiga — considera hablar con el entrenador"
+        else "Recuperación incompleta — vigilar durante el partido"
+
+      val componentes = Seq(
+        ("Sueño", formaHoy("suenoScore").asInstanceOf[Double], "#0dcaf0"),
+        ("Energía", formaHoy("energiaScore").asInstanceOf[Double], "#20c997"),
+        ("Ánimo", formaHoy("animoScore").asInstanceOf[Double], "#ffc107"),
+        ("Carga", formaHoy("acwrScore").asInstanceOf[Double], "#fd7e14"),
+        ("Descanso", formaHoy("descansoScore").asInstanceOf[Double], "#8b5cf6"),
+        ("PHV", formaHoy("phvScore").asInstanceOf[Double], "#dc3545")
+      )
+      val miniBars = componentes.map { case (label, valor, color) =>
+        div(cls := "col",
+          div(cls := "xx-small text-center text-muted", label),
+          div(cls := "progress", style := "height:6px;",
+            div(cls := "progress-bar", style := s"width:${valor * 10}%; background:$color;")
+          ),
+          div(cls := "xx-small text-center fw-bold", style := s"color:$color;", f"$valor%.1f")
+        )
+      }
+
+      if (esDiaDePartido)
+        div(style := "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:16px; margin-bottom:16px; border:1px solid #334155;",
+          div(cls := "d-flex justify-content-between align-items-center mb-2",
+            div(
+              div(style := "font-size:11px; color:#94a3b8; letter-spacing:1px;", "FORMA HOY"),
+              div(style := "font-size:32px; font-weight:900; color:#fff;", f"$semaforo $indice%.1f")
+            )
+          ),
+          div(cls := "small fw-bold mb-2", style := "color:#e2e8f0;", frase),
+          div(cls := "row row-cols-6 g-1", miniBars)
+        )
+      else
+        div(style := "background:#1e293b; border-radius:12px; padding:10px 14px; margin-bottom:16px; border:1px solid #334155;",
+          div(cls := "d-flex justify-content-between align-items-center",
+            span(style := "font-size:11px; color:#94a3b8;", "FORMA HOY"),
+            span(style := "font-size:18px; font-weight:900; color:#fff;", f"$semaforo $indice%.1f")
+          ),
+          div(cls := "row row-cols-6 g-1 mt-1", miniBars)
+        )
+    }
+
     // ── CONSEJOS IA CONSOLIDADOS (datos ya cargados arriba — sin llamadas extra) ─
     val eliteConsejos = scala.collection.mutable.ListBuffer[(String, String, String)]()
 
@@ -124,6 +176,13 @@ object DashboardController extends cask.Routes {
     val avgSeason = if (matches.nonEmpty) matches.map(_.nota).sum / matches.length else 0.0
     val trendDiff = avgLast5 - avgSeason
     val trendColor = if (trendDiff > 0) "text-success" else if (trendDiff < 0) "text-danger" else "text-muted"
+
+    // B2: Detector de tendencia LOESS (solo activo con >=20 partidos totales)
+    val loess = DatabaseManager.getTrendLOESS()
+    val loessActivo = loess.getOrElse("activo", false).asInstanceOf[Boolean]
+
+    // B4: Alertas estadisticas personalizadas
+    val alertasPersonales = try DatabaseManager.getAlertasEstadisticasPersonales() catch { case _: Exception => List.empty[String] }
 
     val radarData = s"""[${card.div}, ${card.han}, ${card.kic}, ${card.ref}, ${card.spd}, ${card.pos}]"""
     val rawMedia = (card.divRaw * 0.20) + (card.hanRaw * 0.20) + (card.kicRaw * 0.15) + (card.refRaw * 0.20) + (card.spdRaw * 0.05) + (card.posRaw * 0.20)
@@ -303,6 +362,40 @@ object DashboardController extends cask.Routes {
       )
     } else div()
 
+    // ── BLOQUE B5: ALERTAS DEL IDP (solo SQL, sin Gemini) ────────────────────
+    val idpAlertWidget: Modifier = DatabaseManager.getActiveIdpTemporada() match {
+      case Some(temp) =>
+        val temporadaId = temp("id").asInstanceOf[Int]
+        DatabaseManager.actualizarProgresoIDP(temporadaId)
+        val objetivos = DatabaseManager.getIdpObjetivos(temporadaId)
+        val fechaInicio = java.time.LocalDate.parse(temp("fechaInicio").asInstanceOf[String])
+        val diasTranscurridos = java.time.temporal.ChronoUnit.DAYS.between(fechaInicio, java.time.LocalDate.now())
+
+        val objetivoRetrasado = objetivos.find(o => o("progresoPct").asInstanceOf[Int] < 20 && diasTranscurridos > 60)
+        val todosAvanzados = objetivos.nonEmpty && objetivos.forall(_("progresoPct").asInstanceOf[Int] >= 80)
+
+        objetivoRetrasado match {
+          case Some(o) =>
+            val dim: String = o("dimension").asInstanceOf[String]
+            val fechaLimite: String = o("fechaLimite").asInstanceOf[String]
+            div(cls := "alert alert-warning border-warning shadow p-3 mb-3",
+              div(cls := "d-flex align-items-center",
+                span(style := "font-size: 20px; margin-right: 10px;", "⚠️"),
+                div(cls := "small fw-bold", s"IDP: El objetivo $dim está por debajo del ritmo necesario para conseguirse antes del $fechaLimite.")
+              )
+            )
+          case None if todosAvanzados =>
+            div(cls := "alert alert-success border-success shadow p-3 mb-3",
+              div(cls := "d-flex align-items-center",
+                span(style := "font-size: 20px; margin-right: 10px;", "🌟"),
+                div(cls := "small fw-bold", "IDP: Héctor está en camino de conseguir todos sus objetivos de temporada.")
+              )
+            )
+          case _ => div()
+        }
+      case None => div()
+    }
+
 
     // --- RENDERIZADO FINAL ---
 
@@ -337,6 +430,9 @@ object DashboardController extends cask.Routes {
 
     val content = basePage("home",
       div(
+        // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
+        formaWidget,
+
         // ── HERO HEADER (dark) ─────────────────────────────────────────────
         div(style := "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:20px; margin-bottom:20px;",
           div(cls := "d-flex justify-content-between align-items-start flex-wrap gap-3",
@@ -394,12 +490,29 @@ object DashboardController extends cask.Routes {
                     )
                   )
                 }: _*)
-              )
+              ),
+              if (loessActivo) {
+                val tendencia = loess("tendencia").asInstanceOf[String]
+                val diferencia = loess("diferencia").asInstanceOf[Double]
+                val (flecha, color) = tendencia match {
+                  case "POSITIVA" => ("↑", "#20c997")
+                  case "NEGATIVA" => ("↓", "#ef4444")
+                  case _          => ("→", "#94a3b8")
+                }
+                div(style := "margin-top:6px; text-align:center;",
+                  span(
+                    attr("title") := "Tendencia basada en los últimos 10 partidos",
+                    style := s"font-size:10px; font-weight:800; color:$color; background:#1e293b; border:1px solid #334155; border-radius:6px; padding:3px 8px;",
+                    s"$flecha TENDENCIA $tendencia (${if (diferencia >= 0) "+" else ""}${f"$diferencia%.1f"})"
+                  )
+                )
+              } else span()
             )
           )
         ),
 
         contextWidget,
+        idpAlertWidget,
 
         // ── CONTENT AREA (light) ──────────────────────────────────────────
         div(cls := "row g-3",
@@ -429,6 +542,21 @@ object DashboardController extends cask.Routes {
                 )
               )
             ),
+
+            // B4: Alertas estadisticas personalizadas (umbrales relativos al patron historico de Hector)
+            if (alertasPersonales.nonEmpty)
+              div(cls := "card bg-white border-0 shadow-sm mb-3",
+                style := "border-radius:12px; overflow:hidden;",
+                div(style := "background:#0f172a; padding:10px 14px;",
+                  span(style := "font-size:12px; font-weight:800; color:#f87171;", "📈 ALERTAS ESTADÍSTICAS PERSONALES")
+                ),
+                div(style := "padding:8px;",
+                  frag(alertasPersonales.map { a =>
+                    div(style := "font-size:12px; color:#334155; padding:6px 4px; border-bottom:1px solid #f1f5f9;", a)
+                  }: _*)
+                )
+              )
+            else span(),
 
             // Auditor técnico
             techAuditorWidget

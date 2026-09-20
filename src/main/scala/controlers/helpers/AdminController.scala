@@ -5,6 +5,73 @@ import SharedLayout._
 
 object AdminController extends cask.Routes {
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE C3 — PANEL DE CONTROL DEL PERFIL PUBLICO
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def perfilPublicoPanel(): Modifier = {
+    val cfg = DatabaseManager.getPerfilPublicoConfig()
+    val activo = cfg("activo").asInstanceOf[Boolean]
+    val visitas = cfg("visitas").asInstanceOf[Int]
+    val ultimaVisita: String = cfg("ultimaVisita").asInstanceOf[String]
+
+    def toggle(fieldName: String, checked: Boolean, labelText: String) =
+      div(cls := "form-check form-switch mb-2",
+        input(cls := "form-check-input", tpe := "checkbox", name := fieldName, id := fieldName,
+          if (checked) attr("checked") := "checked" else frag()),
+        label(`for` := fieldName, cls := "form-check-label small text-white", labelText)
+      )
+
+    div(cls := "card bg-dark text-white border-info shadow p-4 mb-3",
+      h4(cls := "text-info mb-3", "🌍 PERFIL PÚBLICO"),
+      p(cls := "small text-muted", "Comparte este enlace y la contraseña solo con personas de confianza — ojeadores, entrenadores de academia, representantes. Ellos verán el desarrollo real de Héctor en tiempo real."),
+      form(action := "/settings/perfil_publico/save", method := "post",
+        div(cls := "form-check form-switch mb-3",
+          input(cls := "form-check-input", tpe := "checkbox", name := "activo", id := "ppActivo",
+            if (activo) attr("checked") := "checked" else frag()),
+          label(`for` := "ppActivo", cls := "form-check-label fw-bold text-warning", "Activar perfil público")
+        ),
+        div(cls := "mb-3",
+          label(cls := "form-label small text-muted fw-bold", "Contraseña de lectura"),
+          input(tpe := "text", name := "password", cls := "form-control fw-bold",
+            placeholder := "Dejar en blanco para no cambiarla")
+        ),
+        div(cls := "border-top border-secondary pt-3 mb-3",
+          h6(cls := "text-muted small text-uppercase mb-2", "Secciones visibles"),
+          toggle("mostrarCarta", cfg("mostrarCarta").asInstanceOf[Boolean], "Carta FUT"),
+          toggle("mostrarProgresion", cfg("mostrarProgresion").asInstanceOf[Boolean], "Progresión de rating"),
+          toggle("mostrarVideoIa", cfg("mostrarVideoIa").asInstanceOf[Boolean], "Últimos análisis de vídeo IA"),
+          toggle("mostrarIdp", cfg("mostrarIdp").asInstanceOf[Boolean], "Plan de Desarrollo Individual"),
+          toggle("mostrarInforme", cfg("mostrarInforme").asInstanceOf[Boolean], "Informe de captación"),
+          toggle("mostrarCognitivo", cfg("mostrarCognitivo").asInstanceOf[Boolean], "Índice cognitivo"),
+          toggle("mostrarMedico", cfg("mostrarMedico").asInstanceOf[Boolean], "Datos médicos (no recomendado)")
+        ),
+        div(cls := "d-grid mb-3", button(tpe := "submit", cls := "btn btn-info fw-bold", "Guardar configuración"))
+      ),
+      div(cls := "row text-center border-top border-secondary pt-3",
+        div(cls := "col-6",
+          div(cls := "fw-bold text-warning", visitas.toString), div(cls := "xx-small text-muted", "Visitas totales")),
+        div(cls := "col-6",
+          div(cls := "fw-bold text-white small", if (ultimaVisita.nonEmpty) ultimaVisita.take(16) else "—"),
+          div(cls := "xx-small text-muted", "Última visita"))
+      ),
+      div(cls := "d-grid mt-3",
+        button(tpe := "button", id := "btnCopyLink", cls := "btn btn-outline-warning fw-bold",
+          onclick := "copyPublicLink()", "📋 Copiar enlace")
+      ),
+      script(raw("""
+        function copyPublicLink() {
+          var link = window.location.origin + '/hector';
+          navigator.clipboard.writeText(link).then(function() {
+            var btn = document.getElementById('btnCopyLink');
+            var original = btn.textContent;
+            btn.textContent = '✅ Enlace copiado';
+            setTimeout(function() { btn.textContent = original; }, 2000);
+          }).catch(function() { alert(link); });
+        }
+      """))
+    )
+  }
+
   @cask.get("/settings") def settingsPage() = {
     val card = DatabaseManager.getLatestCardData()
     val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Configuracion General"),
@@ -36,9 +103,35 @@ object AdminController extends cask.Routes {
       script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-flex gap-2 mt-2",
       a(href:="/videoteca", cls:="btn btn-warning fw-bold flex-grow-1", "🎬 VIDEOTECA"),
       a(href:="/admin", cls:="btn btn-outline-danger fw-bold", "⚙️ ADMIN")
-    )));
+    ), perfilPublicoPanel()));
     renderHtml(basePage("settings", content))
   }
+
+  private def parseBody(request: cask.Request): Map[String, String] = {
+    val body = new String(request.data.readAllBytes(), "UTF-8")
+    body.split("&").filter(_.nonEmpty).map { p =>
+      val kv = p.split("=", 2)
+      java.net.URLDecoder.decode(kv(0), "UTF-8") -> (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+    }.toMap
+  }
+
+  @cask.post("/settings/perfil_publico/save")
+  def savePerfilPublico(request: cask.Request) = {
+    val p = parseBody(request)
+    DatabaseManager.updatePerfilPublicoConfig(
+      activo = p.contains("activo"),
+      password = p.getOrElse("password", ""),
+      mostrarCarta = p.contains("mostrarCarta"),
+      mostrarProgresion = p.contains("mostrarProgresion"),
+      mostrarVideoIa = p.contains("mostrarVideoIa"),
+      mostrarIdp = p.contains("mostrarIdp"),
+      mostrarInforme = p.contains("mostrarInforme"),
+      mostrarCognitivo = p.contains("mostrarCognitivo"),
+      mostrarMedico = p.contains("mostrarMedico")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
+  }
+
   @cask.postForm("/settings/save_base64")
   def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String,
                          fechaNac: String, rffmUrl: String, rffmName: String,

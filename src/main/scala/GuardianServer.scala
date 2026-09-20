@@ -34,6 +34,7 @@ object GuardianServer extends cask.Main {
     HistoryController,
     CareerController,
     AdminController,
-    AmateurController
+    AmateurController,
+    PublicController
   )
 }

@@ -262,6 +262,19 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
+                // ── NUTRICION PRE-PARTIDO ─────────────────────────────────
+                div(cls := "mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
+                  label(cls := "form-label text-success small fw-bold w-100 text-center", "🍽️ COMIDA LAS 3H ANTES DEL PARTIDO (opcional)"),
+                  select(name := "nutricionPrepartido", cls := "form-select form-select-sm bg-dark text-white fw-bold",
+                    option(value := "", "— Sin especificar —"),
+                    option(value := "completa", "Comida completa (pasta, arroz, proteína)"),
+                    option(value := "ligera", "Comida ligera (bocadillo, fruta)"),
+                    option(value := "snack", "Solo snack (galletas, barrita)"),
+                    option(value := "sin_comer", "Sin comer o muy poco"),
+                    option(value := "no_adecuada", "Comida no adecuada (rápida, pesada)")
+                  )
+                ),
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
@@ -402,6 +415,7 @@ object MatchController extends cask.Routes {
       case _       => None
     }
     val comportamientoPresion = getStr("comportamientoPresion")
+    val nutricionPrepartido   = getStr("nutricionPrepartido")
 
     // Footbar (sensor GPS de rendimiento) — opcional
     val fbDistancia        = getDouble("fbDistancia")
@@ -434,9 +448,9 @@ object MatchController extends cask.Routes {
     DatabaseManager.updateStats(n)
 
     if (scheduleId > 0) {
-      DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo, fbDistancia, comportamientoPresion)
+      DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo, fbDistancia, comportamientoPresion, nutricionPrepartido)
     } else {
-      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt, comportamientoPresion)
+      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt, comportamientoPresion, nutricionPrepartido)
     }
 
     // Guardar contexto de goles encajados
@@ -584,6 +598,54 @@ object MatchController extends cask.Routes {
         (matchData.resultado.split("-")(0), matchData.resultado.split("-")(1))
       else ("0", "0")
       val tags = DatabaseManager.getVideoTags(matchId)
+
+      // --- BLOQUE A3: Analisis de video con IA (solo lectura de BD al cargar) ---
+      val videoStatus = DatabaseManager.getVideoAnalysisStatus(matchId)
+      val videoDoneOpt: Option[(String, String)] = videoStatus.get("status") match {
+        case Some("done") => Some((videoStatus("analisis").asInstanceOf[String], videoStatus("fecha").asInstanceOf[String]))
+        case _ => None
+      }
+      val videoResultBlock: Modifier = videoDoneOpt match {
+        case Some((analisis, fecha)) =>
+          val secciones = DatabaseManager.parseVideoAnalysisSections(analisis)
+          val txtFuertes: String = secciones.getOrElse("PUNTOS FUERTES", "")
+          val txtMejorar: String = secciones.getOrElse("PUNTOS A MEJORAR", "")
+          val txtEjercicio: String = secciones.getOrElse("EJERCICIO RECOMENDADO", "")
+          val txtNota: String = secciones.getOrElse("NOTA TÉCNICA GLOBAL", "")
+          val txtAcciones: String = secciones.getOrElse("ACCIONES DETECTADAS", "")
+          div(id := "videoResultBlock",
+            div(cls := "xx-small text-muted mb-2", s"Analizado el ${fecha.take(16)}"),
+            div(cls := "p-2 mb-2 rounded", style := "background:rgba(32,201,151,0.12); border-left:3px solid #20c997;",
+              strong(cls := "text-success d-block mb-1", "✅ PUNTOS FUERTES"),
+              div(cls := "small", style := "white-space:pre-wrap;", txtFuertes)),
+            div(cls := "p-2 mb-2 rounded", style := "background:rgba(220,53,69,0.12); border-left:3px solid #dc3545;",
+              strong(cls := "text-danger d-block mb-1", "⚠️ PUNTOS A MEJORAR"),
+              div(cls := "small", style := "white-space:pre-wrap;", txtMejorar)),
+            div(cls := "p-2 mb-2 rounded", style := "background:rgba(13,110,253,0.12); border-left:3px solid #0d6efd;",
+              strong(cls := "text-info d-block mb-1", "🏋️ EJERCICIO RECOMENDADO"),
+              div(cls := "small", style := "white-space:pre-wrap;", txtEjercicio)),
+            div(cls := "p-2 mb-2 rounded", style := "background:rgba(255,193,7,0.15); border-left:3px solid #ffc107;",
+              strong(cls := "text-warning d-block mb-1", "⭐ NOTA TÉCNICA GLOBAL"),
+              div(cls := "small", style := "white-space:pre-wrap;", txtNota)),
+            div(cls := "xx-small text-muted", "Acciones detectadas: ", txtAcciones),
+            button(tpe := "button", cls := "btn btn-sm btn-outline-secondary mt-2", onclick := "toggleVideoReanalyze()", "🔄 Re-analizar")
+          )
+        case None => div(id := "videoResultBlock")
+      }
+      val videoUploadForm = div(id := "videoUploadForm", style := (if (videoDoneOpt.isDefined) "display:none;" else "display:block;"),
+        p(cls := "xx-small text-muted", "Sube el vídeo del partido (o solo el fragmento donde aparece Héctor, recomendado) y Gemini analizará su actuación como portero."),
+        div(cls := "mb-2",
+          label(cls := "xx-small text-muted fw-bold d-block", "📹 Vídeo completo o ✂️ fragmento de Héctor"),
+          input(tpe := "file", id := "videoFileInput", accept := "video/mp4,video/webm,video/quicktime",
+            cls := "form-control form-control-sm bg-dark text-white")
+        ),
+        div(id := "videoUploadProgress", style := "display:none;",
+          div(cls := "progress mb-2", style := "height:8px;",
+            div(cls := "progress-bar progress-bar-striped progress-bar-animated bg-info", style := "width:100%")),
+          div(cls := "xx-small text-info", "⏳ Subiendo y analizando con Gemini... 30-60 segundos")
+        ),
+        div(id := "videoUploadError", cls := "xx-small text-danger mt-1")
+      )
 
       // --- Widget de tags de video ---
       val tagList = if (matchData.video.nonEmpty) {
@@ -774,11 +836,98 @@ object MatchController extends cask.Routes {
               div(cls := "card-footer bg-secondary bg-opacity-25",
                 h6(cls := "text-white small fw-bold", "CORTES DE VIDEO (TAGS)"),
                 tagList
+              ),
+
+              // --- Footer: Analisis de video con IA (BLOQUE A3) ---
+              div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary",
+                h6(cls := "text-white small fw-bold mb-2", "🎬 ANÁLISIS DE VÍDEO CON IA"),
+                videoResultBlock,
+                videoUploadForm
               )
             ),
 
             // Script grabacion de audio
-            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """))
+            script(raw(""" let mediaRecorder; let audioChunks = []; async function toggleRecording() { try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaRecorder = new MediaRecorder(stream); mediaRecorder.start(); document.getElementById('btnRecord').style.display='none'; document.getElementById('btnStop').style.display='inline-block'; document.getElementById('btnAnalyze').disabled = true; mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); }; mediaRecorder.onstop = () => { const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); const audioUrl = URL.createObjectURL(audioBlob); const audioEl = document.getElementById('audioPreview'); audioEl.src = audioUrl; audioEl.style.display = 'block'; const reader = new FileReader(); reader.readAsDataURL(audioBlob); reader.onloadend = () => { document.getElementById('hiddenAudioData').value = reader.result; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Grabacion"; }; audioChunks = []; }; } catch(err) { alert('Error microfono: ' + err); } } function stopRecording() { mediaRecorder.stop(); document.getElementById('btnRecord').style.display='inline-block'; document.getElementById('btnStop').style.display='none'; } function handleFileUpload(input) { if (input.files && input.files[0]) { const reader = new FileReader(); reader.onload = function (e) { document.getElementById('hiddenAudioData').value = e.target.result; document.getElementById('audioPreview').src = e.target.result; document.getElementById('audioPreview').style.display = 'block'; document.getElementById('btnAnalyze').disabled = false; document.getElementById('btnAnalyze').innerHTML = "🧠 Analizar Archivo"; }; reader.readAsDataURL(input.files[0]); } } function submitAudio() { document.getElementById('btnAnalyze').innerHTML = "⏳ Procesando... (puede tardar 10s)"; document.getElementById('btnAnalyze').disabled = true; document.getElementById('audioForm').submit(); } """)),
+
+            // Script analisis de video IA (BLOQUE A3)
+            script(raw(s"""
+              var VIDEO_MATCH_ID = $matchId;
+              var VIDEO_SECTIONS = ['ACCIONES DETECTADAS', 'PUNTOS FUERTES', 'PUNTOS A MEJORAR', 'EJERCICIO RECOMENDADO', 'NOTA TÉCNICA GLOBAL'];
+              function toggleVideoReanalyze() {
+                document.getElementById('videoUploadForm').style.display = 'block';
+              }
+              function escVideoTxt(s) {
+                var d = document.createElement('div'); d.innerText = s || ''; return d.innerHTML;
+              }
+              function parseVideoSections(texto) {
+                var upper = texto.toUpperCase();
+                var result = {};
+                for (var i = 0; i < VIDEO_SECTIONS.length; i++) {
+                  var sec = VIDEO_SECTIONS[i];
+                  var startIdx = upper.indexOf(sec);
+                  if (startIdx < 0) { result[sec] = ''; continue; }
+                  var contentStart = startIdx + sec.length;
+                  var nextIdx = texto.length;
+                  for (var j = i + 1; j < VIDEO_SECTIONS.length; j++) {
+                    var idx2 = upper.indexOf(VIDEO_SECTIONS[j], contentStart);
+                    if (idx2 >= 0) { nextIdx = idx2; break; }
+                  }
+                  var content = texto.substring(contentStart, nextIdx).trim();
+                  if (content.indexOf(':') === 0) content = content.substring(1).trim();
+                  result[sec] = content;
+                }
+                return result;
+              }
+              function renderVideoResult(analisis, fecha) {
+                var s = parseVideoSections(analisis);
+                var html = '';
+                html += '<div class="xx-small text-muted mb-2">Analizado el ' + escVideoTxt(fecha.substring(0,16)) + '</div>';
+                html += '<div class="p-2 mb-2 rounded" style="background:rgba(32,201,151,0.12); border-left:3px solid #20c997;"><strong class="text-success d-block mb-1">✅ PUNTOS FUERTES</strong><div class="small" style="white-space:pre-wrap;">' + escVideoTxt(s['PUNTOS FUERTES']) + '</div></div>';
+                html += '<div class="p-2 mb-2 rounded" style="background:rgba(220,53,69,0.12); border-left:3px solid #dc3545;"><strong class="text-danger d-block mb-1">⚠️ PUNTOS A MEJORAR</strong><div class="small" style="white-space:pre-wrap;">' + escVideoTxt(s['PUNTOS A MEJORAR']) + '</div></div>';
+                html += '<div class="p-2 mb-2 rounded" style="background:rgba(13,110,253,0.12); border-left:3px solid #0d6efd;"><strong class="text-info d-block mb-1">🏋️ EJERCICIO RECOMENDADO</strong><div class="small" style="white-space:pre-wrap;">' + escVideoTxt(s['EJERCICIO RECOMENDADO']) + '</div></div>';
+                html += '<div class="p-2 mb-2 rounded" style="background:rgba(255,193,7,0.15); border-left:3px solid #ffc107;"><strong class="text-warning d-block mb-1">⭐ NOTA TÉCNICA GLOBAL</strong><div class="small" style="white-space:pre-wrap;">' + escVideoTxt(s['NOTA TÉCNICA GLOBAL']) + '</div></div>';
+                html += '<div class="xx-small text-muted">Acciones detectadas: ' + escVideoTxt(s['ACCIONES DETECTADAS']) + '</div>';
+                html += '<button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="toggleVideoReanalyze()">🔄 Re-analizar</button>';
+                document.getElementById('videoResultBlock').innerHTML = html;
+                document.getElementById('videoUploadForm').style.display = 'none';
+                document.getElementById('videoUploadProgress').style.display = 'none';
+              }
+              function pollVideoStatus() {
+                var iv = setInterval(function() {
+                  fetch('/video/analyze-status/' + VIDEO_MATCH_ID).then(function(r) { return r.json(); }).then(function(j) {
+                    if (j.status === 'done') {
+                      clearInterval(iv);
+                      renderVideoResult(j.analisis, j.fecha);
+                    }
+                  }).catch(function() {});
+                }, 5000);
+              }
+              var videoFileInputEl = document.getElementById('videoFileInput');
+              if (videoFileInputEl) {
+                videoFileInputEl.addEventListener('change', function(e) {
+                  if (!e.target.files || !e.target.files[0]) return;
+                  var fd = new FormData();
+                  fd.append('video', e.target.files[0]);
+                  fd.append('esFragmento', 'true');
+                  document.getElementById('videoUploadProgress').style.display = 'block';
+                  document.getElementById('videoUploadError').textContent = '';
+                  fetch('/video/analyze-real/' + VIDEO_MATCH_ID, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json().then(function(j) { return { ok: r.status === 202, body: j }; }); })
+                    .then(function(res) {
+                      if (res.ok) {
+                        pollVideoStatus();
+                      } else {
+                        document.getElementById('videoUploadProgress').style.display = 'none';
+                        document.getElementById('videoUploadError').textContent = res.body.error || 'Error al subir el vídeo.';
+                      }
+                    })
+                    .catch(function(err) {
+                      document.getElementById('videoUploadProgress').style.display = 'none';
+                      document.getElementById('videoUploadError').textContent = 'Error de red: ' + err.message;
+                    });
+                });
+              }
+            """))
           )
         )
       renderHtml(content)
