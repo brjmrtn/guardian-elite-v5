@@ -72,7 +72,57 @@ object AdminController extends cask.Routes {
     )
   }
 
-  @cask.get("/settings") def settingsPage() = {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO — PANEL DE BACKUPS AUTOMATICOS
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def backupsPanel(msg: String): Modifier = {
+    val backups = DatabaseManager.getBackupsLog()
+    val estado: Modifier = backups.headOption match {
+      case Some(b) =>
+        div(cls := "alert alert-success small p-2 mb-3",
+          s"✅ Último backup: ${b("fecha").asInstanceOf[String]} · ${b("tamanoKb").asInstanceOf[Int]}KB")
+      case None =>
+        div(cls := "alert alert-warning small p-2 mb-3", "⚠️ Sin backups recientes")
+    }
+
+    val msgBox: Modifier = if (msg.nonEmpty) div(cls := "alert alert-info small p-2 mb-3", msg) else div()
+
+    val filasBackups: Modifier = if (backups.isEmpty)
+      div(cls := "text-muted small text-center py-2", "Todavía no se ha generado ningún backup.")
+    else
+      frag(backups.map { b =>
+        val id = b("id").asInstanceOf[Int]
+        div(cls := "d-flex justify-content-between align-items-center border-bottom border-secondary py-2",
+          div(
+            div(cls := "small text-white fw-bold", b("fecha").asInstanceOf[String]),
+            div(cls := "xx-small text-muted", s"${b("tamanoKb").asInstanceOf[Int]}KB · ${b("destinos").asInstanceOf[String]}")
+          ),
+          a(href := s"/admin/backup/download/$id", cls := "btn btn-sm btn-outline-info fw-bold", "⬇️ Descargar")
+        )
+      }: _*)
+
+    div(cls := "card bg-dark text-white border-warning shadow p-4 mb-3",
+      h4(cls := "text-warning mb-3", "💾 BACKUPS"),
+      msgBox,
+      estado,
+      p(cls := "small text-muted",
+        "Guardian genera un backup automático cada domingo a las 3:00 AM. El backup se guarda en la base de datos y se envía a tu email si está configurado. Contiene todos los datos de Héctor desde el inicio del registro."),
+      div(cls := "d-flex gap-2 mb-3",
+        form(action := "/admin/backup/generate", method := "post", cls := "flex-grow-1",
+          button(tpe := "submit", cls := "btn btn-warning fw-bold w-100", "🔄 Generar backup ahora")
+        ),
+        form(action := "/admin/backup/send-email", method := "post", cls := "flex-grow-1",
+          button(tpe := "submit", cls := "btn btn-outline-warning fw-bold w-100", "📧 Enviarme el backup ahora por email")
+        )
+      ),
+      div(cls := "border-top border-secondary pt-3",
+        h6(cls := "text-muted small text-uppercase mb-2", "Últimos backups"),
+        filasBackups
+      )
+    )
+  }
+
+  @cask.get("/settings") def settingsPage(backupMsg: String = "") = {
     val card = DatabaseManager.getLatestCardData()
     val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Configuracion General"),
       form(action := "/settings/save_base64", method := "post",
@@ -103,7 +153,7 @@ object AdminController extends cask.Routes {
       script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-flex gap-2 mt-2",
       a(href:="/videoteca", cls:="btn btn-warning fw-bold flex-grow-1", "🎬 VIDEOTECA"),
       a(href:="/admin", cls:="btn btn-outline-danger fw-bold", "⚙️ ADMIN")
-    ), perfilPublicoPanel()));
+    ), perfilPublicoPanel(), backupsPanel(backupMsg)));
     renderHtml(basePage("settings", content))
   }
 
@@ -130,6 +180,67 @@ object AdminController extends cask.Routes {
       mostrarMedico = p.contains("mostrarMedico")
     )
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO — ENDPOINTS DE BACKUPS AUTOMATICOS (solo usuario Elite autenticado)
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.post("/admin/backup/generate")
+  def generateBackupNow(request: cask.Request) = withAuth(request) {
+    val msg = try {
+      val sql = DatabaseManager.generarBackupSQL()
+      val bytes = sql.getBytes("UTF-8")
+      val fecha = java.time.LocalDate.now().toString
+      DatabaseManager.guardarBackupEnBD(sql, fecha)
+
+      val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
+      if (emailDest.nonEmpty) {
+        BackupService.enviarPorEmail(emailDest, s"guardian_backup_$fecha.sql", bytes)
+      }
+      s"✅ Backup generado (${bytes.length / 1024}KB)."
+    } catch { case e: Exception => s"⚠️ Error generando el backup: ${e.getMessage.take(150)}" }
+
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/settings?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+    ))
+  }
+
+  @cask.post("/admin/backup/send-email")
+  def sendBackupEmailNow(request: cask.Request) = withAuth(request) {
+    val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
+    val smtpUser  = sys.env.getOrElse("SMTP_USER", "")
+    val smtpPass  = sys.env.getOrElse("SMTP_PASS", "")
+
+    val msg =
+      if (emailDest.isEmpty || smtpUser.isEmpty || smtpPass.isEmpty) {
+        "⚠️ Configura BACKUP_EMAIL, SMTP_USER y SMTP_PASS en Render para poder enviar el backup por email."
+      } else {
+        try {
+          val sql = DatabaseManager.generarBackupSQL()
+          val bytes = sql.getBytes("UTF-8")
+          val fecha = java.time.LocalDate.now().toString
+          DatabaseManager.guardarBackupEnBD(sql, fecha)
+          BackupService.enviarPorEmail(emailDest, s"guardian_backup_$fecha.sql", bytes)
+          s"✅ Backup enviado a $emailDest."
+        } catch { case e: Exception => s"⚠️ Error enviando el backup: ${e.getMessage.take(150)}" }
+      }
+
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/settings?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+    ))
+  }
+
+  @cask.get("/admin/backup/download/:id")
+  def downloadBackup(request: cask.Request, id: Int) = withAuth(request) {
+    DatabaseManager.getBackupSqlById(id) match {
+      case Some((fecha, sql)) =>
+        cask.Response(sql.getBytes("UTF-8"), headers = Seq(
+          "Content-Type" -> "application/sql",
+          "Content-Disposition" -> s"""attachment; filename="guardian_backup_$fecha.sql""""
+        ))
+      case None =>
+        cask.Response("Backup no encontrado".getBytes("UTF-8"), statusCode = 404, headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
+    }
   }
 
   @cask.postForm("/settings/save_base64")

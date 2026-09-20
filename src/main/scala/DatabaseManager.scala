@@ -681,6 +681,18 @@ object DatabaseManager {
       )""")
       stmt.executeUpdate("INSERT INTO perfil_publico (activo) SELECT FALSE WHERE NOT EXISTS (SELECT 1 FROM perfil_publico)")
 
+      // ─────────────────────────────────────────────────────────────────────────────
+      // MODULO — SISTEMA DE BACKUPS AUTOMATICOS
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS backups_log (
+        id          SERIAL PRIMARY KEY,
+        fecha       DATE NOT NULL DEFAULT CURRENT_DATE,
+        tamano_kb   INT DEFAULT 0,
+        sql_dump    TEXT NOT NULL,
+        destinos    TEXT DEFAULT '',
+        created_at  TIMESTAMP DEFAULT NOW()
+      )""")
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -2619,6 +2631,105 @@ $analisisConcatenados"""
     try {
       conn.createStatement().executeUpdate(
         "UPDATE perfil_publico SET visitas = visitas + 1, ultima_visita = NOW() WHERE id = (SELECT MIN(id) FROM perfil_publico)")
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO — SISTEMA DE BACKUPS AUTOMATICOS
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Genera un dump SQL insertable con todas las tablas de datos de Hector.
+  // Calculo/lectura de BD puro — sin Gemini, seguro de invocar desde un boton o desde el hilo de backup.
+  def generarBackupSQL(): String = {
+    val conn = getConnection()
+    try {
+      val sb = new StringBuilder
+      sb.append(s"-- Guardian Elite Backup\n")
+      sb.append(s"-- Generado: ${java.time.LocalDateTime.now()}\n")
+      sb.append(s"-- Hector Martin Gonzalez -- Portero\n\n")
+
+      // Lista de tablas reales del esquema (ver initDB) — excluye cachés regenerables
+      // (ai_cache, feature_cache) y la propia tabla de backups.
+      val tablas = List(
+        "seasons", "matches", "wellness", "match_goals", "growth_history",
+        "medical_records", "trainings", "drills", "technical_reviews", "gear",
+        "injuries", "rivals", "penalties", "video_tags", "objectives",
+        "academic_performance", "legends_milestones", "scouting_reports",
+        "nutrition_plans", "footbar_sessions", "goalkeeper_skills",
+        "development_windows", "opportunities", "contacts", "visibility_events",
+        "season_diary", "periodization", "psych_records", "physical_tests",
+        "idp_temporadas", "idp_objetivos", "idp_revisiones",
+        "forma_diaria", "cognitivo_tests", "perfil_publico"
+      )
+
+      tablas.foreach { tabla =>
+        try {
+          val rs = conn.createStatement().executeQuery(s"SELECT * FROM $tabla ORDER BY id")
+          val meta = rs.getMetaData
+          val cols = (1 to meta.getColumnCount).map(meta.getColumnName)
+          sb.append(s"\n-- TABLA: $tabla\n")
+          while (rs.next()) {
+            val valores = cols.map { col =>
+              val v = rs.getObject(col)
+              if (v == null) "NULL"
+              else v match {
+                case s: String  => s"'${s.replace("'", "''")}'"
+                case b: Boolean => if (b) "TRUE" else "FALSE"
+                case _          => v.toString
+              }
+            }.mkString(", ")
+            sb.append(s"INSERT INTO $tabla (${cols.mkString(", ")}) VALUES ($valores) ON CONFLICT DO NOTHING;\n")
+          }
+        } catch { case _: Exception => sb.append(s"-- TABLA $tabla no encontrada o vacia\n") }
+      }
+      sb.toString()
+    } finally { conn.close() }
+  }
+
+  // Guarda el dump en BD (destino interno) y mantiene solo los ultimos 12 backups
+  def guardarBackupEnBD(sql: String, fecha: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO backups_log (fecha, tamano_kb, sql_dump, destinos) VALUES (?::date, ?, ?, ?)")
+      ps.setString(1, fecha)
+      ps.setInt(2, sql.getBytes("UTF-8").length / 1024)
+      ps.setString(3, sql)
+      ps.setString(4, "bd_interna")
+      ps.executeUpdate()
+      // Mantener solo los ultimos 12 (uno por semana ~ 3 meses)
+      conn.createStatement().executeUpdate(
+        "DELETE FROM backups_log WHERE id NOT IN (SELECT id FROM backups_log ORDER BY created_at DESC LIMIT 12)")
+    } finally { conn.close() }
+  }
+
+  // Lista para el panel — sin traer el dump completo (puede ser pesado)
+  def getBackupsLog(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, fecha, tamano_kb, destinos, created_at FROM backups_log ORDER BY created_at DESC")
+      var list = List[Map[String, Any]]()
+      while (rs.next()) {
+        list = list :+ Map[String, Any](
+          "id" -> rs.getInt("id"),
+          "fecha" -> rs.getDate("fecha").toString,
+          "tamanoKb" -> rs.getInt("tamano_kb"),
+          "destinos" -> Option(rs.getString("destinos")).getOrElse(""),
+          "createdAt" -> Option(rs.getTimestamp("created_at")).map(_.toString).getOrElse("")
+        )
+      }
+      list
+    } finally { conn.close() }
+  }
+
+  // Recupera el dump completo de un backup concreto — usado para la descarga
+  def getBackupSqlById(id: Int): Option[(String, String)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT fecha, sql_dump FROM backups_log WHERE id = ?")
+      ps.setInt(1, id)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some((rs.getDate("fecha").toString, rs.getString("sql_dump"))) else None
     } finally { conn.close() }
   }
 
