@@ -7,7 +7,7 @@ import org.jsoup.Jsoup
 import scala.jdk.CollectionConverters._
 
 // --- DATA MODELS ---
-case class PlayerCardData(nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String, div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int, divRaw: Double, hanRaw: Double, kicRaw: Double, refRaw: Double, spdRaw: Double, posRaw: Double, fechaNacimiento: String, rffmUrl: String, rffmName: String)
+case class PlayerCardData(nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String, div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int, divRaw: Double, hanRaw: Double, kicRaw: Double, refRaw: Double, spdRaw: Double, posRaw: Double, fechaNacimiento: String, rffmUrl: String, rffmName: String, categoria: String)
 // MatchLog completo para Moneyball
 case class MatchLog(id: Int, rival: String, resultado: String, minutos: Int, nota: Double, fecha: String, clima: String, estadio: String, notas: String, video: String, reaccion: String, status: String, tipo: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int, analisisVoz: String, torneoNombre: String, fase: String, paradas: Int, p1v1: Int, pAir: Int, pPie: Int, zTiros: String, zGoles: String)
 case class SeasonSummary(id: Int, categoria: String, clubUrl: String, fotoUrl: String, partidosJugados: Int, golesContra: Int, porteriasCero: Int, mediaFinal: Int)
@@ -58,7 +58,8 @@ case class FootbarSession(
 )
 
 object DatabaseManager {
-  private val dbHost = sys.env.getOrElse("DB_HOST", "ep-fancy-cherry-abkfneqp-pooler.eu-west-2.aws.neon.tech")
+  private val debugMode = sys.env.getOrElse("DEBUG_MODE", "false") == "true"
+  private val dbHost = sys.env.getOrElse("DB_HOST", "")
   private val dbName = sys.env.getOrElse("DB_NAME", "neondb")
   private val dbUser = sys.env.getOrElse("DB_USER", "neondb_owner")
   private val dbPass = sys.env.getOrElse("DB_PASS", "")
@@ -69,6 +70,7 @@ object DatabaseManager {
   // Se inicializa UNA sola vez al arrancar. Neon free tier soporta ~10 conexiones;
   // con maximumPoolSize=5 dejamos margen para el dashboard de Neon.
   private val pool: com.zaxxer.hikari.HikariDataSource = {
+    require(dbHost.nonEmpty, "DB_HOST no configurado")
     if (dbPass.isEmpty) throw new IllegalStateException("DB_PASS no configurada. Anadela como variable de entorno.")
     val config = new com.zaxxer.hikari.HikariConfig()
     config.setJdbcUrl(url)
@@ -693,6 +695,60 @@ object DatabaseManager {
         created_at  TIMESTAMP DEFAULT NOW()
       )""")
 
+      // ─────────────────────────────────────────────────────────────────────────────
+      // BLOQUE 2 — GESTION COMPLETA DE TEMPORADAS
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS nombre TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS fecha_fin DATE DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS media_final DOUBLE PRECISION DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS porterias_cero_total INT DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS informe_fin_temporada TEXT DEFAULT NULL")
+
+      // ─────────────────────────────────────────────────────────────────────────────
+      // BLOQUE 3 — REGISTRO DIARIO Y WELLNESS
+      // ─────────────────────────────────────────────────────────────────────────────
+      // physical_growth es la tabla realmente usada por la app (growth_history es legacy/no usada);
+      // se crea defensivamente por si el CREATE original ya no esta en el historial de migraciones.
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS physical_growth (
+        id                  SERIAL PRIMARY KEY,
+        fecha               DATE DEFAULT CURRENT_DATE,
+        altura              DOUBLE PRECISION,
+        peso                DOUBLE PRECISION,
+        velocidad_crecimiento DOUBLE PRECISION DEFAULT 0
+      )""")
+      stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS kg_musculo DOUBLE PRECISION DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS kg_masa_osea DOUBLE PRECISION DEFAULT NULL")
+
+      // ─────────────────────────────────────────────────────────────────────────────
+      // BLOQUE 4 — MEJORAS EN EL REGISTRO DE PARTIDO
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS rubrica_posicion INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS rubrica_decisiones INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS rubrica_pies INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS rubrica_comunicacion INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS rubrica_actitud INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS feedback_entrenador TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS posicion_set TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS altura_bloque TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS pie_no_dominante_acciones INT DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS iniciativa_vocal TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS guia_conversacion TEXT DEFAULT NULL")
+
+      // ─────────────────────────────────────────────────────────────────────────────
+      // BLOQUE 5.4 — MICRO-OBJETIVOS SEMANALES
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS micro_objetivos (
+        id              SERIAL PRIMARY KEY,
+        semana_inicio   DATE NOT NULL,
+        objetivo_semana TEXT NOT NULL,
+        dimension_idp   TEXT DEFAULT '',
+        completado      BOOLEAN DEFAULT FALSE,
+        resultado       TEXT DEFAULT '',
+        generado_ia     BOOLEAN DEFAULT FALSE,
+        created_at      TIMESTAMP DEFAULT NOW(),
+        UNIQUE(semana_inicio)
+      )""")
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -853,7 +909,7 @@ object DatabaseManager {
         //s"https://generativelanguage.googleapis.com/v1beta/models/:generateContent?key=$apiKey"
       )
 
-      println(s"DEBUG: isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
+      if (debugMode) println(s"DEBUG: isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
 
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
 
@@ -887,11 +943,11 @@ object DatabaseManager {
             return ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
           else {
             lastError = s"Status ${r.statusCode}: ${r.text().take(300)}"
-            println(s"DEBUG URL fallida: $url -> $lastError")
+            if (debugMode) println(s"DEBUG URL fallida: $url -> $lastError")
           }
         } catch { case e: Exception =>
           lastError = e.getMessage
-          println(s"DEBUG excepcion: $lastError")
+          if (debugMode) println(s"DEBUG excepcion: $lastError")
         }
       }
       s"Error: $lastError"
@@ -2442,6 +2498,150 @@ $analisisConcatenados"""
     } finally { conn.close() }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 5.6 — DETECTOR DE DESGASTE SILENCIOSO (SQL puro, sin Gemini)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def detectarDesgasteSilencioso(): Option[String] = {
+    val conn = getConnection()
+    try {
+      var indicadores = 0
+
+      val rsPsych = conn.createStatement().executeQuery(
+        "SELECT motivacion, disfrute FROM psych_records WHERE fecha >= CURRENT_DATE - 21 ORDER BY fecha DESC LIMIT 3")
+      var bajos = 0; var total = 0
+      while (rsPsych.next()) { total += 1; if (rsPsych.getInt("motivacion") < 3 || rsPsych.getInt("disfrute") < 3) bajos += 1 }
+      if (total >= 2 && bajos >= 2) indicadores += 1
+
+      val rsEnergia = conn.createStatement().executeQuery(
+        "SELECT AVG(energia) as m FROM wellness WHERE fecha >= CURRENT_DATE - 14 AND energia IS NOT NULL")
+      if (rsEnergia.next() && rsEnergia.getDouble("m") > 0 && rsEnergia.getDouble("m") < 3) indicadores += 1
+
+      val rsVoz = conn.createStatement().executeQuery("""
+        SELECT COUNT(*) as c FROM matches
+        WHERE fecha >= CURRENT_DATE - 21 AND analisis_voz IS NOT NULL
+        AND (analisis_voz ILIKE '%cansado%' OR analisis_voz ILIKE '%aburrido%' OR analisis_voz ILIKE '%no quiero%')""")
+      if (rsVoz.next() && rsVoz.getInt("c") > 0) indicadores += 1
+
+      if (indicadores >= 2)
+        Some("⚠️ DESCOMPRESIÓN RECOMENDADA — Varios indicadores sugieren saturación silenciosa. Esta semana: cero correcciones técnicas, cero conversaciones de fútbol en casa. Tiempo libre, juego sin agenda. Vuelve al modo normal la semana siguiente.")
+      else None
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 5.4 — MICRO-OBJETIVOS SEMANALES (SQL puro, sin Gemini)
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def lunesEstaSemana(): String = java.time.LocalDate.now().`with`(java.time.DayOfWeek.MONDAY).toString
+
+  def getMicroObjetivoSemana(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val lunes = lunesEstaSemana()
+      val ps = conn.prepareStatement("SELECT * FROM micro_objetivos WHERE semana_inicio = ?::date")
+      ps.setString(1, lunes)
+      val rs = ps.executeQuery()
+      if (rs.next()) {
+        Map("id" -> rs.getInt("id"), "semanaInicio" -> rs.getDate("semana_inicio").toString,
+          "objetivo" -> rs.getString("objetivo_semana"), "dimension" -> Option(rs.getString("dimension_idp")).getOrElse(""),
+          "completado" -> rs.getBoolean("completado"), "resultado" -> Option(rs.getString("resultado")).getOrElse(""),
+          "generadoIA" -> rs.getBoolean("generado_ia"))
+      } else {
+        val rsIdp = conn.createStatement().executeQuery(
+          "SELECT dimension, objetivo FROM idp_objetivos WHERE progreso_pct < 100 ORDER BY progreso_pct ASC LIMIT 1")
+        val (dim, objetivoTxt) = if (rsIdp.next()) (rsIdp.getString("dimension"), rsIdp.getString("objetivo")) else ("General", "Mantén la constancia en el entrenamiento esta semana.")
+
+        val rsRub = conn.createStatement().executeQuery("""
+          SELECT rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud
+          FROM matches WHERE status='PLAYED' AND rubrica_posicion IS NOT NULL ORDER BY fecha DESC LIMIT 1""")
+        val dimRubrica = if (rsRub.next()) {
+          val dims = Seq("Posición" -> rsRub.getInt("rubrica_posicion"), "Decisiones" -> rsRub.getInt("rubrica_decisiones"),
+            "Pies" -> rsRub.getInt("rubrica_pies"), "Comunicación" -> rsRub.getInt("rubrica_comunicacion"),
+            "Actitud" -> rsRub.getInt("rubrica_actitud"))
+          Some(dims.minBy(_._2)._1)
+        } else None
+
+        val objetivoSemana = s"Trabajar: $objetivoTxt" + dimRubrica.map(d => s" (foco rúbrica: $d)").getOrElse("")
+        val ins = conn.prepareStatement(
+          "INSERT INTO micro_objetivos (semana_inicio, objetivo_semana, dimension_idp, generado_ia) VALUES (?::date,?,?,TRUE) ON CONFLICT (semana_inicio) DO NOTHING")
+        ins.setString(1, lunes); ins.setString(2, objetivoSemana); ins.setString(3, dim)
+        ins.executeUpdate()
+        Map("id" -> 0, "semanaInicio" -> lunes, "objetivo" -> objetivoSemana, "dimension" -> dim,
+          "completado" -> false, "resultado" -> "", "generadoIA" -> true)
+      }
+    } finally { conn.close() }
+  }
+
+  def completarMicroObjetivo(resultado: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "UPDATE micro_objetivos SET completado=TRUE, resultado=? WHERE semana_inicio = ?::date")
+      ps.setString(1, fixEncoding(resultado)); ps.setString(2, lunesEstaSemana())
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 5.5 — PREPARACION SEMANAL IA
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def proximoRivalYHash(conn: Connection): Option[(String, String, String)] = {
+    val rsProx = conn.createStatement().executeQuery(
+      "SELECT rival, fecha FROM matches WHERE status='SCHEDULED' ORDER BY fecha ASC LIMIT 1")
+    if (!rsProx.next()) None
+    else {
+      val rival = rsProx.getString("rival"); val fechaProx = rsProx.getDate("fecha").toString
+      val semanaAnio = java.time.LocalDate.now().get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear())
+      Some((rival, fechaProx, s"${s"$rival-$semanaAnio".hashCode}"))
+    }
+  }
+
+  /** Solo lectura de cache — NUNCA llama a Gemini. Para usar en el render del dashboard. */
+  def getPreparacionSemanalCache(): Option[String] = {
+    val conn = getConnection()
+    try {
+      proximoRivalYHash(conn).flatMap { case (_, _, hash) =>
+        val cached = conn.prepareStatement(
+          "SELECT payload FROM feature_cache WHERE cache_key = ? AND updated_at > NOW() - INTERVAL '7 days'")
+        cached.setString(1, s"preparacion_semanal_$hash")
+        val rsCache = cached.executeQuery()
+        if (rsCache.next()) Some(rsCache.getString("payload")) else None
+      }
+    } finally { conn.close() }
+  }
+
+  /** Llama a Gemini — SOLO desde el boton explicito "Generar preparacion semanal". */
+  def generarPreparacionSemanal(): String = {
+    val conn = getConnection()
+    try {
+      val card = getLatestCardData(); val edad = calcularEdadExacta(card.fechaNacimiento)
+      val (rival, fechaProx, hash) = proximoRivalYHash(conn).getOrElse(return "")
+
+      val rsAc = conn.prepareStatement("SELECT COALESCE(SUM(rpe*60),0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsAc.setInt(1, 7); val ac = { val r = rsAc.executeQuery(); if (r.next()) r.getDouble(1) else 0.0 }
+      val rsCh = conn.prepareStatement("SELECT COALESCE(SUM(rpe*60),0) / 4.0 FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsCh.setInt(1, 28); val ch = { val r = rsCh.executeQuery(); if (r.next()) r.getDouble(1) else 0.0 }
+      val acwr = if (ch > 0) ac / ch else 1.0
+      val estadoAcwr = if (acwr < 0.8) "BAJA" else if (acwr <= 1.2) "NORMAL" else "ALTA"
+
+      val fallos = getTechnicalAlerts().take(3).mkString("; ")
+
+      val rsZona = conn.createStatement().executeQuery(
+        "SELECT zona_goles FROM matches WHERE status='PLAYED' AND zona_goles IS NOT NULL AND zona_goles != '' ORDER BY fecha DESC LIMIT 10")
+      val zonaCounts = scala.collection.mutable.Map[String, Int]().withDefaultValue(0)
+      while (rsZona.next()) rsZona.getString("zona_goles").split(",").filter(_.nonEmpty).foreach(z => zonaCounts(z.trim) += 1)
+      val zonaVulnerable = if (zonaCounts.nonEmpty) zonaCounts.maxBy(_._2)._1 else "sin datos suficientes"
+
+      val prompt = s"""Eres el preparador de Héctor, portero de $edad años. Esta semana: próximo partido vs $rival el $fechaProx, ACWR=${"%.2f".format(acwr)} ($estadoAcwr), fallos recurrentes=${if (fallos.nonEmpty) fallos else "ninguno detectado"}, zona vulnerable=$zonaVulnerable. Genera exactamente 3 bloques en texto plano: CONSIGNA_COCHE: [un foco mental o técnico positivo, máximo 2 frases, sin presión, para decirle de camino al entreno] / DESCANSO_CASA: [una pauta concreta de recuperación en casa según el ACWR, una frase accionable] / FOCO_SABADO: [un solo aspecto técnico que el padre debe observar desde la grada el sábado como observador neutral, máximo 2 frases]. Lenguaje para un padre, sin tecnicismos."""
+
+      val resultado = AIProvider.ask(prompt, None, bypassCache = true)
+      val up = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?,?,NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+      up.setString(1, s"preparacion_semanal_$hash"); up.setString(2, resultado)
+      up.executeUpdate()
+      resultado
+    } finally { conn.close() }
+  }
+
   // ── BLOQUE A4: validacion del indice de forma frente al rendimiento real ────
   def getFormaCorrelacion(): Map[String, Any] = {
     val conn = getConnection()
@@ -2853,7 +3053,7 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
   def deleteMatch(id: Int): Unit = { val conn=getConnection(); try { conn.createStatement().executeUpdate(s"DELETE FROM matches WHERE id=$id") } finally { conn.close() } }
   def updateRFFMSettings(url: String, teamName: String): Unit = { val conn=getConnection(); try{ val ps=conn.prepareStatement("UPDATE seasons SET rffm_url=?, rffm_team_name=? WHERE id=(SELECT MAX(id) FROM seasons)"); ps.setString(1,url); ps.setString(2,teamName); ps.executeUpdate() } finally { conn.close() } }
   def updateSeasonSettings(f: String, c: String, n: String, fecha: String): String = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE seasons SET foto_jugador_url=COALESCE(NULLIF(?,''), foto_jugador_url), club_escudo_url=COALESCE(NULLIF(?,''), club_escudo_url), nombre_club=COALESCE(NULLIF(?,''), nombre_club), fecha_nacimiento=? WHERE id=(SELECT MAX(id) FROM seasons)"); s.setString(1,f); s.setString(2,c); s.setString(3,fixEncoding(n)); s.setDate(4, Date.valueOf(fecha)); s.executeUpdate(); "DATOS ACTUALIZADOS" } finally { conn.close() } }
-  def getLatestCardData(): PlayerCardData = { var conn: Connection=null; try { conn=getConnection(); val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1"); if(rs.next()){ val fecha=Option(rs.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19"); PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), "", Option(rs.getString("nombre_club")).getOrElse(""), rs.getDouble("stat_div").toInt, rs.getDouble("stat_han").toInt, rs.getDouble("stat_kic").toInt, rs.getDouble("stat_ref").toInt, rs.getDouble("stat_spd").toInt, rs.getDouble("stat_pos").toInt, rs.getDouble("stat_div"), rs.getDouble("stat_han"), rs.getDouble("stat_kic"), rs.getDouble("stat_ref"), rs.getDouble("stat_spd"), rs.getDouble("stat_pos"), fecha, Option(rs.getString("rffm_url")).getOrElse(""), Option(rs.getString("rffm_team_name")).getOrElse("")) } else { PlayerCardData("HECTOR", 59, "GK", "", "", "", "", 80, 60, 55, 60, 62, 58, 80, 60, 55, 60, 62, 58, "2020-06-19", "", "") } } finally { if(conn!=null) conn.close() } }
+  def getLatestCardData(): PlayerCardData = { var conn: Connection=null; try { conn=getConnection(); val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1"); if(rs.next()){ val fecha=Option(rs.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19"); PlayerCardData("HECTOR", rs.getDouble("media").toInt, "GK", Option(rs.getString("foto_jugador_url")).getOrElse(""), Option(rs.getString("club_escudo_url")).getOrElse(""), "", Option(rs.getString("nombre_club")).getOrElse(""), rs.getDouble("stat_div").toInt, rs.getDouble("stat_han").toInt, rs.getDouble("stat_kic").toInt, rs.getDouble("stat_ref").toInt, rs.getDouble("stat_spd").toInt, rs.getDouble("stat_pos").toInt, rs.getDouble("stat_div"), rs.getDouble("stat_han"), rs.getDouble("stat_kic"), rs.getDouble("stat_ref"), rs.getDouble("stat_spd"), rs.getDouble("stat_pos"), fecha, Option(rs.getString("rffm_url")).getOrElse(""), Option(rs.getString("rffm_team_name")).getOrElse(""), Option(rs.getString("categoria")).getOrElse("Prebenjamín")) } else { PlayerCardData("HECTOR", 59, "GK", "", "", "", "", 80, 60, 55, 60, 62, 58, 80, 60, 55, 60, 62, 58, "2020-06-19", "", "", "Prebenjamín") } } finally { if(conn!=null) conn.close() } }
   def getDeepAnalysis(): String = {
     var conn:Connection=null;
     try {
@@ -2866,16 +3066,26 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
                COALESCE(f.pases, 0)             AS pases
         FROM matches m
         LEFT JOIN footbar_sessions f ON f.match_id = m.id
-        WHERE m.status='PLAYED'
+        WHERE m.status='PLAYED' AND m.season_id = (SELECT MAX(id) FROM seasons)
         ORDER BY m.fecha ASC
       """);
       var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString("fecha")}|${rs.getString("rival")}|${rs.getDouble("nota")}|${rs.getDouble("dist_km")}|${rs.getDouble("sprint_max")}|${rs.getInt("pases")}\n") };
       if(c<2) return "Pocos datos.";
+      val fechaHoy = java.time.LocalDate.now().toString
+      val anio = java.time.LocalDate.now().getYear
+      val temporadaActual = s"$anio-${anio + 1}"
+
+      val rsBascula = conn.createStatement().executeQuery(
+        "SELECT kg_musculo, kg_masa_osea FROM physical_growth WHERE kg_musculo IS NOT NULL ORDER BY fecha DESC LIMIT 1")
+      val basculaLine = if (rsBascula.next())
+        s"\nDatos de composición corporal (báscula inteligente): músculo ${rsBascula.getDouble("kg_musculo")}kg, masa ósea ${rsBascula.getDouble("kg_masa_osea")}kg.\n"
+      else ""
+
       // Cambio aqui: Llamamos a AIProvider.ask
-      val prompt = s"""Eres un analista de rendimiento de porteros de élite.
+      val prompt = s"""Eres un analista de rendimiento de porteros de élite. Fecha de hoy: $fechaHoy. Temporada en curso: $temporadaActual. Analiza ÚNICAMENTE los datos de esta temporada.
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}
+${sb.toString()}$basculaLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -2884,7 +3094,7 @@ Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de cód
 <p><strong>Punto de atención:</strong> [describe el momento más bajo y posibles causas]</p>
 <p><strong>Conclusión:</strong> [una frase motivadora y concreta sobre qué trabajar para la próxima semana]</p>
 
-No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda persona dirigiéndote a Hector directamente. Si hay datos de distancia y sprint, analiza si hay correlación entre carga física y rendimiento. Si distancia > 3km con nota baja, o sprint alto con nota baja, menciónalo como señal de fatiga."""
+No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda persona dirigiéndote a Hector directamente. Si hay datos de distancia y sprint, analiza si hay correlación entre carga física y rendimiento. Si distancia > 3km con nota baja, o sprint alto con nota baja, menciónalo como señal de fatiga. Habla siempre en presente o futuro próximo. No menciones fechas del año anterior. La temporada actual es $temporadaActual."""
       AIProvider.ask(prompt).replace("```html","").replace("```","").trim
     } catch {
       case e:Exception =>
@@ -3478,6 +3688,86 @@ Responde en espanol, tono positivo y motivador para un nino."""
     val conn = getConnection()
     try { conn.createStatement().executeUpdate(s"DELETE FROM match_goals WHERE match_id = $matchId") }
     finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 4.1 / 4.3 — RUBRICA DE VALORACION Y METRICAS DE CANTERA
+  // ─────────────────────────────────────────────────────────────────────────────
+  def updateMatchExtras(matchId: Int,
+                         rubricaPosicion: Option[Int], rubricaDecisiones: Option[Int], rubricaPies: Option[Int],
+                         rubricaComunicacion: Option[Int], rubricaActitud: Option[Int],
+                         posicionSet: String, alturaBloque: String, pieNoDominanteAcciones: Int, iniciativaVocal: String): Unit = {
+    if (matchId <= 0) return
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        UPDATE matches SET
+          rubrica_posicion=?, rubrica_decisiones=?, rubrica_pies=?, rubrica_comunicacion=?, rubrica_actitud=?,
+          posicion_set=?, altura_bloque=?, pie_no_dominante_acciones=?, iniciativa_vocal=?
+        WHERE id=?""")
+      def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => ps.setInt(idx, x); case None => ps.setNull(idx, java.sql.Types.INTEGER) }
+      setOptInt(1, rubricaPosicion); setOptInt(2, rubricaDecisiones); setOptInt(3, rubricaPies)
+      setOptInt(4, rubricaComunicacion); setOptInt(5, rubricaActitud)
+      if (posicionSet.nonEmpty) ps.setString(6, posicionSet) else ps.setNull(6, java.sql.Types.VARCHAR)
+      if (alturaBloque.nonEmpty) ps.setString(7, alturaBloque) else ps.setNull(7, java.sql.Types.VARCHAR)
+      ps.setInt(8, pieNoDominanteAcciones)
+      if (iniciativaVocal.nonEmpty) ps.setString(9, iniciativaVocal) else ps.setNull(9, java.sql.Types.VARCHAR)
+      ps.setInt(10, matchId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getRubricaMatch(matchId: Int): Option[Map[String, Int]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud
+        FROM matches WHERE id=? AND rubrica_posicion IS NOT NULL""")
+      ps.setInt(1, matchId)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(Map(
+        "posicion" -> rs.getInt("rubrica_posicion"), "decisiones" -> rs.getInt("rubrica_decisiones"),
+        "pies" -> rs.getInt("rubrica_pies"), "comunicacion" -> rs.getInt("rubrica_comunicacion"),
+        "actitud" -> rs.getInt("rubrica_actitud")
+      )) else None
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 4.4 — GUIA DE CONVERSACION POST-PARTIDO
+  // ─────────────────────────────────────────────────────────────────────────────
+  def generarGuiaConversacion(matchId: Int): Unit = {
+    new Thread(() => {
+      val conn = getConnection()
+      try {
+        val card = getLatestCardData(); val edad = calcularEdadExacta(card.fechaNacimiento)
+        val ps = conn.prepareStatement("SELECT rival, goles_favor, goles_contra, nota, reaccion_goles FROM matches WHERE id=?")
+        ps.setInt(1, matchId)
+        val rs = ps.executeQuery()
+        if (rs.next()) {
+          val rival = rs.getString("rival"); val gf = rs.getInt("goles_favor"); val gc = rs.getInt("goles_contra")
+          val nota = rs.getDouble("nota"); val comportamiento = Option(rs.getString("reaccion_goles")).getOrElse("N/A")
+
+          val prompt = s"""Héctor, portero de $edad años, acaba de jugar contra $rival. Resultado: $gf-$gc. Nota: $nota. Comportamiento tras goles: $comportamiento. El padre va a comer con él ahora. Dame en texto plano: QUE_RESALTAR: [una acción positiva específica y concreta para mencionar con naturalidad en la comida] / QUE_CALLAR: [un error que debe evitar mencionar hoy, con una frase explicando por qué callarlo beneficia la resiliencia a esta edad] / ACCION_POSITIVA: [una micro-acción para esta tarde que refuerce la confianza, sin hablar de fútbol]. Lenguaje para un padre, no para un entrenador."""
+
+          val guia = AIProvider.ask(prompt, None, bypassCache = true)
+          val up = conn.prepareStatement("UPDATE matches SET guia_conversacion=? WHERE id=?")
+          up.setString(1, guia); up.setInt(2, matchId)
+          up.executeUpdate()
+        }
+      } catch { case e: Exception => println(s"[!] generarGuiaConversacion error: ${e.getMessage}") }
+      finally { conn.close() }
+    }).start()
+  }
+
+  def getGuiaConversacion(matchId: Int): Option[String] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT guia_conversacion FROM matches WHERE id=?")
+      ps.setInt(1, matchId)
+      val rs = ps.executeQuery()
+      if (rs.next()) Option(rs.getString("guia_conversacion")).filter(_.nonEmpty) else None
+    } finally { conn.close() }
   }
 
   def getGoalsAnalysis(): Map[String, Any] = {
@@ -4823,7 +5113,193 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   def updateStats(s: PlayerCardData): Unit = { val conn=getConnection(); try { val st=conn.prepareStatement("UPDATE seasons SET media=?, stat_div=?, stat_han=?, stat_kic=?, stat_ref=?, stat_spd=?, stat_pos=? WHERE id=(SELECT MAX(id) FROM seasons)"); st.setDouble(1,s.media); st.setDouble(2,s.divRaw); st.setDouble(3,s.hanRaw); st.setDouble(4,s.kicRaw); st.setDouble(5,s.refRaw); st.setDouble(6,s.spdRaw); st.setDouble(7,s.posRaw); st.executeUpdate() } finally { conn.close() } }
   def getBackupCSV(): String = { val sb=new StringBuilder(); sb.append("RIVAL,GF,GC,MIN,NOTA,PARADAS,CLIMA,ESTADIO,NOTAS,REACCION,FECHA\n"); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha ASC"); while(rs.next()){ sb.append(s"${rs.getString("rival")},${rs.getInt("goles_favor")},${rs.getInt("goles_contra")},${rs.getInt("minutos")},${rs.getDouble("nota")},${rs.getInt("paradas")},${Option(rs.getString("clima")).getOrElse("Sol")},${Option(rs.getString("estadio")).getOrElse("-")},${Option(rs.getString("notas_partido")).getOrElse("")},${Option(rs.getString("reaccion_goles")).getOrElse("")},${rs.getDate("fecha")}\n") } } finally {conn.close()}; sb.toString() }
   def updateObjective(id: Int, meta: Int): Unit = { val conn=getConnection(); try{ val ps=conn.prepareStatement("UPDATE objectives SET meta=? WHERE id=?"); ps.setInt(1,meta); ps.setInt(2,id); ps.executeUpdate() } finally {conn.close()} }
-  def startNewSeason(categoria: String): String = { val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM seasons ORDER BY id DESC LIMIT 1"); if(rs.next()){ val s=conn.prepareStatement("INSERT INTO seasons (nombre_club, foto_jugador_url, club_escudo_url, media, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos, fecha_inicio, categoria) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"); s.setString(1,rs.getString("nombre_club")); s.setString(2,rs.getString("foto_jugador_url")); s.setString(3,rs.getString("club_escudo_url")); s.setDouble(4,rs.getDouble("media")); s.setDouble(5,rs.getDouble("stat_div")); s.setDouble(6,rs.getDouble("stat_han")); s.setDouble(7,rs.getDouble("stat_kic")); s.setDouble(8,rs.getDouble("stat_ref")); s.setDouble(9,rs.getDouble("stat_spd")); s.setDouble(10,rs.getDouble("stat_pos")); s.setDate(11,Date.valueOf(LocalDate.now())); s.setString(12,fixEncoding(categoria)); s.executeUpdate() }; "Temporada nueva creada." } finally {conn.close()} }
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 2 — GESTION COMPLETA DE TEMPORADAS
+  // ─────────────────────────────────────────────────────────────────────────────
+  def cerrarTemporadaActual(): Either[String, String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT s.id, s.nombre, s.categoria,
+          COUNT(m.id) as pj,
+          COALESCE(AVG(m.nota), 0) as media,
+          SUM(CASE WHEN m.goles_contra = 0 THEN 1 ELSE 0 END) as cs
+        FROM seasons s
+        LEFT JOIN matches m ON m.season_id = s.id AND m.status = 'PLAYED'
+        WHERE s.id = (SELECT MAX(id) FROM seasons)
+        GROUP BY s.id, s.nombre, s.categoria""")
+      if (!rs.next()) return Left("No hay temporada activa.")
+      val (sid, nombre, cat, pj, media, cs) = (
+        rs.getInt("id"), Option(rs.getString("nombre")).getOrElse(rs.getString("categoria")), rs.getString("categoria"),
+        rs.getInt("pj"), rs.getDouble("media"), rs.getInt("cs"))
+      if (pj < 1) return Left(s"La temporada '$nombre' no tiene partidos jugados. No se puede cerrar.")
+      val ps = conn.prepareStatement(
+        "UPDATE seasons SET fecha_fin=CURRENT_DATE, media_final=?, porterias_cero_total=? WHERE id=?")
+      ps.setDouble(1, media); ps.setInt(2, cs); ps.setInt(3, sid)
+      ps.executeUpdate()
+      conn.createStatement().executeUpdate(
+        s"UPDATE matches SET status='CANCELLED' WHERE season_id=$sid AND status='SCHEDULED'")
+      Right(s"Temporada '$nombre — $cat' cerrada — $pj partidos · media ${"%.1f".format(media)} · $cs porterías a cero.")
+    } finally { conn.close() }
+  }
+
+  def startNewSeason(categoria: String, nombreClub: String = "", fechaInicio: String = ""): Either[String, String] = {
+    val conn = getConnection()
+    try {
+      val rsCheck = conn.createStatement().executeQuery(
+        "SELECT id, COALESCE(nombre, categoria) as nombre, fecha_fin FROM seasons ORDER BY id DESC LIMIT 1")
+      if (rsCheck.next() && Option(rsCheck.getDate("fecha_fin")).isEmpty)
+        return Left(s"Cierra primero la temporada '${rsCheck.getString("nombre")}' antes de crear una nueva.")
+
+      val inicio = if (fechaInicio.nonEmpty) fechaInicio else java.time.LocalDate.now().toString
+      val anioInicio = java.time.LocalDate.parse(inicio).getYear
+      val nombreTemporada = s"$anioInicio-${(anioInicio + 1).toString.takeRight(2)}"
+
+      val rsPrev = conn.createStatement().executeQuery(
+        "SELECT * FROM seasons ORDER BY id DESC LIMIT 1")
+      val (club, foto, escudo, div, han, kic, ref, spd, pos, cinturon, fechaNac) =
+        if (rsPrev.next()) (
+          if (nombreClub.nonEmpty) nombreClub else Option(rsPrev.getString("nombre_club")).getOrElse(""),
+          Option(rsPrev.getString("foto_jugador_url")).getOrElse(""),
+          Option(rsPrev.getString("club_escudo_url")).getOrElse(""),
+          rsPrev.getDouble("stat_div"), rsPrev.getDouble("stat_han"), rsPrev.getDouble("stat_kic"),
+          rsPrev.getDouble("stat_ref"), rsPrev.getDouble("stat_spd"), rsPrev.getDouble("stat_pos"),
+          Option(rsPrev.getString("judo_belt")).getOrElse("Blanco"),
+          Option(rsPrev.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19")
+        ) else (nombreClub, "", "", 62.0, 60.0, 55.0, 60.0, 62.0, 58.0, "Blanco", "2020-06-19")
+
+      val ps = conn.prepareStatement("""
+        INSERT INTO seasons
+          (nombre, categoria, nombre_club, foto_jugador_url, club_escudo_url,
+           media, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos,
+           fecha_inicio, fecha_nacimiento, judo_belt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?::date,?::date,?)""")
+      ps.setString(1, nombreTemporada); ps.setString(2, fixEncoding(categoria))
+      ps.setString(3, fixEncoding(club)); ps.setString(4, foto); ps.setString(5, escudo)
+      ps.setDouble(6, (div+han+kic+ref+spd+pos)/6.0)
+      ps.setDouble(7, div); ps.setDouble(8, han); ps.setDouble(9, kic)
+      ps.setDouble(10, ref); ps.setDouble(11, spd); ps.setDouble(12, pos)
+      ps.setString(13, inicio); ps.setString(14, fechaNac); ps.setString(15, cinturon)
+      ps.executeUpdate()
+
+      conn.createStatement().executeUpdate("DELETE FROM ai_cache")
+      conn.createStatement().executeUpdate("DELETE FROM feature_cache")
+      conn.createStatement().executeUpdate("DELETE FROM forma_diaria")
+      conn.createStatement().executeUpdate("DELETE FROM micro_objetivos")
+      conn.createStatement().executeUpdate(
+        "UPDATE idp_temporadas SET estado='COMPLETADA' WHERE estado='ACTIVA'")
+
+      Right(s"Nueva temporada '$nombreTemporada — $categoria' iniciada. Reset: caché IA, forma diaria, micro-objetivos. Conservado: historial completo.")
+    } finally { conn.close() }
+  }
+
+  /** Genera en background el informe de valoracion final de una temporada cerrada y lo guarda en seasons.informe_fin_temporada. */
+  def generarInformeFinTemporada(seasonId: Int): Unit = {
+    new Thread(() => {
+      val conn = getConnection()
+      try {
+        val rs = conn.prepareStatement("SELECT nombre, categoria, fecha_nacimiento FROM seasons WHERE id=?")
+        rs.setInt(1, seasonId)
+        val rsRes = rs.executeQuery()
+        if (rsRes.next()) {
+          val nombreTemp = Option(rsRes.getString("nombre")).getOrElse(rsRes.getString("categoria"))
+          val cat = rsRes.getString("categoria")
+          val edad = calcularEdadExacta(Option(rsRes.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19"))
+
+          val rsStats = conn.prepareStatement("""
+            SELECT COUNT(*) as pj,
+              SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END) as pg,
+              SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) as pe,
+              SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) as pp,
+              COALESCE(SUM(goles_favor),0) as gf, COALESCE(SUM(goles_contra),0) as gc,
+              COALESCE(AVG(nota),0) as media,
+              SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END) as cs
+            FROM matches WHERE season_id=? AND status='PLAYED'""")
+          rsStats.setInt(1, seasonId)
+          val st = rsStats.executeQuery()
+          st.next()
+          val (pj, pg, pe, pp, gf, gc, media, cs) = (st.getInt("pj"), st.getInt("pg"), st.getInt("pe"), st.getInt("pp"), st.getInt("gf"), st.getInt("gc"), st.getDouble("media"), st.getInt("cs"))
+
+          val rsMejor = conn.prepareStatement("SELECT rival, fecha, nota FROM matches WHERE season_id=? AND status='PLAYED' ORDER BY nota DESC LIMIT 1")
+          rsMejor.setInt(1, seasonId)
+          val bm = rsMejor.executeQuery()
+          val mejorPartido = if (bm.next()) s"${bm.getString("rival")} (${bm.getDate("fecha")}) nota ${bm.getDouble("nota")}" else "N/D"
+
+          val rsPeor = conn.prepareStatement("SELECT rival, fecha, nota FROM matches WHERE season_id=? AND status='PLAYED' ORDER BY nota ASC LIMIT 1")
+          rsPeor.setInt(1, seasonId)
+          val pm = rsPeor.executeQuery()
+          val peorPartido = if (pm.next()) s"${pm.getString("rival")} (${pm.getDate("fecha")}) nota ${pm.getDouble("nota")}" else "N/D"
+
+          val rsMes = conn.prepareStatement("""
+            SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, AVG(nota) as media
+            FROM matches WHERE season_id=? AND status='PLAYED' GROUP BY mes ORDER BY mes ASC""")
+          rsMes.setInt(1, seasonId)
+          val rsMesR = rsMes.executeQuery()
+          val evolucionMensual = new StringBuilder()
+          while (rsMesR.next()) evolucionMensual.append(s"${rsMesR.getString("mes")}: ${"%.1f".format(rsMesR.getDouble("media"))}; ")
+
+          val statsStr = s"PJ=$pj PG=$pg PE=$pe PP=$pp GF=$gf GC=$gc Media=${"%.1f".format(media)} PorteriasCero=$cs. Mejor partido: $mejorPartido. Peor partido: $peorPartido. Evolucion mensual: ${evolucionMensual.toString}"
+
+          val prompt = s"""Eres el director deportivo que hace la valoración final de temporada de Héctor, portero de $edad años. Temporada $nombreTemp — $cat. Datos: $statsStr. Genera en HTML limpio: <h2>VALORACIÓN FINAL — $nombreTemp</h2>, <h3>Rendimiento</h3> (párrafo evaluando la temporada en conjunto), <h3>Logro destacado</h3> (el mejor momento y por qué fue especial), <h3>Área de mejora prioritaria</h3> (lo más importante para la siguiente temporada), <h3>Carta al portero</h3> (párrafo emotivo en segunda persona dirigido a Héctor, como si fuera una carta de su entrenador que leerá cuando sea mayor). Lenguaje humano, no corporativo. Que sea memorable."""
+
+          val informe = AIProvider.ask(prompt, None, bypassCache = true).replace("```html", "").replace("```", "").trim
+
+          val up = conn.prepareStatement("UPDATE seasons SET informe_fin_temporada=? WHERE id=?")
+          up.setString(1, informe); up.setInt(2, seasonId)
+          up.executeUpdate()
+        }
+      } catch { case e: Exception => println(s"[!] generarInformeFinTemporada error: ${e.getMessage}") }
+      finally { conn.close() }
+    }).start()
+  }
+
+  def getInformeFinTemporada(seasonId: Int): Option[(String, String)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT COALESCE(nombre, categoria) as nombre, informe_fin_temporada FROM seasons WHERE id=?")
+      ps.setInt(1, seasonId)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some((rs.getString("nombre"), Option(rs.getString("informe_fin_temporada")).getOrElse("")))
+      else None
+    } finally { conn.close() }
+  }
+
+  def getTemporadaActivaInfo(): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT s.id, COALESCE(s.nombre, s.categoria) as nombre, s.categoria, s.fecha_inicio, s.fecha_fin,
+          (SELECT COUNT(*) FROM matches m WHERE m.season_id=s.id AND m.status='PLAYED') as pj,
+          (SELECT COALESCE(AVG(nota),0) FROM matches m WHERE m.season_id=s.id AND m.status='PLAYED') as media
+        FROM seasons s ORDER BY s.id DESC LIMIT 1""")
+      if (rs.next()) Some(Map(
+        "id" -> rs.getInt("id"), "nombre" -> rs.getString("nombre"), "categoria" -> rs.getString("categoria"),
+        "fechaInicio" -> Option(rs.getDate("fecha_inicio")).map(_.toString).getOrElse(""),
+        "fechaFin" -> Option(rs.getDate("fecha_fin")).map(_.toString).getOrElse(""),
+        "pj" -> rs.getInt("pj"), "media" -> rs.getDouble("media")
+      )) else None
+    } finally { conn.close() }
+  }
+
+  def getTemporadasCerradas(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT id, COALESCE(nombre, categoria) as nombre, fecha_inicio, fecha_fin, media_final, porterias_cero_total,
+          (SELECT COUNT(*) FROM matches m WHERE m.season_id=seasons.id AND m.status='PLAYED') as pj,
+          (informe_fin_temporada IS NOT NULL AND informe_fin_temporada != '') as tiene_informe
+        FROM seasons WHERE fecha_fin IS NOT NULL ORDER BY id DESC""")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "id" -> rs.getInt("id"), "nombre" -> rs.getString("nombre"),
+        "fechaInicio" -> Option(rs.getDate("fecha_inicio")).map(_.toString).getOrElse(""),
+        "fechaFin" -> Option(rs.getDate("fecha_fin")).map(_.toString).getOrElse(""),
+        "pj" -> rs.getInt("pj"), "mediaFinal" -> rs.getDouble("media_final"),
+        "porteriasCero" -> rs.getInt("porterias_cero_total"), "tieneInforme" -> rs.getBoolean("tiene_informe")
+      )
+      l
+    } finally { conn.close() }
+  }
   def getCareerSummary(): List[SeasonSummary] = { var l=List[SeasonSummary](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT s.id, s.categoria, s.club_escudo_url, s.foto_jugador_url, s.media, (SELECT COUNT(*) FROM matches m WHERE m.season_id=s.id AND m.status='PLAYED') as pj, (SELECT SUM(goles_contra) FROM matches m WHERE m.season_id=s.id AND m.status='PLAYED') as gc FROM seasons s ORDER BY s.id DESC"); while(rs.next()){ l=l:+SeasonSummary(rs.getInt("id"), Option(rs.getString("categoria")).getOrElse("Temp"), Option(rs.getString("club_escudo_url")).getOrElse(""), Option(rs.getString("foto_jugador_url")).getOrElse(""), rs.getInt("pj"), rs.getInt("gc"), 0, rs.getDouble("media").toInt) } } finally {conn.close()}; l }
   def saveRivalInfo(nombre: String, estilo: String, claves: String, notas: String): Unit = { val conn = getConnection(); try { conn.createStatement().executeUpdate(s"DELETE FROM rivals WHERE LOWER(nombre) = LOWER('${fixEncoding(nombre)}')"); val ps = conn.prepareStatement("INSERT INTO rivals (nombre, estilo_juego, jugadores_clave, notas_scouting) VALUES (?,?,?,?)"); ps.setString(1, fixEncoding(nombre)); ps.setString(2, estilo); ps.setString(3, fixEncoding(claves)); ps.setString(4, fixEncoding(notas)); ps.executeUpdate() } finally { conn.close() } }
   def getRivalInfo(nombre: String): Option[RivalInfo] = { var r: Option[RivalInfo]=None; val conn=getConnection(); try{ val ps=conn.prepareStatement("SELECT * FROM rivals WHERE LOWER(nombre)=LOWER(?)"); ps.setString(1,fixEncoding(nombre)); val rs=ps.executeQuery(); if(rs.next()) r=Some(RivalInfo(rs.getString("nombre"), rs.getString("estilo_juego"), rs.getString("jugadores_clave"), rs.getString("notas_scouting"))) } finally {conn.close()}; r }
@@ -4894,16 +5370,19 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   }
   def importCalendarCSV(csvData: String): String = { var count=0; val lines=csvData.split("\n").map(_.trim).filter(_.nonEmpty); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons"); if(rs.next()){ val sId=rs.getInt("id"); val ps=conn.prepareStatement("INSERT INTO matches (season_id, fecha, rival, tipo_partido, status, goles_favor, goles_contra, minutos, nota, paradas) VALUES (?, ?, ?, ?, 'SCHEDULED', 0, 0, 0, 0, 0)"); lines.foreach { l => try { val p=l.split(",").map(_.trim); if(p.length>=2){ ps.setInt(1,sId); ps.setDate(2,Date.valueOf(p(0))); ps.setString(3,fixEncoding(p(1))); ps.setString(4,if(p.length>2) p(2).toUpperCase else "LIGA"); ps.executeUpdate(); count+=1 } } catch {case _:Exception=>} } } } finally {conn.close()}; s"Importados $count eventos." }
   def importWellnessCSV(csvData: String): String = { var count=0; val lines=csvData.split("\n").map(_.trim).filter(_.nonEmpty); val dataLines=if(lines.headOption.exists(_.toLowerCase.contains("sueno"))) lines.tail else lines; dataLines.foreach { line => try { val p=line.split(",").map(_.trim); if(p.length>=5){ logWellness(p(0).toInt, p(1).toDouble, p(2).toInt, p(3).toInt, if(p.length>4) p(4) else "", 0, 0.0, if(p.length>5) p(5).toInt else 3, "", "DISPONIBLE"); count+=1 } } catch {case _:Exception=>} }; s"Importados $count registros bio." }
-  def logGrowth(altura: Double, peso: Double, tallaSentadoCm: Option[Double] = None, longitudPiernaCm: Option[Double] = None): Unit = {
+  def logGrowth(altura: Double, peso: Double, tallaSentadoCm: Option[Double] = None, longitudPiernaCm: Option[Double] = None,
+                kgMusculo: Option[Double] = None, kgMasaOsea: Option[Double] = None): Unit = {
     val conn = getConnection()
     try {
       var velocity = 0.0
       val rsLast = conn.createStatement().executeQuery("SELECT altura FROM physical_growth ORDER BY fecha DESC LIMIT 1")
       if (rsLast.next()) { val lastHeight = rsLast.getDouble("altura"); if (altura > lastHeight) velocity = altura - lastHeight }
-      val ps = conn.prepareStatement("INSERT INTO physical_growth (altura, peso, velocidad_crecimiento, talla_sentado_cm, longitud_pierna_cm) VALUES (?, ?, ?, ?, ?)")
+      val ps = conn.prepareStatement("INSERT INTO physical_growth (altura, peso, velocidad_crecimiento, talla_sentado_cm, longitud_pierna_cm, kg_musculo, kg_masa_osea) VALUES (?, ?, ?, ?, ?, ?, ?)")
       ps.setDouble(1, altura); ps.setDouble(2, peso); ps.setDouble(3, velocity)
       tallaSentadoCm match { case Some(v) => ps.setDouble(4, v); case None => ps.setNull(4, java.sql.Types.DOUBLE) }
       longitudPiernaCm match { case Some(v) => ps.setDouble(5, v); case None => ps.setNull(5, java.sql.Types.DOUBLE) }
+      kgMusculo match { case Some(v) => ps.setDouble(6, v); case None => ps.setNull(6, java.sql.Types.DOUBLE) }
+      kgMasaOsea match { case Some(v) => ps.setDouble(7, v); case None => ps.setNull(7, java.sql.Types.DOUBLE) }
       ps.executeUpdate()
     } finally { conn.close() }
   }
@@ -4958,7 +5437,8 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   def getActiveGear(): List[GearItem] = { var l=List[GearItem](); val conn=getConnection(); try { val rs=conn.createStatement().executeQuery("SELECT * FROM gear WHERE activo = TRUE ORDER BY tipo DESC"); while(rs.next()) { val (u,max)=(rs.getInt("usos_actuales"),rs.getInt("vida_util_estimada")); l=l:+GearItem(rs.getInt("id"),rs.getString("nombre"),rs.getString("tipo"),u,max,if(max>0 && u.toDouble/max > 0.9) "Critico" else "Optimo", Option(rs.getString("imagen_url")).getOrElse("")) } } finally { conn.close() }; l }
   def logWellness(sueno: Int, horas: Double, energia: Int, dolor: Int, zona: String, altura: Int, peso: Double, animo: Int, notas: String, estadoFisico: String,
                    suenoProfundoMin: Option[Int] = None, suenoLigeroMin: Option[Int] = None, suenoDespiertoMin: Option[Int] = None,
-                   tallaSentadoCm: Option[Double] = None, longitudPiernaCm: Option[Double] = None): Unit = {
+                   tallaSentadoCm: Option[Double] = None, longitudPiernaCm: Option[Double] = None,
+                   kgMusculo: Option[Double] = None, kgMasaOsea: Option[Double] = None): Unit = {
     val conn=getConnection()
     try {
       val s=conn.prepareStatement("INSERT INTO wellness (sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -4966,10 +5446,19 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => s.setInt(idx, x); case None => s.setNull(idx, java.sql.Types.INTEGER) }
       setOptInt(11, suenoProfundoMin); setOptInt(12, suenoLigeroMin); setOptInt(13, suenoDespiertoMin)
       s.executeUpdate()
-      if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso, tallaSentadoCm, longitudPiernaCm)
+      if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso, tallaSentadoCm, longitudPiernaCm, kgMusculo, kgMasaOsea)
     } finally { conn.close() }
   }
-  def logTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int, rutina: String): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle) VALUES (?,?,?,?,?,?)"); s.setString(1,tipo); s.setString(2,fixEncoding(foco)); s.setInt(3,rpe); s.setInt(4,calidad); s.setInt(5, atencion); s.setString(6,fixEncoding(rutina)); s.executeUpdate(); conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE"); if (tipo.contains("Papa")) progressDrills() } finally { conn.close() } }
+  def logTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int, rutina: String, feedbackEntrenador: String = ""): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle, feedback_entrenador) VALUES (?,?,?,?,?,?,?)"); s.setString(1,tipo); s.setString(2,fixEncoding(foco)); s.setInt(3,rpe); s.setInt(4,calidad); s.setInt(5, atencion); s.setString(6,fixEncoding(rutina)); if (feedbackEntrenador.nonEmpty) s.setString(7, fixEncoding(feedbackEntrenador)) else s.setNull(7, java.sql.Types.VARCHAR); s.executeUpdate(); conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE"); if (tipo.contains("Papa")) progressDrills() } finally { conn.close() } }
+
+  def getUltimoFeedbackEntrenador(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT feedback_entrenador, fecha FROM trainings WHERE tipo='Academia' AND feedback_entrenador IS NOT NULL AND feedback_entrenador != '' AND fecha >= CURRENT_DATE - 7 ORDER BY fecha DESC LIMIT 1")
+      if (rs.next()) Some(rs.getString("feedback_entrenador")) else None
+    } finally { conn.close() }
+  }
   // --- EN: DatabaseManager.scala ---
 
   def getSmartInsights(): String = {

@@ -73,6 +73,103 @@ object AdminController extends cask.Routes {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 2.5 — GESTION DE TEMPORADAS (UI)
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def temporadasPanel(msg: String): Modifier = {
+    val activa = DatabaseManager.getTemporadaActivaInfo()
+    val cerradas = DatabaseManager.getTemporadasCerradas()
+
+    val msgBox: Modifier = if (msg.nonEmpty) div(cls := "alert alert-success small p-2 mb-3", msg) else div()
+
+    val panelActiva: Modifier = activa match {
+      case Some(temp) =>
+        val pj = temp("pj").asInstanceOf[Int]
+        val media = temp("media").asInstanceOf[Double]
+        val sid = temp("id").asInstanceOf[Int]
+        div(cls := "border border-secondary rounded p-3 mb-3",
+          div(cls := "d-flex justify-content-between align-items-start",
+            div(
+              div(cls := "fw-bold text-warning", s"${temp("nombre")} — ${temp("categoria")}"),
+              div(cls := "xx-small text-muted", s"Inicio: ${temp("fechaInicio")}"),
+              div(cls := "small text-white mt-1", s"$pj partidos jugados · media ${"%.1f".format(media)}")
+            ),
+            div(cls := "d-flex gap-2",
+              if (pj > 0) form(action := "/admin/temporada/cerrar", method := "post",
+                button(tpe := "submit", cls := "btn btn-sm btn-outline-danger fw-bold",
+                  onclick := "return confirm('¿Cerrar la temporada actual? Esta acción no se puede deshacer.');",
+                  "🔒 Cerrar temporada")
+              ) else frag(),
+              a(href := s"/admin/temporada/$sid/informe", target := "_blank",
+                cls := "btn btn-sm btn-outline-info fw-bold", "📄 Informe final")
+            )
+          )
+        )
+      case None => div(cls := "text-muted small mb-3", "No hay temporada activa.")
+    }
+
+    val puedeCrearNueva = activa.isEmpty || Option(activa.get("fechaFin").asInstanceOf[String]).exists(_.nonEmpty)
+
+    val formNueva: Modifier = if (puedeCrearNueva)
+      form(action := "/admin/temporada/nueva", method := "post", cls := "border border-secondary rounded p-3 mb-3",
+        h6(cls := "text-info small text-uppercase", "Nueva temporada"),
+        div(cls := "mb-2",
+          label(cls := "form-label small text-muted", "Categoría *"),
+          input(tpe := "text", name := "categoria", required := true, cls := "form-control form-control-sm fw-bold",
+            placeholder := "Ej: Benjamín A")
+        ),
+        div(cls := "mb-2",
+          label(cls := "form-label small text-muted", "Nombre del club (opcional)"),
+          input(tpe := "text", name := "nombreClub", cls := "form-control form-control-sm fw-bold")
+        ),
+        div(cls := "mb-2",
+          label(cls := "form-label small text-muted", "Fecha de inicio"),
+          input(tpe := "date", name := "fechaInicio", cls := "form-control form-control-sm fw-bold",
+            value := java.time.LocalDate.now().toString)
+        ),
+        div(cls := "form-check mb-2",
+          input(cls := "form-check-input", tpe := "checkbox", name := "confirmar", id := "confirmarReset", required := true),
+          label(`for` := "confirmarReset", cls := "form-check-label xx-small text-muted",
+            "Entiendo que se reiniciará la caché de IA y los micro-objetivos")
+        ),
+        div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-sm btn-success fw-bold", "Iniciar nueva temporada"))
+      )
+    else div()
+
+    val historial: Modifier = if (cerradas.isEmpty)
+      div(cls := "text-muted xx-small text-center py-2", "Sin temporadas cerradas todavía.")
+    else
+      table(cls := "table table-dark table-sm small mb-0",
+        thead(tr(th("Temporada"), th("Inicio"), th("Fin"), th("PJ"), th("Media"), th("P0"), th(""))),
+        tbody(
+          frag(cerradas.map { c =>
+            tr(
+              td(c("nombre").asInstanceOf[String]),
+              td(c("fechaInicio").asInstanceOf[String]),
+              td(c("fechaFin").asInstanceOf[String]),
+              td(c("pj").asInstanceOf[Int].toString),
+              td("%.1f".format(c("mediaFinal").asInstanceOf[Double])),
+              td(c("porteriasCero").asInstanceOf[Int].toString),
+              td(if (c("tieneInforme").asInstanceOf[Boolean])
+                a(href := s"/admin/temporada/${c("id")}/informe", target := "_blank", cls := "text-info small", "Ver informe")
+                else span(cls := "text-muted xx-small", "—"))
+            )
+          }: _*)
+        )
+      )
+
+    div(cls := "card bg-dark border-warning shadow mb-4 p-3",
+      h5(cls := "text-warning", "📅 GESTIÓN DE TEMPORADAS"),
+      msgBox,
+      panelActiva,
+      formNueva,
+      div(cls := "border-top border-secondary pt-3 mt-2",
+        h6(cls := "text-muted small text-uppercase mb-2", "Historial de temporadas cerradas"),
+        historial
+      )
+    )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // MODULO — PANEL DE BACKUPS AUTOMATICOS
   // ─────────────────────────────────────────────────────────────────────────────
   private def backupsPanel(msg: String): Modifier = {
@@ -272,12 +369,14 @@ object AdminController extends cask.Routes {
   }
 
   @cask.get("/admin")
-  def adminPage() = {
+  def adminPage(msg: String = "") = {
     val objs = DatabaseManager.getSeasonObjectives()
     val content = basePage("settings",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
           h2(cls := "text-danger text-center mb-4", "ADMINISTRACION"),
+          if (msg.nonEmpty) div(cls := "alert alert-success small p-2 mb-3", msg) else div(),
+          temporadasPanel(""),
           div(cls := "card bg-dark border-warning shadow mb-4 p-3",
             h5(cls := "text-warning", "Base de Datos Leyendas"),
             p(cls := "small text-muted fw-bold", "Si no ves la comparacion en Trayectoria, pulsa aqui."),
@@ -831,6 +930,76 @@ object AdminController extends cask.Routes {
       )
     ).render
     renderHtml(htmlContent)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 2.6 — RUTAS DE GESTION DE TEMPORADAS
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.post("/admin/temporada/cerrar")
+  def cerrarTemporada(request: cask.Request) = withAuth(request) {
+    val msg = DatabaseManager.cerrarTemporadaActual() match {
+      case Right(m) => m
+      case Left(e) => e
+    }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+    ))
+  }
+
+  @cask.postForm("/admin/temporada/nueva")
+  def nuevaTemporada(request: cask.Request, categoria: String, nombreClub: String = "", fechaInicio: String = "") = withAuth(request) {
+    val msg = DatabaseManager.startNewSeason(fixEncoding(categoria), fixEncoding(nombreClub), fechaInicio) match {
+      case Right(m) => m
+      case Left(e) => e
+    }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+    ))
+  }
+
+  @cask.get("/admin/temporada/:id/informe")
+  def verInformeTemporada(request: cask.Request, id: Int) = withAuth(request) {
+    DatabaseManager.getInformeFinTemporada(id) match {
+      case Some((nombre, informe)) if informe.nonEmpty =>
+        val htmlStr = s"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"/><title>Informe — $nombre</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap');
+  body { font-family:'Oswald',sans-serif; background:#fff; color:#1a1a1a; padding:40px; max-width:800px; margin:0 auto; }
+  h2 { color:#d4af37; border-bottom:3px solid #d4af37; padding-bottom:10px; }
+  h3 { color:#0f3460; margin-top:24px; }
+  .no-print { text-align:center; margin-bottom:24px; }
+  .print-btn { background:#d4af37; color:#000; border:none; padding:12px 32px; font-size:16px; font-weight:700; border-radius:6px; cursor:pointer; }
+  @media print { .no-print { display:none; } }
+</style></head>
+<body>
+<div class="no-print"><button class="print-btn" onclick="window.print()">IMPRIMIR / GUARDAR PDF</button></div>
+$informe
+</body></html>"""
+        cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+      case Some((nombre, _)) =>
+        val htmlStr = doctype("html")(html(
+          head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
+          body(style := "background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';",
+            h1("Informe no generado"), h3(s"Temporada: $nombre"),
+            form(action := s"/admin/temporada/$id/informe/generar", method := "post", cls := "d-inline-block mt-3",
+              button(tpe := "submit", cls := "btn btn-warning fw-bold", "🧠 Generar informe ahora")
+            ),
+            div(style := "margin-top:20px;", a(href := "/admin", cls := "btn btn-outline-light fw-bold", "Volver"))
+          )
+        )).render
+        cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+      case None =>
+        cask.Response("Temporada no encontrada".getBytes("UTF-8"), statusCode = 404, headers = Seq("Content-Type" -> "text/plain; charset=utf-8"))
+    }
+  }
+
+  @cask.post("/admin/temporada/:id/informe/generar")
+  def generarInformeTemporadaAction(request: cask.Request, id: Int) = withAuth(request) {
+    DatabaseManager.generarInformeFinTemporada(id)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/admin?msg=${java.net.URLEncoder.encode("Generando informe en segundo plano, vuelve a consultar en un minuto.", "UTF-8")}"
+    ))
   }
 
   initialize()

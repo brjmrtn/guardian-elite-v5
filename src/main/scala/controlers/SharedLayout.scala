@@ -7,8 +7,8 @@ import java.nio.charset.StandardCharsets
 object SharedLayout {
 
   // --- Configuracion de seguridad (desde variables de entorno) ---
-  val authUser          = sys.env.getOrElse("GUARDIAN_USER", "admin")
-  val authPass          = sys.env.getOrElse("GUARDIAN_PASS", "hector2026")
+  val authUser          = sys.env.getOrElse("GUARDIAN_USER", "")
+  val authPass          = sys.env.getOrElse("GUARDIAN_PASS", "")
   val sessionCookieName = "guardian_session"
 
   def withAuth(request: cask.Request)(block: => cask.Response[Array[Byte]]): cask.Response[Array[Byte]] = {

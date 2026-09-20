@@ -314,6 +314,14 @@ object AmateurDatabaseManager {
         created_at  TIMESTAMP DEFAULT NOW(),
         UNIQUE(user_id, fecha)
       )""")
+      // Datos de la bascula inteligente — Bloque 3.3
+      s.executeUpdate("ALTER TABLE am_body_metrics ADD COLUMN IF NOT EXISTS pct_grasa DOUBLE PRECISION DEFAULT NULL")
+      s.executeUpdate("ALTER TABLE am_body_metrics ADD COLUMN IF NOT EXISTS pct_agua DOUBLE PRECISION DEFAULT NULL")
+      s.executeUpdate("ALTER TABLE am_body_metrics ADD COLUMN IF NOT EXISTS pct_proteina DOUBLE PRECISION DEFAULT NULL")
+      s.executeUpdate("ALTER TABLE am_body_metrics ADD COLUMN IF NOT EXISTS grasa_visceral INT DEFAULT NULL")
+      s.executeUpdate("ALTER TABLE am_body_metrics ADD COLUMN IF NOT EXISTS kg_musculo DOUBLE PRECISION DEFAULT NULL")
+      s.executeUpdate("ALTER TABLE am_body_metrics ADD COLUMN IF NOT EXISTS kg_masa_osea DOUBLE PRECISION DEFAULT NULL")
+      s.executeUpdate("ALTER TABLE am_body_metrics ADD COLUMN IF NOT EXISTS metabolismo_basal INT DEFAULT NULL")
 
       // Wellness — añadido en v7.4
       s.executeUpdate("""CREATE TABLE IF NOT EXISTS am_wellness (
@@ -1998,21 +2006,32 @@ $jsonTpl"""
   }
 
   def saveBodyMetrics(userId: Int, fecha: String, peso: Double, altura: Double,
-    grasa: Option[Double], cintura: Option[Double], notas: String): Unit = {
+    grasa: Option[Double], cintura: Option[Double], notas: String,
+    pctGrasa: Option[Double] = None, pctAgua: Option[Double] = None, pctProteina: Option[Double] = None,
+    grasaVisceral: Option[Int] = None, kgMusculo: Option[Double] = None, kgMasaOsea: Option[Double] = None,
+    metabolismoBasal: Option[Int] = None): Unit = {
     val conn = getConn()
     try {
       val ps = conn.prepareStatement("""
-        INSERT INTO am_body_metrics (user_id, fecha, peso, altura, grasa, cintura, notas)
-        VALUES (?, ?::date, ?, ?, ?, ?, ?)
+        INSERT INTO am_body_metrics (user_id, fecha, peso, altura, grasa, cintura, notas,
+          pct_grasa, pct_agua, pct_proteina, grasa_visceral, kg_musculo, kg_masa_osea, metabolismo_basal)
+        VALUES (?, ?::date, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (user_id, fecha) DO UPDATE
           SET peso=EXCLUDED.peso, altura=EXCLUDED.altura,
-              grasa=EXCLUDED.grasa, cintura=EXCLUDED.cintura, notas=EXCLUDED.notas
+              grasa=EXCLUDED.grasa, cintura=EXCLUDED.cintura, notas=EXCLUDED.notas,
+              pct_grasa=EXCLUDED.pct_grasa, pct_agua=EXCLUDED.pct_agua, pct_proteina=EXCLUDED.pct_proteina,
+              grasa_visceral=EXCLUDED.grasa_visceral, kg_musculo=EXCLUDED.kg_musculo,
+              kg_masa_osea=EXCLUDED.kg_masa_osea, metabolismo_basal=EXCLUDED.metabolismo_basal
       """)
       ps.setInt(1, userId); ps.setString(2, fecha)
       ps.setDouble(3, peso); ps.setDouble(4, altura)
       grasa match { case Some(v) => ps.setDouble(5, v) case None => ps.setNull(5, java.sql.Types.DOUBLE) }
       cintura match { case Some(v) => ps.setDouble(6, v) case None => ps.setNull(6, java.sql.Types.DOUBLE) }
       ps.setString(7, fix(notas))
+      def setOptD(idx: Int, v: Option[Double]): Unit = v match { case Some(x) => ps.setDouble(idx, x); case None => ps.setNull(idx, java.sql.Types.DOUBLE) }
+      def setOptI(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => ps.setInt(idx, x); case None => ps.setNull(idx, java.sql.Types.INTEGER) }
+      setOptD(8, pctGrasa); setOptD(9, pctAgua); setOptD(10, pctProteina)
+      setOptI(11, grasaVisceral); setOptD(12, kgMusculo); setOptD(13, kgMasaOsea); setOptI(14, metabolismoBasal)
       ps.executeUpdate()
     } finally { conn.close() }
   }

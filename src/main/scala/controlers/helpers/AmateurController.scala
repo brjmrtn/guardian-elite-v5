@@ -3630,6 +3630,22 @@ $penSection
           div(cls := "mb-2",
             label(cls := "xx-small text-muted fw-bold", "FECHA"),
             input(tpe := "date", id := "inp-fecha-body", cls := "form-control mt-1", value := today)),
+          div(cls := "card-am p-2 mb-2", style := "border-style:dashed;",
+            div(cls := "xx-small fw-bold text-muted mb-2", "📊 DATOS DE LA BÁSCULA INTELIGENTE (opcional)"),
+            div(cls := "xx-small text-muted mb-1", "Composición"),
+            div(cls := "row g-2 mb-2",
+              div(cls := "col-6", input(tpe := "number", id := "inp-pctGrasa", step := "0.1", cls := "form-control form-control-sm", placeholder := "% Grasa")),
+              div(cls := "col-6", input(tpe := "number", id := "inp-pctAgua", step := "0.1", cls := "form-control form-control-sm", placeholder := "% Agua")),
+              div(cls := "col-6", input(tpe := "number", id := "inp-pctProteina", step := "0.1", cls := "form-control form-control-sm", placeholder := "% Proteína")),
+              div(cls := "col-6", input(tpe := "number", id := "inp-grasaVisceral", step := "1", cls := "form-control form-control-sm", placeholder := "Grasa visceral"))
+            ),
+            div(cls := "xx-small text-muted mb-1", "Masa"),
+            div(cls := "row g-2",
+              div(cls := "col-4", input(tpe := "number", id := "inp-kgMusculo", step := "0.1", cls := "form-control form-control-sm", placeholder := "Músculo kg")),
+              div(cls := "col-4", input(tpe := "number", id := "inp-kgMasaOsea", step := "0.1", cls := "form-control form-control-sm", placeholder := "Hueso kg")),
+              div(cls := "col-4", input(tpe := "number", id := "inp-metabolismoBasal", step := "1", cls := "form-control form-control-sm", placeholder := "Metabolismo"))
+            )
+          ),
           div(id := "imc-preview", cls := "text-center py-2 mb-2",
             style := "background:rgba(255,255,255,.04); border-radius:8px;",
             span(cls := "xx-small text-muted", "IMC: "),
@@ -3673,6 +3689,13 @@ $penSection
             params.append('grasa',document.getElementById('inp-grasa').value);
             params.append('cintura',document.getElementById('inp-cintura').value);
             params.append('fecha',document.getElementById('inp-fecha-body').value);
+            params.append('pctGrasa',document.getElementById('inp-pctGrasa').value);
+            params.append('pctAgua',document.getElementById('inp-pctAgua').value);
+            params.append('pctProteina',document.getElementById('inp-pctProteina').value);
+            params.append('grasaVisceral',document.getElementById('inp-grasaVisceral').value);
+            params.append('kgMusculo',document.getElementById('inp-kgMusculo').value);
+            params.append('kgMasaOsea',document.getElementById('inp-kgMasaOsea').value);
+            params.append('metabolismoBasal',document.getElementById('inp-metabolismoBasal').value);
             document.getElementById('btn-body').disabled=true;
             document.getElementById('btn-body').textContent='Guardando...';
             fetch('/am/body/save',{method:'POST',body:params,
@@ -3715,7 +3738,10 @@ $penSection
           str("altura").toDoubleOption.getOrElse(0.0),
           str("grasa").toDoubleOption.map(Some(_)).getOrElse(None),
           str("cintura").toDoubleOption.map(Some(_)).getOrElse(None),
-          ""
+          "",
+          str("pctGrasa").toDoubleOption, str("pctAgua").toDoubleOption, str("pctProteina").toDoubleOption,
+          str("grasaVisceral").toIntOption, str("kgMusculo").toDoubleOption, str("kgMasaOsea").toDoubleOption,
+          str("metabolismoBasal").toIntOption
         )
         cask.Response(Array.emptyByteArray, 200)
       } catch { case e: Exception =>

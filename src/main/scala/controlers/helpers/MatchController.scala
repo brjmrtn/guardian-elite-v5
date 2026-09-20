@@ -204,7 +204,37 @@ object MatchController extends cask.Routes {
                 div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white fw-bold", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
                 input(tpe:="hidden", name:="reaccion", value:=""),  // campo legacy mantenido para DB
                 div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
-                div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
+
+                // ── BLOQUE 4.1: RUBRICA DE VALORACION (opcional pero recomendado) ─
+                div(cls := "mb-3 p-2 border border-warning rounded bg-warning bg-opacity-10",
+                  div(cls := "d-flex justify-content-between align-items-center", style := "cursor:pointer;", onclick := "toggleRubrica()",
+                    label(cls := "text-warning fw-bold small mb-0", style := "cursor:pointer;", "📋 RÚBRICA DE VALORACIÓN (opcional pero recomendado)"),
+                    span(id := "rubricaChevron", cls := "text-warning small", "▼")
+                  ),
+                  div(id := "rubricaPanel", style := "display:none;",
+                    div(cls := "xx-small text-muted mt-2 mb-2", "Puntúa 1-5 cada dimensión. Se sugerirá una nota automática que podrás editar."),
+                    Seq(
+                      ("rubricaPosicion", "Posición y movimientos", "1=siempre fuera de lugar / 5=anticipa siempre el juego"),
+                      ("rubricaDecisiones", "Decisiones bajo presión", "1=duda siempre, sale tarde / 5=decisiones rápidas en 1v1"),
+                      ("rubricaPies", "Juego con los pies", "1=evita el balón / 5=distribuye con intención bajo presión"),
+                      ("rubricaComunicacion", "Comunicación", "1=no habla / 5=dirige activamente la defensa"),
+                      ("rubricaActitud", "Actitud y concentración", "1=se desconecta tras errores / 5=líder todo el partido")
+                    ).map { case (fieldName, label_, hint) =>
+                      div(cls := "mb-2",
+                        label(cls := "xx-small text-white fw-bold d-block", label_),
+                        div(cls := "xx-small text-muted mb-1", hint),
+                        select(name := fieldName, id := fieldName, cls := "form-select form-select-sm bg-dark text-white border-warning", onchange := "calcNotaSugerida()",
+                          option(value := "", "— Sin puntuar —"),
+                          option(value := "1", "1"), option(value := "2", "2"), option(value := "3", "3"),
+                          option(value := "4", "4"), option(value := "5", "5")
+                        )
+                      )
+                    },
+                    div(id := "notaSugeridaBox", cls := "xx-small text-warning fw-bold text-center mt-2", "")
+                  )
+                ),
+
+                div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", id := "notaInput", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
 
                 // ── REGISTRO DE GOLES ENCAJADOS ─────────────────────────
                 div(cls:="mb-4 p-3 border border-danger rounded",
@@ -275,6 +305,42 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
+                // ── BLOQUE 4.3: METRICAS DE CANTERA (opcional) ────────────
+                div(cls := "mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
+                  label(cls := "form-label text-white small fw-bold w-100 text-center", "📐 MÉTRICAS DE CANTERA (opcional)"),
+                  div(cls := "mb-2",
+                    label(cls := "xx-small text-muted fw-bold", "Posición en goles encajados"),
+                    select(name := "posicionSet", cls := "form-select form-select-sm bg-dark text-white fw-bold",
+                      option(value := "", "— Sin especificar —"),
+                      option(value := "BIEN_PLANTADO", "Bien plantado"),
+                      option(value := "DESPLAZAMIENTO_TARDIO", "Desplazamiento tardío"),
+                      option(value := "PASO_NEGATIVO", "Paso negativo"),
+                      option(value := "IMPARABLE", "Imparable")
+                    )
+                  ),
+                  div(cls := "mb-2",
+                    label(cls := "xx-small text-muted fw-bold", "Altura defensiva del bloque"),
+                    select(name := "alturaBloque", cls := "form-select form-select-sm bg-dark text-white fw-bold",
+                      option(value := "", "— Sin especificar —"),
+                      option(value := "BAJO_PALOS", "Bajo palos"),
+                      option(value := "ADELANTADO_LIBERO", "Adelantado / líbero")
+                    )
+                  ),
+                  div(cls := "mb-2",
+                    label(cls := "xx-small text-muted fw-bold", "Acciones con pie no dominante"),
+                    input(tpe := "number", step := "1", min := "0", name := "pieNoDominanteAcciones", cls := "form-control form-control-sm bg-dark text-white fw-bold", value := "0")
+                  ),
+                  div(cls := "mb-1",
+                    label(cls := "xx-small text-muted fw-bold", "Iniciativa vocal"),
+                    select(name := "iniciativaVocal", cls := "form-select form-select-sm bg-dark text-white fw-bold",
+                      option(value := "", "— Sin especificar —"),
+                      option(value := "SI", "✅ Sí"),
+                      option(value := "PARCIAL", "🟡 Parcial"),
+                      option(value := "TIMIDO", "🔇 Tímido")
+                    )
+                  )
+                ),
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
@@ -282,6 +348,17 @@ object MatchController extends cask.Routes {
             // SCRIPTS
             script(raw("""
               function toggleFootbar(){var p=document.getElementById('footbarPanel');var c=document.getElementById('footbarChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
+              function toggleRubrica(){var p=document.getElementById('rubricaPanel');var c=document.getElementById('rubricaChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
+              function calcNotaSugerida(){
+                var ids=['rubricaPosicion','rubricaDecisiones','rubricaPies','rubricaComunicacion','rubricaActitud'];
+                var vals=ids.map(function(id){var v=document.getElementById(id).value;return v?parseInt(v):null;});
+                var box=document.getElementById('notaSugeridaBox');
+                if(vals.some(function(v){return v===null;})){box.textContent='';return;}
+                var nota=(vals[0]*0.25+vals[1]*0.25+vals[2]*0.20+vals[3]*0.15+vals[4]*0.15)*2;
+                nota=Math.round(nota*10)/10;
+                box.textContent='Nota sugerida por rúbrica: '+nota+' (editable abajo)';
+                document.getElementById('notaInput').value=nota;
+              }
               var currentMode='save';var goals=[];var saves=[];var origins=[];
               function setMode(mode){currentMode=mode;}
               function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
@@ -417,6 +494,20 @@ object MatchController extends cask.Routes {
     val comportamientoPresion = getStr("comportamientoPresion")
     val nutricionPrepartido   = getStr("nutricionPrepartido")
 
+    // Bloque 4.1: Rubrica de valoracion (opcional)
+    def getOptInt(key: String): Option[Int] = getStr(key).toIntOption
+    val rubricaPosicion     = getOptInt("rubricaPosicion")
+    val rubricaDecisiones   = getOptInt("rubricaDecisiones")
+    val rubricaPies         = getOptInt("rubricaPies")
+    val rubricaComunicacion = getOptInt("rubricaComunicacion")
+    val rubricaActitud      = getOptInt("rubricaActitud")
+
+    // Bloque 4.3: Metricas de cantera (opcional)
+    val posicionSet             = getStr("posicionSet")
+    val alturaBloque            = getStr("alturaBloque")
+    val pieNoDominanteAcciones  = getInt("pieNoDominanteAcciones")
+    val iniciativaVocal         = getStr("iniciativaVocal")
+
     // Footbar (sensor GPS de rendimiento) — opcional
     val fbDistancia        = getDouble("fbDistancia")
     val fbAltaIntensidad   = getDouble("fbAltaIntensidad")
@@ -481,6 +572,12 @@ object MatchController extends cask.Routes {
         fbBalones, fbPases, fbTiempoBalon, fbDisparos, fbTiroMax
       )
     }
+
+    // Bloque 4.1/4.3: Rubrica y metricas de cantera + Bloque 4.4: guia de conversacion en background
+    val savedMatchId = if (scheduleId > 0) scheduleId else DatabaseManager.getLastMatchId()
+    DatabaseManager.updateMatchExtras(savedMatchId, rubricaPosicion, rubricaDecisiones, rubricaPies,
+      rubricaComunicacion, rubricaActitud, posicionSet, alturaBloque, pieNoDominanteAcciones, iniciativaVocal)
+    DatabaseManager.generarGuiaConversacion(savedMatchId)
 
     // Respuesta visual renderizada como Array[Byte] para cumplir con withAuth
     val d = n.media - c.media
@@ -843,7 +940,27 @@ object MatchController extends cask.Routes {
                 h6(cls := "text-white small fw-bold mb-2", "🎬 ANÁLISIS DE VÍDEO CON IA"),
                 videoResultBlock,
                 videoUploadForm
-              )
+              ),
+
+              // --- Footer: Bloque 4.4 — Guia de conversacion post-partido (solo lectura de BD) ---
+              DatabaseManager.getGuiaConversacion(matchId) match {
+                case Some(guia) =>
+                  val partes = guia.split("/").map(_.trim)
+                  def parte(prefijo: String): String = partes.find(_.startsWith(prefijo)).map(_.drop(prefijo.length).trim).getOrElse("")
+                  div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary",
+                    h6(cls := "text-white small fw-bold mb-2", "💬 GUÍA DE CONVERSACIÓN POST-PARTIDO"),
+                    div(cls := "p-2 mb-2 rounded", style := "background:rgba(32,201,151,0.12); border-left:3px solid #20c997;",
+                      strong(cls := "text-success d-block mb-1", "✅ QUÉ RESALTAR"),
+                      div(cls := "small", parte("QUE_RESALTAR:"))),
+                    div(cls := "p-2 mb-2 rounded", style := "background:rgba(255,193,7,0.15); border-left:3px solid #ffc107;",
+                      strong(cls := "text-warning d-block mb-1", "🤐 QUÉ CALLAR"),
+                      div(cls := "small", parte("QUE_CALLAR:"))),
+                    div(cls := "p-2 rounded", style := "background:rgba(13,110,253,0.12); border-left:3px solid #0d6efd;",
+                      strong(cls := "text-info d-block mb-1", "💛 ACCIÓN POSITIVA"),
+                      div(cls := "small", parte("ACCION_POSITIVA:")))
+                  )
+                case None => div()
+              }
             ),
 
             // Script grabacion de audio

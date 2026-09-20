@@ -18,6 +18,79 @@ object DashboardController extends cask.Routes {
     val aiMessage = DatabaseManager.getDeepAnalysis()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
 
+    // ── BLOQUE 5.6: DETECTOR DE DESGASTE SILENCIOSO (prioridad maxima) ────────
+    val desgasteWidget: Modifier = DatabaseManager.detectarDesgasteSilencioso() match {
+      case Some(msg) => div(cls := "alert alert-danger fw-bold shadow mb-3", style := "border-left:6px solid #dc3545;", msg)
+      case None => div()
+    }
+
+    // ── BLOQUE 2.7: ALERTAS DE TEMPORADA (SQL puro) ───────────────────────────
+    val temporadaAlertWidget: Modifier = DatabaseManager.getTemporadaActivaInfo() match {
+      case Some(t) if t("fechaFin").asInstanceOf[String].nonEmpty =>
+        div(cls := "alert alert-warning small p-2 mb-3", s"📅 La temporada ${t("nombre")} está cerrada — ve a Admin para iniciar la nueva.")
+      case Some(t) if t("fechaInicio").asInstanceOf[String].nonEmpty &&
+        scala.util.Try(java.time.LocalDate.parse(t("fechaInicio").asInstanceOf[String])).toOption
+          .exists(_.isBefore(java.time.LocalDate.now().minusMonths(11))) =>
+        div(cls := "alert alert-warning small p-2 mb-3", "📅 La temporada lleva más de 11 meses activa. ¿Es momento de cerrarla?")
+      case _ => div()
+    }
+
+    // ── BLOQUE 4.2: ULTIMA ACADEMIA (feedback del entrenador, ultimos 7 dias) ──
+    val ultimaAcademiaWidget: Modifier = DatabaseManager.getUltimoFeedbackEntrenador() match {
+      case Some(fb) => div(cls := "card bg-dark text-white border-info shadow-sm mb-3 p-3",
+        div(style := "font-size:11px; color:#7dd3fc; letter-spacing:1px;", "🎓 ÚLTIMA ACADEMIA"),
+        div(cls := "small mt-1", fb))
+      case None => div()
+    }
+
+    // ── BLOQUE 5.4: FOCO DE ESTA SEMANA (micro-objetivo) ──────────────────────
+    val microObjetivo = DatabaseManager.getMicroObjetivoSemana()
+    val microObjetivoWidget: Modifier = {
+      val completado = microObjetivo("completado").asInstanceOf[Boolean]
+      div(cls := "card bg-dark text-white border-info shadow-sm mb-3 p-3",
+        div(cls := "d-flex justify-content-between align-items-start",
+          div(
+            div(style := "font-size:11px; color:#7dd3fc; letter-spacing:1px;", "🎯 FOCO DE ESTA SEMANA"),
+            div(cls := "small fw-bold mt-1", microObjetivo("objetivo").asInstanceOf[String])
+          )
+        ),
+        form(action := "/micro-objetivo/completar", method := "post", cls := "mt-2",
+          div(cls := "form-check mb-2",
+            input(cls := "form-check-input", tpe := "checkbox", name := "completado", id := "microCompletado",
+              if (completado) attr("checked") := "checked" else frag()),
+            label(`for` := "microCompletado", cls := "form-check-label xx-small", "Completado")
+          ),
+          input(tpe := "text", name := "resultado", cls := "form-control form-control-sm mb-2",
+            placeholder := "Observación (opcional)", value := microObjetivo("resultado").asInstanceOf[String]),
+          button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold", "Guardar")
+        )
+      )
+    }
+
+    // ── BLOQUE 5.5: PREPARACION SEMANAL (solo lectura de cache, nunca Gemini aqui) ─
+    val preparacionWidget: Modifier = DatabaseManager.getPreparacionSemanalCache() match {
+      case Some(texto) =>
+        val partes = texto.split("/").map(_.trim)
+        def parte(prefijo: String): String = partes.find(_.startsWith(prefijo)).map(_.drop(prefijo.length).trim).getOrElse("")
+        div(cls := "row g-2 mb-3",
+          div(cls := "col-4", div(cls := "card bg-secondary bg-opacity-25 border-0 p-2 h-100",
+            div(cls := "xx-small text-warning fw-bold", "🚗 De camino al campo"),
+            div(cls := "xx-small text-white mt-1", parte("CONSIGNA_COCHE:")))),
+          div(cls := "col-4", div(cls := "card bg-secondary bg-opacity-25 border-0 p-2 h-100",
+            div(cls := "xx-small text-warning fw-bold", "🏠 Entrenamiento invisible"),
+            div(cls := "xx-small text-white mt-1", parte("DESCANSO_CASA:")))),
+          div(cls := "col-4", div(cls := "card bg-secondary bg-opacity-25 border-0 p-2 h-100",
+            div(cls := "xx-small text-warning fw-bold", "👁️ Tu ojo en la grada"),
+            div(cls := "xx-small text-white mt-1", parte("FOCO_SABADO:"))))
+        )
+      case None =>
+        div(cls := "d-grid mb-3",
+          form(action := "/preparacion-semanal/generar", method := "post",
+            button(tpe := "submit", cls := "btn btn-sm btn-outline-warning fw-bold w-100", "🧠 Generar preparación semanal")
+          )
+        )
+    }
+
     // ── BLOQUE A3: INDICE DE FORMA DIARIO (solo SQL/matematicas, sin Gemini) ──
     val formaHoy = DatabaseManager.calcularFormaHoy()
     val esDiaDePartido = DatabaseManager.hayPartidoProximo()
@@ -430,6 +503,19 @@ object DashboardController extends cask.Routes {
 
     val content = basePage("home",
       div(
+        // ── BLOQUE 5.6: DESGASTE SILENCIOSO (prioridad maxima sobre todo lo demas) ─
+        desgasteWidget,
+
+        // ── BLOQUE 2.7: ALERTAS DE TEMPORADA ────────────────────────────────
+        temporadaAlertWidget,
+
+        // ── BLOQUE 4.2: ULTIMA ACADEMIA ─────────────────────────────────────
+        ultimaAcademiaWidget,
+
+        // ── BLOQUE 5.4/5.5: FOCO SEMANAL Y PREPARACION ──────────────────────
+        microObjetivoWidget,
+        preparacionWidget,
+
         // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
         formaWidget,
 
@@ -451,7 +537,9 @@ object DashboardController extends cask.Routes {
                 div(cls := "name-container",
                   div(cls := "player-name", card.nombre),
                   div(style := "font-size:12px; margin-top:-5px; opacity:.9; font-weight:bold;",
-                    card.clubNombre)),
+                    card.clubNombre),
+                  div(style := "font-size:9px; opacity:.75; font-weight:bold; letter-spacing:0.5px;",
+                    card.categoria)),
                 div(cls := "stats-container",
                   div(cls := "stats-grid",
                     div(cls := "stat-item", span(cls := "stat-val", card.div), span(cls := "stat-label", "DIV")),
@@ -703,6 +791,24 @@ object DashboardController extends cask.Routes {
       )
     )
     renderHtml(content)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 5.4 — RUTA: COMPLETAR MICRO-OBJETIVO DE LA SEMANA
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.postForm("/micro-objetivo/completar")
+  def completarMicroObjetivoAction(request: cask.Request, resultado: String = "") = withAuth(request) {
+    DatabaseManager.completarMicroObjetivo(resultado)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE 5.5 — RUTA: GENERAR PREPARACION SEMANAL (solo al pulsar el boton)
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.post("/preparacion-semanal/generar")
+  def generarPreparacionSemanalAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generarPreparacionSemanal()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/"))
   }
 
   // --- 2. MATCH CENTER (JUGAR) - VERSION CORREGIDA 4.1 ---

@@ -74,7 +74,10 @@ object AuthController extends cask.Routes {
 
   @cask.postForm("/login")
   def doPostLogin(request: cask.Request, user: String, pass: String, next: String = "/") = {
-    if (user.trim == authUser && pass == authPass) {
+    if (authUser.isEmpty || authPass.isEmpty) {
+      cask.Response(Array.emptyByteArray, 302,
+        headers = Seq("Location" -> "/login?error=Variables+de+entorno+no+configuradas"))
+    } else if (user.trim == authUser && pass == authPass) {
       cask.Response(Array.emptyByteArray, 302, headers = Seq(
         "Location"   -> "/profiles",
         "Set-Cookie" -> s"$sessionCookieName=elite; Path=/; SameSite=Lax; HttpOnly; Max-Age=86400"

@@ -454,11 +454,14 @@ object CareerController extends cask.Routes {
 
   @cask.postForm("/career/new-season")
   def newSeasonAction(categoria: String) = {
-    val msg = DatabaseManager.startNewSeason(categoria)
+    val (titulo, msg) = DatabaseManager.startNewSeason(categoria) match {
+      case Right(m) => ("OK", m)
+      case Left(err) => ("AVISO", err)
+    }
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.title("Nueva Temp"), tags2.style(raw(getCss()))),
       body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';",
-        h1("OK"), h2(msg),
+        h1(titulo), h2(msg),
         p(s"Etapa iniciada: $categoria"),
         div(style := "margin-top: 20px;",
           a(href := "/", cls := "btn btn-warning fw-bold", "Ir a Inicio")
