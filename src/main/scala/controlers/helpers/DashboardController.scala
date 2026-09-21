@@ -104,7 +104,10 @@ object DashboardController extends cask.Routes {
         else if (indice >= 3.0) "Señales de fatiga — considera hablar con el entrenador"
         else "Recuperación incompleta — vigilar durante el partido"
 
-      val componentes = Seq(
+      val tieneFcHoy = formaHoy.get("tieneFcHoy").exists(_.asInstanceOf[Boolean])
+      val fcScoreOpt = formaHoy.get("fcScore").flatMap(_.asInstanceOf[Option[Double]])
+
+      val componentesBase = Seq(
         ("Sueño", formaHoy("suenoScore").asInstanceOf[Double], "#0dcaf0"),
         ("Energía", formaHoy("energiaScore").asInstanceOf[Double], "#20c997"),
         ("Ánimo", formaHoy("animoScore").asInstanceOf[Double], "#ffc107"),
@@ -112,6 +115,11 @@ object DashboardController extends cask.Routes {
         ("Descanso", formaHoy("descansoScore").asInstanceOf[Double], "#8b5cf6"),
         ("PHV", formaHoy("phvScore").asInstanceOf[Double], "#dc3545")
       )
+      // BLOQUE A: mini-barra "FC reposo" adicional si hay dato de hoy
+      val componentes = if (tieneFcHoy)
+        componentesBase :+ (("FC reposo", fcScoreOpt.getOrElse(7.0), "#e83e8c"))
+      else componentesBase
+      val numCols = componentes.size
       val miniBars = componentes.map { case (label, valor, color) =>
         div(cls := "col",
           div(cls := "xx-small text-center text-muted", label),
@@ -131,7 +139,7 @@ object DashboardController extends cask.Routes {
             )
           ),
           div(cls := "small fw-bold mb-2", style := "color:#e2e8f0;", frase),
-          div(cls := "row row-cols-6 g-1", miniBars)
+          div(cls := s"row row-cols-$numCols g-1", miniBars)
         )
       else
         div(style := "background:#1e293b; border-radius:12px; padding:10px 14px; margin-bottom:16px; border:1px solid #334155;",
@@ -139,7 +147,7 @@ object DashboardController extends cask.Routes {
             span(style := "font-size:11px; color:#94a3b8;", "FORMA HOY"),
             span(style := "font-size:18px; font-weight:900; color:#fff;", f"$semaforo $indice%.1f")
           ),
-          div(cls := "row row-cols-6 g-1 mt-1", miniBars)
+          div(cls := s"row row-cols-$numCols g-1 mt-1", miniBars)
         )
     }
 

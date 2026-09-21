@@ -710,6 +710,48 @@ object HistoryController extends cask.Routes {
     val estilo = data.getOrElse("estilo", "").toString
     val claves = data.getOrElse("claves", "").toString
 
+    // BLOQUE F: scouting conectado a la flash-card del rival
+    val rivalScoutingSection: Modifier = if (targetRival.isEmpty) div() else {
+      val notas = DatabaseManager.getRivalScoutingNotas(targetRival)
+      val historial = DatabaseManager.getRivalHistorialCompleto(targetRival)
+      val pjHist = historial.getOrElse("pj", 0).asInstanceOf[Int]
+      val arquetipoRival = DatabaseManager.getStrikerClusters()
+        .find(c => c("rival").asInstanceOf[String].toLowerCase.contains(targetRival.toLowerCase))
+        .map(_("arquetipo").asInstanceOf[String])
+
+      val hayScouting = notas.get("estilo").exists(_.nonEmpty) || notas.get("claves").exists(_.nonEmpty) || pjHist > 0
+
+      if (!hayScouting)
+        div(cls := "alert alert-secondary small",
+          "No hay datos de este rival — registra el partido de hoy y ve a SCOUTING para añadir notas.")
+      else
+        div(cls := "card bg-dark border-info shadow mb-4",
+          div(cls := "card-header text-info fw-bold small", "🔍 LO QUE SABEMOS DE ESTE RIVAL"),
+          div(cls := "card-body p-3",
+            if (notas.getOrElse("estilo", "").nonEmpty) div(cls := "mb-2",
+              div(cls := "xx-small text-muted fw-bold", "ESTILO DE JUEGO"),
+              div(cls := "text-light small", fixEncoding(notas("estilo")))
+            ) else div(),
+            if (notas.getOrElse("claves", "").nonEmpty) div(cls := "mb-2",
+              div(cls := "xx-small text-muted fw-bold", "CLAVES TÁCTICAS"),
+              div(cls := "text-warning small fw-bold", fixEncoding(notas("claves")))
+            ) else div(),
+            if (pjHist > 0) div(cls := "mb-2 pt-2 border-top border-secondary",
+              div(cls := "xx-small text-muted fw-bold", "HISTORIAL CONTRA ESTE RIVAL"),
+              div(cls := "text-light small",
+                s"PJ ${historial("pj")} · GF ${historial("gf")} · GC ${historial("gc")} · Nota media de Héctor ${f"${historial("notaMedia").asInstanceOf[Double]}%.1f"}")
+            ) else div(),
+            arquetipoRival match {
+              case Some(arq) => div(cls := "mb-0 pt-2 border-top border-secondary",
+                div(cls := "xx-small text-muted fw-bold", "TIPO DE DELANTERO PREDOMINANTE"),
+                span(cls := "badge bg-info text-dark fw-bold", arq)
+              )
+              case None => div()
+            }
+          )
+        )
+    }
+
     val winRate = if (partidos.nonEmpty) {
       val wins = partidos.count { case (res, _, _, _, _) =>
         val p = res.split("-"); p.headOption.flatMap(_.trim.toIntOption).getOrElse(0) >
@@ -832,6 +874,8 @@ object HistoryController extends cask.Routes {
                 ) else div()
               )
             ),
+
+            rivalScoutingSection,
 
             div(cls:="row g-3",
               // Historial vs rival
@@ -4957,30 +5001,95 @@ object HistoryController extends cask.Routes {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE D — SUBIDA Y ANALISIS DE VIDEO REAL EN ENTRENAMIENTOS CON GEMINI VISION
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.post("/video/analyze-training/:trainingId")
+  def analyzeVideoTrainingAction(request: cask.Request, trainingId: Int) = withAuth(request) {
+    val contentType = request.exchange.getRequestHeaders.getFirst("Content-Type")
+    val bodyBytes = request.data.readAllBytes()
+    val maxBytes = 1.8d * 1024 * 1024 * 1024 // 1.8GB
+
+    if (bodyBytes.length.toDouble > maxBytes) {
+      val json = ujson.Obj("status" -> "error",
+        "error" -> "El vídeo es demasiado grande. Sube solo el fragmento donde aparece Héctor (menos de 15 minutos) para reducir el tamaño.")
+      cask.Response(json.render().getBytes("UTF-8"), statusCode = 413, headers = Seq("Content-Type" -> "application/json"))
+    } else {
+      val fields = parseMultipart(bodyBytes, contentType)
+      val videoFieldOpt = fields.get("video").filter(_.data.nonEmpty)
+      videoFieldOpt match {
+        case None =>
+          val json = ujson.Obj("status" -> "error", "error" -> "No se ha recibido ningún vídeo.")
+          cask.Response(json.render().getBytes("UTF-8"), statusCode = 400, headers = Seq("Content-Type" -> "application/json"))
+        case Some(videoField) =>
+          val filenameLower = videoField.filename.getOrElse("video.mp4").toLowerCase
+          val mediaType =
+            if (filenameLower.endsWith(".webm")) "video/webm"
+            else if (filenameLower.endsWith(".mov")) "video/quicktime"
+            else "video/mp4"
+
+          val base64Data = java.util.Base64.getEncoder.encodeToString(videoField.data)
+
+          new Thread(new Runnable {
+            def run(): Unit = {
+              try { DatabaseManager.analyzeVideoTraining(trainingId, base64Data, mediaType) }
+              catch { case _: Exception => () }
+            }
+          }).start()
+
+          val json = ujson.Obj("status" -> "processing")
+          cask.Response(json.render().getBytes("UTF-8"), statusCode = 202, headers = Seq("Content-Type" -> "application/json"))
+      }
+    }
+  }
+
+  // Lectura desde BD unicamente — nunca llama a Gemini
+  @cask.get("/video/training-status/:trainingId")
+  def videoTrainingStatusAction(trainingId: Int) = {
+    val status = DatabaseManager.getVideoAnalysisStatusTraining(trainingId)
+    val json = status.get("status") match {
+      case Some("done") => ujson.Obj(
+        "status"   -> "done",
+        "analisis" -> status("analisis").asInstanceOf[String],
+        "fecha"    -> status("fecha").asInstanceOf[String]
+      )
+      case _ => ujson.Obj("status" -> "pending")
+    }
+    cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE A4 — HISTORIAL DE ANALISIS DE VIDEO
   // ─────────────────────────────────────────────────────────────────────────────
   @cask.get("/video-history")
   def videoHistoryPage(request: cask.Request) = withAuth(request) {
-    val hist = DatabaseManager.getVideoAnalysisHistory()
+    val hist = DatabaseManager.getVideoAnalysisHistoryAll()
     val evolCached = DatabaseManager.getVideoEvolutionAnalysisCached()
 
     def notaTecFmt(h: Map[String, Any]): String =
       h("notaTecnica").asInstanceOf[Option[Double]].map(n => f"$n%.1f").getOrElse("—")
 
     val rows = if (hist.isEmpty)
-      tr(td(attr("colspan") := "3", cls := "text-center text-muted", "Sin análisis de vídeo todavía."))
+      tr(td(attr("colspan") := "4", cls := "text-center text-muted", "Sin análisis de vídeo todavía."))
     else
       frag(hist.map { h =>
         val notaTxt: String = notaTecFmt(h)
+        val esPartido = h("tipoVideo").asInstanceOf[String] == "Partido"
+        val badge = if (esPartido) span(cls := "badge bg-warning text-dark", "🏟️ Partido") else span(cls := "badge bg-info text-dark", "🏃 Entreno")
         tr(
-          td(fixEncoding(h("rival").asInstanceOf[String])),
+          td(badge),
+          td(fixEncoding(h("label").asInstanceOf[String])),
           td(h("fecha").asInstanceOf[String]),
           td(cls := "text-center", notaTxt)
         )
       }: _*)
 
     val labelsJs = hist.map(h => s""""${h("fecha").asInstanceOf[String]}"""").mkString("[", ",", "]")
-    val notasJs = hist.map(h => h("notaTecnica").asInstanceOf[Option[Double]].getOrElse(0.0).toString).mkString("[", ",", "]")
+    val notasMatchJs = hist.map(h =>
+      if (h("tipoVideo").asInstanceOf[String] == "Partido") h("notaTecnica").asInstanceOf[Option[Double]].getOrElse(0.0).toString else "null"
+    ).mkString("[", ",", "]")
+    val notasTrainingJs = hist.map(h =>
+      if (h("tipoVideo").asInstanceOf[String] == "Entreno") h("notaTecnica").asInstanceOf[Option[Double]].getOrElse(0.0).toString else "null"
+    ).mkString("[", ",", "]")
 
     val evolSection = evolCached match {
       case Some(a) => div(cls := "card bg-dark border-info shadow mb-3",
@@ -4999,7 +5108,7 @@ object HistoryController extends cask.Routes {
             a(href := "/history", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Historial")
           ),
           div(cls := "card bg-dark border-secondary shadow mb-3",
-            div(cls := "card-header text-white fw-bold small", "Evolución de la nota técnica"),
+            div(cls := "card-header text-white fw-bold small", "Evolución de la nota técnica (🏟️ Partido / 🏃 Entreno)"),
             div(cls := "card-body", tag("canvas")(id := "chartVideoEvol", style := "max-height:220px;"))
           ),
           div(cls := "d-grid mb-3",
@@ -5009,9 +5118,9 @@ object HistoryController extends cask.Routes {
           ),
           evolSection,
           div(cls := "card bg-dark border-secondary shadow",
-            div(cls := "card-header text-white fw-bold small", "Partidos analizados"),
+            div(cls := "card-header text-white fw-bold small", "Análisis de vídeo (partidos y entrenamientos)"),
             table(cls := "table table-dark table-sm mb-0",
-              thead(tr(th("Rival"), th("Fecha"), th(cls := "text-center", "Nota técnica"))),
+              thead(tr(th("Tipo"), th("Rival / Foco"), th("Fecha"), th(cls := "text-center", "Nota técnica"))),
               tbody(rows)
             )
           )
@@ -5023,8 +5132,11 @@ object HistoryController extends cask.Routes {
         if (ctxVE) {
           new Chart(ctxVE, {
             type: 'line',
-            data: { labels: $labelsJs, datasets: [{ label: 'Nota técnica', data: $notasJs, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, fill:true, tension:0.3 }] },
-            options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:10 } } }
+            data: { labels: $labelsJs, datasets: [
+              { label: '🏟️ Partido', data: $notasMatchJs, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, fill:false, tension:0.3, spanGaps:true },
+              { label: '🏃 Entreno', data: $notasTrainingJs, borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.15)', borderWidth:2, pointRadius:4, fill:false, tension:0.3, spanGaps:true }
+            ]},
+            options: { responsive:true, plugins:{ legend:{ display:true, labels:{ color:'#ccc' } } }, scales:{ y:{ min:0, max:10 } } }
           });
         }
       """))

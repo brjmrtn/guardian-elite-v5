@@ -69,6 +69,38 @@ object GuardianServer extends cask.Main {
     java.util.concurrent.TimeUnit.MILLISECONDS
   )
 
+  // ── RESUMEN SEMANAL ENGINE (BLOQUE G) ───────────────────────────────────────
+  // Se ejecuta automáticamente cada lunes a las 8:00 AM. SQL puro, sin Gemini.
+  val resumenExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r => {
+    val t = new Thread(r, "resumen-engine")
+    t.setDaemon(true)
+    t
+  })
+  val ahora2 = java.time.LocalDateTime.now()
+  val proximoLunes = ahora2
+    .`with`(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.MONDAY))
+    .withHour(8).withMinute(0).withSecond(0)
+  val msHastaResumen = java.time.Duration.between(ahora2, proximoLunes).toMillis
+
+  resumenExecutor.scheduleAtFixedRate(
+    new Runnable {
+      def run(): Unit = {
+        try {
+          val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
+          if (emailDest.nonEmpty) {
+            val html = DatabaseManager.generarResumenSemanal()
+            BackupService.enviarResumenEmail(emailDest, html)
+          }
+        } catch { case e: Exception =>
+          println(s"[Resumen Email] ERROR: ${e.getMessage.take(200)}")
+        }
+      }
+    },
+    msHastaResumen,
+    7 * 24 * 60 * 60 * 1000L,
+    java.util.concurrent.TimeUnit.MILLISECONDS
+  )
+
   override def host: String = "0.0.0.0"
   override def port: Int    = sys.env.getOrElse("PORT", "8081").toInt
 

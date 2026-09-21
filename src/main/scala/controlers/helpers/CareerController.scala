@@ -725,10 +725,209 @@ object CareerController extends cask.Routes {
             li("- Parada: +5 XP"),
             li("- Nota > 7.0: +100 XP (Bonus)")
           )
+        ),
+
+        div(cls:="d-grid mt-3",
+          a(href:="/career/comparativa", cls:="btn btn-outline-info fw-bold", "📊 Comparativa entre temporadas")
         )
       )
     ))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE I — COMPARATIVA ENTRE TEMPORADAS
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/career/comparativa")
+  def comparativaPage(request: cask.Request, id1: Int = 0, id2: Int = 0) = withAuth(request) {
+    val temporadas = DatabaseManager.getSeasonsForSelector()
+
+    val (selId1, selId2) = if (id1 > 0 && id2 > 0) (id1, id2)
+      else temporadas.map(_._1) match {
+        case a :: b :: _ => (b, a) // por defecto: las dos mas recientes, mas antigua primero
+        case a :: Nil    => (a, a)
+        case _           => (0, 0)
+      }
+
+    val selector = form(action := "/career/comparativa", method := "get", cls := "d-flex gap-2 align-items-center flex-wrap",
+      select(name := "id1", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+        temporadas.map { case (id, label) => option(value := id.toString, if (id == selId1) selected := "selected" else frag(), label) }
+      ),
+      span(cls := "text-muted small", "vs"),
+      select(name := "id2", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+        temporadas.map { case (id, label) => option(value := id.toString, if (id == selId2) selected := "selected" else frag(), label) }
+      ),
+      button(tpe := "submit", cls := "btn btn-sm btn-warning fw-bold", "COMPARAR")
+    )
+
+    val body: Modifier = if (selId1 == 0 || selId2 == 0 || temporadas.size < 2) {
+      div(cls := "alert alert-secondary text-center py-5 mt-3",
+        "Necesitas al menos 2 temporadas registradas para comparar.")
+    } else {
+      val comp = DatabaseManager.getTemporadasComparativa(selId1, selId2)
+      val s1 = comp("season1").asInstanceOf[Map[String, Any]]
+      val s2 = comp("season2").asInstanceOf[Map[String, Any]]
+
+      def d(m: Map[String, Any], k: String): Double = m(k) match {
+        case i: Int => i.toDouble
+        case dd: Double => dd
+        case _ => 0.0
+      }
+      def s(m: Map[String, Any], k: String): String = m(k).toString
+
+      // KPIs a comparar: (etiqueta, clave, mayorEsMejor)
+      val kpis = Seq(
+        ("Partidos jugados", "pj", true), ("Ganados", "pg", true), ("Empatados", "pe", true), ("Perdidos", "pp", false),
+        ("Goles a favor", "gf", true), ("Goles en contra", "gc", false), ("Nota media", "notaMedia", true),
+        ("Porterías a cero", "porteriasCero", true), ("Mejor nota", "mejorNota", true), ("Peor nota", "peorNota", true),
+        ("Horas de práctica", "horasPractica", true), ("Lesiones", "lesiones", false), ("Skills conseguidas", "skillsConseguidas", true)
+      )
+
+      val kpiRows = kpis.map { case (label, key, mayorMejor) =>
+        val v1 = d(s1, key); val v2 = d(s2, key)
+        val fmt = (v: Double) => if (key == "notaMedia" || key == "mejorNota" || key == "peorNota") f"$v%.1f"
+                                  else if (key == "horasPractica") f"$v%.0fh" else v.toInt.toString
+        val (arrow1, arrow2) =
+          if (v1 == v2) ("", "")
+          else if ((v1 > v2) == mayorMejor) ("↑", "↓") else ("↓", "↑")
+        val (cls1, cls2) =
+          if (v1 == v2) ("text-muted", "text-muted")
+          else if ((v1 > v2) == mayorMejor) ("text-success fw-bold", "text-danger") else ("text-danger", "text-success fw-bold")
+        tr(
+          td(cls := "text-muted small", label),
+          td(cls := s"text-center $cls1", s"${fmt(v1)} $arrow1"),
+          td(cls := s"text-center $cls2", s"${fmt(v2)} $arrow2")
+        )
+      }
+
+      // "Lo que mejoro / empeoro": comparacion cronologica (id mas bajo = temporada anterior)
+      val (anteriorLabel, actualLabel, anterior, actual) =
+        if (selId1 < selId2) (s(s1,"label"), s(s2,"label"), s1, s2) else (s(s2,"label"), s(s1,"label"), s2, s1)
+      val comparablesAuto = Seq(
+        ("Nota media", "notaMedia", true), ("Goles en contra (por partido)", "gcPorPartido", false),
+        ("Porterías a cero (%)", "pctCS", true), ("Horas de práctica", "horasPractica", true), ("Lesiones", "lesiones", false)
+      )
+      def metricaAuto(m: Map[String, Any], key: String): Double = key match {
+        case "gcPorPartido" => val pj = d(m,"pj"); if (pj > 0) d(m,"gc") / pj else 0.0
+        case "pctCS" => val pj = d(m,"pj"); if (pj > 0) d(m,"porteriasCero") * 100.0 / pj else 0.0
+        case k => d(m, k)
+      }
+      val mejoras = scala.collection.mutable.ListBuffer[String]()
+      val empeoras = scala.collection.mutable.ListBuffer[String]()
+      comparablesAuto.foreach { case (label, key, mayorMejor) =>
+        val vA = metricaAuto(anterior, key); val vB = metricaAuto(actual, key)
+        if (math.abs(vB - vA) > 0.001) {
+          val mejoro = (vB > vA) == mayorMejor
+          val txt = f"$label%s: ${vA}%.1f → ${vB}%.1f"
+          if (mejoro) mejoras += txt else empeoras += txt
+        }
+      }
+
+      val atributos = Seq("div", "han", "kic", "ref", "spd", "pos")
+      val atributosLabels = Seq("DIV", "HAN", "KIC", "REF", "SPD", "POS")
+      val s1AttrJs = atributos.map(a => d(s1, a).toString).mkString("[", ",", "]")
+      val s2AttrJs = atributos.map(a => d(s2, a).toString).mkString("[", ",", "]")
+      val attrLabelsJs = atributosLabels.map(a => s""""$a"""").mkString("[", ",", "]")
+
+      val evol1 = s1("evolMensual").asInstanceOf[List[(Int, Double)]]
+      val evol2 = s2("evolMensual").asInstanceOf[List[(Int, Double)]]
+      val maxMes = math.max(evol1.map(_._1).maxOption.getOrElse(1), evol2.map(_._1).maxOption.getOrElse(1))
+      val mesesJs = (1 to math.max(maxMes,1)).map(m => s""""Mes $m"""").mkString("[", ",", "]")
+      def serieJs(evol: List[(Int, Double)]): String = {
+        val map = evol.toMap
+        (1 to math.max(maxMes,1)).map(m => map.get(m).map(v => f"$v%.2f").getOrElse("null")).mkString("[", ",", "]")
+      }
+
+      div(
+        div(cls := "card bg-dark border-secondary shadow mb-4 mt-3",
+          div(cls := "card-header text-white fw-bold small", "KPIs LADO A LADO"),
+          div(cls := "card-body p-2",
+            table(cls := "table table-dark table-sm mb-0",
+              thead(tr(th(""), th(cls := "text-center", s(s1,"label")), th(cls := "text-center", s(s2,"label")))),
+              tbody(kpiRows)
+            )
+          )
+        ),
+
+        div(cls := "row g-3 mb-4",
+          div(cls := "col-md-6",
+            div(cls := "card bg-dark border-secondary shadow h-100",
+              div(cls := "card-header text-white fw-bold small", "ATRIBUTOS FUT"),
+              div(cls := "card-body", tag("canvas")(id := "chartAttrCompare", style := "max-height:260px;"))
+            )
+          ),
+          div(cls := "col-md-6",
+            div(cls := "card bg-dark border-secondary shadow h-100",
+              div(cls := "card-header text-white fw-bold small", "EVOLUCIÓN DE LA NOTA MEDIA (mes a mes)"),
+              div(cls := "card-body", tag("canvas")(id := "chartEvolCompare", style := "max-height:260px;"))
+            )
+          )
+        ),
+
+        div(cls := "row g-3 mb-4",
+          div(cls := "col-md-6",
+            div(cls := "card bg-dark border-success shadow h-100",
+              div(cls := "card-header text-success fw-bold small", "📈 LO QUE MEJORÓ"),
+              div(cls := "card-body",
+                if (mejoras.isEmpty) div(cls := "text-muted small", "Sin mejoras detectadas")
+                else ul(cls := "small text-light mb-0", mejoras.map(m => li(m)).toSeq)
+              )
+            )
+          ),
+          div(cls := "col-md-6",
+            div(cls := "card bg-dark border-danger shadow h-100",
+              div(cls := "card-header text-danger fw-bold small", "📉 LO QUE EMPEORÓ"),
+              div(cls := "card-body",
+                if (empeoras.isEmpty) div(cls := "text-muted small", "Sin empeoramientos detectados")
+                else ul(cls := "small text-light mb-0", empeoras.map(m => li(m)).toSeq)
+              )
+            )
+          )
+        ),
+
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+        script(raw(s"""
+          var ctxAttr = document.getElementById('chartAttrCompare');
+          if (ctxAttr) {
+            new Chart(ctxAttr, {
+              type: 'bar',
+              data: { labels: $attrLabelsJs, datasets: [
+                { label: '${fixEncoding(s(s1,"label"))}', data: $s1AttrJs, backgroundColor: 'rgba(212,175,55,0.7)' },
+                { label: '${fixEncoding(s(s2,"label"))}', data: $s2AttrJs, backgroundColor: 'rgba(13,202,240,0.7)' }
+              ]},
+              options: { responsive:true, plugins:{ legend:{ display:true, labels:{ color:'#ccc' } } },
+                scales:{ y:{ ticks:{ color:'#aaa' } }, x:{ ticks:{ color:'#aaa' } } } }
+            });
+          }
+          var ctxEvol = document.getElementById('chartEvolCompare');
+          if (ctxEvol) {
+            new Chart(ctxEvol, {
+              type: 'line',
+              data: { labels: $mesesJs, datasets: [
+                { label: '${fixEncoding(s(s1,"label"))}', data: ${serieJs(evol1)}, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, spanGaps:true, tension:0.3 },
+                { label: '${fixEncoding(s(s2,"label"))}', data: ${serieJs(evol2)}, borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.15)', borderWidth:2, pointRadius:4, spanGaps:true, tension:0.3 }
+              ]},
+              options: { responsive:true, plugins:{ legend:{ display:true, labels:{ color:'#ccc' } } },
+                scales:{ y:{ min:0, max:10, ticks:{ color:'#aaa' } }, x:{ ticks:{ color:'#aaa' } } } }
+            });
+          }
+        """))
+      )
+    }
+
+    val content = basePage("career",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-10 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h2(cls := "text-warning mb-0", "COMPARATIVA ENTRE TEMPORADAS"),
+            a(href := "/career/legacy", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Legado")
+          ),
+          div(cls := "card bg-dark border-secondary shadow p-2", selector),
+          body
+        )
+      )
+    )
+    renderHtml(content)
   }
 
   @cask.get("/career/evolucion")
@@ -1085,11 +1284,18 @@ object CareerController extends cask.Routes {
   def footbarPage(request: cask.Request) = withAuth(request) {
     val d          = DatabaseManager.getFootbarPageData()
     val rows        = d("rows").asInstanceOf[List[Map[String, Any]]]
+    val trainingRows = d("trainingRows").asInstanceOf[List[Map[String, Any]]]
     val totalSesiones = d("totalSesiones").asInstanceOf[Int]
 
-    val content = if (totalSesiones < 3) {
+    val notaContextoFootbar = div(cls := "alert alert-info small mb-4",
+      "📊 Los datos de Footbar se interpretan en contexto de portero. Distancias de 1-2km por partido son normales en esta posición. " +
+      "El valor principal de Footbar para Héctor es el seguimiento de su explosividad (sprints máximos) y la carga acumulada semanal, no la distancia total."
+    )
+
+    val content = if (totalSesiones < 3 && trainingRows.isEmpty) {
       div(
         h4(cls := "fw-black text-white mb-4", "🦵 Footbar"),
+        notaContextoFootbar,
         div(cls := "alert alert-secondary text-center",
           "Necesitas al menos 3 partidos con datos Footbar para ver patrones")
       )
@@ -1105,8 +1311,16 @@ object CareerController extends cask.Routes {
         s"{x:$dist,y:$nota}"
       }.mkString("[", ",", "]")
 
+      // BLOQUE B: sesiones de entrenamiento diferenciadas por color (calidad como proxy de nota)
+      val scatterDataTraining = trainingRows.map { r =>
+        val dist = r("distanciaKm").asInstanceOf[Double]
+        val calidad = r("calidad").asInstanceOf[Int]
+        s"{x:$dist,y:$calidad}"
+      }.mkString("[", ",", "]")
+
       div(
         h4(cls := "fw-black text-white mb-4", "🦵 Footbar"),
+        notaContextoFootbar,
 
         // ── KPIs ──
         div(cls := "row g-3 mb-4",
@@ -1125,27 +1339,32 @@ object CareerController extends cask.Routes {
           }
         ),
 
-        // ── Gráfico scatter distancia vs nota ──
+        // ── Gráfico scatter distancia vs nota/calidad — partidos y entrenamientos diferenciados por color ──
         div(cls := "card bg-dark border-secondary p-3 mb-4",
-          div(cls := "fw-bold text-muted small text-uppercase mb-3", "Distancia (km) vs. Nota"),
+          div(cls := "fw-bold text-muted small text-uppercase mb-3", "Distancia (km) vs. Nota / Calidad"),
           div(style := "height:260px;", canvas(id := "chartFootbarScatter")),
           script(src := "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"),
           script(raw(s"""
             new Chart(document.getElementById('chartFootbarScatter'), {
               type: 'scatter',
               data: { datasets: [{
-                label: 'Partidos',
+                label: 'Partidos (nota)',
                 data: $scatterData,
                 backgroundColor: 'rgba(255,193,7,0.7)',
+                pointRadius: 6
+              }, {
+                label: 'Entrenamientos (calidad)',
+                data: $scatterDataTraining,
+                backgroundColor: 'rgba(13,202,240,0.7)',
                 pointRadius: 6
               }]},
               options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: { legend: { display: true, labels: { color: '#ccc' } } },
                 scales: {
                   x: { title: { display: true, text: 'Distancia (km)', color: '#aaa' },
                        ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                  y: { title: { display: true, text: 'Nota', color: '#aaa' }, min: 0, max: 10,
+                  y: { title: { display: true, text: 'Nota / Calidad', color: '#aaa' }, min: 0, max: 10,
                        ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
                 }
               }
@@ -1172,6 +1391,33 @@ object CareerController extends cask.Routes {
                     td(f"${r("sprintMaxKmh").asInstanceOf[Double]}%.1f km/h"),
                     td(r("pases").asInstanceOf[Int].toString),
                     td(r("disparos").asInstanceOf[Int].toString)
+                  )
+                }: _*)
+              )
+            )
+          )
+        ),
+
+        // ── Tabla de entrenamientos con datos Footbar ──
+        if (trainingRows.isEmpty) div()
+        else div(cls := "card bg-dark border-secondary p-3 mb-4",
+          div(cls := "fw-bold text-muted small text-uppercase mb-3", "Entrenamientos con datos Footbar"),
+          div(style := "overflow-x:auto;",
+            table(cls := "table table-dark table-sm mb-0",
+              thead(tr(
+                th("Fecha"), th("Tipo"), th("Calidad"), th("Distancia"),
+                th("Sprint máx"), th("Acel."), th("Desacel.")
+              )),
+              tbody(
+                frag(trainingRows.map { r =>
+                  tr(
+                    td(r("fecha").asInstanceOf[String].take(10)),
+                    td(fixEncoding(r("tipo").asInstanceOf[String])),
+                    td(r("calidad").asInstanceOf[Int].toString),
+                    td(f"${r("distanciaKm").asInstanceOf[Double]}%.2f km"),
+                    td(f"${r("sprintMaxKmh").asInstanceOf[Double]}%.1f km/h"),
+                    td(r("aceleraciones").asInstanceOf[Int].toString),
+                    td(r("desaceleraciones").asInstanceOf[Int].toString)
                   )
                 }: _*)
               )

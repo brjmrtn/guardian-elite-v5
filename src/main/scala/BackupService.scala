@@ -59,4 +59,38 @@ object BackupService {
     Transport.send(message)
     println(s"[Backup Email] Enviado a $destino")
   }
+
+  // BLOQUE G: resumen semanal — mismo transporte SMTP que enviarPorEmail, pero sin adjunto
+  // y con el HTML como cuerpo del email.
+  def enviarResumenEmail(destino: String, htmlContent: String): Unit = {
+    val smtpHost = sys.env.getOrElse("SMTP_HOST", "smtp.gmail.com")
+    val smtpPort = sys.env.getOrElse("SMTP_PORT", "587")
+    val smtpUser = sys.env.getOrElse("SMTP_USER", "")
+    val smtpPass = sys.env.getOrElse("SMTP_PASS", "")
+
+    if (smtpUser.isEmpty || smtpPass.isEmpty) {
+      println("[Resumen Email] SMTP no configurado — saltando envío por email")
+      return
+    }
+
+    val props = new Properties()
+    props.put("mail.smtp.auth", "true")
+    props.put("mail.smtp.starttls.enable", "true")
+    props.put("mail.smtp.host", smtpHost)
+    props.put("mail.smtp.port", smtpPort)
+
+    val session = Session.getInstance(props, new Authenticator() {
+      override def getPasswordAuthentication =
+        new PasswordAuthentication(smtpUser, smtpPass)
+    })
+
+    val message = new MimeMessage(session)
+    message.setFrom(new InternetAddress(smtpUser))
+    message.setRecipients(Message.RecipientType.TO, destino)
+    message.setSubject(s"Guardian Elite — Resumen semana del ${java.time.LocalDate.now()}")
+    message.setContent(htmlContent, "text/html; charset=UTF-8")
+
+    Transport.send(message)
+    println(s"[Resumen Email] Enviado a $destino")
+  }
 }

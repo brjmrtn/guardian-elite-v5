@@ -163,7 +163,10 @@ object AdminController extends cask.Routes {
       panelActiva,
       formNueva,
       div(cls := "border-top border-secondary pt-3 mt-2",
-        h6(cls := "text-muted small text-uppercase mb-2", "Historial de temporadas cerradas"),
+        div(cls := "d-flex justify-content-between align-items-center mb-2",
+          h6(cls := "text-muted small text-uppercase mb-0", "Historial de temporadas cerradas"),
+          a(href := "/career/comparativa", cls := "btn btn-sm btn-outline-info fw-bold", "📊 Comparar temporadas")
+        ),
         historial
       )
     )
@@ -385,8 +388,11 @@ object AdminController extends cask.Routes {
           ),
           div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
             h5(cls := "text-white", "Copia de Seguridad"),
-            p(cls := "small text-muted fw-bold", "Descarga todos los partidos en formato Excel/CSV."),
-            a(href := "/admin/download_csv", cls := "btn btn-primary w-100 fw-bold", "Descargar CSV")
+            p(cls := "small text-muted fw-bold", "Descarga los partidos, o todas las tablas principales en un ZIP."),
+            div(cls := "d-grid gap-2",
+              a(href := "/admin/download_csv", cls := "btn btn-primary w-100 fw-bold", "⬇️ CSV Partidos"),
+              a(href := "/admin/download_full_csv", cls := "btn btn-outline-primary w-100 fw-bold", "⬇️ Exportación completa (ZIP)")
+            )
           ),
           div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
             h5(cls := "text-white", "Informe PDF"),
@@ -444,6 +450,24 @@ object AdminController extends cask.Routes {
         "Content-Disposition" -> "attachment; filename=guardian_backup.csv"
       )
     )
+  }
+  // BLOQUE H: exportacion completa — un CSV por tabla principal, empaquetados en ZIP
+  @cask.get("/admin/download_full_csv")
+  def downloadFullCsv() = {
+    val csvMap = DatabaseManager.getFullExportCSV()
+    val baos = new java.io.ByteArrayOutputStream()
+    val zos = new java.util.zip.ZipOutputStream(baos)
+    csvMap.foreach { case (nombre, contenido) =>
+      zos.putNextEntry(new java.util.zip.ZipEntry(nombre))
+      zos.write(contenido.getBytes("UTF-8"))
+      zos.closeEntry()
+    }
+    zos.close()
+    cask.Response(baos.toByteArray,
+      headers = Seq(
+        "Content-Type" -> "application/zip",
+        "Content-Disposition" -> s"attachment; filename=guardian_hector_${java.time.LocalDate.now()}.zip"
+      ))
   }
   @cask.get("/admin/print_report")
   def printReport() = {
