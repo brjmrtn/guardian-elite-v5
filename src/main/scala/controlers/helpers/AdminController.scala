@@ -94,12 +94,12 @@ object AdminController extends cask.Routes {
               div(cls := "small text-white mt-1", s"$pj partidos jugados · media ${"%.1f".format(media)}")
             ),
             div(cls := "d-flex gap-2",
-              if (pj > 0) form(action := "/admin/temporada/cerrar", method := "post",
+              if (pj > 0) form(action := "/admin/season/close", method := "post",
                 button(tpe := "submit", cls := "btn btn-sm btn-outline-danger fw-bold",
                   onclick := "return confirm('¿Cerrar la temporada actual? Esta acción no se puede deshacer.');",
                   "🔒 Cerrar temporada")
               ) else frag(),
-              a(href := s"/admin/temporada/$sid/informe", target := "_blank",
+              a(href := s"/admin/season/$sid/report", target := "_blank",
                 cls := "btn btn-sm btn-outline-info fw-bold", "📄 Informe final")
             )
           )
@@ -110,7 +110,7 @@ object AdminController extends cask.Routes {
     val puedeCrearNueva = activa.isEmpty || Option(activa.get("fechaFin").asInstanceOf[String]).exists(_.nonEmpty)
 
     val formNueva: Modifier = if (puedeCrearNueva)
-      form(action := "/admin/temporada/nueva", method := "post", cls := "border border-secondary rounded p-3 mb-3",
+      form(action := "/admin/season/new", method := "post", cls := "border border-secondary rounded p-3 mb-3",
         h6(cls := "text-info small text-uppercase", "Nueva temporada"),
         div(cls := "mb-2",
           label(cls := "form-label small text-muted", "Categoría *"),
@@ -150,7 +150,7 @@ object AdminController extends cask.Routes {
               td("%.1f".format(c("mediaFinal").asInstanceOf[Double])),
               td(c("porteriasCero").asInstanceOf[Int].toString),
               td(if (c("tieneInforme").asInstanceOf[Boolean])
-                a(href := s"/admin/temporada/${c("id")}/informe", target := "_blank", cls := "text-info small", "Ver informe")
+                a(href := s"/admin/season/${c("id")}/report", target := "_blank", cls := "text-info small", "Ver informe")
                 else span(cls := "text-muted xx-small", "—"))
             )
           }: _*)
@@ -935,7 +935,7 @@ object AdminController extends cask.Routes {
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE 2.6 — RUTAS DE GESTION DE TEMPORADAS
   // ─────────────────────────────────────────────────────────────────────────────
-  @cask.post("/admin/temporada/cerrar")
+  @cask.post("/admin/season/close")
   def cerrarTemporada(request: cask.Request) = withAuth(request) {
     val msg = DatabaseManager.cerrarTemporadaActual() match {
       case Right(m) => m
@@ -946,7 +946,7 @@ object AdminController extends cask.Routes {
     ))
   }
 
-  @cask.postForm("/admin/temporada/nueva")
+  @cask.postForm("/admin/season/new")
   def nuevaTemporada(request: cask.Request, categoria: String, nombreClub: String = "", fechaInicio: String = "") = withAuth(request) {
     val msg = DatabaseManager.startNewSeason(fixEncoding(categoria), fixEncoding(nombreClub), fechaInicio) match {
       case Right(m) => m
@@ -957,7 +957,7 @@ object AdminController extends cask.Routes {
     ))
   }
 
-  @cask.get("/admin/temporada/:id/informe")
+  @cask.get("/admin/season/:id/report")
   def verInformeTemporada(request: cask.Request, id: Int) = withAuth(request) {
     DatabaseManager.getInformeFinTemporada(id) match {
       case Some((nombre, informe)) if informe.nonEmpty =>
@@ -982,7 +982,7 @@ $informe
           head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
           body(style := "background:#1a1a1a;color:white;text-align:center;padding-top:50px;font-family:'Oswald';",
             h1("Informe no generado"), h3(s"Temporada: $nombre"),
-            form(action := s"/admin/temporada/$id/informe/generar", method := "post", cls := "d-inline-block mt-3",
+            form(action := s"/admin/season/$id/report/generate", method := "post", cls := "d-inline-block mt-3",
               button(tpe := "submit", cls := "btn btn-warning fw-bold", "🧠 Generar informe ahora")
             ),
             div(style := "margin-top:20px;", a(href := "/admin", cls := "btn btn-outline-light fw-bold", "Volver"))
@@ -994,7 +994,7 @@ $informe
     }
   }
 
-  @cask.post("/admin/temporada/:id/informe/generar")
+  @cask.post("/admin/season/:id/report/generate")
   def generarInformeTemporadaAction(request: cask.Request, id: Int) = withAuth(request) {
     DatabaseManager.generarInformeFinTemporada(id)
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
