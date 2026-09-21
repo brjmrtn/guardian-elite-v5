@@ -7,6 +7,44 @@ import java.net.URLEncoder
 
 object MatchController extends cask.Routes {
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE A — REGISTRO DE PARTIDO POR NLP (solo Elite; nunca toca tablas am_*)
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.post("/match-center/nlp")
+  def matchCenterNlp(request: cask.Request) = withAuth(request) {
+    val bodyString = new String(request.data.readAllBytes(), "UTF-8")
+    val formData = bodyString.split("&").filter(_.nonEmpty).map { part =>
+      val pair = part.split("=", 2)
+      val key = java.net.URLDecoder.decode(pair(0), "UTF-8")
+      val value = if (pair.length > 1) java.net.URLDecoder.decode(pair(1), "UTF-8") else ""
+      key -> value
+    }.toMap
+    val texto = formData.getOrElse("texto", "")
+
+    if (texto.trim.isEmpty) {
+      val json = ujson.Obj("error" -> "Texto vacío")
+      cask.Response(json.render().getBytes("UTF-8"), statusCode = 400, headers = Seq("Content-Type" -> "application/json"))
+    } else {
+      val raw = DatabaseManager.extraerPartidoNLP(texto)
+      try {
+        val parsed = ujson.read(raw) // valida que sea JSON antes de reenviarlo al frontend
+        cask.Response(parsed.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
+      } catch {
+        case _: Exception =>
+          val json = ujson.Obj("error" -> "No se pudo interpretar la respuesta de la IA", "confianza" -> 0.0)
+          cask.Response(json.render().getBytes("UTF-8"), statusCode = 502, headers = Seq("Content-Type" -> "application/json"))
+      }
+    }
+  }
+
+  // BLOQUE D: clima automatico (Open-Meteo) — solo lectura, nunca Gemini
+  @cask.get("/match-center/clima")
+  def matchCenterClima(fecha: String) = {
+    val clima = DatabaseManager.getClimaParaFecha(fecha)
+    val json = ujson.Obj("clima" -> clima)
+    cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
+  }
+
   @cask.get("/match-center")
   def matchCenterPage(request: cask.Request, scheduleId: Int = 0) = withAuth(request) {
     val today = java.time.LocalDate.now().toString
@@ -37,6 +75,27 @@ object MatchController extends cask.Routes {
             div(cls := "card-body p-3",
               form(action := "/match-center/save", method := "post", attr("accept-charset") := "UTF-8",
 
+                // ── BLOQUE A: REGISTRO RAPIDO POR VOZ O TEXTO (NLP con Gemini) ──
+                div(cls:="mb-4 p-3 border border-warning rounded", style:="background:rgba(212,175,55,0.06);",
+                  div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;", onclick:="toggleNlpPanel()",
+                    label(cls:="text-warning fw-bold small mb-0", style:="cursor:pointer;", "⚡ REGISTRO RÁPIDO POR VOZ O TEXTO"),
+                    span(id:="nlpChevron", cls:="text-warning small", "▲")
+                  ),
+                  div(id:="nlpPanel", style:="display:block;",
+                    div(cls:="xx-small text-muted mt-2 mb-2",
+                      "Describe el partido libremente y la IA rellenará el formulario. Tú siempre revisas y guardas."),
+                    textarea(id:="nlpTexto", cls:="form-control form-control-sm bg-dark text-white border-warning mb-2", rows:="3",
+                      placeholder:="Ej: 'Ganamos 2-1 al Rayo B fuera de casa, llovía. Héctor estuvo muy bien, sacó 5 paradas, le puse un 8. Sin comunicar mucho con la defensa.'"),
+                    div(cls:="d-flex gap-2",
+                      button(tpe:="button", id:="nlpDictarBtn", cls:="btn btn-sm btn-outline-warning fw-bold", onclick:="nlpToggleDictado()", "🎤 Dictar"),
+                      button(tpe:="button", id:="nlpExtraerBtn", cls:="btn btn-sm btn-warning fw-bold flex-fill", onclick:="nlpExtraer()", "🧠 Extraer datos")
+                    ),
+                    div(id:="nlpStatus", cls:="xx-small text-muted mt-2"),
+                    div(id:="nlpConfianzaWarning", cls:="xx-small text-danger mt-1", style:="display:none;",
+                      "⚠️ Algunos campos pueden no ser correctos — revísalos antes de guardar")
+                  )
+                ),
+
                 // 1. DATOS GENERALES
                 input(tpe:="hidden", name:="scheduleId", value:=scheduleId.toString),
                 div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "TIPO DE PARTIDO"),
@@ -60,7 +119,7 @@ object MatchController extends cask.Routes {
                     if (scheduleId > 0) readonly := true else ()
                   )
                 ),
-                div(cls := "mb-3", label(cls := "form-label text-white fw-bold small", "FECHA"), input(tpe := "date", name := "fecha", cls := "form-control", value := preFecha)),
+                div(cls := "mb-3", label(cls := "form-label text-white fw-bold small", "FECHA"), input(tpe := "date", name := "fecha", id := "fechaInput", cls := "form-control", value := preFecha)),
                 div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "ESTADIO / CAMPO"), input(tpe:="text", name:="estadio", cls:="form-control bg-dark text-white", value:=fixEncoding(preEstadio), placeholder:="Ej: Valdebebas Campo 3")),
                 div(cls:="mb-3",
                   label(cls:="form-label text-white fw-bold small", "¿LOCAL O VISITANTE?"),
@@ -196,7 +255,12 @@ object MatchController extends cask.Routes {
                 div(cls:="mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
                   label(cls:="form-label text-white small fw-bold w-100 text-center", "ENTORNO"),
                   div(cls:="row mb-2",
-                    div(cls:="col-6", label(cls:="small text-muted fw-bold", "Clima"), select(name:="clima", cls:="form-select form-select-sm bg-dark text-white fw-bold", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Viento", "Viento"))),
+                    div(cls:="col-6",
+                      div(cls:="d-flex justify-content-between align-items-center",
+                        label(cls:="small text-muted fw-bold", "Clima"),
+                        span(id:="climaAutoBadge", cls:="badge bg-info text-dark xx-small", style:="display:none;", "🌐 Auto")
+                      ),
+                      select(name:="clima", id:="climaSelect", cls:="form-select form-select-sm bg-dark text-white fw-bold", onchange:="document.getElementById('climaAutoBadge').style.display='none';", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Calor", "Calor"), option(value:="Viento", "Viento"))),
                     div(cls:="col-6", label(cls:="small text-muted fw-bold", "Temp (C)"), input(tpe:="number", name:="temp", cls:="form-control form-control-sm bg-dark text-white fw-bold", value:="20"))
                   )
                 ),
@@ -432,6 +496,92 @@ object MatchController extends cask.Routes {
                 }
                 document.getElementById('goalsDataInput').value = rows.join(';');
               }
+
+              // ── BLOQUE A: REGISTRO RAPIDO POR VOZ O TEXTO (NLP) ─────────
+              function toggleNlpPanel(){var p=document.getElementById('nlpPanel');var c=document.getElementById('nlpChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
+              var nlpRecognition = null; var nlpDictando = false;
+              function nlpToggleDictado(){
+                var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SR) { alert('Reconocimiento de voz no disponible en este navegador.'); return; }
+                var btn = document.getElementById('nlpDictarBtn');
+                if (nlpDictando) { if (nlpRecognition) nlpRecognition.stop(); return; }
+                nlpRecognition = new SR();
+                nlpRecognition.lang = 'es-ES';
+                nlpRecognition.continuous = true; nlpRecognition.interimResults = false;
+                nlpRecognition.onstart = function(){ nlpDictando = true; btn.textContent = '⏹ Parar'; };
+                nlpRecognition.onresult = function(e){
+                  var texto = '';
+                  for (var i = 0; i < e.results.length; i++) texto += e.results[i][0].transcript + ' ';
+                  document.getElementById('nlpTexto').value = texto.trim();
+                };
+                nlpRecognition.onerror = function(){ nlpDictando = false; btn.textContent = '🎤 Dictar'; };
+                nlpRecognition.onend = function(){ nlpDictando = false; btn.textContent = '🎤 Dictar'; };
+                nlpRecognition.start();
+              }
+              function nlpMarkAuto(el){ if(el) el.style.border = '2px solid #d4af37'; }
+              function nlpSetVal(name, val){
+                if (val === null || val === undefined || val === '') return;
+                var el = document.querySelector('[name="'+name+'"]:not([type="radio"])');
+                if (el) { el.value = val; nlpMarkAuto(el); }
+              }
+              function nlpSetRadio(name, val){
+                var el = document.querySelector('[name="'+name+'"][value="'+val+'"]');
+                if (el) { el.checked = true; el.dispatchEvent(new Event('change')); }
+              }
+              function nlpExtraer(){
+                var texto = document.getElementById('nlpTexto').value.trim();
+                if (!texto) { alert('Describe el partido primero.'); return; }
+                var status = document.getElementById('nlpStatus');
+                status.textContent = '⏳ Extrayendo datos con Gemini...';
+                document.getElementById('nlpExtraerBtn').disabled = true;
+                var body = 'texto=' + encodeURIComponent(texto);
+                fetch('/match-center/nlp', { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: body })
+                  .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+                  .then(function(res){
+                    document.getElementById('nlpExtraerBtn').disabled = false;
+                    if (!res.ok) { status.textContent = '⚠️ ' + (res.body.error || 'Error al extraer datos.'); return; }
+                    var d = res.body;
+                    status.textContent = '✅ Datos extraídos — revisa los campos marcados en amarillo.';
+                    nlpSetVal('rival', d.rival);
+                    nlpSetVal('gf', d.goles_favor);
+                    nlpSetVal('gc', d.goles_contra);
+                    nlpSetVal('nota', d.nota);
+                    nlpSetVal('paradas', d.paradas);
+                    if (d.clima) { nlpSetVal('clima', d.clima); document.getElementById('climaAutoBadge').style.display='none'; }
+                    if (d.sede === 'Casa') nlpSetRadio('esLocal', 'true');
+                    else if (d.sede === 'Fuera') nlpSetRadio('esLocal', 'false');
+                    if (d.tipo_partido) nlpSetVal('tipo', d.tipo_partido);
+                    if (d.iniciativa_vocal) nlpSetVal('iniciativaVocal', d.iniciativa_vocal);
+                    nlpSetVal('rubricaPosicion', d.rubrica_posicion);
+                    nlpSetVal('rubricaDecisiones', d.rubrica_decisiones);
+                    nlpSetVal('rubricaPies', d.rubrica_pies);
+                    nlpSetVal('rubricaComunicacion', d.rubrica_comunicacion);
+                    nlpSetVal('rubricaActitud', d.rubrica_actitud);
+                    nlpSetVal('notas', d.notas_partido);
+                    var warn = document.getElementById('nlpConfianzaWarning');
+                    warn.style.display = (typeof d.confianza === 'number' && d.confianza < 0.6) ? 'block' : 'none';
+                  })
+                  .catch(function(err){
+                    document.getElementById('nlpExtraerBtn').disabled = false;
+                    status.textContent = '⚠️ Error de red: ' + err.message;
+                  });
+              }
+
+              // ── BLOQUE D: CLIMA AUTOMATICO (Open-Meteo) ─────────────────
+              function cargarClimaAuto(fecha){
+                if (!fecha) return;
+                fetch('/match-center/clima?fecha=' + encodeURIComponent(fecha)).then(function(r){ return r.json(); }).then(function(j){
+                  if (j.clima) {
+                    document.getElementById('climaSelect').value = j.clima;
+                    document.getElementById('climaAutoBadge').style.display = 'inline-block';
+                  }
+                }).catch(function(){});
+              }
+              var fechaInputEl = document.getElementById('fechaInput');
+              if (fechaInputEl) {
+                fechaInputEl.addEventListener('change', function(){ cargarClimaAuto(this.value); });
+                if (fechaInputEl.value) cargarClimaAuto(fechaInputEl.value);
+              }
             """))
           )
         )
@@ -577,6 +727,11 @@ object MatchController extends cask.Routes {
     DatabaseManager.updateMatchExtras(savedMatchId, rubricaPosicion, rubricaDecisiones, rubricaPies,
       rubricaComunicacion, rubricaActitud, posicionSet, alturaBloque, pieNoDominanteAcciones, iniciativaVocal)
     DatabaseManager.generarGuiaConversacion(savedMatchId)
+
+    // BLOQUE G3: notificacion Telegram al guardar el partido — en background, nunca bloquea la respuesta
+    new Thread(new Runnable {
+      def run(): Unit = TelegramService.enviar(s"✅ Partido vs $cleanRival registrado — $gf-$gc · Nota: $nota")
+    }).start()
 
     // Respuesta visual renderizada como Array[Byte] para cumplir con withAuth
     val d = n.media - c.media

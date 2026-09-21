@@ -18,10 +18,59 @@ object DashboardController extends cask.Routes {
     val aiMessage = DatabaseManager.getDeepAnalysis()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
 
+    // ── BLOQUE F: RIESGO DE LESION COMPUESTO (SQL puro, sin Gemini) ───────────
+    val riesgoLesion = DatabaseManager.calcularRiesgoLesion()
+    val riesgoValor = riesgoLesion("riesgo").asInstanceOf[Double]
+    val riesgoClasificacion = riesgoLesion("clasificacion").asInstanceOf[String]
+    val riesgoSemaforo = riesgoLesion("semaforo").asInstanceOf[String]
+    val riesgoFactores = riesgoLesion("factoresActivos").asInstanceOf[List[String]]
+    val riesgoEsAltoOCritico = riesgoClasificacion == "ALTO" || riesgoClasificacion == "CRITICO"
+
+    // BLOQUE G3: alerta Telegram de riesgo CRITICO, maximo una vez al dia, en background
+    if (riesgoClasificacion == "CRITICO" && !DatabaseManager.yaAlertadoRiesgoCriticoHoy()) {
+      DatabaseManager.marcarRiesgoCriticoAlertadoHoy()
+      val factoresTxt = riesgoFactores.mkString(", ")
+      new Thread(new Runnable {
+        def run(): Unit = TelegramService.enviar(s"🔴 ALERTA GUARDIAN: Riesgo de lesión CRITICO. Factores: $factoresTxt")
+      }).start()
+    }
+
+    // ── BLOQUE F2: alerta de maxima prioridad si el riesgo es CRITICO ─────────
+    val riesgoCriticoAlert: Modifier =
+      if (riesgoClasificacion == "CRITICO")
+        div(cls := "alert alert-danger fw-bold shadow mb-3", style := "border-left:6px solid #dc3545;",
+          s"🔴 RIESGO DE LESIÓN CRÍTICO — factores: ${riesgoFactores.mkString(", ")}")
+      else div()
+
+    val riesgoLesionWidget: Modifier = {
+      val explicacion: Modifier =
+        if (riesgoEsAltoOCritico) div(cls := "xx-small mt-1", style := "color:#fca5a5;",
+          "Considera hablar con el entrenador sobre la carga de esta semana.")
+        else div()
+      div(cls := "card bg-dark border-secondary shadow-sm mb-3 p-2",
+        attr("title") := riesgoFactores.mkString(", "),
+        div(cls := "d-flex justify-content-between align-items-center",
+          span(style := "font-size:11px; color:#94a3b8;", "🩹 RIESGO DE LESIÓN"),
+          span(style := "font-size:16px; font-weight:900; color:#fff;", f"$riesgoSemaforo $riesgoValor%.1f — $riesgoClasificacion")
+        ),
+        explicacion
+      )
+    }
+
     // ── BLOQUE 5.6: DETECTOR DE DESGASTE SILENCIOSO (prioridad maxima) ────────
     val desgasteWidget: Modifier = DatabaseManager.detectarDesgasteSilencioso() match {
       case Some(msg) => div(cls := "alert alert-danger fw-bold shadow mb-3", style := "border-left:6px solid #dc3545;", msg)
       case None => div()
+    }
+
+    // ── BLOQUE B2: PENDIENTE DE REGISTRAR (estructura semanal, SQL puro) ──────
+    val pendienteWidget: Modifier = {
+      val pendientes = DatabaseManager.getSemanaIncompleta()
+      if (pendientes.isEmpty) div()
+      else div(cls := "card bg-secondary bg-opacity-25 border-secondary shadow-sm mb-3 p-2",
+        div(cls := "xx-small text-muted fw-bold mb-1", "📋 PENDIENTE DE REGISTRAR"),
+        div(cls := "xx-small text-light", pendientes.map(p => div(p)))
+      )
     }
 
     // ── BLOQUE 2.7: ALERTAS DE TEMPORADA (SQL puro) ───────────────────────────
@@ -41,6 +90,21 @@ object DashboardController extends cask.Routes {
         div(style := "font-size:11px; color:#7dd3fc; letter-spacing:1px;", "🎓 ÚLTIMA ACADEMIA"),
         div(cls := "small mt-1", fb))
       case None => div()
+    }
+
+    // ── BLOQUE E3: TIP PARA EL ENTRENADOR DE ACADEMIA (video IA reciente, sin Gemini aqui) ──
+    val academiaVideoTipWidget: Modifier = {
+      val histVideo = DatabaseManager.getVideoAnalysisHistoryAll()
+      val hayReciente = histVideo.lastOption.exists { h =>
+        scala.util.Try(java.time.LocalDate.parse(h("fecha").asInstanceOf[String])).toOption
+          .exists(_.isAfter(java.time.LocalDate.now().minusDays(30)))
+      }
+      if (!hayReciente) div()
+      else DatabaseManager.getUltimoErrorRecurrente() match {
+        case Some(error) => div(cls := "card bg-dark text-white border-warning shadow-sm mb-3 p-3",
+          div(cls := "small", s"💡 Para comentar al entrenador de academia: la IA detectó en vídeo que $error. ¿Podría trabajarlo este domingo?"))
+        case None => div()
+      }
     }
 
     // ── BLOQUE 5.4: FOCO DE ESTA SEMANA (micro-objetivo) ──────────────────────
@@ -149,6 +213,133 @@ object DashboardController extends cask.Routes {
           ),
           div(cls := s"row row-cols-$numCols g-1 mt-1", miniBars)
         )
+    }
+
+    // ── BLOQUE C: MODO DIA DE PARTIDO (SQL/cache, sin Gemini en el render) ────
+    val diaPartidoBanner: Modifier = if (!esDiaDePartido) div() else {
+      val indice = formaHoy("indiceForma").asInstanceOf[Double]
+      val semaforo = if (indice >= 7.5) "🟢" else if (indice >= 5.0) "🟡" else "🔴"
+      val tieneFcHoy = formaHoy.get("tieneFcHoy").exists(_.asInstanceOf[Boolean])
+      val fcScoreOpt = formaHoy.get("fcScore").flatMap(_.asInstanceOf[Option[Double]])
+      val fcLinea: Modifier = if (tieneFcHoy) {
+        val fc = fcScoreOpt.getOrElse(7.0)
+        val interp = if (fc >= 9.0) "excelente descanso" else if (fc >= 6.0) "descanso normal"
+                     else if (fc >= 3.0) "FC reposo elevada — vigilar cansancio" else "FC reposo muy elevada — posible fatiga acumulada"
+        div(cls := "xx-small", style := "color:#cbd5e1;", s"❤️ FC reposo hoy: $interp")
+      } else div()
+
+      // BLOQUE F3: aviso de riesgo de lesion en el modo dia de partido
+      val riesgoLinea: Modifier = if (riesgoEsAltoOCritico)
+        div(cls := "xx-small fw-bold mt-1", style := "color:#fca5a5;",
+          "⚠️ El riesgo de lesión hoy es ALTO — considera hablar con el entrenador sobre la intensidad del calentamiento.")
+      else div()
+
+      val info = DatabaseManager.getDiaPartidoInfo()
+      val hayRival = info.getOrElse("hayRivalProgramado", false).asInstanceOf[Boolean]
+
+      val rivalCard: Modifier = if (!hayRival) div() else {
+        val rival = info("rival").asInstanceOf[String]
+        val pj = info("pj").asInstanceOf[Int]
+        val notaMedia = info("notaMedia").asInstanceOf[Double]
+        val ultimo = info("ultimoResultado").asInstanceOf[String]
+        val tipoPartido = info("tipoPartido").asInstanceOf[String]
+        val torneoNombre = info("torneoNombre").asInstanceOf[String]
+        val fase = info("fase").asInstanceOf[String]
+        val estilo = info("estilo").asInstanceOf[Option[String]]
+        val arquetipo = info("arquetipo").asInstanceOf[Option[String]]
+        val torneoLinea: Modifier = if (tipoPartido == "TORNEO" && torneoNombre.nonEmpty)
+          div(cls := "xx-small fw-bold", style := "color:#facc15;", s"🏆 ${torneoNombre.toUpperCase}${if (fase.nonEmpty) s" — $fase" else ""}")
+        else div()
+        div(cls := "mt-2 pt-2", style := "border-top:1px solid #334155;",
+          div(style := "font-size:11px; color:#94a3b8; letter-spacing:1px;", "RIVAL DE HOY"),
+          div(cls := "fw-bold", style := "color:#fff; font-size:18px;", rival),
+          torneoLinea,
+          if (pj > 0) div(cls := "xx-small", style := "color:#cbd5e1;",
+            s"PJ $pj · nota media ${f"$notaMedia%.1f"}" + (if (ultimo.nonEmpty) s" · último resultado $ultimo" else ""))
+          else div(cls := "xx-small text-muted", "Primer partido registrado contra este rival"),
+          estilo.map(e => div(cls := "xx-small", style := "color:#cbd5e1;", s"Estilo: $e")).getOrElse(div()),
+          arquetipo.map(a => div(cls := "xx-small", style := "color:#cbd5e1;", s"Tipo de delantero: $a")).getOrElse(div())
+        )
+      }
+
+      val prepCache = DatabaseManager.getPreparacionSemanalCache()
+      def parteCache(prefijo: String): String = prepCache.map { texto =>
+        texto.split("/").map(_.trim).find(_.startsWith(prefijo)).map(_.drop(prefijo.length).trim).getOrElse("")
+      }.getOrElse("")
+      val consignaCoche = parteCache("CONSIGNA_COCHE:")
+      val focoGrada = parteCache("FOCO_SABADO:")
+      val comidaPrePartido = "Comida ligera y rica en carbohidratos 2-3h antes: pasta, arroz o plátano. Evita fritos y exceso de fibra."
+
+      val tarjetas = Seq(
+        ("🚗", "CONSIGNA COCHE", if (consignaCoche.nonEmpty) consignaCoche else "Genera la preparación semanal para ver una consigna personalizada."),
+        ("🍽️", "COMIDA PRE-PARTIDO", comidaPrePartido),
+        ("👁️", "FOCO EN LA GRADA", if (focoGrada.nonEmpty) focoGrada else "Genera la preparación semanal para ver el foco de hoy.")
+      ).map { case (icono, titulo, texto) =>
+        div(cls := "col-12 col-md-4",
+          div(cls := "p-2 rounded h-100", style := "background:rgba(255,255,255,0.05);",
+            div(cls := "xx-small fw-bold", style := "color:#facc15;", s"$icono $titulo"),
+            div(cls := "xx-small mt-1", style := "color:#e2e8f0;", texto)
+          )
+        )
+      }
+
+      val microObjetivoLinea: Modifier = {
+        val obj = microObjetivo("objetivo").asInstanceOf[String]
+        if (obj.nonEmpty) div(cls := "xx-small mt-2", style := "color:#cbd5e1;", s"🎯 Micro-objetivo: $obj") else div()
+      }
+
+      val botonRegistrar = hayRival match {
+        case true =>
+          val scheduleId = info("scheduleId").asInstanceOf[Int]
+          a(href := s"/match-center?scheduleId=$scheduleId", cls := "btn btn-warning fw-bold w-100 mt-3", "⚽ REGISTRAR PARTIDO")
+        case false =>
+          a(href := "/match-center", cls := "btn btn-warning fw-bold w-100 mt-3", "⚽ REGISTRAR PARTIDO")
+      }
+
+      div(id := "diaPartidoBanner",
+        style := "background: linear-gradient(135deg, #451a03 0%, #1e293b 100%); border-radius:16px; padding:18px; margin-bottom:16px; border:1px solid #d4af37;",
+        div(cls := "d-flex justify-content-between align-items-start",
+          div(
+            div(style := "font-size:13px; color:#facc15; letter-spacing:1px; font-weight:900;", "🏟️ HOY ES DÍA DE PARTIDO"),
+            div(cls := "d-flex align-items-center gap-2 mt-1",
+              span(style := "font-size:24px; font-weight:900; color:#fff;", f"$semaforo $indice%.1f"),
+              span(cls := "xx-small text-muted", "ÍNDICE DE FORMA")
+            ),
+            fcLinea,
+            riesgoLinea
+          ),
+          span(style := "cursor:pointer; color:#94a3b8; font-size:18px;", onclick := "cerrarDiaPartidoBanner()", "✕")
+        ),
+        rivalCard,
+        div(cls := "row g-2 mt-2", tarjetas),
+        microObjetivoLinea,
+        botonRegistrar
+      )
+    }
+
+    // BLOQUE C3: aviso post-partido si son las 15:00+ del dia de partido y aun no hay registro
+    val postPartidoWidget: Modifier = if (!esDiaDePartido) div() else {
+      val ahora = java.time.LocalTime.now()
+      DatabaseManager.getPartidoHoyRegistrado() match {
+        case None if ahora.isAfter(java.time.LocalTime.of(15, 0)) =>
+          div(cls := "alert alert-warning small p-2 mb-3", style := "border-left:6px solid #fd7e14;",
+            "⏳ ¿Ya terminó el partido? Regístralo antes de que se enfríe el recuerdo. ",
+            a(href := "/match-center", cls := "fw-bold", "Registrar ahora →"))
+        case Some(matchId) =>
+          DatabaseManager.getGuiaConversacion(matchId) match {
+            case Some(guia) if guia.nonEmpty =>
+              val partes = guia.split("/").map(_.trim)
+              def parte(p: String): String = partes.find(_.startsWith(p)).map(_.drop(p.length).trim).getOrElse("")
+              div(cls := "card bg-dark border-success shadow-sm mb-3 p-3",
+                div(cls := "xx-small fw-bold text-success mb-2", "💬 CLAVES PARA LA COMIDA DE HOY"),
+                div(cls := "xx-small mb-1", strong("Resalta: "), parte("QUE_RESALTAR:")),
+                div(cls := "xx-small mb-1", strong("No menciones: "), parte("QUE_CALLAR:")),
+                div(cls := "xx-small", strong("Esta tarde: "), parte("ACCION_POSITIVA:"))
+              )
+            case _ => div()
+          }
+        case _ => div()
+      }
     }
 
     // ── CONSEJOS IA CONSOLIDADOS (datos ya cargados arriba — sin llamadas extra) ─
@@ -511,14 +702,25 @@ object DashboardController extends cask.Routes {
 
     val content = basePage("home",
       div(
+        // ── BLOQUE F2: RIESGO DE LESION CRITICO (maxima prioridad, por encima del desgaste) ─
+        riesgoCriticoAlert,
+
         // ── BLOQUE 5.6: DESGASTE SILENCIOSO (prioridad maxima sobre todo lo demas) ─
         desgasteWidget,
+
+        // ── BLOQUE C: MODO DIA DE PARTIDO ───────────────────────────────────
+        diaPartidoBanner,
+        postPartidoWidget,
 
         // ── BLOQUE 2.7: ALERTAS DE TEMPORADA ────────────────────────────────
         temporadaAlertWidget,
 
+        // ── BLOQUE B2: PENDIENTE DE REGISTRAR ───────────────────────────────
+        pendienteWidget,
+
         // ── BLOQUE 4.2: ULTIMA ACADEMIA ─────────────────────────────────────
         ultimaAcademiaWidget,
+        academiaVideoTipWidget,
 
         // ── BLOQUE 5.4/5.5: FOCO SEMANAL Y PREPARACION ──────────────────────
         microObjetivoWidget,
@@ -526,6 +728,7 @@ object DashboardController extends cask.Routes {
 
         // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
         formaWidget,
+        riesgoLesionWidget,
 
         // ── HERO HEADER (dark) ─────────────────────────────────────────────
         div(style := "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:20px; margin-bottom:20px;",
@@ -796,7 +999,24 @@ object DashboardController extends cask.Routes {
             )
           )
         )
-      )
+      ),
+      script(raw("""
+        function cerrarDiaPartidoBanner(){
+          var b = document.getElementById('diaPartidoBanner');
+          if (b) b.style.display = 'none';
+          try { localStorage.setItem('diaPartidoBannerCerrado', new Date().toISOString().slice(0,10)); } catch(e) {}
+        }
+        (function(){
+          try {
+            var cerrado = localStorage.getItem('diaPartidoBannerCerrado');
+            var hoy = new Date().toISOString().slice(0,10);
+            if (cerrado === hoy) {
+              var b = document.getElementById('diaPartidoBanner');
+              if (b) b.style.display = 'none';
+            }
+          } catch(e) {}
+        })();
+      """))
     )
     renderHtml(content)
   }

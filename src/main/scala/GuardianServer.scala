@@ -86,11 +86,14 @@ object GuardianServer extends cask.Main {
     new Runnable {
       def run(): Unit = {
         try {
+          val html = DatabaseManager.generarResumenSemanal()
           val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
           if (emailDest.nonEmpty) {
-            val html = DatabaseManager.generarResumenSemanal()
             BackupService.enviarResumenEmail(emailDest, html)
           }
+          // BLOQUE G3: mismo contenido del resumen, en texto plano, por Telegram
+          val textoPlano = html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim
+          TelegramService.enviar(textoPlano)
         } catch { case e: Exception =>
           println(s"[Resumen Email] ERROR: ${e.getMessage.take(200)}")
         }
@@ -98,6 +101,34 @@ object GuardianServer extends cask.Main {
     },
     msHastaResumen,
     7 * 24 * 60 * 60 * 1000L,
+    java.util.concurrent.TimeUnit.MILLISECONDS
+  )
+
+  // ── AVISO DIA DE PARTIDO POR TELEGRAM (BLOQUE G3) ───────────────────────────
+  // Se comprueba TODOS los dias a las 9:00 AM — el dia de partido nunca esta hardcodeado,
+  // se lee dinamicamente de weekly_structure en cada ejecucion (soporta cambios desde /settings).
+  val avisoPartidoExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r => {
+    val t = new Thread(r, "aviso-partido-engine")
+    t.setDaemon(true)
+    t
+  })
+  val ahora3 = java.time.LocalDateTime.now()
+  var proximasNueve = ahora3.withHour(9).withMinute(0).withSecond(0)
+  if (!proximasNueve.isAfter(ahora3)) proximasNueve = proximasNueve.plusDays(1)
+  val msHastaAvisoPartido = java.time.Duration.between(ahora3, proximasNueve).toMillis
+
+  avisoPartidoExecutor.scheduleAtFixedRate(
+    new Runnable {
+      def run(): Unit = {
+        try {
+          DatabaseManager.getAvisoDiaPartido().foreach(TelegramService.enviar)
+        } catch { case e: Exception =>
+          println(s"[Aviso Partido] ERROR: ${e.getMessage.take(200)}")
+        }
+      }
+    },
+    msHastaAvisoPartido,
+    24 * 60 * 60 * 1000L, // cada 24h
     java.util.concurrent.TimeUnit.MILLISECONDS
   )
 

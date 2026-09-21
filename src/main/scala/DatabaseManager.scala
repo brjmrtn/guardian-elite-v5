@@ -761,6 +761,28 @@ object DatabaseManager {
         UNIQUE(semana_inicio)
       )""")
 
+      // ─────────────────────────────────────────────────────────────────────────────
+      // BLOQUE B — ESTRUCTURA SEMANAL FIJA DE HECTOR (Elite exclusivamente)
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS weekly_structure (
+        id          SERIAL PRIMARY KEY,
+        dia_semana  INT NOT NULL CHECK (dia_semana BETWEEN 1 AND 7),
+        tipo_sesion TEXT NOT NULL,
+        activo      BOOLEAN DEFAULT TRUE,
+        notas       TEXT DEFAULT '',
+        UNIQUE(dia_semana, tipo_sesion)
+      )""")
+      stmt.executeUpdate("""
+        INSERT INTO weekly_structure (dia_semana, tipo_sesion, notas) VALUES
+          (1, 'JUDO',     'Lunes — Judo'),
+          (2, 'EQUIPO',   'Martes — Entreno equipo'),
+          (3, 'JUDO',     'Miercoles — Judo'),
+          (4, 'EQUIPO',   'Jueves — Entreno equipo'),
+          (6, 'PARTIDO',  'Sabado — Partido'),
+          (7, 'ACADEMIA', 'Domingo — Academia porteros')
+        ON CONFLICT (dia_semana, tipo_sesion) DO NOTHING
+      """)
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -769,7 +791,16 @@ object DatabaseManager {
     }
   }
 
-  def fixEncoding(s: String): String = { try { if (s == null) "" else if (s.contains("A")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
+  // BLOQUE H1: mismo fix que SharedLayout.fixEncoding — solo re-encodea ante secuencias
+  // concretas de corrupcion UTF-8/ISO-8859-1, nunca por contener una simple "A" mayuscula.
+  def fixEncoding(s: String): String = {
+    if (s == null || s.isEmpty) return ""
+    try {
+      val indicadores = Seq("Ã±", "Ã¡", "Ã©", "Ã³", "Ã", "Ãº", "Ã¼", "Ã ", "Ã¨", "Ã¬", "Ã²", "Ã€")
+      if (indicadores.exists(s.contains)) new String(s.getBytes("ISO-8859-1"), "UTF-8")
+      else s
+    } catch { case _: Exception => s }
+  }
 
   /** Escapa caracteres HTML peligrosos en strings que provienen de la BD
    *  y van a ser embebidos en HTML (raw()). Previene XSS.
@@ -1145,6 +1176,19 @@ object DatabaseManager {
   }
 
   def getOraclePrediction(hDad: Double, hMom: Double): String = { val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT altura FROM physical_growth ORDER BY fecha DESC LIMIT 1"); val currentHeight=if(rs.next()) rs.getDouble("altura") else 115.0; val midParent=(hDad+hMom+13)/2.0; val projected=(currentHeight*(180.0/110.0)+midParent)/2.0+5.0; val minH=projected-4; val maxH=projected+4; f"<div class='text-center'><h1 class='display-1 text-warning fw-bold'>${projected.toInt} cm</h1><p class='text-muted'>Proyeccion Adulta Estimada</p><div class='progress mb-2' style='height:10px;'><div class='progress-bar bg-success' style='width:${(projected/200.0)*100}%%'></div></div><p class='small'>Rango probable: <b>${minH.toInt}cm - ${maxH.toInt}cm</b></p><hr><p class='small text-info'>Comparativa Elite: <b>189 cm</b> (Media Pro)</p></div>" } catch { case _:Exception => "Error calculando." } finally { conn.close() } }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE A — REGISTRO DE PARTIDO POR NLP (Elite exclusivamente)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Llamada a Gemini — SOLO desde el boton explicito "Extraer datos". Usa cache normal (ai_cache).
+  def extraerPartidoNLP(texto: String): String = {
+    val card = getLatestCardData()
+    val edad = calcularEdadExacta(card.fechaNacimiento)
+    val prompt = s"""Eres el asistente de registro de partidos de Guardian Elite. El padre de Héctor, un portero de $edad años, te describe un partido en lenguaje natural. Extrae los datos y devuelve ÚNICAMENTE un JSON válido sin backticks ni texto adicional: { rival: string, goles_favor: int, goles_contra: int, nota: float (1-10), paradas: int, clima: 'Sol'|'Nubes'|'Lluvia'|'Frio'|'Calor'|'Viento', sede: 'Casa'|'Fuera', tipo_partido: 'LIGA'|'TORNEO'|'CUP'|'AMISTOSO', iniciativa_vocal: 'SI'|'PARCIAL'|'TIMIDO'|null, rubrica_posicion: int|null (1-5), rubrica_decisiones: int|null (1-5), rubrica_pies: int|null (1-5), rubrica_comunicacion: int|null (1-5), rubrica_actitud: int|null (1-5), notas_partido: string, confianza: float (0-1) }. Si no puedes inferir un campo con confianza razonable déjalo null. Texto del padre: $texto"""
+
+    val res = AIProvider.ask(prompt)
+    res.replace("```json", "").replace("```", "").trim
+  }
 
   // --- CORE MATCH LOGIC ---
   def logMatch(
@@ -1967,9 +2011,11 @@ Sugiere una periodización para los próximos 6 meses (bloques de carga alta, de
   private def audioDiaryDataOnly(audioBase64: String): String =
     if (audioBase64.contains(",")) audioBase64.split(",", 2)(1) else audioBase64
 
-  // Prompt especifico para Hector (7 anos) traduciendo su lenguaje infantil a lenguaje tecnico
-  private def audioDiaryPrompt(contexto: String): String =
-    s"""Eres el psicólogo deportivo y analista técnico de Héctor, un portero de 7 años. El siguiente audio es una grabación espontánea de Héctor hablando libremente después de $contexto. Héctor habla como un niño de 7 años — traduce su lenguaje infantil al lenguaje técnico de un entrenador de porteros de élite. El padre ha grabado sin hacer preguntas guiadas.
+  // Prompt para Hector traduciendo su lenguaje infantil a lenguaje tecnico.
+  // BLOQUE G5: edad siempre dinamica via calcularEdadExacta — nunca hardcodeada.
+  private def audioDiaryPrompt(contexto: String): String = {
+    val edad = calcularEdadExacta(getLatestCardData().fechaNacimiento)
+    s"""Eres el psicólogo deportivo y analista técnico de Héctor, un portero de $edad años. El siguiente audio es una grabación espontánea de Héctor hablando libremente después de $contexto. Héctor habla como un niño de $edad años — traduce su lenguaje infantil al lenguaje técnico de un entrenador de porteros de élite. El padre ha grabado sin hacer preguntas guiadas.
 
 Extrae y devuelve en texto plano estas 4 secciones:
 
@@ -1979,9 +2025,10 @@ PERCEPCIÓN TÉCNICA: ¿Qué aspectos técnicos menciona aunque sea con palabras
 
 SEÑAL SOCIAL: ¿Menciona a compañeros, al entrenador, a rivales? ¿Hay algo que indique cómo se relaciona con el entorno del equipo o la academia?
 
-CONSEJO PARA EL PADRE: Una acción concreta que el padre puede hacer en las próximas 24 horas para reforzar lo positivo o trabajar lo negativo detectado. Adaptada a 7 años — sin presión, enfocada en el disfrute y la confianza.
+CONSEJO PARA EL PADRE: Una acción concreta que el padre puede hacer en las próximas 24 horas para reforzar lo positivo o trabajar lo negativo detectado. Adaptada a $edad años — sin presión, enfocada en el disfrute y la confianza.
 
 Si el audio no contiene información sobre alguna sección escribe 'No mencionado'. Nunca inventes información que no esté en el audio."""
+  }
 
   // Procesamiento efimero: el base64 vive solo en memoria durante esta llamada (nunca a disco).
   def analyzeAudioDiaryMatch(matchId: Int, audioBase64: String): String = {
@@ -2023,11 +2070,18 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
 
     val res = AIProvider.ask(prompt, Some((mimeType, videoBase64)), bypassCache = true)
     val conn = getConnection()
-    try {
+    val rivalPartido = try {
       val ps = conn.prepareStatement("UPDATE matches SET video_analisis_ia = ?, video_analisis_fecha = NOW() WHERE id = ?")
       ps.setString(1, fixEncoding(res)); ps.setInt(2, matchId)
       ps.executeUpdate()
+      val rsR = conn.prepareStatement("SELECT rival FROM matches WHERE id = ?")
+      rsR.setInt(1, matchId)
+      val rr = rsR.executeQuery()
+      if (rr.next()) fixEncoding(rr.getString("rival")) else ""
     } finally { conn.close() }
+    // BLOQUE G3: notificacion Telegram — ya estamos en el hilo de fondo del analisis de video
+    val notaTecnica = extractNotaTecnica(res).map(n => f"$n%.1f").getOrElse("—")
+    TelegramService.enviar(s"🎬 Análisis de vídeo listo — vs $rivalPartido. Nota técnica: $notaTecnica/10")
     res
   }
 
@@ -2186,6 +2240,35 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
       list
     } finally { conn.close() }
     (matches ++ trainingsList).sortBy(_("fecha").asInstanceOf[String])
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE E — VIDEO IA ALIMENTA FLASH-CARDS Y ACADEMIA (solo Elite, SQL/cache, sin Gemini)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getUltimoErrorRecurrente(): Option[String] = {
+    val hist = getVideoAnalysisHistoryAll().sortBy(_("fecha").asInstanceOf[String]).takeRight(3)
+    if (hist.isEmpty) return None
+
+    def extraerError(h: Map[String, Any]): String = {
+      val analisis = h("analisis").asInstanceOf[String]
+      val texto =
+        if (h("tipoVideo").asInstanceOf[String] == "Partido") parseVideoAnalysisSections(analisis).getOrElse("PUNTOS A MEJORAR", "")
+        else parseVideoAnalysisSectionsTraining(analisis).getOrElse("ERROR RECURRENTE", "")
+      texto.trim
+    }
+
+    val errores = hist.map(extraerError).filter(_.nonEmpty)
+    if (errores.isEmpty) return None
+    val masReciente = errores.last
+    if (errores.size < 2) return Some(masReciente)
+
+    // Heurística ligera: si el error mas reciente comparte una palabra clave tecnica con algun
+    // analisis anterior, se marca como patron repetido (los textos son parrafos libres de Gemini,
+    // no hay forma exacta de comparar sin otra llamada a IA — se evita por la regla "nunca en render").
+    val keywords = Seq("mano", "pie", "salida", "posicion", "comunicac", "blocaje", "reflejo", "colocacion", "anticipac", "aereo", "concentrac")
+    val keyReciente = keywords.find(k => masReciente.toLowerCase.contains(k))
+    val repiteEnAnterior = keyReciente.exists(k => errores.dropRight(1).exists(_.toLowerCase.contains(k)))
+    if (repiteEnAnterior) Some(s"$masReciente (patrón repetido en los últimos análisis)") else Some(masReciente)
   }
 
   // Lectura desde cache unicamente — nunca llama a Gemini en el render de pagina
@@ -2643,13 +2726,230 @@ $analisisConcatenados"""
     } finally { conn.close() }
   }
 
-  // Hay partido programado hoy o mañana — solo lectura de BD
+  // BLOQUE C1: hay partido programado hoy o mañana, O hoy coincide con el dia de PARTIDO de la
+  // estructura semanal (weekly_structure) — nunca hardcodeado a sabado, siempre dinamico.
   def hayPartidoProximo(): Boolean = {
     val conn = getConnection()
     try {
       val rs = conn.createStatement().executeQuery(
         "SELECT COUNT(*) as c FROM matches WHERE status='SCHEDULED' AND fecha >= CURRENT_DATE AND fecha <= CURRENT_DATE + 1")
+      val hayProgramado = rs.next() && rs.getInt("c") > 0
+      if (hayProgramado) true
+      else {
+        val diaSemana = LocalDate.now().getDayOfWeek.getValue
+        val ps = conn.prepareStatement("SELECT COUNT(*) as c FROM weekly_structure WHERE tipo_sesion='PARTIDO' AND activo=TRUE AND dia_semana=?")
+        ps.setInt(1, diaSemana)
+        val rsW = ps.executeQuery()
+        rsW.next() && rsW.getInt("c") > 0
+      }
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE F — RIESGO DE LESION COMPUESTO (SQL puro, sin Gemini — solo tablas Elite)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def calcularRiesgoLesion(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // ACWR factor
+      val acute = getWorkloads(7); val chronic = getWorkloads(28)
+      val acwr = StatsCalculator.calculateACWR(acute, chronic)
+      val (acwrFactor, hayAcwr) =
+        if (acute.isEmpty && chronic.isEmpty) (1.0, false)
+        else if (acwr < 0.8) (1.0, true)
+        else if (acwr <= 1.2) (0.0, true)
+        else if (acwr <= 1.5) (3.0, true)
+        else (5.0, true)
+
+      // PHV factor
+      val faseBio = try getBioBandingData().getOrElse("faseBio", "").toString catch { case _: Exception => "" }
+      val phvFactor =
+        if (faseBio.contains("PICO ACTIVO")) 3.0
+        else if (faseBio.contains("POST-PHV") || faseBio == "MADUREZ") 0.5
+        else if (faseBio.nonEmpty) 0.5
+        else 0.5
+
+      // Descanso factor: dias consecutivos sin descanso (entreno o partido) terminando hoy
+      val rsFechas = conn.createStatement().executeQuery("""
+        (SELECT fecha FROM trainings WHERE fecha >= CURRENT_DATE - 14)
+        UNION
+        (SELECT fecha FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - 14)
+        ORDER BY fecha DESC
+      """)
+      var fechasActividad = Set[LocalDate]()
+      while (rsFechas.next()) fechasActividad += rsFechas.getDate("fecha").toLocalDate
+      var diasConsecutivos = 0
+      var cursor = LocalDate.now()
+      while (fechasActividad.contains(cursor)) { diasConsecutivos += 1; cursor = cursor.minusDays(1) }
+      val descansoFactor =
+        if (diasConsecutivos > 5) 2.0 else if (diasConsecutivos > 3) 1.0 else 0.0
+
+      // FC reposo factor
+      val rsFcHoy = conn.createStatement().executeQuery(
+        "SELECT fc_reposo FROM wellness WHERE fecha >= CURRENT_DATE - 1 ORDER BY fecha DESC LIMIT 1")
+      val fcHoy = if (rsFcHoy.next()) Option(rsFcHoy.getObject("fc_reposo")).map(_ => rsFcHoy.getInt("fc_reposo")) else None
+      val fcFactor = fcHoy match {
+        case Some(fc) =>
+          val rsFcAvg = conn.createStatement().executeQuery(
+            "SELECT AVG(fc_reposo) as m FROM wellness WHERE fc_reposo IS NOT NULL AND fecha >= CURRENT_DATE - 30")
+          val media = if (rsFcAvg.next()) rsFcAvg.getDouble("m") else 0.0
+          if (fc > media + 10) 2.0 else if (fc > media + 5) 1.0 else 0.0
+        case None => 0.0
+      }
+
+      // Fatiga factor: media de energia (wellness) ultimos 3 dias
+      val rsEnergia = conn.createStatement().executeQuery(
+        "SELECT AVG(energia) as m FROM wellness WHERE fecha >= CURRENT_DATE - 3")
+      val energiaMedia = if (rsEnergia.next()) rsEnergia.getDouble("m") else 0.0
+      val fatigaFactor =
+        if (energiaMedia > 0 && energiaMedia < 2.5) 1.5
+        else if (energiaMedia > 0 && energiaMedia < 3.5) 0.5
+        else 0.0
+
+      val riesgo = math.min(10.0, acwrFactor + phvFactor + descansoFactor + fcFactor + fatigaFactor)
+      val (clasificacion, semaforo) =
+        if (riesgo < 2.0) ("BAJO", "🟢")
+        else if (riesgo < 4.0) ("MEDIO", "🟡")
+        else if (riesgo < 6.0) ("ALTO", "🟠")
+        else ("CRITICO", "🔴")
+
+      val factoresActivos = scala.collection.mutable.ListBuffer[String]()
+      if (acwrFactor > 0) factoresActivos += s"ACWR ${"%.2f".format(acwr)}"
+      if (phvFactor >= 3.0) factoresActivos += "Pico de crecimiento (PHV)"
+      if (descansoFactor > 0) factoresActivos += s"$diasConsecutivos días seguidos sin descanso"
+      if (fcFactor > 0) factoresActivos += "FC en reposo elevada"
+      if (fatigaFactor > 0) factoresActivos += "Energía baja en los últimos días"
+
+      Map(
+        "riesgo" -> riesgo, "clasificacion" -> clasificacion, "semaforo" -> semaforo,
+        "acwrFactor" -> acwrFactor, "phvFactor" -> phvFactor, "descansoFactor" -> descansoFactor,
+        "fcFactor" -> fcFactor, "fatigaFactor" -> fatigaFactor, "factoresActivos" -> factoresActivos.toList
+      )
+    } finally { conn.close() }
+  }
+
+  // BLOQUE G3: evita reenviar la alerta de Telegram de riesgo CRITICO mas de una vez al dia
+  def yaAlertadoRiesgoCriticoHoy(): Boolean = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT COUNT(*) as c FROM feature_cache WHERE cache_key = 'telegram_riesgo_critico' AND updated_at::date = CURRENT_DATE")
       rs.next() && rs.getInt("c") > 0
+    } finally { conn.close() }
+  }
+
+  def marcarRiesgoCriticoAlertadoHoy(): Unit = {
+    val conn = getConnection()
+    try {
+      conn.createStatement().executeUpdate(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('telegram_riesgo_critico', '1', NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload='1', updated_at=NOW()")
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE C — MODO DIA DE PARTIDO (SQL puro, sin Gemini — solo tablas Elite)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getDiaPartidoInfo(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rsM = conn.createStatement().executeQuery(
+        "SELECT id, rival, tipo_partido, torneo_nombre, fase FROM matches WHERE status='SCHEDULED' AND fecha >= CURRENT_DATE AND fecha <= CURRENT_DATE + 1 ORDER BY fecha ASC LIMIT 1")
+      if (!rsM.next()) return Map("hayRivalProgramado" -> false)
+
+      val scheduleId = rsM.getInt("id")
+      val rival = fixEncoding(Option(rsM.getString("rival")).getOrElse(""))
+      val tipoPartido = Option(rsM.getString("tipo_partido")).getOrElse("")
+      val torneoNombre = fixEncoding(Option(rsM.getString("torneo_nombre")).getOrElse(""))
+      val fase = fixEncoding(Option(rsM.getString("fase")).getOrElse(""))
+
+      val rsH = conn.prepareStatement(
+        "SELECT COUNT(*) as pj, COALESCE(AVG(nota),0) as media FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED'")
+      rsH.setString(1, s"%$rival%")
+      val rsHr = rsH.executeQuery()
+      rsHr.next()
+      val pj = rsHr.getInt("pj"); val notaMedia = rsHr.getDouble("media")
+
+      val rsU = conn.prepareStatement(
+        "SELECT goles_favor, goles_contra FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED' ORDER BY fecha DESC LIMIT 1")
+      rsU.setString(1, s"%$rival%")
+      val rsUr = rsU.executeQuery()
+      val ultimoResultado = if (rsUr.next()) s"${rsUr.getInt("goles_favor")}-${rsUr.getInt("goles_contra")}" else ""
+
+      val estilo = getRivalInfo(rival).map(_.estilo).filter(_.nonEmpty)
+      val arquetipo = getStrikerClusters()
+        .find(c => c("rival").asInstanceOf[String].toLowerCase.contains(rival.toLowerCase))
+        .map(_("arquetipo").asInstanceOf[String])
+
+      Map(
+        "hayRivalProgramado" -> true, "scheduleId" -> scheduleId, "rival" -> rival,
+        "tipoPartido" -> tipoPartido, "torneoNombre" -> torneoNombre, "fase" -> fase,
+        "pj" -> pj, "notaMedia" -> notaMedia, "ultimoResultado" -> ultimoResultado,
+        "estilo" -> estilo, "arquetipo" -> arquetipo
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE D — CLIMA AUTOMATICO (Open-Meteo) — solo para /match-center de Hector
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getClimaParaFecha(fecha: String, lat: Double = 40.4168, lon: Double = -3.7038): String = {
+    try {
+      val url = s"https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&daily=precipitation_sum,weathercode,temperature_2m_max,windspeed_10m_max&start_date=$fecha&end_date=$fecha&timezone=Europe/Madrid"
+      val r = requests.get(url, readTimeout = 3000, connectTimeout = 3000)
+      if (r.statusCode != 200) return ""
+      val json = ujson.read(r.text())
+      val daily = json("daily")
+      val weathercode = daily("weathercode")(0).num.toInt
+      val tempMax = daily("temperature_2m_max")(0).num
+      val windMax = daily("windspeed_10m_max")(0).num
+
+      if (tempMax > 28) "Calor"
+      else if (tempMax < 8) "Frio"
+      else if (windMax > 30) "Viento"
+      else if (weathercode == 0) "Sol"
+      else if (Seq(1,2,3).contains(weathercode)) "Nubes"
+      else if ((51 to 67).contains(weathercode) || (71 to 77).contains(weathercode) || (80 to 82).contains(weathercode)) "Lluvia"
+      else ""
+    } catch { case _: Exception => "" }
+  }
+
+  // BLOQUE G3: aviso Telegram del dia de partido a las 9:00 AM — dia siempre dinamico via weekly_structure
+  def getAvisoDiaPartido(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val diaSemana = LocalDate.now().getDayOfWeek.getValue
+      val rsW = conn.prepareStatement("SELECT COUNT(*) as c FROM weekly_structure WHERE tipo_sesion='PARTIDO' AND activo=TRUE AND dia_semana=?")
+      rsW.setInt(1, diaSemana)
+      val rsWr = rsW.executeQuery()
+      val esDiaPartido = rsWr.next() && rsWr.getInt("c") > 0
+      if (!esDiaPartido) return None
+
+      val rsM = conn.createStatement().executeQuery(
+        "SELECT rival, tipo_partido, torneo_nombre, fase FROM matches WHERE status='SCHEDULED' AND fecha BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '2 days' ORDER BY fecha ASC LIMIT 1")
+      val rivalTxt = if (rsM.next()) {
+        val rival = fixEncoding(Option(rsM.getString("rival")).getOrElse(""))
+        val tipoPartido = Option(rsM.getString("tipo_partido")).getOrElse("")
+        val torneoNombre = fixEncoding(Option(rsM.getString("torneo_nombre")).getOrElse(""))
+        val fase = fixEncoding(Option(rsM.getString("fase")).getOrElse(""))
+        val torneoTxt = if (tipoPartido == "TORNEO" && torneoNombre.nonEmpty) s" ($torneoNombre${if (fase.nonEmpty) s" — $fase" else ""})" else ""
+        s" vs $rival$torneoTxt"
+      } else ""
+
+      val formaHoy = calcularFormaHoy()
+      val indice = formaHoy("indiceForma").asInstanceOf[Double]
+      val semaforo = if (indice >= 7.5) "🟢" else if (indice >= 5.0) "🟡" else "🔴"
+
+      Some(s"🏟️ HOY ES DÍA DE PARTIDO$rivalTxt · Índice de Forma: ${"%.1f".format(indice)} $semaforo")
+    } finally { conn.close() }
+  }
+
+  // BLOQUE C3: partido de hoy ya registrado como jugado (para el aviso post-partido)
+  def getPartidoHoyRegistrado(): Option[Int] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id FROM matches WHERE status='PLAYED' AND fecha = CURRENT_DATE ORDER BY id DESC LIMIT 1")
+      if (rs.next()) Some(rs.getInt("id")) else None
     } finally { conn.close() }
   }
 
@@ -2786,7 +3086,13 @@ $analisisConcatenados"""
       while (rsZona.next()) rsZona.getString("zona_goles").split(",").filter(_.nonEmpty).foreach(z => zonaCounts(z.trim) += 1)
       val zonaVulnerable = if (zonaCounts.nonEmpty) zonaCounts.maxBy(_._2)._1 else "sin datos suficientes"
 
-      val prompt = s"""Eres el preparador de Héctor, portero de $edad años. Esta semana: próximo partido vs $rival el $fechaProx, ACWR=${"%.2f".format(acwr)} ($estadoAcwr), fallos recurrentes=${if (fallos.nonEmpty) fallos else "ninguno detectado"}, zona vulnerable=$zonaVulnerable. Genera exactamente 3 bloques en texto plano: CONSIGNA_COCHE: [un foco mental o técnico positivo, máximo 2 frases, sin presión, para decirle de camino al entreno] / DESCANSO_CASA: [una pauta concreta de recuperación en casa según el ACWR, una frase accionable] / FOCO_SABADO: [un solo aspecto técnico que el padre debe observar desde la grada el sábado como observador neutral, máximo 2 frases]. Lenguaje para un padre, sin tecnicismos."""
+      // BLOQUE E3: si hay un analisis de video reciente, se incorpora como contexto adicional
+      val errorVideoLinea = getUltimoErrorRecurrente() match {
+        case Some(error) => s" El último análisis de vídeo detectó este error técnico recurrente en Héctor: $error. Incorpóralo en la CONSIGNA_COCHE o en el FOCO_SABADO si es relevante."
+        case None => ""
+      }
+
+      val prompt = s"""Eres el preparador de Héctor, portero de $edad años. Esta semana: próximo partido vs $rival el $fechaProx, ACWR=${"%.2f".format(acwr)} ($estadoAcwr), fallos recurrentes=${if (fallos.nonEmpty) fallos else "ninguno detectado"}, zona vulnerable=$zonaVulnerable.$errorVideoLinea Genera exactamente 3 bloques en texto plano: CONSIGNA_COCHE: [un foco mental o técnico positivo, máximo 2 frases, sin presión, para decirle de camino al entreno] / DESCANSO_CASA: [una pauta concreta de recuperación en casa según el ACWR, una frase accionable] / FOCO_SABADO: [un solo aspecto técnico que el padre debe observar desde la grada el sábado como observador neutral, máximo 2 frases]. Lenguaje para un padre, sin tecnicismos."""
 
       val resultado = AIProvider.ask(prompt, None, bypassCache = true)
       val up = conn.prepareStatement(
@@ -3100,6 +3406,19 @@ $analisisConcatenados"""
         if (dias > 10) s"""<p style="color:#dc3545;"><strong>⚠️ Alerta:</strong> hace $dias días que no se registra un partido jugado.</p>""" else ""
       } else ""
 
+      // BLOQUE G4: recordatorios trimestrales (>90 dias desde el ultimo registro)
+      def diasDesdeUltimo(tabla: String): Option[Long] = {
+        val rs = conn.createStatement().executeQuery(s"SELECT MAX(fecha) as f FROM $tabla")
+        if (rs.next() && rs.getDate("f") != null) Some(java.time.temporal.ChronoUnit.DAYS.between(rs.getDate("f").toLocalDate, hoy)) else None
+      }
+      val pendientesTrimestre = scala.collection.mutable.ListBuffer[String]()
+      diasDesdeUltimo("physical_tests").filter(_ > 90).foreach(d => pendientesTrimestre += s"💪 Test físico pendiente (último hace $d días)")
+      diasDesdeUltimo("cognitivo_tests").filter(_ > 90).foreach(d => pendientesTrimestre += s"🧠 Test cognitivo pendiente (último hace $d días)")
+      diasDesdeUltimo("psych_records").filter(_ > 90).foreach(d => pendientesTrimestre += s"🧠 Registro psicológico pendiente (último hace $d días)")
+      diasDesdeUltimo("physical_growth").filter(_ > 90).foreach(d => pendientesTrimestre += s"📏 Registro de crecimiento pendiente (último hace $d días)")
+      val trimestralHtml = if (pendientesTrimestre.isEmpty) "" else
+        s"<h3>📅 PENDIENTE TRIMESTRAL</h3><ul>${pendientesTrimestre.map(p => s"<li>$p</li>").mkString}</ul>"
+
       s"""
       <html><body style="font-family:sans-serif; color:#222;">
         <h2>Guardian Elite — Resumen semana del $hoy</h2>
@@ -3114,6 +3433,7 @@ $analisisConcatenados"""
         <p>${"%.1f".format(formaMedia)}</p>
         <h3>🎯 Micro-objetivo de la semana</h3>
         <p>$objetivoHtml</p>
+        $trimestralHtml
       </body></html>
       """
     } finally { conn.close() }
@@ -3280,7 +3600,40 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
 
   // --- FUNCIONES EXTRA ---
   def createTournament(nombre: String, estructura: String): String = { val conn=getConnection(); var count=0; try{ val rsId=conn.createStatement().executeQuery("SELECT MAX(id) as id FROM seasons"); if(rsId.next()){ val sId=rsId.getInt("id"); val lines=estructura.split("\n").map(_.trim).filter(_.nonEmpty); val ps=conn.prepareStatement("INSERT INTO matches (season_id, fecha, rival, tipo_partido, status, goles_favor, goles_contra, minutos, nota, paradas, clima, estadio, torneo_nombre, fase) VALUES (?, ?, ?, 'TORNEO', 'SCHEDULED', 0, 0, 0, 0, 0, 'Sol', 'Sede Torneo', ?, ?)"); lines.foreach { l => val p=l.split("\\|").map(_.trim); if(p.length>=2){ ps.setInt(1, sId); ps.setDate(2, if(p.length>2) try Date.valueOf(p(2)) catch {case _:Exception=>Date.valueOf(LocalDate.now())} else Date.valueOf(LocalDate.now())); ps.setString(3, fixEncoding(p(1))); ps.setString(4, fixEncoding(nombre)); ps.setString(5, fixEncoding(p(0))); ps.executeUpdate(); count += 1 } } } else return "Error: Crea una temporada primero." } catch { case e: Exception => return s"Error: ${e.getMessage}" } finally { conn.close() }; s"Torneo '$nombre' creado ($count partidos)." }
-  def syncRFFMCalendar(): String = { var logs=new StringBuilder(); var count=0; val conn=getConnection(); try{ val rsCfg=conn.createStatement().executeQuery("SELECT id, rffm_url, rffm_team_name FROM seasons ORDER BY id DESC LIMIT 1"); if(!rsCfg.next()) return "Error: Sin temporada."; val (sid,url,myTeam)=(rsCfg.getInt("id"), Option(rsCfg.getString("rffm_url")).getOrElse(""), Option(rsCfg.getString("rffm_team_name")).getOrElse("").toUpperCase); if(url.isEmpty || myTeam.isEmpty) return "Error Config."; val doc=Jsoup.connect(url).userAgent("Mozilla/5.0").timeout(10000).get(); val ps=conn.prepareStatement("INSERT INTO matches (season_id, fecha, rival, tipo_partido, status, goles_favor, goles_contra, minutos, nota, paradas, clima, estadio, torneo_nombre, fase) VALUES (?, ?, ?, 'LIGA', 'SCHEDULED', 0, 0, 0, 0, 0, 'Sol', ?, '', 'Regular')"); for(row<-doc.select("table tbody tr").asScala){ val cols=row.select("td"); if(cols.size()>=4){ val (loc,vis)=(cols.get(0).text().toUpperCase.trim, cols.get(2).text().toUpperCase.trim); if(loc.contains(myTeam)||vis.contains(myTeam)){ val rival=if(loc.contains(myTeam)) vis else loc; val campo=if(cols.get(3).text().length>50) cols.get(3).text().take(50) else cols.get(3).text(); if(conn.createStatement().executeQuery(s"SELECT count(*) FROM matches WHERE season_id=$sid AND rival='${fixEncoding(rival)}'").next()){ ps.setInt(1, sid); ps.setDate(2, Date.valueOf(LocalDate.now().plusDays(7))); ps.setString(3, fixEncoding(rival)); ps.setString(4, fixEncoding(campo)); ps.executeUpdate(); count+=1; logs.append(s"+ $rival\n") } } } } } catch { case e: Exception => logs.append(s"Err: ${e.getMessage}") } finally { conn.close() }; logs.toString() }
+  def syncRFFMCalendar(): String = {
+    var logs = new StringBuilder(); var count = 0
+    val conn = getConnection()
+    try {
+      val rsCfg = conn.createStatement().executeQuery("SELECT id, rffm_url, rffm_team_name FROM seasons ORDER BY id DESC LIMIT 1")
+      if (!rsCfg.next()) return "Error: Sin temporada."
+      val (sid, url, myTeam) = (rsCfg.getInt("id"), Option(rsCfg.getString("rffm_url")).getOrElse(""), Option(rsCfg.getString("rffm_team_name")).getOrElse("").toUpperCase)
+      if (url.isEmpty || myTeam.isEmpty) return "Error Config."
+
+      // BLOQUE H2: encoding explicito — si Jsoup no detecta UTF-8, re-parsea forzando la conversion
+      val doc = Jsoup.connect(url).userAgent("Mozilla/5.0").timeout(10000).get()
+      val docFinal = if (doc.charset().name() != "UTF-8")
+        Jsoup.parse(new String(doc.html().getBytes("ISO-8859-1"), "UTF-8"))
+      else doc
+
+      val ps = conn.prepareStatement("INSERT INTO matches (season_id, fecha, rival, tipo_partido, status, goles_favor, goles_contra, minutos, nota, paradas, clima, estadio, torneo_nombre, fase) VALUES (?, ?, ?, 'LIGA', 'SCHEDULED', 0, 0, 0, 0, 0, 'Sol', ?, '', 'Regular')")
+      for (row <- docFinal.select("table tbody tr").asScala) {
+        val cols = row.select("td")
+        if (cols.size() >= 4) {
+          val (loc, vis) = (cols.get(0).text().toUpperCase.trim, cols.get(2).text().toUpperCase.trim)
+          if (loc.contains(myTeam) || vis.contains(myTeam)) {
+            val rival = if (loc.contains(myTeam)) vis else loc
+            val campo = if (cols.get(3).text().length > 50) cols.get(3).text().take(50) else cols.get(3).text()
+            if (conn.createStatement().executeQuery(s"SELECT count(*) FROM matches WHERE season_id=$sid AND rival='${fixEncoding(rival)}'").next()) {
+              ps.setInt(1, sid); ps.setDate(2, Date.valueOf(LocalDate.now().plusDays(7)))
+              ps.setString(3, fixEncoding(rival)); ps.setString(4, fixEncoding(campo))
+              ps.executeUpdate(); count += 1; logs.append(s"+ $rival\n")
+            }
+          }
+        }
+      }
+    } catch { case e: Exception => logs.append(s"Err: ${e.getMessage}") } finally { conn.close() }
+    logs.toString()
+  }
   def updateMatch(id: Int, rival: String, gf: Int, gc: Int, min: Int, nota: Double, clima: String, estadio: String, temp: Int, notas: String, video: String, reaccion: String, fechaStr: String): Unit = { val conn=getConnection(); try { val s=conn.prepareStatement("UPDATE matches SET rival=?, goles_favor=?, goles_contra=?, minutos=?, nota=?, clima=?, estadio=?, temperatura=?, notas_partido=?, video_url=?, reaccion_goles=?, fecha=? WHERE id=?"); s.setString(1,fixEncoding(rival)); s.setInt(2,gf); s.setInt(3,gc); s.setInt(4,min); s.setDouble(5,nota); s.setString(6,clima); s.setString(7,fixEncoding(estadio)); s.setInt(8,temp); s.setString(9,fixEncoding(notas)); s.setString(10,video); s.setString(11,fixEncoding(reaccion)); s.setDate(12,Date.valueOf(fechaStr)); s.setInt(13,id); s.executeUpdate() } finally { conn.close() }; linkFormaDiariaAMatch(id) }
   def updateMatchExtra(id: Int, tipo: String, esLocal: String): Unit = { val conn=getConnection(); try { val esLocalVal: java.lang.Boolean = esLocal match { case "true" => true; case "false" => false; case _ => null }; val ps = conn.prepareStatement("UPDATE matches SET tipo_partido=? WHERE id=?"); ps.setString(1, if (tipo.nonEmpty) tipo else "LIGA"); ps.setInt(2, id); ps.executeUpdate(); if (esLocalVal != null) { val ps2 = conn.prepareStatement("UPDATE matches SET es_local=? WHERE id=?"); ps2.setBoolean(1, esLocalVal); ps2.setInt(2, id); ps2.executeUpdate() } } finally { conn.close() } }
   def deleteMatch(id: Int): Unit = { val conn=getConnection(); try { conn.createStatement().executeUpdate(s"DELETE FROM matches WHERE id=$id") } finally { conn.close() } }
@@ -5990,6 +6343,125 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       conn.close()
     }
   }
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE B — ESTRUCTURA SEMANAL FIJA DE HECTOR (Elite exclusivamente)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Mapea el tipo_sesion de weekly_structure al patron usado en trainings.tipo
+  private def patronTipoSesion(tipoSesion: String): String = tipoSesion match {
+    case "JUDO"     => "%judo%"
+    case "ACADEMIA" => "%academia%"
+    case "EQUIPO"   => "%club%"
+    case other      => s"%${other.toLowerCase}%"
+  }
+
+  private def sesionRegistrada(conn: Connection, fecha: LocalDate, tipoSesion: String): Boolean = {
+    if (tipoSesion == "PARTIDO") {
+      val ps = conn.prepareStatement("SELECT COUNT(*) as c FROM matches WHERE status='PLAYED' AND fecha = ?")
+      ps.setDate(1, Date.valueOf(fecha))
+      val rs = ps.executeQuery(); rs.next() && rs.getInt("c") > 0
+    } else {
+      val ps = conn.prepareStatement("SELECT COUNT(*) as c FROM trainings WHERE fecha = ? AND LOWER(tipo) LIKE ?")
+      ps.setDate(1, Date.valueOf(fecha)); ps.setString(2, patronTipoSesion(tipoSesion))
+      val rs = ps.executeQuery(); rs.next() && rs.getInt("c") > 0
+    }
+  }
+
+  private def etiquetaTipoSesion(tipoSesion: String): String = tipoSesion match {
+    case "JUDO"     => "🥋 Judo"
+    case "ACADEMIA" => "🥅 Academia"
+    case "EQUIPO"   => "⚽ Entreno equipo"
+    case "PARTIDO"  => "🏟️ Partido"
+    case other      => other
+  }
+
+  // Solo sesiones esperadas de los ultimos 3 dias (dentro de la semana actual) sin registro. SQL puro.
+  def getSemanaIncompleta(): List[String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT dia_semana, tipo_sesion, notas FROM weekly_structure WHERE activo = TRUE")
+      var estructura = List[(Int, String)]()
+      while (rs.next()) estructura = estructura :+ (rs.getInt("dia_semana"), rs.getString("tipo_sesion"))
+
+      val hoy = LocalDate.now()
+      var pendientes = List[String]()
+      for (i <- 0 to 2) {
+        val fecha = hoy.minusDays(i)
+        val diaSemana = fecha.getDayOfWeek.getValue // 1=Lunes .. 7=Domingo
+        estructura.filter(_._1 == diaSemana).foreach { case (_, tipoSesion) =>
+          if (!sesionRegistrada(conn, fecha, tipoSesion)) {
+            val diaLabel = fecha.getDayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, new java.util.Locale("es", "ES")).capitalize
+            pendientes = pendientes :+ s"${etiquetaTipoSesion(tipoSesion)} del $diaLabel (${fecha.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM"))}) sin registrar"
+          }
+        }
+      }
+      pendientes
+    } finally { conn.close() }
+  }
+
+  // BLOQUE B3: tipo de sesion esperado hoy segun weekly_structure, para pre-rellenar el formulario de entreno.
+  // Mapea al value de los <option> ya existentes en BioController (Club/Academia/Judo). PARTIDO no aplica aqui.
+  def getTipoSesionHoy(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val diaSemana = LocalDate.now().getDayOfWeek.getValue
+      val ps = conn.prepareStatement("SELECT tipo_sesion FROM weekly_structure WHERE dia_semana = ? AND activo = TRUE AND tipo_sesion <> 'PARTIDO' LIMIT 1")
+      ps.setInt(1, diaSemana)
+      val rs = ps.executeQuery()
+      if (!rs.next()) None
+      else rs.getString("tipo_sesion") match {
+        case "JUDO"     => Some("Judo")
+        case "EQUIPO"   => Some("Club")
+        case "ACADEMIA" => Some("Academia")
+        case _          => None
+      }
+    } finally { conn.close() }
+  }
+
+  // BLOQUE B5: gestion de la estructura semanal desde /settings
+  def getWeeklyStructure(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT id, dia_semana, tipo_sesion, activo, notas FROM weekly_structure ORDER BY dia_semana ASC, tipo_sesion ASC")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "id" -> rs.getInt("id"), "diaSemana" -> rs.getInt("dia_semana"), "tipoSesion" -> rs.getString("tipo_sesion"),
+        "activo" -> rs.getBoolean("activo"), "notas" -> Option(rs.getString("notas")).getOrElse("")
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  def updateWeeklySlot(id: Int, activo: Boolean, diaSemana: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE weekly_structure SET activo = ?, dia_semana = ? WHERE id = ?")
+      ps.setBoolean(1, activo); ps.setInt(2, diaSemana); ps.setInt(3, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // BLOQUE B4: sesiones esperadas segun weekly_structure sin registro en trainings/matches Elite,
+  // estimadas con RPE=5 (misma escala 60*rpe que el resto de getWorkloads) para no subestimar el ACWR.
+  private def sesionesEsperadasNoRegistradas(days: Int): List[Double] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT dia_semana, tipo_sesion FROM weekly_structure WHERE activo = TRUE")
+      var estructura = List[(Int, String)]()
+      while (rs.next()) estructura = estructura :+ (rs.getInt("dia_semana"), rs.getString("tipo_sesion"))
+
+      val hoy = LocalDate.now()
+      var faltantes = List[Double]()
+      for (i <- 0 until days) {
+        val fecha = hoy.minusDays(i)
+        val diaSemana = fecha.getDayOfWeek.getValue
+        estructura.filter(_._1 == diaSemana).foreach { case (_, tipoSesion) =>
+          if (!sesionRegistrada(conn, fecha, tipoSesion)) faltantes = faltantes :+ (60.0 * 5.0)
+        }
+      }
+      faltantes
+    } finally { conn.close() }
+  }
+
   def getWorkloads(days: Int): Seq[Double] = {
     val conn = getConnection()
     var loads = List[Double]()
@@ -6005,7 +6477,8 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       val rs = ps.executeQuery()
       while(rs.next()) { loads = loads :+ rs.getDouble("load") }
     } finally { conn.close() }
-    loads
+    // BLOQUE B4: sesiones esperadas de la estructura semanal sin registrar, estimadas con RPE=5
+    loads ++ sesionesEsperadasNoRegistradas(days)
   }
 
   // --- GESTION DE CINTURON DE JUDO ---

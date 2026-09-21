@@ -8,6 +8,45 @@ object AdminController extends cask.Routes {
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE C3 — PANEL DE CONTROL DEL PERFIL PUBLICO
   // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE B5 — ESTRUCTURA SEMANAL FIJA DE HECTOR (Elite exclusivamente)
+  // ─────────────────────────────────────────────────────────────────────────────
+  private val diasSemanaLabel = Map(1 -> "Lunes", 2 -> "Martes", 3 -> "Miércoles", 4 -> "Jueves", 5 -> "Viernes", 6 -> "Sábado", 7 -> "Domingo")
+  private def etiquetaTipoSesionUI(tipo: String): String = tipo match {
+    case "JUDO"     => "🥋 Judo"
+    case "ACADEMIA" => "🥅 Academia"
+    case "EQUIPO"   => "⚽ Entreno equipo"
+    case "PARTIDO"  => "🏟️ Partido"
+    case other      => other
+  }
+  private def weeklyStructurePanel(): Modifier = {
+    val slots = DatabaseManager.getWeeklyStructure()
+    div(cls := "card bg-dark border-info shadow mb-4 p-3",
+      h5(cls := "text-info", "📅 ESTRUCTURA SEMANAL DE HÉCTOR"),
+      p(cls := "small text-muted", "Activa/desactiva sesiones y cambia el día si cambia la rutina (ej: mover el partido de sábado a viernes)."),
+      div(slots.map { s =>
+        val slotId = s("id").asInstanceOf[Int]
+        val dia = s("diaSemana").asInstanceOf[Int]
+        val tipo = s("tipoSesion").asInstanceOf[String]
+        val activo = s("activo").asInstanceOf[Boolean]
+        form(action := "/settings/weekly-structure/save", method := "post", cls := "row g-2 align-items-center mb-2 border-bottom border-secondary pb-2",
+          input(tpe := "hidden", name := "id", value := slotId.toString),
+          div(cls := "col-4 small fw-bold text-white", etiquetaTipoSesionUI(tipo)),
+          div(cls := "col-3",
+            select(name := "diaSemana", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+              (1 to 7).map(d => option(value := d.toString, if (d == dia) selected := "selected" else frag(), diasSemanaLabel(d)))
+            )
+          ),
+          div(cls := "col-3 form-check",
+            input(cls := "form-check-input", tpe := "checkbox", name := "activo", id := s"activoSlot$slotId", if (activo) attr("checked") := "checked" else frag()),
+            label(`for` := s"activoSlot$slotId", cls := "form-check-label xx-small text-muted", "Activo")
+          ),
+          div(cls := "col-2", button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold", "💾"))
+        )
+      })
+    )
+  }
+
   private def perfilPublicoPanel(): Modifier = {
     val cfg = DatabaseManager.getPerfilPublicoConfig()
     val activo = cfg("activo").asInstanceOf[Boolean]
@@ -253,7 +292,7 @@ object AdminController extends cask.Routes {
       script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-flex gap-2 mt-2",
       a(href:="/videoteca", cls:="btn btn-warning fw-bold flex-grow-1", "🎬 VIDEOTECA"),
       a(href:="/admin", cls:="btn btn-outline-danger fw-bold", "⚙️ ADMIN")
-    ), perfilPublicoPanel(), backupsPanel(backupMsg)));
+    ), weeklyStructurePanel(), perfilPublicoPanel(), backupsPanel(backupMsg)));
     renderHtml(basePage("settings", content))
   }
 
@@ -263,6 +302,16 @@ object AdminController extends cask.Routes {
       val kv = p.split("=", 2)
       java.net.URLDecoder.decode(kv(0), "UTF-8") -> (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
     }.toMap
+  }
+
+  @cask.post("/settings/weekly-structure/save")
+  def saveWeeklyStructure(request: cask.Request) = {
+    val p = parseBody(request)
+    val id = p.getOrElse("id", "0").toIntOption.getOrElse(0)
+    val diaSemana = p.getOrElse("diaSemana", "1").toIntOption.getOrElse(1)
+    val activo = p.contains("activo")
+    if (id > 0) DatabaseManager.updateWeeklySlot(id, activo, diaSemana)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
   }
 
   @cask.post("/settings/perfil_publico/save")
@@ -432,6 +481,41 @@ object AdminController extends cask.Routes {
     )
     renderHtml(content)
   }
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE H4 — FIX DE ENCODING EN REGISTROS HISTORICOS (mantenimiento, solo auth)
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/admin/fix-encoding")
+  def fixEncodingAction(request: cask.Request) = withAuth(request) {
+    var count = 0
+    val conn = DatabaseManager.getConnection()
+    try {
+      // matches
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, rival, estadio, notas_partido FROM matches WHERE rival LIKE '%Ã%' OR estadio LIKE '%Ã%'")
+      val ps = conn.prepareStatement("UPDATE matches SET rival=?, estadio=?, notas_partido=? WHERE id=?")
+      while (rs.next()) {
+        ps.setString(1, fixEncoding(rs.getString("rival")))
+        ps.setString(2, fixEncoding(Option(rs.getString("estadio")).getOrElse("")))
+        ps.setString(3, fixEncoding(Option(rs.getString("notas_partido")).getOrElse("")))
+        ps.setInt(4, rs.getInt("id"))
+        ps.executeUpdate()
+        count += 1
+      }
+      // rivals
+      val rs2 = conn.createStatement().executeQuery(
+        "SELECT nombre FROM rivals WHERE nombre LIKE '%Ã%'")
+      val ps2 = conn.prepareStatement("UPDATE rivals SET nombre=? WHERE nombre=?")
+      while (rs2.next()) {
+        val nombreOld = rs2.getString("nombre")
+        ps2.setString(1, fixEncoding(nombreOld))
+        ps2.setString(2, nombreOld)
+        ps2.executeUpdate()
+        count += 1
+      }
+    } finally { conn.close() }
+    renderHtml(s"<h2>Fix encoding completado — $count registros corregidos</h2>")
+  }
+
   @cask.get("/admin/init_legends")
   def initLegendsAction() = {
     val msg = DatabaseManager.initLegendsTable()

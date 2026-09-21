@@ -710,6 +710,27 @@ object HistoryController extends cask.Routes {
     val estilo = data.getOrElse("estilo", "").toString
     val claves = data.getOrElse("claves", "").toString
 
+    // BLOQUE E2: lo que detecto la IA en video, conectado a la flash-card (solo si hay analisis reciente)
+    val videoErrorSection: Modifier = {
+      val histVideo = DatabaseManager.getVideoAnalysisHistoryAll()
+      val hayReciente = histVideo.lastOption.exists { h =>
+        scala.util.Try(java.time.LocalDate.parse(h("fecha").asInstanceOf[String])).toOption
+          .exists(_.isAfter(java.time.LocalDate.now().minusDays(30)))
+      }
+      if (!hayReciente) div()
+      else DatabaseManager.getUltimoErrorRecurrente() match {
+        case Some(error) =>
+          div(cls := "card bg-dark border-warning shadow mb-4",
+            div(cls := "card-header text-warning fw-bold small", "🎬 LO QUE DETECTÓ LA IA EN VÍDEO"),
+            div(cls := "card-body p-3",
+              div(cls := "text-light small", error),
+              div(cls := "xx-small text-warning fw-bold mt-2", "👁️ Observa específicamente esto hoy desde la grada.")
+            )
+          )
+        case None => div()
+      }
+    }
+
     // BLOQUE F: scouting conectado a la flash-card del rival
     val rivalScoutingSection: Modifier = if (targetRival.isEmpty) div() else {
       val notas = DatabaseManager.getRivalScoutingNotas(targetRival)
@@ -875,6 +896,7 @@ object HistoryController extends cask.Routes {
               )
             ),
 
+            videoErrorSection,
             rivalScoutingSection,
 
             div(cls:="row g-3",

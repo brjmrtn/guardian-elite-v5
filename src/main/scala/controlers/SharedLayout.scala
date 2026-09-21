@@ -24,7 +24,17 @@ object SharedLayout {
     }
   }
 
-  def fixEncoding(s: String): String = { try { if (s.contains("A")) new String(s.getBytes("ISO-8859-1"), "UTF-8") else s } catch { case e: Exception => s } }
+  // BLOQUE H1: solo re-encodea si detecta secuencias concretas de corrupcion UTF-8 mal
+  // interpretada como ISO-8859-1 — la condicion anterior (contains("A")) corrompia
+  // cualquier texto correcto que tuviera una A mayuscula.
+  def fixEncoding(s: String): String = {
+    if (s == null || s.isEmpty) return s
+    try {
+      val indicadores = Seq("Ã±", "Ã¡", "Ã©", "Ã³", "Ã", "Ãº", "Ã¼", "Ã ", "Ã¨", "Ã¬", "Ã²", "Ã€")
+      if (indicadores.exists(s.contains)) new String(s.getBytes("ISO-8859-1"), "UTF-8")
+      else s
+    } catch { case _: Exception => s }
+  }
 
   def renderRedirect(url: String): cask.Response[Array[Byte]] =
     cask.Response(Array.empty[Byte], statusCode = 302,
