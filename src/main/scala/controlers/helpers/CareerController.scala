@@ -2221,6 +2221,13 @@ object CareerController extends cask.Routes {
     val data = DatabaseManager.getTemporalComparison()
     val currentSeasonId = data.lastOption.map(_("id").asInstanceOf[Int]).getOrElse(-1)
 
+    // ── BLOQUE 4.1: Evolucion de la rubrica de valoracion (un punto por partido) ─
+    val rubricaEvo = DatabaseManager.getRubricaEvolution()
+    val rubricaLabelsJs = rubricaEvo.map(r => s""""${r("fecha")}"""").mkString("[", ",", "]")
+    def rubricaSeriesJs(key: String): String = rubricaEvo.map(r => r(key).asInstanceOf[Int].toString).mkString("[", ",", "]")
+    val rPosJs = rubricaSeriesJs("posicion"); val rDecJs = rubricaSeriesJs("decisiones")
+    val rPiesJs = rubricaSeriesJs("pies"); val rComJs = rubricaSeriesJs("comunicacion"); val rActJs = rubricaSeriesJs("actitud")
+
     val labels   = data.map(d => fixEncoding(d("categoria").asInstanceOf[String]).replace("\"", ""))
     val labelsJs = labels.map(l => s""""$l"""").mkString("[", ",", "]")
 
@@ -2286,6 +2293,13 @@ object CareerController extends cask.Routes {
               div(cls := "card-body", div(style := "height:240px;", canvas(id := "chartRendimiento")))
             ),
 
+            if (rubricaEvo.size >= 2)
+              div(cls := "card bg-dark border-warning shadow mb-4",
+                div(cls := "card-header text-warning fw-bold small", "📋 EVOLUCIÓN DE LA RÚBRICA DE VALORACIÓN"),
+                div(cls := "card-body", div(style := "height:240px;", canvas(id := "chartRubricaEvo")))
+              )
+            else div(),
+
             div(cls := "card bg-dark border-secondary shadow mb-4",
               div(cls := "card-header text-white fw-bold small", "TABLA COMPARATIVA"),
               div(cls := "card-body p-0",
@@ -2344,7 +2358,32 @@ object CareerController extends cask.Routes {
                   }
                 }
               });
-            """))
+            """)),
+            if (rubricaEvo.size >= 2)
+              script(raw(s"""
+                new Chart(document.getElementById('chartRubricaEvo'), {
+                  type: 'line',
+                  data: {
+                    labels: $rubricaLabelsJs,
+                    datasets: [
+                      { label: 'Posición', data: $rPosJs, borderColor: '#0dcaf0', tension: 0.3, fill: false },
+                      { label: 'Decisiones', data: $rDecJs, borderColor: '#dc3545', tension: 0.3, fill: false },
+                      { label: 'Pies', data: $rPiesJs, borderColor: '#20c997', tension: 0.3, fill: false },
+                      { label: 'Comunicación', data: $rComJs, borderColor: '#8b5cf6', tension: 0.3, fill: false },
+                      { label: 'Actitud', data: $rActJs, borderColor: '#d4af37', tension: 0.3, fill: false }
+                    ]
+                  },
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#ccc', font: { size: 9 } } } },
+                    scales: {
+                      x: { ticks: { color: '#aaa', font: { size: 8 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      y: { min: 0, max: 5, ticks: { color: '#aaa', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                    }
+                  }
+                });
+              """))
+            else span()
           )
         )
       )

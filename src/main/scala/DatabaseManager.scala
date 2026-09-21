@@ -3081,11 +3081,17 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         s"\nDatos de composición corporal (báscula inteligente): músculo ${rsBascula.getDouble("kg_musculo")}kg, masa ósea ${rsBascula.getDouble("kg_masa_osea")}kg.\n"
       else ""
 
+      val rubricaLine = getRubricaMediasTemporada() match {
+        case Some(r) =>
+          s"\nMedias de la rúbrica de valoración esta temporada (escala 1-5): posición ${"%.1f".format(r("posicion"))}, decisiones bajo presión ${"%.1f".format(r("decisiones"))}, juego con los pies ${"%.1f".format(r("pies"))}, comunicación ${"%.1f".format(r("comunicacion"))}, actitud ${"%.1f".format(r("actitud"))}.\n"
+        case None => ""
+      }
+
       // Cambio aqui: Llamamos a AIProvider.ask
       val prompt = s"""Eres un analista de rendimiento de porteros de élite. Fecha de hoy: $fechaHoy. Temporada en curso: $temporadaActual. Analiza ÚNICAMENTE los datos de esta temporada.
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}$basculaLine
+${sb.toString()}$basculaLine$rubricaLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -3729,6 +3735,44 @@ Responde en espanol, tono positivo y motivador para un nino."""
         "posicion" -> rs.getInt("rubrica_posicion"), "decisiones" -> rs.getInt("rubrica_decisiones"),
         "pies" -> rs.getInt("rubrica_pies"), "comunicacion" -> rs.getInt("rubrica_comunicacion"),
         "actitud" -> rs.getInt("rubrica_actitud")
+      )) else None
+    } finally { conn.close() }
+  }
+
+  /** Evolucion de las 5 dimensiones de la rubrica, un punto por partido con rubrica completa. Para /temporal. */
+  def getRubricaEvolution(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT fecha, rival, rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud
+        FROM matches
+        WHERE status='PLAYED' AND rubrica_posicion IS NOT NULL
+        ORDER BY fecha ASC""")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "fecha" -> rs.getDate("fecha").toString, "rival" -> Option(rs.getString("rival")).getOrElse(""),
+        "posicion" -> rs.getInt("rubrica_posicion"), "decisiones" -> rs.getInt("rubrica_decisiones"),
+        "pies" -> rs.getInt("rubrica_pies"), "comunicacion" -> rs.getInt("rubrica_comunicacion"),
+        "actitud" -> rs.getInt("rubrica_actitud")
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  /** Medias de rubrica de la temporada activa, para incluir en el contexto de getDeepAnalysis(). */
+  def getRubricaMediasTemporada(): Option[Map[String, Double]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT AVG(rubrica_posicion) as posicion, AVG(rubrica_decisiones) as decisiones,
+               AVG(rubrica_pies) as pies, AVG(rubrica_comunicacion) as comunicacion,
+               AVG(rubrica_actitud) as actitud, COUNT(*) as n
+        FROM matches
+        WHERE status='PLAYED' AND rubrica_posicion IS NOT NULL AND season_id = (SELECT MAX(id) FROM seasons)""")
+      if (rs.next() && rs.getInt("n") > 0) Some(Map(
+        "posicion" -> rs.getDouble("posicion"), "decisiones" -> rs.getDouble("decisiones"),
+        "pies" -> rs.getDouble("pies"), "comunicacion" -> rs.getDouble("comunicacion"),
+        "actitud" -> rs.getDouble("actitud")
       )) else None
     } finally { conn.close() }
   }

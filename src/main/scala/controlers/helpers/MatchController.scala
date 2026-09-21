@@ -942,6 +942,34 @@ object MatchController extends cask.Routes {
                 videoUploadForm
               ),
 
+              // --- Footer: Bloque 4.1 — Radar de rubrica de valoracion (solo si esta completa) ---
+              DatabaseManager.getRubricaMatch(matchId) match {
+                case Some(r) =>
+                  div(cls := "card-footer bg-secondary bg-opacity-10 border-top border-secondary",
+                    h6(cls := "text-white small fw-bold mb-2", "📋 RÚBRICA DE VALORACIÓN"),
+                    div(style := "height:220px;", canvas(id := "rubricaRadarChart")),
+                    script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+                    script(raw(s"""
+                      new Chart(document.getElementById('rubricaRadarChart'), {
+                        type: 'radar',
+                        data: {
+                          labels: ['Posición', 'Decisiones', 'Pies', 'Comunicación', 'Actitud'],
+                          datasets: [{
+                            label: 'Rúbrica',
+                            data: [${r("posicion")}, ${r("decisiones")}, ${r("pies")}, ${r("comunicacion")}, ${r("actitud")}],
+                            borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.2)', pointBackgroundColor: '#ffc107'
+                          }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false,
+                          plugins: { legend: { display: false } },
+                          scales: { r: { min: 0, max: 5, ticks: { color: '#aaa', backdropColor: 'transparent', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' }, pointLabels: { color: '#ccc', font: { size: 10 } } } }
+                        }
+                      });
+                    """))
+                  )
+                case None => div()
+              },
+
               // --- Footer: Bloque 4.4 — Guia de conversacion post-partido (solo lectura de BD) ---
               DatabaseManager.getGuiaConversacion(matchId) match {
                 case Some(guia) =>
