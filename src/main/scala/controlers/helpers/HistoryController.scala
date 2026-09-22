@@ -4595,6 +4595,8 @@ object HistoryController extends cask.Routes {
     val gc = DatabaseManager.calcularGoalCoverage(d("alturaProyectada").asInstanceOf[Double])
     // BLOQUE E: Markov Career Pathing — None si hay menos de 2 temporadas cerradas
     val markov = DatabaseManager.calcularMarkovPathway()
+    // BLOQUE RFFM: posicion real de Hector en la categoria — None si aun no hay >=10 equipos sincronizados
+    val rffmPercentil = DatabaseManager.getPercentilRealHector()
 
     // Pre-computar todo con tipos explicitos
     val edadAnios: Int         = d("edadAnios").asInstanceOf[Int]
@@ -4966,6 +4968,28 @@ object HistoryController extends cask.Routes {
               )
             )
           ),
+
+          // BLOQUE RFFM: posicion real de Hector en la categoria Prebenjamin F7
+          rffmPercentil match {
+            case None => div()
+            case Some(p) =>
+              val mediaGc = p("mediaGcHector").asInstanceOf[Double]
+              val percentil = p("percentilGC").asInstanceOf[Int]
+              val totalEquipos = p("totalEquipos").asInstanceOf[Int]
+              val totalPartidos = p("totalPartidos").asInstanceOf[Int]
+              val fuente = p("fuenteDatos").asInstanceOf[String]
+              div(cls := "card bg-dark border-info shadow mb-3",
+                div(cls := "card-header text-info fw-bold small", "📊 POSICIÓN EN LA CATEGORÍA"),
+                div(cls := "card-body p-3",
+                  div(cls := "small text-white mb-2",
+                    f"Héctor encaja $mediaGc%.1f goles/partido de media. El $percentil%% de los equipos de Prebenjamín F7 Madrid encajan más."),
+                  div(cls := "progress mb-2", style := "height:14px;",
+                    div(cls := "progress-bar bg-info fw-bold", style := s"width:$percentil%;", s"P$percentil")
+                  ),
+                  div(cls := "xx-small text-muted", s"Datos de $totalEquipos equipos · $totalPartidos partidos · $fuente")
+                )
+              )
+          },
 
           script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
           {
@@ -5716,6 +5740,15 @@ object HistoryController extends cask.Routes {
       case None => ""
     }
 
+    // BLOQUE RFFM: percentil real de Hector vs la categoria (None si aun no hay >=10 equipos sincronizados)
+    val rffmHtml = DatabaseManager.getPercentilRealHector() match {
+      case Some(p) =>
+        val percentil = p("percentilGC").asInstanceOf[Int]
+        val totalEquipos = p("totalEquipos").asInstanceOf[Int]
+        s"""<div class="narrative" style="font-size:12px;">📊 Rendimiento vs categoría: percentil $percentil en GC/partido sobre $totalEquipos equipos de Prebenjamín F7 Madrid (RFFM)</div>"""
+      case None => ""
+    }
+
     val presionRows = if (presionDist.isEmpty)
       "<tr><td colspan=\"2\">Sin datos suficientes de comportamiento bajo presión</td></tr>"
     else presionDist.map { d =>
@@ -5828,6 +5861,7 @@ object HistoryController extends cask.Routes {
 <div class="narrative">${DatabaseManager.escHtml(analisisIA)}</div>
 $goalCoverageHtml
 $markovHtml
+$rffmHtml
 
 <p class="section-title">OPORTUNIDADES RECIENTES</p>
 <table>

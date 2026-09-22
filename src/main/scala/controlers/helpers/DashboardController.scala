@@ -220,6 +220,22 @@ object DashboardController extends cask.Routes {
         )
     }
 
+    // ── BLOQUE RFFM: BENCHMARK REAL VS CATEGORIA (SQL puro, sin Gemini) ───────
+    val rffmWidget: Modifier = DatabaseManager.getPercentilRealHector() match {
+      case Some(p) =>
+        val totalEquipos = p("totalEquipos").asInstanceOf[Int]
+        val mediaGc = p("mediaGcHector").asInstanceOf[Double]
+        val percentil = p("percentilGC").asInstanceOf[Int]
+        val pctLimpiasH = p("pctLimpiasHector").asInstanceOf[Double]
+        val pctLimpiasCat = p("pctLimpiasCategoria").asInstanceOf[Double]
+        div(cls := "card bg-dark border-secondary shadow-sm mb-3 p-2",
+          div(cls := "xx-small text-muted fw-bold", "📊 VS CATEGORÍA (RFFM Madrid)"),
+          div(cls := "xx-small text-white mt-1", f"GC/partido: $mediaGc%.1f · Percentil $percentil de $totalEquipos equipos"),
+          div(cls := "xx-small text-white", f"Porterías a cero: $pctLimpiasH%.0f%% · Categoría: $pctLimpiasCat%.0f%%")
+        )
+      case None => div()
+    }
+
     // ── BLOQUE E: HITOS CONSEGUIDOS EN LOS ULTIMOS 7 DIAS (SQL puro, sin Gemini) ──
     val hitosRecientes = DatabaseManager.getHitosRecientes(7)
     val hitosWidget: Modifier =
@@ -790,6 +806,7 @@ object DashboardController extends cask.Routes {
         formaWidget,
         deudaSuenoWidget,
         riesgoLesionWidget,
+        rffmWidget,
 
         // ── HERO HEADER (dark) ─────────────────────────────────────────────
         div(style := "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:20px; margin-bottom:20px;",

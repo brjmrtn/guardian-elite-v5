@@ -211,6 +211,39 @@ object DatabaseManager {
         created_at    TIMESTAMP DEFAULT NOW()
       )""")
 
+      // BLOQUE RFFM: benchmarking real contra la categoria Prebenjamin F7
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS rffm_benchmark (
+        id            SERIAL PRIMARY KEY,
+        temporada     TEXT NOT NULL,
+        competicion   TEXT NOT NULL,
+        grupo         TEXT NOT NULL,
+        nombre_grupo  TEXT NOT NULL,
+        equipo_local  TEXT NOT NULL,
+        equipo_visita TEXT NOT NULL,
+        goles_local   INT NOT NULL,
+        goles_visita  INT NOT NULL,
+        jornada       INT NOT NULL,
+        fecha         DATE DEFAULT NULL,
+        created_at    TIMESTAMP DEFAULT NOW(),
+        UNIQUE(competicion, grupo, equipo_local, equipo_visita, jornada)
+      )""")
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS rffm_percentiles (
+        id            SERIAL PRIMARY KEY,
+        temporada     TEXT NOT NULL,
+        competicion   TEXT NOT NULL,
+        fecha_calculo DATE NOT NULL DEFAULT CURRENT_DATE,
+        total_partidos INT DEFAULT 0,
+        total_equipos  INT DEFAULT 0,
+        media_gc      DOUBLE PRECISION DEFAULT 0,
+        p10_gc        DOUBLE PRECISION DEFAULT 0,
+        p25_gc        DOUBLE PRECISION DEFAULT 0,
+        p50_gc        DOUBLE PRECISION DEFAULT 0,
+        p75_gc        DOUBLE PRECISION DEFAULT 0,
+        p90_gc        DOUBLE PRECISION DEFAULT 0,
+        pct_limpias   DOUBLE PRECISION DEFAULT 0,
+        created_at    TIMESTAMP DEFAULT NOW()
+      )""")
+
       // BLOQUE E: hitos automaticos de carrera
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS hitos_conseguidos (
         id          SERIAL PRIMARY KEY,
@@ -5013,6 +5046,358 @@ Responde en espanol, tono positivo y motivador para un nino."""
         "ratioEspecifico" -> ratioEspecifico, "edad" -> edad, "recMin" -> recMin, "recMax" -> recMax,
         "porDebajo" -> (ratioEspecifico < recMin), "porEncima" -> (ratioEspecifico >= recMin)
       )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE RFFM — BENCHMARKING REAL CONTRA LA CATEGORIA (Prebenjamin F7, RFFM Madrid)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // AVISO: rffm.es no publica un contrato de API estable — los nombres de campo del
+  // JSON embebido se infieren de forma defensiva (varios candidatos por campo, escaneo
+  // recursivo para localizar arrays de partidos). Si rffm.es cambia su HTML/JSON, el
+  // sync fallara con gracia (log + contador de fallos) sin afectar al resto de Guardian.
+
+  def getRffmCompeticionId(): String = {
+    val conn = getConnection()
+    try {
+      val rs = conn.prepareStatement("SELECT payload FROM feature_cache WHERE cache_key='rffm_competicion_id_override'")
+      val r = rs.executeQuery()
+      if (r.next()) r.getString("payload") else sys.env.getOrElse("RFFM_COMPETICION_ID", "26738167")
+    } finally { conn.close() }
+  }
+
+  def getRffmTemporada(): String = {
+    val conn = getConnection()
+    try {
+      val rs = conn.prepareStatement("SELECT payload FROM feature_cache WHERE cache_key='rffm_temporada_override'")
+      val r = rs.executeQuery()
+      if (r.next()) r.getString("payload") else sys.env.getOrElse("RFFM_TEMPORADA", "22")
+    } finally { conn.close() }
+  }
+
+  def setRffmConfig(competicionId: String, temporada: String): Unit = {
+    val conn = getConnection()
+    try {
+      def upsert(key: String, value: String): Unit = {
+        val ps = conn.prepareStatement(
+          "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?,?,NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+        ps.setString(1, key); ps.setString(2, value); ps.executeUpdate()
+      }
+      if (competicionId.trim.nonEmpty) upsert("rffm_competicion_id_override", competicionId.trim)
+      if (temporada.trim.nonEmpty) upsert("rffm_temporada_override", temporada.trim)
+    } finally { conn.close() }
+  }
+
+  private def rffmSyncEstado(estado: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('rffm_sync_status', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+      ps.setString(1, estado); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getRffmSyncEstado(): String = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT payload FROM feature_cache WHERE cache_key='rffm_sync_status'")
+      if (rs.next()) rs.getString("payload") else "Sin sincronizar todavia"
+    } finally { conn.close() }
+  }
+
+  private def rffmFailCount(): Int = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT payload FROM feature_cache WHERE cache_key='rffm_fail_count'")
+      if (rs.next()) rs.getString("payload").toIntOption.getOrElse(0) else 0
+    } finally { conn.close() }
+  }
+  private def rffmFailCountSet(n: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('rffm_fail_count', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+      ps.setString(1, n.toString); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Descarga una URL de rffm.es y extrae el JSON embebido, probando varias estrategias. */
+  private def rffmFetchJson(url: String): Option[ujson.Value] = {
+    try {
+      val doc = Jsoup.connect(url)
+        .userAgent("Mozilla/5.0 (compatible; Guardian/1.0)")
+        .timeout(15000)
+        .get()
+
+      def tryParse(s: String): Option[ujson.Value] =
+        if (s == null || s.isEmpty) None else try Some(ujson.read(s)) catch { case _: Exception => None }
+
+      // Estrategia 1: <script> que contiene "grupos_competicion"
+      val scripts = doc.select("script").asScala
+      val jsonScript = scripts.find(s => s.html().contains("grupos_competicion"))
+      val desdeScript = jsonScript.flatMap { s =>
+        val html = s.html()
+        val startIdx = html.indexOf("{\"")
+        val endIdx = html.lastIndexOf("}") + 1
+        if (startIdx >= 0 && endIdx > startIdx) tryParse(html.substring(startIdx, endIdx)) else None
+      }
+      if (desdeScript.isDefined) return desdeScript
+
+      // Estrategia 2: atributo data-* con el JSON
+      val elemento = doc.select("[data-results], [data-json], #resultados-data").first()
+      val desdeAtributo = Option(elemento).flatMap { e =>
+        val raw = if (e.hasAttr("data-results")) e.attr("data-results")
+                  else if (e.hasAttr("data-json")) e.attr("data-json")
+                  else e.attr("data-results")
+        tryParse(raw)
+      }
+      if (desdeAtributo.isDefined) return desdeAtributo
+
+      // Estrategia 3: buscar "grupos_competicion" en el HTML completo y extraer manualmente
+      val htmlCompleto = doc.html()
+      val idx = htmlCompleto.indexOf("grupos_competicion")
+      if (idx >= 0) {
+        // Retrocede hasta la llave que abre el objeto que contiene esa clave
+        val startIdx = htmlCompleto.lastIndexOf("{\"", idx)
+        val endIdx = htmlCompleto.lastIndexOf("}") + 1
+        if (startIdx >= 0 && endIdx > startIdx) tryParse(htmlCompleto.substring(startIdx, endIdx)) else None
+      } else None
+    } catch { case e: Exception =>
+      if (debugMode) println(s"[RFFM] Error descargando $url: ${e.getMessage}")
+      None
+    }
+  }
+
+  /** Prueba varias claves candidatas sobre un objeto JSON y devuelve la primera que exista como String. */
+  private def jsonStrCandidatos(obj: ujson.Value, claves: Seq[String]): Option[String] =
+    claves.iterator.flatMap { k =>
+      try {
+        val v = obj(k)
+        if (v.isNull) None
+        else Some(scala.util.Try(v.str).getOrElse(v.num.toLong.toString))
+      } catch { case _: Exception => None }
+    }.nextOption()
+
+  /** Busca recursivamente en el JSON un array cuyo cache_key sea exactamente `nombre`. */
+  private def buscarArrayPorClave(v: ujson.Value, nombre: String): Option[List[ujson.Value]] = {
+    v match {
+      case o: ujson.Obj =>
+        o.value.get(nombre) match {
+          case Some(a: ujson.Arr) => Some(a.value.toList)
+          case _ => o.value.values.iterator.map(x => buscarArrayPorClave(x, nombre)).find(_.isDefined).flatten
+        }
+      case a: ujson.Arr =>
+        a.value.iterator.map(x => buscarArrayPorClave(x, nombre)).find(_.isDefined).flatten
+      case _ => None
+    }
+  }
+
+  /** Busca recursivamente el primer array cuyos elementos parezcan partidos (tienen campos de goles). */
+  private def buscarArrayPartidos(v: ujson.Value): Option[List[ujson.Value]] = {
+    val clavesGol = Seq("goles_local", "goles_visita", "goles_visitante", "resultado_local", "golesLocal")
+    v match {
+      case a: ujson.Arr if a.value.nonEmpty && a.value.head.isInstanceOf[ujson.Obj] &&
+        clavesGol.exists(k => a.value.head.asInstanceOf[ujson.Obj].value.contains(k)) =>
+        Some(a.value.toList)
+      case o: ujson.Obj =>
+        o.value.values.iterator.map(buscarArrayPartidos).find(_.isDefined).flatten
+      case a: ujson.Arr =>
+        a.value.iterator.map(buscarArrayPartidos).find(_.isDefined).flatten
+      case _ => None
+    }
+  }
+
+  /**
+   * Sincroniza los resultados de la categoria Prebenjamin F7 desde rffm.es. Sincrona — SIEMPRE
+   * debe llamarse desde un hilo de fondo (ver syncRFFMBenchmarkAsync). Devuelve un resumen textual.
+   */
+  def syncRFFMBenchmark(): String = {
+    rffmSyncEstado("IN_PROGRESS")
+    val competicion = getRffmCompeticionId()
+    val temporada = getRffmTemporada()
+    val baseUrl = "https://www.rffm.es/competicion/resultados-y-jornadas"
+
+    try {
+      // Paso 1: descubrir todos los grupos de la competicion a partir de una jornada de referencia
+      val urlInicial = s"$baseUrl?temporada=$temporada&competicion=$competicion&grupo=26738199&jornada=1&tipojuego=2"
+      val jsonInicial = rffmFetchJson(urlInicial)
+      if (jsonInicial.isEmpty) {
+        rffmFailCountSet(rffmFailCount() + 1)
+        rffmSyncEstado(s"ERROR: no se pudo leer el JSON inicial de rffm.es (${LocalDate.now()})")
+        return "Error: no se pudo conectar con rffm.es"
+      }
+
+      val gruposJson = buscarArrayPorClave(jsonInicial.get, "grupos_competicion").getOrElse(List.empty)
+      val grupos: List[(String, String)] = gruposJson.flatMap { g =>
+        for {
+          id <- jsonStrCandidatos(g, Seq("id", "grupo", "grupo_id", "idgrupo", "codigo"))
+          nombre <- jsonStrCandidatos(g, Seq("nombre", "descripcion", "name", "grupo_nombre")).orElse(Some(id))
+        } yield (id, nombre)
+      }
+      val gruposFinal = if (grupos.nonEmpty) grupos else List(("26738199", "Grupo principal"))
+
+      var totalPartidosNuevos = 0
+      // Una conexion por grupo (no una sola para todo el sync) — un sync con muchos grupos
+      // puede tardar varios minutos y no conviene retener una conexion del pool tanto tiempo.
+      gruposFinal.foreach { case (grupoId, nombreGrupo) =>
+        val conn = getConnection()
+        try {
+          var jornada = 1
+          var continuar = true
+          while (continuar && jornada <= 30) {
+            val url = s"$baseUrl?temporada=$temporada&competicion=$competicion&grupo=$grupoId&jornada=$jornada&tipojuego=2"
+            rffmFetchJson(url) match {
+              case None => continuar = false
+              case Some(json) =>
+                val partidos = buscarArrayPartidos(json).getOrElse(List.empty)
+                if (partidos.isEmpty) continuar = false
+                else {
+                  partidos.foreach { p =>
+                    val local = jsonStrCandidatos(p, Seq("equipo_local", "local", "equipoLocal", "nombre_local"))
+                    val visita = jsonStrCandidatos(p, Seq("equipo_visitante", "equipo_visita", "visitante", "equipoVisitante", "nombre_visitante"))
+                    val gLocal = jsonStrCandidatos(p, Seq("goles_local", "golesLocal", "resultado_local")).flatMap(_.toIntOption)
+                    val gVisita = jsonStrCandidatos(p, Seq("goles_visita", "goles_visitante", "golesVisitante", "resultado_visitante")).flatMap(_.toIntOption)
+                    val fecha = jsonStrCandidatos(p, Seq("fecha", "fecha_partido", "dia"))
+                    (local, visita, gLocal, gVisita) match {
+                      case (Some(l), Some(v), Some(gl), Some(gv)) =>
+                        val ps = conn.prepareStatement("""
+                          INSERT INTO rffm_benchmark (temporada, competicion, grupo, nombre_grupo, equipo_local, equipo_visita, goles_local, goles_visita, jornada, fecha)
+                          VALUES (?,?,?,?,?,?,?,?,?,?::date)
+                          ON CONFLICT (competicion, grupo, equipo_local, equipo_visita, jornada) DO NOTHING
+                        """)
+                        ps.setString(1, temporada); ps.setString(2, competicion); ps.setString(3, grupoId); ps.setString(4, fixEncoding(nombreGrupo))
+                        ps.setString(5, fixEncoding(l)); ps.setString(6, fixEncoding(v)); ps.setInt(7, gl); ps.setInt(8, gv); ps.setInt(9, jornada)
+                        fecha.flatMap(f => scala.util.Try(LocalDate.parse(f).toString).toOption) match {
+                          case Some(f) => ps.setString(10, f)
+                          case None => ps.setNull(10, java.sql.Types.DATE)
+                        }
+                        if (ps.executeUpdate() > 0) totalPartidosNuevos += 1
+                      case _ => ()
+                    }
+                  }
+                  jornada += 1
+                  Thread.sleep(300) // buen ciudadano: no saturar rffm.es
+                }
+            }
+          }
+        } finally { conn.close() }
+      }
+
+      calcularPercentilesRFFM()
+      rffmFailCountSet(0)
+      val msg = s"✅ Sync RFFM completado: $totalPartidosNuevos partidos nuevos en ${gruposFinal.size} grupos (${LocalDate.now()})"
+      rffmSyncEstado(msg)
+      msg
+    } catch { case e: Exception =>
+      rffmFailCountSet(rffmFailCount() + 1)
+      val msg = s"ERROR: ${e.getMessage}"
+      rffmSyncEstado(msg)
+      if (debugMode) e.printStackTrace()
+      msg
+    }
+  }
+
+  /** Lanza el sync en background — nunca bloquea al llamador (arranque del servidor, boton admin, cron). */
+  def syncRFFMBenchmarkAsync(): Unit = {
+    new Thread(() => { try syncRFFMBenchmark() catch { case e: Exception => println(s"[RFFM] sync async error: ${e.getMessage}") } }).start()
+  }
+
+  def calcularPercentilesRFFM(): Unit = {
+    val conn = getConnection()
+    try {
+      val temporada = getRffmTemporada()
+      val competicion = getRffmCompeticionId()
+      val ps = conn.prepareStatement(s"""
+        WITH gc_por_equipo AS (
+          SELECT equipo_local as equipo, goles_visita as gc FROM rffm_benchmark WHERE temporada = ? AND competicion = ?
+          UNION ALL
+          SELECT equipo_visita as equipo, goles_local as gc FROM rffm_benchmark WHERE temporada = ? AND competicion = ?
+        ),
+        stats_equipo AS (
+          SELECT equipo, AVG(gc) as media_gc,
+            SUM(CASE WHEN gc = 0 THEN 1 ELSE 0 END)::float / COUNT(*) as pct_limpias,
+            COUNT(*) as partidos
+          FROM gc_por_equipo
+          GROUP BY equipo
+          HAVING COUNT(*) >= 3
+        )
+        SELECT
+          COUNT(*) as total_equipos,
+          COALESCE(SUM(partidos), 0) as total_partidos,
+          COALESCE(AVG(media_gc), 0) as media_global,
+          COALESCE(PERCENTILE_CONT(0.10) WITHIN GROUP (ORDER BY media_gc), 0) as p10,
+          COALESCE(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY media_gc), 0) as p25,
+          COALESCE(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY media_gc), 0) as p50,
+          COALESCE(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY media_gc), 0) as p75,
+          COALESCE(PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY media_gc), 0) as p90,
+          COALESCE(AVG(pct_limpias), 0) as pct_limpias_media
+        FROM stats_equipo
+      """)
+      ps.setString(1, temporada); ps.setString(2, competicion); ps.setString(3, temporada); ps.setString(4, competicion)
+      val rs = ps.executeQuery()
+      if (rs.next() && rs.getInt("total_equipos") > 0) {
+        val ins = conn.prepareStatement("""
+          INSERT INTO rffm_percentiles (temporada, competicion, total_partidos, total_equipos, media_gc, p10_gc, p25_gc, p50_gc, p75_gc, p90_gc, pct_limpias)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """)
+        ins.setString(1, temporada); ins.setString(2, competicion)
+        ins.setInt(3, rs.getInt("total_partidos")); ins.setInt(4, rs.getInt("total_equipos"))
+        ins.setDouble(5, rs.getDouble("media_global")); ins.setDouble(6, rs.getDouble("p10")); ins.setDouble(7, rs.getDouble("p25"))
+        ins.setDouble(8, rs.getDouble("p50")); ins.setDouble(9, rs.getDouble("p75")); ins.setDouble(10, rs.getDouble("p90"))
+        ins.setDouble(11, rs.getDouble("pct_limpias_media"))
+        ins.executeUpdate()
+      }
+    } finally { conn.close() }
+  }
+
+  private def getUltimoPercentilRFFM(conn: Connection): Option[Map[String, Any]] = {
+    val rs = conn.createStatement().executeQuery(
+      "SELECT * FROM rffm_percentiles ORDER BY fecha_calculo DESC, id DESC LIMIT 1")
+    if (!rs.next()) None
+    else Some(Map(
+      "totalEquipos" -> rs.getInt("total_equipos"), "totalPartidos" -> rs.getInt("total_partidos"),
+      "mediaGc" -> rs.getDouble("media_gc"), "p10" -> rs.getDouble("p10_gc"), "p25" -> rs.getDouble("p25_gc"),
+      "p50" -> rs.getDouble("p50_gc"), "p75" -> rs.getDouble("p75_gc"), "p90" -> rs.getDouble("p90_gc"),
+      "pctLimpiasCategoria" -> (rs.getDouble("pct_limpias") * 100.0), "fechaCalculo" -> rs.getDate("fecha_calculo").toString
+    ))
+  }
+
+  /** Percentil real de Hector frente a la categoria. None si no hay percentiles calculados (>=10 equipos). */
+  def getPercentilRealHector(seasonId: Int = 0): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      getUltimoPercentilRFFM(conn).filter(_("totalEquipos").asInstanceOf[Int] >= 10).map { cat =>
+        val efectivo = if (seasonId > 0) seasonId else getTemporadaActivaId()
+        val rsH = conn.prepareStatement(s"""
+          SELECT COUNT(*) as pj, COALESCE(AVG(goles_contra),0) as media_gc,
+            SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*),0) as pct_limpias
+          FROM matches WHERE status='PLAYED' ${seasonFilter(efectivo)}
+        """)
+        val rH = rsH.executeQuery(); rH.next()
+        val mediaGcHector = rH.getDouble("media_gc")
+        val pctLimpiasHector = rH.getDouble("pct_limpias") * 100.0
+
+        val p10 = cat("p10").asInstanceOf[Double]; val p25 = cat("p25").asInstanceOf[Double]
+        val p50 = cat("p50").asInstanceOf[Double]; val p75 = cat("p75").asInstanceOf[Double]
+        // GC bajo es mejor: menos goles encajados que el p10 de la categoria => percentil alto (elite)
+        val percentilGC =
+          if (mediaGcHector <= p10) 90
+          else if (mediaGcHector <= p25) 75
+          else if (mediaGcHector <= p50) 50
+          else if (mediaGcHector <= p75) 25
+          else 10
+
+        Map(
+          "mediaGcHector"    -> mediaGcHector,
+          "percentilGC"      -> percentilGC,
+          "mediaCategoria"   -> p50,
+          "totalEquipos"     -> cat("totalEquipos").asInstanceOf[Int],
+          "totalPartidos"    -> cat("totalPartidos").asInstanceOf[Int],
+          "pctLimpiasHector" -> pctLimpiasHector,
+          "pctLimpiasCategoria" -> cat("pctLimpiasCategoria").asInstanceOf[Double],
+          "fuenteDatos"      -> s"RFFM Prebenjamín F7 Madrid temporada ${getRffmTemporada()}"
+        )
+      }
     } finally { conn.close() }
   }
 

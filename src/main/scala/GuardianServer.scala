@@ -69,6 +69,38 @@ object GuardianServer extends cask.Main {
     java.util.concurrent.TimeUnit.MILLISECONDS
   )
 
+  // ── RFFM BENCHMARK ENGINE ────────────────────────────────────────────────────
+  // Se ejecuta automaticamente cada lunes a las 6:00 AM, antes del resumen semanal.
+  // El sync es lento (muchas URLs a rffm.es) — siempre en un hilo de fondo, nunca
+  // bloquea el servidor. Si falla, se loguea y se continua con los ultimos datos.
+  val rffmExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r => {
+    val t = new Thread(r, "rffm-benchmark-engine")
+    t.setDaemon(true)
+    t
+  })
+  val ahoraRffm = java.time.LocalDateTime.now()
+  val proximoLunesRffm = ahoraRffm
+    .`with`(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.MONDAY))
+    .withHour(6).withMinute(0).withSecond(0)
+  val msHastaRffm = java.time.Duration.between(ahoraRffm, proximoLunesRffm).toMillis
+
+  rffmExecutor.scheduleAtFixedRate(
+    new Runnable {
+      def run(): Unit = {
+        try {
+          println(s"[RFFM Benchmark] Iniciando sync semanal ${java.time.LocalDate.now()}")
+          val resultado = DatabaseManager.syncRFFMBenchmark()
+          println(s"[RFFM Benchmark] $resultado")
+        } catch { case e: Exception =>
+          println(s"[RFFM Benchmark] ERROR: ${e.getMessage.take(200)}")
+        }
+      }
+    },
+    msHastaRffm,
+    7 * 24 * 60 * 60 * 1000L, // cada 7 dias
+    java.util.concurrent.TimeUnit.MILLISECONDS
+  )
+
   // ── RESUMEN SEMANAL ENGINE (BLOQUE G) ───────────────────────────────────────
   // Se ejecuta automáticamente cada lunes a las 8:00 AM. SQL puro, sin Gemini.
   val resumenExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r => {

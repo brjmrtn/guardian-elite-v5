@@ -261,7 +261,51 @@ object AdminController extends cask.Routes {
     )
   }
 
-  @cask.get("/settings") def settingsPage(backupMsg: String = "") = {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE RFFM — PANEL DE BENCHMARKING REAL CONTRA LA CATEGORIA
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def rffmBenchmarkPanel(msg: String): Modifier = {
+    val estado = DatabaseManager.getRffmSyncEstado()
+    val competicionId = DatabaseManager.getRffmCompeticionId()
+    val temporada = DatabaseManager.getRffmTemporada()
+    val enProgreso = estado == "IN_PROGRESS"
+
+    val estadoBox: Modifier =
+      if (enProgreso) div(cls := "alert alert-info small p-2 mb-3", "⏳ Sincronizando datos de la RFFM...")
+      else if (estado.startsWith("ERROR")) div(cls := "alert alert-warning small p-2 mb-3",
+        "⚠️ No se pudo conectar con rffm.es — los percentiles se calculan con los últimos datos disponibles.")
+      else div(cls := "alert alert-secondary small p-2 mb-3", estado)
+
+    val msgBox: Modifier = if (msg.nonEmpty) div(cls := "alert alert-info small p-2 mb-3", msg) else div()
+
+    div(cls := "card bg-dark text-white border-info shadow p-4 mb-3",
+      h4(cls := "text-info mb-3", "📊 BENCHMARK RFFM"),
+      msgBox,
+      estadoBox,
+      p(cls := "small text-muted",
+        "Guardian sincroniza cada lunes a las 6:00 AM los resultados de la categoría Prebenjamín F7 de la RFFM para calcular en qué percentil está Héctor frente a su categoría real."),
+      form(action := "/admin/rffm/sync", method := "post", cls := "d-grid mb-3",
+        button(tpe := "submit", cls := "btn btn-info fw-bold", if (enProgreso) "⏳ Sincronizando..." else "🔄 Sincronizar ahora")
+      ),
+      div(cls := "border-top border-secondary pt-3",
+        h6(cls := "text-muted small text-uppercase mb-2", "Configuración"),
+        form(action := "/admin/rffm/config", method := "post", cls := "row g-2 align-items-end",
+          div(cls := "col-6",
+            label(cls := "xx-small text-muted fw-bold", "ID de competición RFFM"),
+            input(tpe := "text", name := "competicionId", cls := "form-control form-control-sm bg-dark text-white border-secondary", value := competicionId)
+          ),
+          div(cls := "col-4",
+            label(cls := "xx-small text-muted fw-bold", "Temporada"),
+            input(tpe := "text", name := "temporada", cls := "form-control form-control-sm bg-dark text-white border-secondary", value := temporada)
+          ),
+          div(cls := "col-2", button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold w-100", "Guardar"))
+        ),
+        div(cls := "xx-small text-muted mt-1", "Cambia el ID si Héctor pasa a otro grupo de la competición en temporadas futuras.")
+      )
+    )
+  }
+
+  @cask.get("/settings") def settingsPage(backupMsg: String = "", rffmMsg: String = "") = {
     val card = DatabaseManager.getLatestCardData()
     val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Configuracion General"),
       form(action := "/settings/save_base64", method := "post",
@@ -292,7 +336,7 @@ object AdminController extends cask.Routes {
       script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-flex gap-2 mt-2",
       a(href:="/videoteca", cls:="btn btn-warning fw-bold flex-grow-1", "🎬 VIDEOTECA"),
       a(href:="/admin", cls:="btn btn-outline-danger fw-bold", "⚙️ ADMIN")
-    ), weeklyStructurePanel(), perfilPublicoPanel(), backupsPanel(backupMsg)));
+    ), weeklyStructurePanel(), perfilPublicoPanel(), rffmBenchmarkPanel(rffmMsg), backupsPanel(backupMsg)));
     renderHtml(basePage("settings", content))
   }
 
@@ -376,6 +420,23 @@ object AdminController extends cask.Routes {
 
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
       "Location" -> s"/settings?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+    ))
+  }
+
+  @cask.post("/admin/rffm/sync")
+  def syncRffmNow(request: cask.Request) = withAuth(request) {
+    DatabaseManager.syncRFFMBenchmarkAsync()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/settings?rffmMsg=${java.net.URLEncoder.encode("⏳ Sincronización lanzada en segundo plano. Recarga la página en unos minutos.", "UTF-8")}"
+    ))
+  }
+
+  @cask.post("/admin/rffm/config")
+  def saveRffmConfig(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.setRffmConfig(p.getOrElse("competicionId", ""), p.getOrElse("temporada", ""))
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/settings?rffmMsg=${java.net.URLEncoder.encode("✅ Configuración RFFM guardada.", "UTF-8")}"
     ))
   }
 
