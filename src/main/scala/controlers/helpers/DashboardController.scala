@@ -240,6 +240,19 @@ object DashboardController extends cask.Routes {
         )
       })
 
+    // ── MODULO ARQUETIPO: badge junto a los KPIs (SQL puro, sin Gemini) ───────
+    val arquetipoWidget: Modifier = {
+      val arq = DatabaseManager.calcularArquetipoPortero()
+      if (!arq("activo").asInstanceOf[Boolean]) div()
+      else {
+        val desc = DatabaseManager.arquetipoDescripcion(arq("dominante").asInstanceOf[String])
+        div(cls := "d-grid mb-3",
+          a(href := "/arquetipo", cls := "btn btn-sm btn-outline-light fw-bold text-start",
+            s"🎭 ${desc("emoji")} ${desc("nombre")} — ver arquetipo completo →")
+        )
+      }
+    }
+
     // ── BLOQUE RFFM: BENCHMARK REAL VS CATEGORIA (SQL puro, sin Gemini) ───────
     val rffmWidget: Modifier = DatabaseManager.getPercentilRealHector() match {
       case Some(p) =>
@@ -852,6 +865,7 @@ object DashboardController extends cask.Routes {
 
         // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
         formaWidget,
+        arquetipoWidget,
         deudaSuenoWidget,
         riesgoLesionWidget,
         rfmfPendientesWidget,

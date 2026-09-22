@@ -101,6 +101,7 @@ object PublicController extends cask.Routes {
     val mostrarIdp        = config("mostrarIdp").asInstanceOf[Boolean]
     val mostrarInforme    = config("mostrarInforme").asInstanceOf[Boolean]
     val mostrarCognitivo  = config("mostrarCognitivo").asInstanceOf[Boolean]
+    val mostrarArquetipo  = config("mostrarArquetipo").asInstanceOf[Boolean]
 
     // --- Carta FUT ---
     val cartaSection: Modifier = if (mostrarCarta)
@@ -229,6 +230,22 @@ object PublicController extends cask.Routes {
       }
     } else div()
 
+    // --- Arquetipo de portero (el dato mas impactante visualmente para un ojeador) ---
+    val arquetipoSection: Modifier = if (mostrarArquetipo) {
+      val arq = DatabaseManager.calcularArquetipoPortero()
+      if (!arq("activo").asInstanceOf[Boolean]) div()
+      else {
+        val desc = DatabaseManager.arquetipoDescripcion(arq("dominante").asInstanceOf[String])
+        div(cls := "card bg-dark border-secondary shadow mb-3",
+          div(cls := "card-header text-white fw-bold small", s"🎭 Arquetipo de portero — ${desc("emoji")} ${desc("nombre")}"),
+          div(cls := "card-body p-3",
+            arquetipoBarsWidget(arq),
+            div(cls := "xx-small text-muted mt-2", desc("descripcion"))
+          )
+        )
+      }
+    } else div()
+
     val pageHtml = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
@@ -253,6 +270,7 @@ object PublicController extends cask.Routes {
           idpSection,
           informeSection,
           cognitivoSection,
+          arquetipoSection,
           div(cls := "text-center text-muted xx-small mt-4",
             "Perfil generado con Guardian Elite · Datos actualizados en tiempo real")
         ),

@@ -82,7 +82,8 @@ object AdminController extends cask.Routes {
           toggle("mostrarIdp", cfg("mostrarIdp").asInstanceOf[Boolean], "Plan de Desarrollo Individual"),
           toggle("mostrarInforme", cfg("mostrarInforme").asInstanceOf[Boolean], "Informe de captación"),
           toggle("mostrarCognitivo", cfg("mostrarCognitivo").asInstanceOf[Boolean], "Índice cognitivo"),
-          toggle("mostrarMedico", cfg("mostrarMedico").asInstanceOf[Boolean], "Datos médicos (no recomendado)")
+          toggle("mostrarMedico", cfg("mostrarMedico").asInstanceOf[Boolean], "Datos médicos (no recomendado)"),
+          toggle("mostrarArquetipo", cfg("mostrarArquetipo").asInstanceOf[Boolean], "Arquetipo de portero")
         ),
         div(cls := "d-grid mb-3", button(tpe := "submit", cls := "btn btn-info fw-bold", "Guardar configuración"))
       ),
@@ -496,7 +497,8 @@ object AdminController extends cask.Routes {
       mostrarIdp = p.contains("mostrarIdp"),
       mostrarInforme = p.contains("mostrarInforme"),
       mostrarCognitivo = p.contains("mostrarCognitivo"),
-      mostrarMedico = p.contains("mostrarMedico")
+      mostrarMedico = p.contains("mostrarMedico"),
+      mostrarArquetipo = p.contains("mostrarArquetipo")
     )
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
   }

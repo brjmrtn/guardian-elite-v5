@@ -769,6 +769,23 @@ object DatabaseManager {
         created_at        TIMESTAMP DEFAULT NOW()
       )""")
       stmt.executeUpdate("INSERT INTO perfil_publico (activo) SELECT FALSE WHERE NOT EXISTS (SELECT 1 FROM perfil_publico)")
+      // BLOQUE ARQUETIPO: mostrar las 4 barras de arquetipo en el perfil publico
+      stmt.executeUpdate("ALTER TABLE perfil_publico ADD COLUMN IF NOT EXISTS mostrar_arquetipo BOOLEAN DEFAULT TRUE")
+
+      // ── ARQUETIPO DE PORTERO — historico mensual (SQL puro, sin Gemini) ──────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS arquetipo_history (
+        id              SERIAL PRIMARY KEY,
+        season_id       INT REFERENCES seasons(id) ON DELETE CASCADE,
+        fecha_calculo   DATE NOT NULL DEFAULT CURRENT_DATE,
+        pct_sweeper     INT DEFAULT 0,
+        pct_shot_stopper INT DEFAULT 0,
+        pct_commanding  INT DEFAULT 0,
+        pct_modern      INT DEFAULT 0,
+        arquetipo_dominante TEXT NOT NULL,
+        arquetipo_secundario TEXT DEFAULT NULL,
+        partidos_base   INT DEFAULT 0,
+        created_at      TIMESTAMP DEFAULT NOW()
+      )""")
 
       // ─────────────────────────────────────────────────────────────────────────────
       // MODULO — SISTEMA DE BACKUPS AUTOMATICOS
@@ -2563,7 +2580,16 @@ $analisisConcatenados"""
       val chronic = getWorkloads(28)
       val acwr = StatsCalculator.calculateACWR(acute, chronic)
 
-      val prompt = s"""Eres el director de desarrollo de jugadores de una academia de élite. Héctor es un portero de $edad años con estos datos actuales: checklist técnico conseguido $pctChecklist% (por categoría: $checklistPorCategoria), fase madurativa $faseBio, último test físico: $ultimoTest, índice de velocidad de aprendizaje: $indiceAprendizaje, último registro psicológico: $ultimoPsych, oportunidades de visibilidad este año: $oportunidadesAnio, ACWR medio últimas 4 semanas: ${f"$acwr%.2f"}. Genera exactamente 4 objetivos SMART para la temporada $temporada, uno por cada dimensión. Para cada objetivo devuelve en formato: DIMENSION|OBJETIVO|METRICA|VALOR_ACTUAL|VALOR_OBJETIVO|FECHA_LIMITE. Ejemplos: TECNICO|Consolidar el 80% del checklist de técnica básica|% habilidades técnicas conseguidas|45%|80%|2027-01-31. FISICO|Mantener ACWR en zona verde toda la temporada|% semanas con ACWR menor de 1.3|Sin datos|85%|2027-06-30. MENTAL|Registrar motivación igual o mayor a 4 en todos los registros trimestrales|Puntuación motivación|Sin datos|4/5|2027-06-30. VISIBILIDAD|Participar en 2 eventos de visibilidad ALTO|Eventos nivel ALTO participados|0|2|2027-05-31. Sé específico y realista para la edad de Héctor. Devuelve SOLO las 4 líneas en el formato indicado, sin texto adicional."""
+      // MODULO ARQUETIPO: contexto para que el objetivo tecnico del IDP sea coherente con el perfil natural
+      val arquetipoLine = {
+        val arq = calcularArquetipoPortero()
+        if (arq("activo").asInstanceOf[Boolean]) {
+          val nombre = arquetipoDescripcion(arq("dominante").asInstanceOf[String])("nombre")
+          s" Su arquetipo dominante es $nombre. El objetivo técnico del IDP debe ser coherente con este perfil."
+        } else ""
+      }
+
+      val prompt = s"""Eres el director de desarrollo de jugadores de una academia de élite. Héctor es un portero de $edad años con estos datos actuales: checklist técnico conseguido $pctChecklist% (por categoría: $checklistPorCategoria), fase madurativa $faseBio, último test físico: $ultimoTest, índice de velocidad de aprendizaje: $indiceAprendizaje, último registro psicológico: $ultimoPsych, oportunidades de visibilidad este año: $oportunidadesAnio, ACWR medio últimas 4 semanas: ${f"$acwr%.2f"}.$arquetipoLine Genera exactamente 4 objetivos SMART para la temporada $temporada, uno por cada dimensión. Para cada objetivo devuelve en formato: DIMENSION|OBJETIVO|METRICA|VALOR_ACTUAL|VALOR_OBJETIVO|FECHA_LIMITE. Ejemplos: TECNICO|Consolidar el 80% del checklist de técnica básica|% habilidades técnicas conseguidas|45%|80%|2027-01-31. FISICO|Mantener ACWR en zona verde toda la temporada|% semanas con ACWR menor de 1.3|Sin datos|85%|2027-06-30. MENTAL|Registrar motivación igual o mayor a 4 en todos los registros trimestrales|Puntuación motivación|Sin datos|4/5|2027-06-30. VISIBILIDAD|Participar en 2 eventos de visibilidad ALTO|Eventos nivel ALTO participados|0|2|2027-05-31. Sé específico y realista para la edad de Héctor. Devuelve SOLO las 4 líneas en el formato indicado, sin texto adicional."""
 
       val respuesta = AIProvider.ask(prompt, None, bypassCache = true)
 
@@ -3531,29 +3557,30 @@ $analisisConcatenados"""
         "mostrarInforme" -> rs.getBoolean("mostrar_informe"),
         "mostrarCognitivo" -> rs.getBoolean("mostrar_cognitivo"),
         "mostrarMedico" -> rs.getBoolean("mostrar_medico"),
+        "mostrarArquetipo" -> rs.getBoolean("mostrar_arquetipo"),
         "visitas" -> rs.getInt("visitas"),
         "ultimaVisita" -> Option(rs.getTimestamp("ultima_visita")).map(_.toString).getOrElse("")
       ) else Map(
         "activo" -> false, "passwordLectura" -> "", "mostrarCarta" -> true, "mostrarProgresion" -> true,
         "mostrarVideoIa" -> true, "mostrarIdp" -> true, "mostrarInforme" -> true, "mostrarCognitivo" -> false,
-        "mostrarMedico" -> false, "visitas" -> 0, "ultimaVisita" -> ""
+        "mostrarMedico" -> false, "mostrarArquetipo" -> true, "visitas" -> 0, "ultimaVisita" -> ""
       )
     } finally { conn.close() }
   }
 
   def updatePerfilPublicoConfig(activo: Boolean, password: String, mostrarCarta: Boolean, mostrarProgresion: Boolean,
                                  mostrarVideoIa: Boolean, mostrarIdp: Boolean, mostrarInforme: Boolean,
-                                 mostrarCognitivo: Boolean, mostrarMedico: Boolean): Unit = {
+                                 mostrarCognitivo: Boolean, mostrarMedico: Boolean, mostrarArquetipo: Boolean = true): Unit = {
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement("""
         UPDATE perfil_publico SET activo = ?, mostrar_carta = ?, mostrar_progresion = ?, mostrar_video_ia = ?,
-          mostrar_idp = ?, mostrar_informe = ?, mostrar_cognitivo = ?, mostrar_medico = ?
+          mostrar_idp = ?, mostrar_informe = ?, mostrar_cognitivo = ?, mostrar_medico = ?, mostrar_arquetipo = ?
         WHERE id = (SELECT MIN(id) FROM perfil_publico)
       """)
       ps.setBoolean(1, activo); ps.setBoolean(2, mostrarCarta); ps.setBoolean(3, mostrarProgresion)
       ps.setBoolean(4, mostrarVideoIa); ps.setBoolean(5, mostrarIdp); ps.setBoolean(6, mostrarInforme)
-      ps.setBoolean(7, mostrarCognitivo); ps.setBoolean(8, mostrarMedico)
+      ps.setBoolean(7, mostrarCognitivo); ps.setBoolean(8, mostrarMedico); ps.setBoolean(9, mostrarArquetipo)
       ps.executeUpdate()
       if (password.nonEmpty) {
         val psPass = conn.prepareStatement("UPDATE perfil_publico SET password_lectura = ? WHERE id = (SELECT MIN(id) FROM perfil_publico)")
@@ -5454,6 +5481,251 @@ Responde en espanol, tono positivo y motivador para un nino."""
         "notaReorganiza" -> notaReorganiza, "notaDecaido" -> notaDecaido,
         "patronDominante" -> patronDominante, "pctDecaido" -> pctDecaido, "pctSaludable" -> pctSaludable
       )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO — ARQUETIPO DE PORTERO
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro — sin Gemini. Lee de tablas ya existentes (matches, rubrica, etc).
+  def calcularArquetipoPortero(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val sid = if (seasonId > 0) seasonId else getTemporadaActivaId()
+      if (sid == 0) return Map("activo" -> false, "motivo" -> "Sin temporada activa")
+
+      // ── Recoger metricas base ─────────────────────────────────────────
+      val rsScan = conn.createStatement().executeQuery(s"""
+        SELECT AVG(CASE WHEN scanning_rate > 0
+          THEN scanning_efectivo::float / scanning_rate ELSE NULL END) as scan_eff,
+          AVG(scanning_rate) as scan_freq
+        FROM matches WHERE season_id=$sid AND status='PLAYED'""")
+      val (scanEff, scanFreq) = if (rsScan.next())
+        (rsScan.getDouble("scan_eff"), rsScan.getDouble("scan_freq")) else (0.0, 0.0)
+
+      val rsBp = conn.createStatement().executeQuery(s"""
+        SELECT AVG(lineas_superadas) as bypass
+        FROM matches WHERE season_id=$sid AND status='PLAYED'""")
+      val bypass = if (rsBp.next()) rsBp.getDouble("bypass") else 0.0
+
+      val rs1v1 = conn.createStatement().executeQuery(s"""
+        SELECT AVG(paradas_1v1) as par1v1,
+          AVG(paradas_aereas) as aereas,
+          AVG(acciones_pie) as pie,
+          AVG(COALESCE(rubrica_comunicacion, 3)) as com,
+          AVG(COALESCE(rubrica_posicion, 3)) as pos,
+          AVG(COALESCE(rubrica_decisiones, 3)) as dec,
+          AVG(COALESCE(rubrica_pies, 3)) as pies,
+          AVG(COALESCE(rubrica_actitud, 3)) as act,
+          AVG(COALESCE(economia_movimiento, 3)) as economia,
+          AVG(COALESCE(corners_dominados::float /
+            NULLIF(corners_dominados + corners_cedidos, 0), 0)) as dominio_aereo,
+          AVG(CASE WHEN velocidad_distribucion = 'INMEDIATO' THEN 1.0
+              WHEN velocidad_distribucion = 'NORMAL' THEN 0.6
+              WHEN velocidad_distribucion = 'LENTO' THEN 0.2
+              ELSE 0.5 END) as vel_dist,
+          COUNT(*) as pj
+        FROM matches WHERE season_id=$sid AND status='PLAYED'""")
+
+      if (!rs1v1.next() || rs1v1.getInt("pj") < 5)
+        return Map("activo" -> false, "motivo" -> "Mínimo 5 partidos necesarios")
+
+      val (par1v1, aereas, pie, com, pos, dec, pies, act, economia, dominioAereo, velDist, pj) = (
+        rs1v1.getDouble("par1v1"), rs1v1.getDouble("aereas"),
+        rs1v1.getDouble("pie"), rs1v1.getDouble("com"),
+        rs1v1.getDouble("pos"), rs1v1.getDouble("dec"),
+        rs1v1.getDouble("pies"), rs1v1.getDouble("act"),
+        rs1v1.getDouble("economia"), rs1v1.getDouble("dominio_aereo"),
+        rs1v1.getDouble("vel_dist"), rs1v1.getInt("pj")
+      )
+
+      // ── Normalizar cada metrica a escala 0-100 ────────────────────────
+      def norm(v: Double, min: Double, max: Double): Double =
+        Math.min(100, Math.max(0, (v - min) / (max - min) * 100))
+
+      val nScanEff    = norm(scanEff, 0.0, 1.0)
+      val nScanFreq   = norm(scanFreq, 0.0, 10.0)
+      val nBypass     = norm(bypass, 0.0, 5.0)
+      val n1v1        = norm(par1v1, 0.0, 5.0)
+      val nAereas     = norm(aereas, 0.0, 5.0)
+      val nPie        = norm(pie, 0.0, 8.0)
+      val nCom        = norm(com, 1.0, 5.0)
+      val nPos        = norm(pos, 1.0, 5.0)
+      val nDec        = norm(dec, 1.0, 5.0)
+      val nPies       = norm(pies, 1.0, 5.0)
+      val nAct        = norm(act, 1.0, 5.0)
+      val nEconomia   = norm(economia, 1.0, 5.0)
+      val nDominioAer = norm(dominioAereo, 0.0, 1.0)
+      val nVelDist    = norm(velDist, 0.0, 1.0)
+
+      // ── Puntuacion por arquetipo (0-100) ──────────────────────────────
+      val sweeper = (
+        nScanEff    * 0.25 +
+        nScanFreq   * 0.15 +
+        nBypass     * 0.25 +
+        n1v1        * 0.20 +
+        nDec        * 0.15
+      ).toInt
+
+      val shotStopper = (
+        nEconomia   * 0.35 +
+        nPos        * 0.35 +
+        nAereas     * 0.15 +
+        nAct        * 0.15
+      ).toInt
+
+      val commanding = (
+        nDominioAer * 0.35 +
+        nCom        * 0.35 +
+        nAereas     * 0.15 +
+        nAct        * 0.15
+      ).toInt
+
+      val modern = (
+        nVelDist    * 0.25 +
+        nPies       * 0.25 +
+        nPie        * 0.20 +
+        ((nPos + nDec + nCom + nPies + nAct) / 5.0) * 0.30
+      ).toInt
+
+      val arquetipos = List(
+        ("SWEEPER_KEEPER", sweeper, "🔵"),
+        ("SHOT_STOPPER", shotStopper, "🔴"),
+        ("COMMANDING_KEEPER", commanding, "🟡"),
+        ("MODERN_GUARDIAN", modern, "🟢")
+      ).sortBy(-_._2)
+
+      val dominante = arquetipos.head
+      val secundario = arquetipos(1)
+
+      // Guardar en arquetipo_history si han pasado mas de 30 dias
+      val rsLast = conn.createStatement().executeQuery(
+        s"SELECT fecha_calculo FROM arquetipo_history WHERE season_id=$sid ORDER BY fecha_calculo DESC LIMIT 1")
+      val debeGuardar = !rsLast.next() ||
+        rsLast.getDate("fecha_calculo").toLocalDate.isBefore(LocalDate.now().minusDays(30))
+      if (debeGuardar) {
+        val ps = conn.prepareStatement("""
+          INSERT INTO arquetipo_history
+            (season_id, pct_sweeper, pct_shot_stopper, pct_commanding, pct_modern,
+             arquetipo_dominante, arquetipo_secundario, partidos_base)
+          VALUES (?,?,?,?,?,?,?,?)""")
+        ps.setInt(1, sid); ps.setInt(2, sweeper); ps.setInt(3, shotStopper)
+        ps.setInt(4, commanding); ps.setInt(5, modern)
+        ps.setString(6, dominante._1); ps.setString(7, secundario._1)
+        ps.setInt(8, pj)
+        ps.executeUpdate()
+      }
+
+      Map(
+        "activo"           -> true,
+        "sweeper"          -> sweeper,
+        "shotStopper"      -> shotStopper,
+        "commanding"       -> commanding,
+        "modern"           -> modern,
+        "dominante"        -> dominante._1,
+        "dominanteLabel"   -> dominante._3,
+        "dominantePct"     -> dominante._2,
+        "secundario"       -> secundario._1,
+        "secundarioPct"    -> secundario._2,
+        "pj"               -> pj
+      )
+    } finally { conn.close() }
+  }
+
+  def getArquetipoHistory(seasonId: Int = 0): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val sid = if (seasonId > 0) seasonId else getTemporadaActivaId()
+      val ps = conn.prepareStatement("SELECT * FROM arquetipo_history WHERE season_id = ? ORDER BY fecha_calculo ASC")
+      ps.setInt(1, sid)
+      val rs = ps.executeQuery()
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "fecha" -> rs.getDate("fecha_calculo").toString,
+        "sweeper" -> rs.getInt("pct_sweeper"), "shotStopper" -> rs.getInt("pct_shot_stopper"),
+        "commanding" -> rs.getInt("pct_commanding"), "modern" -> rs.getInt("pct_modern")
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  def arquetipoDescripcion(tipo: String): Map[String, String] = tipo match {
+    case "SWEEPER_KEEPER" => Map(
+      "nombre"       -> "Sweeper-Keeper",
+      "emoji"        -> "🔵",
+      "referentes"   -> "Neuer, Ederson, Alisson",
+      "descripcion"  -> "Sale del área con decisión, actúa como líbero adicional, alto scanning y distribución. Domina el 1v1 agresivo.",
+      "entreno_foco" -> "Salidas agresivas, pase largo con presión, anticipación visual, lectura del juego anticipada.",
+      "sistema_ideal"-> "Presión alta, salida de balón desde atrás, portero-jugador de campo.",
+      "alerta"       -> "Tendencia a salir tarde o a arriesgarse en exceso. Trabajar el juicio de cuándo salir y cuándo quedarse."
+    )
+    case "SHOT_STOPPER" => Map(
+      "nombre"       -> "Shot-Stopper",
+      "emoji"        -> "🔴",
+      "referentes"   -> "Oblak, Courtois, Ter Stegen (primera época)",
+      "descripcion"  -> "Reflejos excepcionales, posición de set perfecta, mínimo movimiento máxima cobertura. Domina desde su posición.",
+      "entreno_foco" -> "Posición de set, reacción ante disparo, posicionamiento en tiros lejanos, economía de movimiento.",
+      "sistema_ideal"-> "Bloque medio-bajo, equipos que defienden con orden y necesitan un portero que salve lo que la defensa no corta.",
+      "alerta"       -> "Puede ser pasivo en el juego con el pie y en la salida al área. Trabajar distribución y lectura anticipada."
+    )
+    case "COMMANDING_KEEPER" => Map(
+      "nombre"       -> "Commanding Keeper",
+      "emoji"        -> "🟡",
+      "referentes"   -> "Casillas, Buffon, Valdés",
+      "descripcion"  -> "Dominio aéreo absoluto, alta comunicación y liderazgo vocal. Organiza la defensa y manda en el área.",
+      "entreno_foco" -> "Mando en área, comunicación táctica, salidas a balones aéreos, liderazgo bajo presión.",
+      "sistema_ideal"-> "Equipos que reciben mucho balón aéreo, con defensas jóvenes que necesitan organización constante.",
+      "alerta"       -> "Puede descuidar el juego con el pie y la distribución rápida. Trabajar la transición parada-distribución."
+    )
+    case "MODERN_GUARDIAN" => Map(
+      "nombre"       -> "Modern Guardian",
+      "emoji"        -> "🟢",
+      "referentes"   -> "ter Stegen, Alisson, Donnarumma",
+      "descripcion"  -> "Equilibrado en todas las dimensiones. Distribución precisa, transición parada-juego rápida, sólido en todo.",
+      "entreno_foco" -> "Desarrollo balanceado. No especializar prematuramente — mantener el equilibrio entre todas las dimensiones.",
+      "sistema_ideal"-> "Cualquier sistema. La versatilidad es su mayor activo.",
+      "alerta"       -> "Sin especialización puede perderse en academias que buscan un perfil muy definido. Identificar y potenciar el punto diferencial."
+    )
+    case _ => Map("nombre" -> tipo, "emoji" -> "⚪", "referentes" -> "", "descripcion" -> "", "entreno_foco" -> "", "sistema_ideal" -> "", "alerta" -> "")
+  }
+
+  /** Solo lectura de cache (30 dias) — NUNCA llama a Gemini. */
+  def getArquetipoAnalisisCache(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT payload FROM feature_cache WHERE cache_key = 'arquetipo_analisis_ia' AND updated_at > NOW() - INTERVAL '30 days'")
+      if (rs.next()) Some(rs.getString("payload")) else None
+    } finally { conn.close() }
+  }
+
+  /** Llama a Gemini — SOLO desde el boton explicito "Análisis IA del arquetipo". Cache 30 dias. */
+  def generarArquetipoAnalisisIA(): String = {
+    val conn = getConnection()
+    try {
+      val arq = calcularArquetipoPortero()
+      if (!arq("activo").asInstanceOf[Boolean]) return "Se necesitan al menos 5 partidos registrados para generar este análisis."
+
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+      val pj = arq("pj").asInstanceOf[Int]
+      val ordenados = List(
+        ("Sweeper-Keeper", arq("sweeper").asInstanceOf[Int]),
+        ("Shot-Stopper", arq("shotStopper").asInstanceOf[Int]),
+        ("Commanding Keeper", arq("commanding").asInstanceOf[Int]),
+        ("Modern Guardian", arq("modern").asInstanceOf[Int])
+      ).sortBy(-_._2)
+      val dominanteNombre = arquetipoDescripcion(arq("dominante").asInstanceOf[String])("nombre")
+      val perfilStr = ordenados.map { case (n, p) => s"$n $p%" }.mkString(" · ")
+      val metricasContribuyen = arquetipoDescripcion(arq("dominante").asInstanceOf[String])("entreno_foco")
+
+      val prompt = s"""Eres el director de metodología de porteros de una academia de élite. Héctor es un portero de $edad años con $pj partidos registrados. Su perfil de arquetipo calculado es: $perfilStr. Las métricas que más contribuyen a su arquetipo dominante ($dominanteNombre) son: $metricasContribuyen. Analiza: 1) Si el arquetipo emergente es coherente con su perfil psicológico y físico actual, 2) Si hay tensión entre su arquetipo dominante y secundario o si son complementarios, 3) Qué debería priorizar el entrenador de academia en los próximos 3 meses para potenciar su arquetipo natural. Máximo 3 líneas por punto. Tono técnico, orientado al entrenador."""
+
+      val texto = AIProvider.ask(prompt, None, bypassCache = true)
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('arquetipo_analisis_ia', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+      ps.setString(1, texto); ps.executeUpdate()
+      texto
     } finally { conn.close() }
   }
 

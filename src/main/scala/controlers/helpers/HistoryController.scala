@@ -5062,6 +5062,19 @@ object HistoryController extends cask.Routes {
             )
           ),
 
+          // MODULO ARQUETIPO: linea junto al Markov con la proyeccion a talla adulta
+          {
+            val arq = DatabaseManager.calcularArquetipoPortero()
+            if (!arq("activo").asInstanceOf[Boolean]) div()
+            else {
+              val desc = DatabaseManager.arquetipoDescripcion(arq("dominante").asInstanceOf[String])
+              div(cls := "card bg-dark border-secondary shadow mb-3 p-3",
+                div(cls := "xx-small text-white",
+                  s"🎭 Arquetipo proyectado a la talla adulta: dado su perfil ${desc("nombre")} y su talla proyectada de ${alturaProyStr}cm, encaja especialmente en ${desc("sistema_ideal")}")
+              )
+            }
+          },
+
           // BLOQUE E: RUTA DE CARRERA (MARKOV) ────────────────────────────────
           div(cls:="card bg-dark border-info shadow mb-3",
             div(cls:="card-header text-info fw-bold small", "🗺️ RUTA DE CARRERA (Markov)"),
@@ -6076,6 +6089,23 @@ object HistoryController extends cask.Routes {
       }
     }
 
+    // MODULO ARQUETIPO: seccion en el informe de captacion — SQL puro, sin Gemini
+    val arquetipoHtml = {
+      val arq = DatabaseManager.calcularArquetipoPortero()
+      if (!arq("activo").asInstanceOf[Boolean]) "" else {
+        val descDom = DatabaseManager.arquetipoDescripcion(arq("dominante").asInstanceOf[String])
+        val descSec = DatabaseManager.arquetipoDescripcion(arq("secundario").asInstanceOf[String])
+        val domPct = arq("dominantePct").asInstanceOf[Int]; val secPct = arq("secundarioPct").asInstanceOf[Int]
+        s"""<p class="section-title">🎭 ARQUETIPO EN DESARROLLO</p>
+            <div class="narrative" style="font-size:12px;">
+              ARQUETIPO DOMINANTE: ${DatabaseManager.escHtml(descDom("nombre"))} ($domPct%)<br/>
+              ARQUETIPO SECUNDARIO: ${DatabaseManager.escHtml(descSec("nombre"))} ($secPct%)<br/>
+              SISTEMA IDEAL: ${DatabaseManager.escHtml(descDom("sistema_ideal"))}<br/>
+              REFERENTES: ${DatabaseManager.escHtml(descDom("referentes"))}
+            </div>"""
+      }
+    }
+
     // BLOQUE K: Club Readiness Score — SQL puro, sin Gemini
     val readinessHtml = {
       val r = DatabaseManager.getClubReadinessScore()
@@ -6209,6 +6239,7 @@ object HistoryController extends cask.Routes {
 $goalCoverageHtml
 $markovHtml
 $pasoNegativoHtml
+$arquetipoHtml
 $rffmHtml
 $readinessHtml
 $automatismoTablaHtml

@@ -1353,6 +1353,111 @@ object CareerController extends cask.Routes {
   // ─────────────────────────────────────────────────────────────────────────────
   // FASE 7 v7.2 — MARKET ESTIMATOR
   // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO — ARQUETIPO DE PORTERO
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/arquetipo")
+  def arquetipoPage(request: cask.Request) = withAuth(request) {
+    val arq = DatabaseManager.calcularArquetipoPortero()
+
+    val content: Modifier = if (!arq("activo").asInstanceOf[Boolean]) {
+      div(cls := "alert alert-secondary text-center py-5",
+        div(style := "font-size:40px; opacity:0.3;", "🎭"),
+        div(cls := "fw-bold mt-2", "El arquetipo aún no está disponible"),
+        div(cls := "small text-muted mt-1", arq("motivo").asInstanceOf[String])
+      )
+    } else {
+      val dominante = arq("dominante").asInstanceOf[String]
+      val secundario = arq("secundario").asInstanceOf[String]
+      val dominantePct = arq("dominantePct").asInstanceOf[Int]
+      val secundarioPct = arq("secundarioPct").asInstanceOf[Int]
+      val pj = arq("pj").asInstanceOf[Int]
+      val descDom = DatabaseManager.arquetipoDescripcion(dominante)
+      val descSec = DatabaseManager.arquetipoDescripcion(secundario)
+
+      val historia = DatabaseManager.getArquetipoHistory()
+      val fechasJs = historia.map(h => s""""${h("fecha")}"""").mkString("[", ",", "]")
+      def serieJs(key: String): String = historia.map(h => h(key).asInstanceOf[Int].toString).mkString("[", ",", "]")
+
+      val analisisIA = DatabaseManager.getArquetipoAnalisisCache()
+
+      div(
+        div(cls := "text-center mb-3",
+          h2(cls := "text-white mb-0", s"🎭 ARQUETIPO DE PORTERO — ${descDom("emoji")} ${descDom("nombre")}")
+        ),
+        div(cls := "card bg-dark border-secondary shadow mb-3",
+          div(cls := "card-header text-white fw-bold small", "DISTRIBUCIÓN DE ARQUETIPOS"),
+          div(cls := "card-body p-3", arquetipoBarsWidget(arq))
+        ),
+        div(cls := s"card bg-dark shadow mb-3", style := "border-color:#d4af37;",
+          div(cls := "card-header fw-bold small text-dark", style := "background:#d4af37;", s"${descDom("emoji")} ${descDom("nombre")} — ARQUETIPO DOMINANTE ($dominantePct%)"),
+          div(cls := "card-body p-3",
+            div(cls := "xx-small text-muted mb-2", strong("Referentes: "), descDom("referentes")),
+            div(cls := "small text-white mb-2", descDom("descripcion")),
+            div(cls := "xx-small text-info mt-2", strong("FOCO DE ENTRENAMIENTO: "), descDom("entreno_foco")),
+            div(cls := "xx-small text-success mt-1", strong("SISTEMA IDEAL: "), descDom("sistema_ideal")),
+            div(cls := "xx-small text-warning mt-1", strong("PUNTO DE ATENCIÓN: "), descDom("alerta"))
+          )
+        ),
+        div(cls := "card bg-dark border-secondary shadow mb-3",
+          div(cls := "card-header text-muted fw-bold small", s"${descSec("emoji")} ${descSec("nombre")} — arquetipo secundario ($secundarioPct%)"),
+          div(cls := "card-body p-2",
+            div(cls := "xx-small text-muted", descSec("descripcion"))
+          )
+        ),
+        div(cls := "text-center xx-small text-muted mb-3",
+          s"Basado en $pj partidos con datos completos. El arquetipo puede cambiar con el desarrollo — se recalcula mensualmente."
+        ),
+
+        if (historia.size >= 2) div(cls := "card bg-dark border-secondary shadow mb-3",
+          div(cls := "card-header text-white fw-bold small", "📈 EVOLUCIÓN DEL ARQUETIPO"),
+          div(cls := "card-body p-3",
+            div(style := "height:220px;", tag("canvas")(id := "chartArquetipoEvol")),
+            script(raw(s"""
+              var ctxAE = document.getElementById('chartArquetipoEvol');
+              if (ctxAE) {
+                new Chart(ctxAE, { type: 'line',
+                  data: { labels: $fechasJs, datasets: [
+                    { label: 'Sweeper-Keeper', data: ${serieJs("sweeper")}, borderColor: '#0dcaf0', tension:0.3 },
+                    { label: 'Shot-Stopper', data: ${serieJs("shotStopper")}, borderColor: '#dc3545', tension:0.3 },
+                    { label: 'Commanding Keeper', data: ${serieJs("commanding")}, borderColor: '#ffc107', tension:0.3 },
+                    { label: 'Modern Guardian', data: ${serieJs("modern")}, borderColor: '#20c997', tension:0.3 }
+                  ]},
+                  options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{color:'#eee', font:{size:10}} } },
+                    scales: { y: { min:0, max:100, ticks:{color:'#aaa'}, grid:{color:'#333'} }, x: { ticks:{color:'#888'}, grid:{color:'#333'} } } }
+                });
+              }
+            """))
+          )
+        ) else div(),
+
+        div(cls := "card bg-dark border-info shadow mb-3",
+          div(cls := "card-header text-info fw-bold small", "🧠 ANÁLISIS IA DEL ARQUETIPO"),
+          div(cls := "card-body p-3",
+            analisisIA match {
+              case Some(texto) => div(cls := "small text-light", style := "white-space:pre-wrap;", texto)
+              case None => div(cls := "d-grid",
+                form(action := "/arquetipo/analisis-ia", method := "post",
+                  button(tpe := "submit", cls := "btn btn-outline-info fw-bold w-100", "🧠 Análisis IA del arquetipo")
+                )
+              )
+            }
+          )
+        )
+      )
+    }
+
+    renderHtml(basePage("arquetipo",
+      div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", content))
+    ))
+  }
+
+  @cask.post("/arquetipo/analisis-ia")
+  def generarArquetipoAnalisisAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generarArquetipoAnalisisIA()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/arquetipo"))
+  }
+
   @cask.get("/market-estimator")
   def marketEstimatorPage(request: cask.Request) = withAuth(request) {
     val d = DatabaseManager.getMarketEstimatorData()
