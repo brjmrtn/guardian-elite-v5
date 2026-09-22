@@ -5075,6 +5075,18 @@ object HistoryController extends cask.Routes {
             }
           },
 
+          // MODULO LA VOZ DEL PORTERO: linea de caritas junto al arco completo, si hay 6+ meses de historial
+          {
+            val hist = DatabaseManager.getVozPorteroHistorial()
+            if (hist.size < 6) div()
+            else {
+              val linea = hist.reverse.map(h => DatabaseManager.caritaEmoji(h("motivacionCarita").asInstanceOf[Int])).mkString(" ")
+              div(cls := "card bg-dark border-secondary shadow mb-3 p-3",
+                div(cls := "xx-small text-white", s"🎤 Motivación declarada a lo largo del tiempo: $linea")
+              )
+            }
+          },
+
           // BLOQUE E: RUTA DE CARRERA (MARKOV) ────────────────────────────────
           div(cls:="card bg-dark border-info shadow mb-3",
             div(cls:="card-header text-info fw-bold small", "🗺️ RUTA DE CARRERA (Markov)"),
@@ -6089,6 +6101,30 @@ object HistoryController extends cask.Routes {
       }
     }
 
+    // MODULO LA VOZ DEL PORTERO: SQL puro, sin Gemini. NUNCA incluir respuesta_error — es privada.
+    val vozPorteroHtml = {
+      val hist = DatabaseManager.getVozPorteroHistorial()
+      if (hist.isEmpty) "" else {
+        val ultimo = hist.head
+        val carita = ultimo("motivacionCarita").asInstanceOf[Int]
+        val anteriores = hist.drop(1).take(3).map(_("motivacionCarita").asInstanceOf[Int])
+        val tendenciaTxt =
+          if (anteriores.isEmpty) "→ estable"
+          else {
+            val media = anteriores.sum.toDouble / anteriores.size
+            if (carita > media + 0.3) "↑ en aumento" else if (carita < media - 0.3) "↓ en descenso" else "→ estable"
+          }
+        val aprendizaje = ultimo("respuestaAprendizaje").asInstanceOf[String]
+        val extracto = aprendizaje.split("(?<=[.!?])\\s+").take(2).mkString(" ")
+        s"""<p class="section-title">🎤 LA VOZ DEL PORTERO</p>
+            <div class="narrative" style="font-size:12px;">
+              Motivación intrínseca declarada: $carita/5<br/>
+              Tendencia: $tendenciaTxt<br/>
+              Última declaración sobre el aprendizaje: "${DatabaseManager.escHtml(extracto)}"
+            </div>"""
+      }
+    }
+
     // MODULO ARQUETIPO: seccion en el informe de captacion — SQL puro, sin Gemini
     val arquetipoHtml = {
       val arq = DatabaseManager.calcularArquetipoPortero()
@@ -6240,6 +6276,7 @@ $goalCoverageHtml
 $markovHtml
 $pasoNegativoHtml
 $arquetipoHtml
+$vozPorteroHtml
 $rffmHtml
 $readinessHtml
 $automatismoTablaHtml

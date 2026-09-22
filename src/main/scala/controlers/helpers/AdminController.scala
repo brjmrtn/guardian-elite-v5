@@ -83,7 +83,9 @@ object AdminController extends cask.Routes {
           toggle("mostrarInforme", cfg("mostrarInforme").asInstanceOf[Boolean], "Informe de captación"),
           toggle("mostrarCognitivo", cfg("mostrarCognitivo").asInstanceOf[Boolean], "Índice cognitivo"),
           toggle("mostrarMedico", cfg("mostrarMedico").asInstanceOf[Boolean], "Datos médicos (no recomendado)"),
-          toggle("mostrarArquetipo", cfg("mostrarArquetipo").asInstanceOf[Boolean], "Arquetipo de portero")
+          toggle("mostrarArquetipo", cfg("mostrarArquetipo").asInstanceOf[Boolean], "Arquetipo de portero"),
+          toggle("mostrarVozPortero", cfg("mostrarVozPortero").asInstanceOf[Boolean], "🎤 Mostrar motivación"),
+          div(cls := "xx-small text-muted mb-2", "Solo muestra la carita y la tendencia — nunca el texto de las respuestas.")
         ),
         div(cls := "d-grid mb-3", button(tpe := "submit", cls := "btn btn-info fw-bold", "Guardar configuración"))
       ),
@@ -501,7 +503,8 @@ object AdminController extends cask.Routes {
       mostrarInforme = p.contains("mostrarInforme"),
       mostrarCognitivo = p.contains("mostrarCognitivo"),
       mostrarMedico = p.contains("mostrarMedico"),
-      mostrarArquetipo = p.contains("mostrarArquetipo")
+      mostrarArquetipo = p.contains("mostrarArquetipo"),
+      mostrarVozPortero = p.contains("mostrarVozPortero")
     )
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
   }

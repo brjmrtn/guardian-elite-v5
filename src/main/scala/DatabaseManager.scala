@@ -771,6 +771,25 @@ object DatabaseManager {
       stmt.executeUpdate("INSERT INTO perfil_publico (activo) SELECT FALSE WHERE NOT EXISTS (SELECT 1 FROM perfil_publico)")
       // BLOQUE ARQUETIPO: mostrar las 4 barras de arquetipo en el perfil publico
       stmt.executeUpdate("ALTER TABLE perfil_publico ADD COLUMN IF NOT EXISTS mostrar_arquetipo BOOLEAN DEFAULT TRUE")
+      // MODULO LA VOZ DEL PORTERO: mostrar solo la carita y la tendencia, nunca el texto
+      stmt.executeUpdate("ALTER TABLE perfil_publico ADD COLUMN IF NOT EXISTS mostrar_voz_portero BOOLEAN DEFAULT FALSE")
+
+      // ── LA VOZ DEL PORTERO — registro mensual en primera persona de Hector ───
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS voz_portero (
+        id                    SERIAL PRIMARY KEY,
+        fecha                 DATE NOT NULL DEFAULT CURRENT_DATE,
+        motivacion_carita     INT NOT NULL CHECK (motivacion_carita BETWEEN 1 AND 5),
+        respuesta_error       TEXT NOT NULL,
+        respuesta_aprendizaje TEXT NOT NULL,
+        analisis_ia           TEXT DEFAULT NULL,
+        analisis_fecha        TIMESTAMP DEFAULT NULL,
+        created_at            TIMESTAMP DEFAULT NOW()
+      )""")
+      // UNIQUE sobre una expresion (mes de la fecha) no es un constraint de tabla valido en
+      // Postgres — se implementa como indice unico sobre la expresion, y sirve igualmente
+      // como target de ON CONFLICT para el upsert "un registro por mes".
+      stmt.executeUpdate(
+        "CREATE UNIQUE INDEX IF NOT EXISTS voz_portero_mes_idx ON voz_portero (DATE_TRUNC('month', fecha))")
 
       // ── ARQUETIPO DE PORTERO — historico mensual (SQL puro, sin Gemini) ──────
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS arquetipo_history (
@@ -3266,6 +3285,13 @@ $analisisConcatenados"""
         AND (analisis_voz ILIKE '%cansado%' OR analisis_voz ILIKE '%aburrido%' OR analisis_voz ILIKE '%no quiero%')""")
       if (rsVoz.next() && rsVoz.getInt("c") > 0) indicadores += 1
 
+      // MODULO LA VOZ DEL PORTERO: carita de los ultimos 2 meses <= 2, cuenta como señal adicional
+      val rsVozPortero = conn.createStatement().executeQuery(
+        "SELECT motivacion_carita FROM voz_portero ORDER BY fecha DESC LIMIT 2")
+      var vozBajaCount = 0; var vozTotal = 0
+      while (rsVozPortero.next()) { vozTotal += 1; if (rsVozPortero.getInt("motivacion_carita") <= 2) vozBajaCount += 1 }
+      if (vozTotal >= 2 && vozBajaCount >= 2) indicadores += 1
+
       if (indicadores >= 2)
         Some("⚠️ DESCOMPRESIÓN RECOMENDADA — Varios indicadores sugieren saturación silenciosa. Esta semana: cero correcciones técnicas, cero conversaciones de fútbol en casa. Tiempo libre, juego sin agenda. Vuelve al modo normal la semana siguiente.")
       else None
@@ -3558,29 +3584,33 @@ $analisisConcatenados"""
         "mostrarCognitivo" -> rs.getBoolean("mostrar_cognitivo"),
         "mostrarMedico" -> rs.getBoolean("mostrar_medico"),
         "mostrarArquetipo" -> rs.getBoolean("mostrar_arquetipo"),
+        "mostrarVozPortero" -> rs.getBoolean("mostrar_voz_portero"),
         "visitas" -> rs.getInt("visitas"),
         "ultimaVisita" -> Option(rs.getTimestamp("ultima_visita")).map(_.toString).getOrElse("")
       ) else Map(
         "activo" -> false, "passwordLectura" -> "", "mostrarCarta" -> true, "mostrarProgresion" -> true,
         "mostrarVideoIa" -> true, "mostrarIdp" -> true, "mostrarInforme" -> true, "mostrarCognitivo" -> false,
-        "mostrarMedico" -> false, "mostrarArquetipo" -> true, "visitas" -> 0, "ultimaVisita" -> ""
+        "mostrarMedico" -> false, "mostrarArquetipo" -> true, "mostrarVozPortero" -> false, "visitas" -> 0, "ultimaVisita" -> ""
       )
     } finally { conn.close() }
   }
 
   def updatePerfilPublicoConfig(activo: Boolean, password: String, mostrarCarta: Boolean, mostrarProgresion: Boolean,
                                  mostrarVideoIa: Boolean, mostrarIdp: Boolean, mostrarInforme: Boolean,
-                                 mostrarCognitivo: Boolean, mostrarMedico: Boolean, mostrarArquetipo: Boolean = true): Unit = {
+                                 mostrarCognitivo: Boolean, mostrarMedico: Boolean, mostrarArquetipo: Boolean = true,
+                                 mostrarVozPortero: Boolean = false): Unit = {
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement("""
         UPDATE perfil_publico SET activo = ?, mostrar_carta = ?, mostrar_progresion = ?, mostrar_video_ia = ?,
-          mostrar_idp = ?, mostrar_informe = ?, mostrar_cognitivo = ?, mostrar_medico = ?, mostrar_arquetipo = ?
+          mostrar_idp = ?, mostrar_informe = ?, mostrar_cognitivo = ?, mostrar_medico = ?, mostrar_arquetipo = ?,
+          mostrar_voz_portero = ?
         WHERE id = (SELECT MIN(id) FROM perfil_publico)
       """)
       ps.setBoolean(1, activo); ps.setBoolean(2, mostrarCarta); ps.setBoolean(3, mostrarProgresion)
       ps.setBoolean(4, mostrarVideoIa); ps.setBoolean(5, mostrarIdp); ps.setBoolean(6, mostrarInforme)
       ps.setBoolean(7, mostrarCognitivo); ps.setBoolean(8, mostrarMedico); ps.setBoolean(9, mostrarArquetipo)
+      ps.setBoolean(10, mostrarVozPortero)
       ps.executeUpdate()
       if (password.nonEmpty) {
         val psPass = conn.prepareStatement("UPDATE perfil_publico SET password_lectura = ? WHERE id = (SELECT MIN(id) FROM perfil_publico)")
@@ -3730,6 +3760,9 @@ $analisisConcatenados"""
       diasDesdeUltimo("cognitivo_tests").filter(_ > 90).foreach(d => pendientesTrimestre += s"🧠 Test cognitivo pendiente (último hace $d días)")
       diasDesdeUltimo("psych_records").filter(_ > 90).foreach(d => pendientesTrimestre += s"🧠 Registro psicológico pendiente (último hace $d días)")
       diasDesdeUltimo("physical_growth").filter(_ > 90).foreach(d => pendientesTrimestre += s"📏 Registro de crecimiento pendiente (último hace $d días)")
+
+      // MODULO LA VOZ DEL PORTERO: recordatorio si han pasado mas de 35 dias desde el ultimo registro
+      if (debeRecordarVozPortero()) pendientesTrimestre += "🎤 La Voz del Portero de este mes pendiente."
 
       // BLOQUE A — recordatorio de revision mensual del IDP (solo si hay temporada IDP activa)
       val rsIdpRev = conn.createStatement().executeQuery("""
@@ -4049,6 +4082,9 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         case _ => ""
       }
 
+      // MODULO LA VOZ DEL PORTERO: tendencia de motivacion declarada por Hector, si hay registros recientes
+      val vozPorteroLine = getVozPorteroTendenciaTexto().map(t => s"\n$t\n").getOrElse("")
+
       // BLOQUE N: desglose de habilidades por nivel de automatismo
       val automatismo = getAutomatismoBreakdown()
       val automatismoLine =
@@ -4068,7 +4104,7 @@ CONTEXTO FOOTBAR — PORTERO: Héctor es portero. Los porteros recorren estructu
 
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$cpiLine
+${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$vozPorteroLine$cpiLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -5727,6 +5763,138 @@ Responde en espanol, tono positivo y motivador para un nino."""
       ps.setString(1, texto); ps.executeUpdate()
       texto
     } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO — LA VOZ DEL PORTERO
+  // ─────────────────────────────────────────────────────────────────────────────
+  def caritaEmoji(v: Int): String = v match {
+    case 5 => "😄"; case 4 => "😊"; case 3 => "😐"; case 2 => "😟"; case 1 => "😢"; case _ => "❔"
+  }
+
+  private def vozPorteroRowToMap(rs: java.sql.ResultSet): Map[String, Any] = Map(
+    "id" -> rs.getInt("id"), "fecha" -> rs.getDate("fecha").toString,
+    "motivacionCarita" -> rs.getInt("motivacion_carita"),
+    "respuestaError" -> fixEncoding(rs.getString("respuesta_error")),
+    "respuestaAprendizaje" -> fixEncoding(rs.getString("respuesta_aprendizaje")),
+    "analisisIA" -> Option(rs.getString("analisis_ia")).map(fixEncoding),
+    "analisisFecha" -> Option(rs.getTimestamp("analisis_fecha")).map(_.toString).getOrElse("")
+  )
+
+  /** Upsert: un unico registro por mes natural. Si ya existia, lo sobreescribe y limpia el analisis (queda obsoleto). */
+  def saveVozPortero(motivacion: Int, respuestaError: String, respuestaAprendizaje: String): Int = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO voz_portero (fecha, motivacion_carita, respuesta_error, respuesta_aprendizaje)
+        VALUES (CURRENT_DATE, ?, ?, ?)
+        ON CONFLICT (DATE_TRUNC('month', fecha)) DO UPDATE SET
+          motivacion_carita = EXCLUDED.motivacion_carita,
+          respuesta_error = EXCLUDED.respuesta_error,
+          respuesta_aprendizaje = EXCLUDED.respuesta_aprendizaje,
+          analisis_ia = NULL, analisis_fecha = NULL
+        RETURNING id
+      """)
+      ps.setInt(1, motivacion)
+      ps.setString(2, fixEncoding(respuestaError))
+      ps.setString(3, fixEncoding(respuestaAprendizaje))
+      val rs = ps.executeQuery()
+      if (rs.next()) rs.getInt("id") else -1
+    } finally { conn.close() }
+  }
+
+  /** Llama a Gemini — SOLO en background tras guardar. Nunca en el render de /voz-portero. */
+  def analizarVozPortero(id: Int): Unit = {
+    new Thread(() => {
+      var conn: Connection = null
+      try {
+        conn = getConnection()
+        val ps = conn.prepareStatement("SELECT motivacion_carita, respuesta_error, respuesta_aprendizaje FROM voz_portero WHERE id = ?")
+        ps.setInt(1, id)
+        val rs = ps.executeQuery()
+        if (rs.next()) {
+          val card = getLatestCardData(); val edad = calcularEdadExacta(card.fechaNacimiento)
+          val motivacion = rs.getInt("motivacion_carita")
+          val error = fixEncoding(rs.getString("respuesta_error"))
+          val aprendizaje = fixEncoding(rs.getString("respuesta_aprendizaje"))
+
+          val prompt = s"""Eres un psicólogo deportivo especializado en desarrollo infantil y rendimiento deportivo. Héctor es un portero de $edad años. Este mes ha respondido lo siguiente con sus propias palabras: MOTIVACIÓN: $motivacion/5. ANTE UN ERROR: '$error'. QUÉ MÁS LE GUSTA APRENDER: '$aprendizaje'. Analiza en tres párrafos cortos: 1) MOTIVACIÓN INTRÍNSECA: ¿Qué revela la carita y la respuesta sobre su motivación real? ¿Es disfrute genuino, motivación extrínseca o hay señales de ambivalencia? 2) RELACIÓN CON LOS ERRORES: ¿Qué revela su respuesta sobre cómo procesa el fallo? ¿Resiliencia, perfeccionismo, indiferencia? ¿Qué implica esto para cómo el padre debe gestionar los errores con él? 3) ORIENTACIÓN AL APRENDIZAJE: ¿Qué dice su respuesta sobre qué tipo de portero quiere ser? ¿Hay alguna pista sobre su arquetipo emergente? Un párrafo final: CONSEJO DEL MES: una sola acción concreta que el padre puede hacer esta semana basada en lo que Héctor dijo — sin hablar de fútbol, sin correcciones técnicas. Que sea algo del ámbito familiar. Lenguaje humano, cálido, no clínico."""
+
+          val analisis = AIProvider.ask(prompt, None, bypassCache = true)
+          val up = conn.prepareStatement("UPDATE voz_portero SET analisis_ia = ?, analisis_fecha = NOW() WHERE id = ?")
+          up.setString(1, analisis); up.setInt(2, id)
+          up.executeUpdate()
+        }
+      } catch { case e: Exception => println(s"[!] analizarVozPortero error: ${e.getMessage}") }
+      finally { if (conn != null) conn.close() }
+    }).start()
+  }
+
+  def getVozPorteroMesActual(): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT * FROM voz_portero WHERE DATE_TRUNC('month', fecha) = DATE_TRUNC('month', CURRENT_DATE) ORDER BY id DESC LIMIT 1")
+      if (rs.next()) Some(vozPorteroRowToMap(rs)) else None
+    } finally { conn.close() }
+  }
+
+  def getVozPorteroHistorial(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT * FROM voz_portero ORDER BY fecha DESC")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ vozPorteroRowToMap(rs)
+      l
+    } finally { conn.close() }
+  }
+
+  /** Meses consecutivos (contando desde el mas reciente) con carita <= 3. None si la racha es menor de 3. */
+  def getAlertaMotivacionVoz(): Option[String] = {
+    val hist = getVozPorteroHistorial() // ya viene ordenado por fecha DESC
+    var n = 0
+    var mesEsperado: Option[java.time.YearMonth] = None
+    var continuar = true
+    hist.foreach { h =>
+      if (continuar) {
+        val fecha = java.time.LocalDate.parse(h("fecha").asInstanceOf[String])
+        val ym = java.time.YearMonth.from(fecha)
+        val carita = h("motivacionCarita").asInstanceOf[Int]
+        mesEsperado match {
+          case Some(esperado) if ym != esperado => continuar = false
+          case _ =>
+            if (carita <= 3) { n += 1; mesEsperado = Some(ym.minusMonths(1)) } else continuar = false
+        }
+      }
+    }
+    if (n >= 3) Some(s"⚠️ La motivación de Héctor lleva $n meses por debajo de la mitad. Revisa el registro psicológico y habla con el entrenador de academia.")
+    else None
+  }
+
+  def getDiasDesdeUltimaVoz(): Option[Long] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT MAX(fecha) as f FROM voz_portero")
+      if (rs.next() && rs.getDate("f") != null) Some(java.time.temporal.ChronoUnit.DAYS.between(rs.getDate("f").toLocalDate, LocalDate.now()))
+      else None
+    } finally { conn.close() }
+  }
+
+  /** True si toca recordar el registro mensual (nunca registrado, o hace mas de 35 dias). */
+  def debeRecordarVozPortero(): Boolean = getDiasDesdeUltimaVoz().forall(_ > 35)
+
+  /** Texto listo para incluir como contexto en getDeepAnalysis(). None si no hay registros recientes (~3 meses). */
+  def getVozPorteroTendenciaTexto(): Option[String] = {
+    val hist = getVozPorteroHistorial()
+    if (hist.isEmpty) return None
+    val ultimaFecha = java.time.LocalDate.parse(hist.head("fecha").asInstanceOf[String])
+    if (java.time.temporal.ChronoUnit.DAYS.between(ultimaFecha, LocalDate.now()) > 100) return None
+    val ultimoValor = hist.head("motivacionCarita").asInstanceOf[Int]
+    val anteriores = hist.drop(1).take(3).map(_("motivacionCarita").asInstanceOf[Int])
+    if (anteriores.isEmpty) return Some(s"Motivación declarada por Héctor (sus propias palabras): $ultimoValor/5 este mes.")
+    val mediaAnterior = anteriores.sum.toDouble / anteriores.size
+    val flecha = if (ultimoValor > mediaAnterior + 0.3) "↑" else if (ultimoValor < mediaAnterior - 0.3) "↓" else "→"
+    Some(s"Motivación declarada por Héctor (sus propias palabras): $ultimoValor/5 este mes, tendencia $flecha respecto al trimestre anterior.")
   }
 
   // BLOQUE B (autoeval padre): cruza conducta_padre con la nota del partido. NUNCA usar en
@@ -10845,8 +11013,15 @@ PLAZO: <texto>"""
       val avgNota = if (matches.nonEmpty) matches.map(_.nota).sum / matches.size else 0.0
       val audioDestacado = if (audios.isEmpty) "" else audios.maxBy(m => math.abs(m.nota - avgNota)).audio
 
+      // MODULO LA VOZ DEL PORTERO: la cita literal de Hector de ese mes, si existe, es oro para la narrativa
+      val psVoz = conn.prepareStatement("SELECT respuesta_aprendizaje FROM voz_portero WHERE TO_CHAR(fecha, 'YYYY-MM') = ?")
+      psVoz.setString(1, mes)
+      val rsVoz = psVoz.executeQuery()
+      val citaVoz = if (rsVoz.next()) fixEncoding(rsVoz.getString("respuesta_aprendizaje")) else ""
+      val citaVozLinea = if (citaVoz.nonEmpty) s" Ese mes, cuando le preguntaron qué era lo que más le gustaba aprender, Héctor respondió: '$citaVoz'." else ""
+
       val mesLbl = mesLabel(mes)
-      val prompt = s"""Eres el cronista oficial de la carrera deportiva de Hector, portero que comenzo a los 6 anos. Escribe la entrada del diario de $mesLbl en tercera persona, como si fuera un periodista deportivo siguiendo su desarrollo desde el principio. Datos del mes: partidos=[$partidosStr], hitos conseguidos=[$hitosStr], oportunidades=[$oppsStr], extracto de audio mas destacado=[$audioDestacado]. Escribe 3-4 parrafos narrativos, en pasado, con nombre propio. No uses listas ni bullets. Empieza siempre con 'En $mesLbl, Hector...'. Que sea emotivo pero basado unicamente en los datos reales."""
+      val prompt = s"""Eres el cronista oficial de la carrera deportiva de Hector, portero que comenzo a los 6 anos. Escribe la entrada del diario de $mesLbl en tercera persona, como si fuera un periodista deportivo siguiendo su desarrollo desde el principio. Datos del mes: partidos=[$partidosStr], hitos conseguidos=[$hitosStr], oportunidades=[$oppsStr], extracto de audio mas destacado=[$audioDestacado].$citaVozLinea Escribe 3-4 parrafos narrativos, en pasado, con nombre propio. No uses listas ni bullets. Empieza siempre con 'En $mesLbl, Hector...'. Si hay una cita literal de Hector, inclúyela tal cual, entre comillas, como parte natural de la narrativa. Que sea emotivo pero basado unicamente en los datos reales."""
 
       // No se cachea con feature_cache: cada mes se persiste en season_diary bajo demanda del usuario
       val contenido = AIProvider.ask(prompt, None, bypassCache = true)

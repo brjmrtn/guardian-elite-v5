@@ -240,6 +240,14 @@ object DashboardController extends cask.Routes {
         )
       })
 
+    // ── MODULO LA VOZ DEL PORTERO: recordatorio mensual (SQL puro, sin Gemini) ─
+    val vozPorteroWidget: Modifier =
+      if (!DatabaseManager.debeRecordarVozPortero()) div()
+      else div(cls := "card bg-dark border-warning shadow-sm mb-3 p-2",
+        a(href := "/voz-portero", cls := "text-decoration-none xx-small text-warning fw-bold",
+          "🎤 Este mes aún no has registrado La Voz del Portero — tarda 2 minutos.")
+      )
+
     // ── MODULO ARQUETIPO: badge junto a los KPIs (SQL puro, sin Gemini) ───────
     val arquetipoWidget: Modifier = {
       val arq = DatabaseManager.calcularArquetipoPortero()
@@ -865,6 +873,7 @@ object DashboardController extends cask.Routes {
 
         // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
         formaWidget,
+        vozPorteroWidget,
         arquetipoWidget,
         deudaSuenoWidget,
         riesgoLesionWidget,

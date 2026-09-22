@@ -102,6 +102,7 @@ object PublicController extends cask.Routes {
     val mostrarInforme    = config("mostrarInforme").asInstanceOf[Boolean]
     val mostrarCognitivo  = config("mostrarCognitivo").asInstanceOf[Boolean]
     val mostrarArquetipo  = config("mostrarArquetipo").asInstanceOf[Boolean]
+    val mostrarVozPortero = config("mostrarVozPortero").asInstanceOf[Boolean]
 
     // --- Carta FUT ---
     val cartaSection: Modifier = if (mostrarCarta)
@@ -246,6 +247,28 @@ object PublicController extends cask.Routes {
       }
     } else div()
 
+    // --- Voz del Portero: SOLO la carita y la tendencia, nunca el texto de las respuestas ---
+    val vozPorteroSection: Modifier = if (mostrarVozPortero) {
+      val hist = DatabaseManager.getVozPorteroHistorial()
+      if (hist.isEmpty) div() else {
+        val carita = hist.head("motivacionCarita").asInstanceOf[Int]
+        val anteriores = hist.drop(1).take(3).map(_("motivacionCarita").asInstanceOf[Int])
+        val tendencia =
+          if (anteriores.isEmpty) "→ estable"
+          else {
+            val media = anteriores.sum.toDouble / anteriores.size
+            if (carita > media + 0.3) "↑ en aumento" else if (carita < media - 0.3) "↓ en descenso" else "→ estable"
+          }
+        div(cls := "card bg-dark border-secondary shadow mb-3 text-center",
+          div(cls := "card-header text-white fw-bold small", "🎤 Motivación declarada"),
+          div(cls := "card-body p-3",
+            div(style := "font-size:40px;", DatabaseManager.caritaEmoji(carita)),
+            div(cls := "xx-small text-muted mt-1", s"Tendencia: $tendencia")
+          )
+        )
+      }
+    } else div()
+
     val pageHtml = "<!DOCTYPE html>" + html(lang := "es",
       head(
         meta(charset := "UTF-8"),
@@ -271,6 +294,7 @@ object PublicController extends cask.Routes {
           informeSection,
           cognitivoSection,
           arquetipoSection,
+          vozPorteroSection,
           div(cls := "text-center text-muted xx-small mt-4",
             "Perfil generado con Guardian Elite · Datos actualizados en tiempo real")
         ),

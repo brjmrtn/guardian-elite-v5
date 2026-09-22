@@ -1458,6 +1458,182 @@ object CareerController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/arquetipo"))
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODULO — LA VOZ DEL PORTERO
+  // ─────────────────────────────────────────────────────────────────────────────
+  private val mesAbrev = Map(1 -> "ENE", 2 -> "FEB", 3 -> "MAR", 4 -> "ABR", 5 -> "MAY", 6 -> "JUN",
+    7 -> "JUL", 8 -> "AGO", 9 -> "SEP", 10 -> "OCT", 11 -> "NOV", 12 -> "DIC")
+  private def caritaEmoji(v: Int): String = DatabaseManager.caritaEmoji(v)
+
+  @cask.get("/voz-portero")
+  def vozPorteroPage(request: cask.Request) = withAuth(request) {
+    val actual = DatabaseManager.getVozPorteroMesActual()
+    val historial = DatabaseManager.getVozPorteroHistorial()
+    val alerta = DatabaseManager.getAlertaMotivacionVoz()
+
+    // Paso 5: evolucion de caritas — ultimos 12 meses con registro, orden cronologico
+    val evolucion = historial.reverse.takeRight(12)
+    val evolucionItems: List[Modifier] = evolucion.map { h =>
+      val fecha = java.time.LocalDate.parse(h("fecha").asInstanceOf[String])
+      val emoji = caritaEmoji(h("motivacionCarita").asInstanceOf[Int])
+      val mesTxt: String = mesAbrev.getOrElse(fecha.getMonthValue, "")
+      div(cls := "px-1",
+        div(style := "font-size:24px;", emoji),
+        div(cls := "xx-small text-muted", mesTxt)
+      )
+    }
+    val evolucionWidget: Modifier =
+      if (evolucion.isEmpty) div()
+      else div(cls := "card bg-dark border-secondary shadow mb-3",
+        div(cls := "card-header text-white fw-bold small", "Evolución de la motivación"),
+        div(cls := "card-body p-3",
+          div(cls := "d-flex justify-content-around text-center flex-wrap", evolucionItems),
+          alerta.map(a => div(cls := "alert alert-danger small p-2 mt-3 mb-0", a)).getOrElse(div())
+        )
+      )
+
+    // Paso 2: formulario del mes actual o vista del registro ya guardado
+    val instrucciones = div(cls := "alert alert-secondary small p-3 mb-3",
+      strong("Cómo hacerlo: "), "Elige un momento tranquilo — en el coche, en casa tomando algo. Haz las preguntas sin presión y sin anticipar las respuestas. Si Héctor dice \"no sé\", espera en silencio — casi siempre responde. Transcribe sus palabras exactas, no lo que tú crees que quiere decir."
+    )
+
+    def formulario(prefill: Option[Map[String, Any]]): Modifier = {
+      val motivacionPrefill = prefill.map(_("motivacionCarita").asInstanceOf[Int])
+      val errorPrefill = prefill.map(_("respuestaError").asInstanceOf[String]).getOrElse("")
+      val aprendizajePrefill = prefill.map(_("respuestaAprendizaje").asInstanceOf[String]).getOrElse("")
+      div(cls := "card bg-dark border-warning shadow mb-3",
+        div(cls := "card-header text-warning fw-bold small", if (prefill.isEmpty) "🎤 REGISTRAR LA VOZ DE HÉCTOR ESTE MES" else "✏️ EDITAR EL REGISTRO DE ESTE MES"),
+        div(cls := "card-body p-3",
+          instrucciones,
+          form(action := "/voz-portero/save", method := "post",
+            div(cls := "mb-4",
+              label(cls := "form-label text-white small fw-bold w-100 text-center", "¿Cuánto te gusta ser portero? (muéstrale las cinco caritas y que señale)"),
+              div(cls := "btn-group w-100", attr("role") := "group",
+                Seq(5, 4, 3, 2, 1).map { v =>
+                  frag(
+                    input(tpe := "radio", cls := "btn-check", name := "motivacion", id := s"motiv_$v", value := v.toString,
+                      if (motivacionPrefill.contains(v)) attr("checked") := "checked" else frag()),
+                    label(cls := "btn btn-outline-warning", `for` := s"motiv_$v", style := "font-size:24px;", caritaEmoji(v))
+                  )
+                }
+              )
+            ),
+            div(cls := "mb-3",
+              label(cls := "form-label text-white small fw-bold", "Pregúntale: \"Cuando cometes un error en un partido, ¿cómo te sientes después?\" — transcribe exactamente lo que diga"),
+              textarea(name := "respuestaError", cls := "form-control bg-dark text-white border-secondary", rows := "4",
+                placeholder := "Escribe aquí las palabras exactas de Héctor, tal como las dijo.", required := true, errorPrefill)
+            ),
+            div(cls := "mb-3",
+              label(cls := "form-label text-white small fw-bold", "Pregúntale: \"¿Qué es lo que más te gusta aprender en la academia?\" — transcribe exactamente lo que diga"),
+              textarea(name := "respuestaAprendizaje", cls := "form-control bg-dark text-white border-secondary", rows := "4",
+                placeholder := "Escribe aquí las palabras exactas de Héctor, tal como las dijo.", required := true, aprendizajePrefill)
+            ),
+            div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-warning fw-bold", "Guardar la voz de Héctor este mes"))
+          )
+        )
+      )
+    }
+
+    // Paso 4: vista de un registro mensual (usado para el mes actual y para el historial)
+    def vistaRegistro(r: Map[String, Any], esActual: Boolean): Modifier = {
+      val id = r("id").asInstanceOf[Int]
+      val fecha = r("fecha").asInstanceOf[String]
+      val carita = r("motivacionCarita").asInstanceOf[Int]
+      val error = r("respuestaError").asInstanceOf[String]
+      val aprendizaje = r("respuestaAprendizaje").asInstanceOf[String]
+      val analisis = r("analisisIA").asInstanceOf[Option[String]]
+
+      def extraeSeccion(texto: String, tag: String, siguiente: Option[String]): String = {
+        val idx = texto.indexOf(tag)
+        if (idx < 0) "" else {
+          val start = idx + tag.length
+          val end = siguiente.map(t => texto.indexOf(t, start)).filter(_ >= 0).getOrElse(texto.length)
+          texto.substring(start, end).trim
+        }
+      }
+
+      div(cls := "card bg-dark border-secondary shadow mb-3",
+        div(cls := "card-header text-white fw-bold small d-flex justify-content-between align-items-center",
+          span(s"🎤 ${fecha.take(7)}" + (if (esActual) " (este mes)" else "")),
+          span(style := "font-size:22px;", caritaEmoji(carita))
+        ),
+        div(cls := "card-body p-3",
+          div(cls := "mb-2",
+            div(cls := "xx-small text-muted fw-bold", "ANTE UN ERROR, HÉCTOR DIJO:"),
+            div(cls := "fst-italic text-info", s"“$error”")
+          ),
+          div(cls := "mb-3",
+            div(cls := "xx-small text-muted fw-bold", "SOBRE LO QUE MÁS LE GUSTA APRENDER, HÉCTOR DIJO:"),
+            div(cls := "fst-italic text-info", s"“$aprendizaje”")
+          ),
+          analisis match {
+            case Some(texto) =>
+              div(
+                div(cls := "border-top border-secondary pt-2",
+                  div(cls := "xx-small text-warning fw-bold mb-1", "MOTIVACIÓN INTRÍNSECA"),
+                  div(cls := "small text-light mb-2", extraeSeccion(texto, "MOTIVACIÓN INTRÍNSECA:", Some("RELACIÓN CON LOS ERRORES:"))),
+                  div(cls := "xx-small text-warning fw-bold mb-1", "RELACIÓN CON LOS ERRORES"),
+                  div(cls := "small text-light mb-2", extraeSeccion(texto, "RELACIÓN CON LOS ERRORES:", Some("ORIENTACIÓN AL APRENDIZAJE:"))),
+                  div(cls := "xx-small text-warning fw-bold mb-1", "ORIENTACIÓN AL APRENDIZAJE"),
+                  div(cls := "small text-light mb-2", extraeSeccion(texto, "ORIENTACIÓN AL APRENDIZAJE:", Some("CONSEJO DEL MES:"))),
+                  div(cls := "xx-small text-success fw-bold mb-1", "CONSEJO DEL MES"),
+                  div(cls := "small text-light", extraeSeccion(texto, "CONSEJO DEL MES:", None))
+                ),
+                form(action := s"/voz-portero-regenerar/$id", method := "post", cls := "d-grid mt-2",
+                  button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold", "🔄 Regenerar análisis")
+                )
+              )
+            case None =>
+              div(cls := "xx-small text-muted fst-italic", "Analizando con IA en segundo plano — recarga la página en unos segundos.")
+          }
+        )
+      )
+    }
+
+    val mesActualSeccion: Modifier = actual match {
+      case Some(r) => div(vistaRegistro(r, esActual = true), formulario(Some(r)))
+      case None => formulario(None)
+    }
+
+    val historialAnterior = historial.filter(h => actual.forall(_("id").asInstanceOf[Int] != h("id").asInstanceOf[Int]))
+
+    val content = basePage("voz-portero",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-white mb-4 text-center", "🎤 LA VOZ DEL PORTERO"),
+          evolucionWidget,
+          mesActualSeccion,
+          if (historialAnterior.nonEmpty) div(
+            h5(cls := "text-muted small text-uppercase mt-4 mb-2", "Meses anteriores"),
+            historialAnterior.map(vistaRegistro(_, esActual = false))
+          ) else div()
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/voz-portero/save")
+  def saveVozPorteroAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val motivacion = p.getOrElse("motivacion", "3").toIntOption.getOrElse(3)
+    val error = p.getOrElse("respuestaError", "")
+    val aprendizaje = p.getOrElse("respuestaAprendizaje", "")
+    if (error.trim.nonEmpty && aprendizaje.trim.nonEmpty) {
+      val id = DatabaseManager.saveVozPortero(motivacion, error, aprendizaje)
+      if (id > 0) DatabaseManager.analizarVozPortero(id)
+    }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/voz-portero"))
+  }
+
+  // Prefijo distinto de /voz-portero/save para no mezclar una ruta literal con un wildcard
+  // en el mismo nivel del arbol de Cask (mismo problema ya resuelto con temporadas y escolar).
+  @cask.post("/voz-portero-regenerar/:id")
+  def regenerarVozPorteroAction(request: cask.Request, id: Int) = withAuth(request) {
+    DatabaseManager.analizarVozPortero(id)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/voz-portero"))
+  }
+
   @cask.get("/market-estimator")
   def marketEstimatorPage(request: cask.Request) = withAuth(request) {
     val d = DatabaseManager.getMarketEstimatorData()
