@@ -63,6 +63,7 @@ object BioController extends cask.Routes {
     val rpg = DatabaseManager.getRPGStatus()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
     val medicalReports = DatabaseManager.getMedicalReports()
+    val documentVaultDocs = DatabaseManager.getDocumentVaultList()
     val academiaSessions = DatabaseManager.getAcademiaSessions().take(5)
     val tipoSesionHoy = DatabaseManager.getTipoSesionHoy() // BLOQUE B3: pre-relleno segun estructura semanal
 
@@ -204,6 +205,73 @@ object BioController extends cask.Routes {
       )
     )
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // BLOQUE B — CONTRACT & LICENSE VAULT
+    // ─────────────────────────────────────────────────────────────────────────
+    def docTipoLabel(t: String): String = t match {
+      case "LICENCIA_FEDERATIVA" => "Licencia federativa"
+      case "SEGURO_DEPORTIVO"    => "Seguro deportivo"
+      case "OFERTA_PRUEBA"       => "Oferta / Prueba"
+      case "CONTRATO_ACADEMIA"   => "Contrato academia"
+      case "DERECHO_IMAGEN"      => "Derecho de imagen"
+      case _                     => "Otro"
+    }
+    val documentVault = div(cls := "card bg-dark text-white border-info shadow mb-3",
+      div(cls := "card-header bg-info text-dark fw-bold text-center small", "📋 VAULT DE DOCUMENTOS"),
+      div(cls := "card-body p-3",
+        form(action := "/bio/document-vault/upload", method := "post", enctype := "multipart/form-data",
+          div(cls:="row g-2 mb-2",
+            div(cls:="col-6",
+              label(cls:="xx-small text-muted text-uppercase", "Tipo"),
+              select(name:="tipo", cls:="form-select form-select-sm bg-dark text-white border-secondary",
+                option(value:="LICENCIA_FEDERATIVA", "Licencia federativa"),
+                option(value:="SEGURO_DEPORTIVO", "Seguro deportivo"),
+                option(value:="OFERTA_PRUEBA", "Oferta / Prueba"),
+                option(value:="CONTRATO_ACADEMIA", "Contrato academia"),
+                option(value:="DERECHO_IMAGEN", "Derecho de imagen"),
+                option(value:="OTRO", "Otro")
+              )
+            ),
+            div(cls:="col-6",
+              label(cls:="xx-small text-muted text-uppercase", "Fecha"),
+              input(tpe:="date", name:="fecha", cls:="form-control form-control-sm bg-dark text-white border-secondary", required:=true)
+            )
+          ),
+          div(cls:="mb-2",
+            label(cls:="xx-small text-muted text-uppercase", "Nombre del documento"),
+            input(tpe:="text", name:="nombre", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Ej: Licencia RFFM 2025-26", required:=true)
+          ),
+          div(cls:="mb-3",
+            label(cls:="xx-small text-muted text-uppercase", "Archivo (PDF/Imagen)"),
+            input(tpe:="file", name:="archivo", cls:="form-control form-control-sm bg-dark text-white", required:=true)
+          ),
+          div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-sm btn-info fw-bold", "SUBIR Y ANALIZAR"))
+        ),
+        hr(cls:="border-secondary"),
+        div(cls:="document-vault-list", style:="max-height: 200px; overflow-y: auto;",
+          if (documentVaultDocs.isEmpty) p(cls:="text-center text-muted small", "Sin documentos aún.")
+          else documentVaultDocs.map { doc =>
+            val id = doc("id").asInstanceOf[Int]
+            val tipo = doc("tipo").asInstanceOf[String]
+            val nombre = doc("nombre").asInstanceOf[String]
+            val fecha = doc("fecha").asInstanceOf[String]
+            val notas = doc("notas").asInstanceOf[String]
+            div(cls:="border-start border-info border-2 ps-2 mb-2",
+              div(cls:="d-flex justify-content-between align-items-center xx-small",
+                span(cls:="badge bg-info text-dark", docTipoLabel(tipo)),
+                span(cls:="text-muted", fecha)
+              ),
+              div(cls:="d-flex justify-content-between align-items-center",
+                span(cls:="small fw-bold text-white", nombre),
+                a(href:=s"/bio/document-vault/download/$id", cls:="xx-small text-info", "⬇ Descargar")
+              ),
+              if (notas.nonEmpty) div(cls:="xx-small text-light fst-italic mt-1", notas) else div()
+            )
+          }
+        )
+      )
+    )
+
     // --- WIDGET 2: FORMULARIO ACADEMICO ---
     val academicForm = div(cls := "card bg-dark text-white border-warning shadow mb-3",
       div(cls := "card-header bg-warning text-dark fw-bold text-center small", "📚 REGISTRO ACADEMICO"),
@@ -260,6 +328,7 @@ object BioController extends cask.Routes {
         ),
         fase2Panel,
         medicalVault,
+        documentVault,
         academicForm, // Entrada de datos escolares
 
 
@@ -503,6 +572,118 @@ object BioController extends cask.Routes {
 
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BLOQUE B — CONTRACT & LICENSE VAULT: parseo manual de multipart/form-data
+  // (mismo patron que /video/analyze-real en HistoryController.scala, pero via @cask.post)
+  // ─────────────────────────────────────────────────────────────────────────
+  private val B_CR: Byte = '\r'.toByte
+  private val B_LF: Byte = '\n'.toByte
+  private val B_DASH: Byte = '-'.toByte
+
+  private def indexOfBytes(hay: Array[Byte], needle: Array[Byte], from: Int): Int = {
+    val n = needle.length
+    if (n == 0 || from < 0) return -1
+    var i = from
+    val limit = hay.length - n
+    while (i <= limit) {
+      var j = 0
+      while (j < n && hay(i + j) == needle(j)) j += 1
+      if (j == n) return i
+      i += 1
+    }
+    -1
+  }
+
+  private case class MultipartField(filename: Option[String], contentType: Option[String], data: Array[Byte])
+
+  private def parseMultipart(bodyBytes: Array[Byte], contentTypeHeader: String): Map[String, MultipartField] = {
+    val marker = "boundary="
+    val bIdx = if (contentTypeHeader == null) -1 else contentTypeHeader.indexOf(marker)
+    if (bIdx < 0) return Map.empty
+    var boundary = contentTypeHeader.substring(bIdx + marker.length).split(";").head.trim
+    if (boundary.startsWith("\"") && boundary.endsWith("\"")) boundary = boundary.substring(1, boundary.length - 1)
+    val delim = ("--" + boundary).getBytes("ISO-8859-1")
+    val headerEnd = Array(B_CR, B_LF, B_CR, B_LF)
+
+    var fields = Map[String, MultipartField]()
+    var searchFrom = 0
+    var continue = true
+    while (continue) {
+      val delimPos = indexOfBytes(bodyBytes, delim, searchFrom)
+      if (delimPos < 0) { continue = false } else {
+        var partStart = delimPos + delim.length
+        val isFinal = partStart + 1 < bodyBytes.length && bodyBytes(partStart) == B_DASH && bodyBytes(partStart + 1) == B_DASH
+        if (isFinal) { continue = false } else {
+          if (partStart + 1 < bodyBytes.length && bodyBytes(partStart) == B_CR && bodyBytes(partStart + 1) == B_LF) partStart += 2
+          val hEnd = indexOfBytes(bodyBytes, headerEnd, partStart)
+          if (hEnd < 0) { continue = false } else {
+            val headersStr = new String(bodyBytes, partStart, hEnd - partStart, "UTF-8")
+            val dataStart = hEnd + headerEnd.length
+            val nextDelimPos = indexOfBytes(bodyBytes, delim, dataStart)
+            if (nextDelimPos < 0) { continue = false } else {
+              var dataEnd = nextDelimPos
+              if (dataEnd >= dataStart + 2 && bodyBytes(dataEnd - 2) == B_CR && bodyBytes(dataEnd - 1) == B_LF) dataEnd -= 2
+              val nameOpt = """name="([^"]*)"""".r.findFirstMatchIn(headersStr).map(_.group(1))
+              val fileOpt = """filename="([^"]*)"""".r.findFirstMatchIn(headersStr).map(_.group(1))
+              val ctOpt = """(?i)Content-Type:\s*([^\r\n]+)""".r.findFirstMatchIn(headersStr).map(_.group(1).trim)
+              nameOpt.foreach { name =>
+                val data = java.util.Arrays.copyOfRange(bodyBytes, dataStart, math.max(dataStart, dataEnd))
+                fields = fields + (name -> MultipartField(fileOpt, ctOpt, data))
+              }
+              searchFrom = nextDelimPos
+            }
+          }
+        }
+      }
+    }
+    fields
+  }
+
+  @cask.post("/bio/document-vault/upload")
+  def uploadDocumentVault(request: cask.Request) = withAuth(request) {
+    val contentType = request.exchange.getRequestHeaders.getFirst("Content-Type")
+    val bodyBytes = request.data.readAllBytes()
+    val fields = parseMultipart(bodyBytes, contentType)
+
+    def fieldStr(name: String): String =
+      fields.get(name).map(f => new String(f.data, "UTF-8")).getOrElse("")
+
+    val tipo   = fieldStr("tipo")
+    val nombre = fieldStr("nombre")
+    val fecha  = fieldStr("fecha")
+    val archivoField = fields.get("archivo").filter(_.data.nonEmpty)
+
+    archivoField match {
+      case Some(archivo) =>
+        val base64Content = java.util.Base64.getEncoder.encodeToString(archivo.data)
+        val fileName = archivo.filename.getOrElse("documento.pdf")
+        val mimeType = if (fileName.toLowerCase.endsWith(".pdf")) "application/pdf" else "image/jpeg"
+
+        // BLOQUE B: analisis con Gemini SOLO al pulsar "Subir" — nunca en render de pagina
+        val docPrompt = s"Analiza este documento ($tipo) de Hector, un portero de futbol base. Extrae: tipo de contrato o documento, vigencia (fechas si las hay), entidad firmante, y cualquier clausula relevante para su carrera deportiva. Responde en texto plano, conciso, maximo 4 lineas."
+        val analisisIA = try DatabaseManager.AIProvider.ask(docPrompt, Some((mimeType, base64Content))) catch { case _: Exception => "" }
+
+        DatabaseManager.saveDocumentVault(tipo, nombre, fecha, base64Content, analisisIA)
+      case None => ()
+    }
+    cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
+  }
+
+  @cask.get("/bio/document-vault/download/:id")
+  def downloadDocumentVault(id: Int) = {
+    DatabaseManager.getDocumentVaultFile(id) match {
+      case Some((nombre, archivoB64)) =>
+        val bytes = java.util.Base64.getDecoder.decode(archivoB64)
+        val safeNombre = nombre.replaceAll("[^a-zA-Z0-9._-]", "_")
+        cask.Response(bytes, headers = Seq(
+          "Content-Type" -> "application/octet-stream",
+          "Content-Disposition" -> s"attachment; filename=$safeNombre"
+        ))
+      case None => cask.Response("Documento no encontrado".getBytes("UTF-8"), statusCode = 404)
+    }
+  }
+
   // --- 3. MODO LEGADO (RPG) ---
 
   // ── FASE 2: PAGINA GRAFICO DE CARGA ───────────────────────────────────────

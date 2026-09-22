@@ -1175,6 +1175,7 @@ object HistoryController extends cask.Routes {
     val temporadasDb = DatabaseManager.getTodasTemporadas()
     val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
     val stats = DatabaseManager.getBiomecPosicional(efectivo)
+    val setPieceStats = DatabaseManager.getSetPieceStats(efectivo) // BLOQUE C
     if (stats.isEmpty) renderHtml(basePage("history",
       div(cls:="text-center text-muted py-5", "Sin partidos jugados aun")
     )) else {
@@ -1362,6 +1363,77 @@ object HistoryController extends cask.Routes {
                 )
               )
             ),
+
+            script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
+
+            // BLOQUE C: CONTROL DE BALON PARADO ──────────────────────────
+            {
+              val nSP           = setPieceStats("nPartidosConDatos").asInstanceOf[Int]
+              val ratioDominio  = setPieceStats("ratioDominio").asInstanceOf[Double]
+              val totalDom      = setPieceStats("totalDominados").asInstanceOf[Int]
+              val totalCed      = setPieceStats("totalCedidos").asInstanceOf[Int]
+              val totalFaltasSP = setPieceStats("totalFaltas").asInstanceOf[Int]
+              val tendenciaSP   = setPieceStats("tendencia").asInstanceOf[String]
+              val notaDominioSP   = setPieceStats("notaMediaDominio").asInstanceOf[Double]
+              val notaNoDominioSP = setPieceStats("notaMediaNoDominio").asInstanceOf[Double]
+              val serieFechasSP = setPieceStats("serieFechas").asInstanceOf[List[String]]
+              val serieRatiosSP = setPieceStats("serieRatios").asInstanceOf[List[Double]]
+
+              if (nSP == 0) div(cls:="card bg-dark border-secondary shadow mb-4",
+                div(cls:="card-header text-white fw-bold small", "🏴 CONTROL DE BALÓN PARADO"),
+                div(cls:="card-body text-center text-muted small py-4", "Sin datos de balón parado registrados todavía.")
+              ) else {
+                val barColor = if (ratioDominio >= 70) "success" else if (ratioDominio >= 50) "warning" else "danger"
+                val fraseAuto: Modifier =
+                  if (nSP >= 5) {
+                    val interpretacion =
+                      if (ratioDominio >= 70) "un dominio claro del juego aéreo — un diferencial de élite para su edad"
+                      else if (ratioDominio >= 50) "un control razonable, con margen de mejora en la toma de decisión de salida"
+                      else "dificultad para imponerse en el área — foco recomendado en salidas aéreas"
+                    div(cls:="alert alert-secondary small mt-2",
+                      f"Héctor domina el $ratioDominio%.0f%% de los córners — $interpretacion.")
+                  } else div()
+
+                val labelsJson = serieFechasSP.map(f => "\"" + f + "\"").mkString("[",",","]")
+                val ratiosJson = serieRatiosSP.map(r => f"$r%.0f").mkString("[",",","]")
+
+                div(cls:="card bg-dark border-warning shadow mb-4",
+                  div(cls:="card-header text-warning fw-bold small", "🏴 CONTROL DE BALÓN PARADO"),
+                  div(cls:="card-body p-3",
+                    div(cls:="d-flex justify-content-between align-items-center mb-1",
+                      span(cls:="small text-muted", "Dominio aéreo en córners"),
+                      span(cls:=s"fw-bold text-$barColor", f"$ratioDominio%.0f%%")
+                    ),
+                    div(cls:="progress mb-3", style:="height:10px;",
+                      div(cls:=s"progress-bar bg-$barColor", style:=f"width:$ratioDominio%.0f%%;")
+                    ),
+                    div(cls:="row g-2 text-center mb-3",
+                      div(cls:="col-4", div(cls:="fw-bold text-warning", totalDom.toString), div(cls:="xx-small text-muted", "Dominados")),
+                      div(cls:="col-4", div(cls:="fw-bold text-secondary", totalCed.toString), div(cls:="xx-small text-muted", "Cedidos")),
+                      div(cls:="col-4", div(cls:="fw-bold text-info", totalFaltasSP.toString), div(cls:="xx-small text-muted", "Faltas dominadas"))
+                    ),
+                    if (serieRatiosSP.nonEmpty) div(
+                      div(style:="height:180px;", tag("canvas")(id:="chartSetPiece")),
+                      script(raw(s"""
+                        var ctxSP = document.getElementById('chartSetPiece');
+                        if (ctxSP) {
+                          new Chart(ctxSP, {
+                            type: 'line',
+                            data: { labels: $labelsJson, datasets: [{ label: '% Dominio córners', data: $ratiosJson,
+                              borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.15)', borderWidth:2, pointRadius:3, fill:true, tension:0.3 }] },
+                            options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:100 } } }
+                          });
+                        }
+                      """))
+                    ) else div(),
+                    if (notaDominioSP > 0 && notaNoDominioSP > 0) div(cls:="xx-small text-muted mt-2",
+                      f"Nota media cuando domina el área: $notaDominioSP%.1f · cuando no: $notaNoDominioSP%.1f")
+                    else div(),
+                    fraseAuto
+                  )
+                )
+              }
+            },
 
             script(raw("""
             function switchMode(mode) {
@@ -4386,6 +4458,10 @@ object HistoryController extends cask.Routes {
     val useMadre: Double = if (hMadre > 0) hMadre else 168.0
     val d = DatabaseManager.getDigitalTwinData(usePadre, useMadre)
     val bioInsights: String = DatabaseManager.getOracleInsights()
+    // BLOQUE A: Goal Coverage Mapping — usa la proyeccion adulta ya calculada arriba para consistencia
+    val gc = DatabaseManager.calcularGoalCoverage(d("alturaProyectada").asInstanceOf[Double])
+    // BLOQUE E: Markov Career Pathing — None si hay menos de 2 temporadas cerradas
+    val markov = DatabaseManager.calcularMarkovPathway()
 
     // Pre-computar todo con tipos explicitos
     val edadAnios: Int         = d("edadAnios").asInstanceOf[Int]
@@ -4543,6 +4619,131 @@ object HistoryController extends cask.Routes {
                   )
                 )
               )
+            )
+          ),
+
+          // BLOQUE A: GOAL COVERAGE MAPPING (geometria pura, sin IA) ──────────
+          div(cls:="card bg-dark border-primary shadow mb-3",
+            div(cls:="card-header text-primary fw-bold small", "📐 COBERTURA DE PORTERÍA"),
+            div(cls:="card-body p-3",
+              {
+                val tallaCm = gc("tallaCm").asInstanceOf[Double]
+                val enverCm = gc("envergaduraCm").asInstanceOf[Double]
+                val alcanceCm = gc("alcanceVerticalCm").asInstanceOf[Double]
+                val pctBase = gc("pctCoberturaBase").asInstanceOf[Double]
+                val pctEstirada = gc("pctCoberturaEstirada").asInstanceOf[Double]
+                val tallaAdultaCmGc = gc("tallaAdultaCm").asInstanceOf[Double]
+                val pctAdulto = gc("pctCoberturaAdulto").asInstanceOf[Double]
+                val pAncho = gc("porteriaAncho").asInstanceOf[Double]
+                val pAlto = gc("porteriaAlto").asInstanceOf[Double]
+
+                // Geometria SVG: viewBox 500x200 -> 100px = 1m
+                val anchoEstiradaM = math.min((enverCm / 100.0) + (enverCm / 200.0), pAncho)
+                val anchoBaseM = math.min(enverCm / 100.0, pAncho)
+                val altoM = math.min(alcanceCm / 100.0, pAlto)
+                val wEstiradaPx = anchoEstiradaM * 100
+                val wBasePx = anchoBaseM * 100
+                val hPx = altoM * 100
+                val xEstirada = (500 - wEstiradaPx) / 2
+                val xBase = (500 - wBasePx) / 2
+                val yTop = 200 - hPx
+
+                div(
+                  div(cls:="text-center mb-3",
+                    tag("svg")(attr("viewBox") := "0 0 500 200", attr("width") := "100%", style := "max-width:500px; background:#0f172a; border-radius:8px;",
+                      // Marco porteria
+                      tag("rect")(attr("x") := "4", attr("y") := "4", attr("width") := "492", attr("height") := "192",
+                        attr("fill") := "none", attr("stroke") := "white", attr("stroke-width") := "4"),
+                      // Cobertura con estirada (azul claro)
+                      tag("rect")(attr("x") := xEstirada.toString, attr("y") := yTop.toString,
+                        attr("width") := wEstiradaPx.toString, attr("height") := hPx.toString,
+                        attr("fill") := "rgba(13,202,240,0.35)"),
+                      // Cobertura base (azul mas intenso)
+                      tag("rect")(attr("x") := xBase.toString, attr("y") := yTop.toString,
+                        attr("width") := wBasePx.toString, attr("height") := hPx.toString,
+                        attr("fill") := "rgba(13,110,253,0.55)"),
+                      // Figura estilizada del portero (centro)
+                      tag("circle")(attr("cx") := "250", attr("cy") := (200 - hPx * 0.55).toString, attr("r") := "9", attr("fill") := "#ffc107"),
+                      tag("line")(attr("x1") := "250", attr("y1") := (200 - hPx * 0.55 + 9).toString, attr("x2") := "250", attr("y2") := "196",
+                        attr("stroke") := "#ffc107", attr("stroke-width") := "4"),
+                      // Linea de suelo
+                      tag("line")(attr("x1") := "0", attr("y1") := "198", attr("x2") := "500", attr("y2") := "198",
+                        attr("stroke") := "#475569", attr("stroke-width") := "2")
+                    )
+                  ),
+                  div(cls:="row g-2 text-center mb-3",
+                    div(cls:="col-4",
+                      div(cls:="card bg-dark border-primary h-100", div(cls:="card-body p-2",
+                        div(cls:="xx-small text-muted", "Cobertura base"),
+                        div(cls:="fw-bold text-primary fs-5", f"$pctBase%.0f%%")))),
+                    div(cls:="col-4",
+                      div(cls:="card bg-dark border-info h-100", div(cls:="card-body p-2",
+                        div(cls:="xx-small text-muted", "Con estirada"),
+                        div(cls:="fw-bold text-info fs-5", f"$pctEstirada%.0f%%")))),
+                    div(cls:="col-4",
+                      div(cls:="card bg-dark border-warning h-100", div(cls:="card-body p-2",
+                        div(cls:="xx-small text-muted", "Adulta proyectada"),
+                        div(cls:="fw-bold text-warning fs-5", f"$pctAdulto%.0f%%"))))
+                  ),
+                  div(cls:="small text-light",
+                    f"Con su altura actual de ${tallaCm.toInt}cm y una envergadura de ${enverCm.toInt}cm, Héctor cubre el $pctBase%.0f%% de la portería sin moverse. Con estirada lateral cubre el $pctEstirada%.0f%%. A su altura adulta proyectada de ${tallaAdultaCmGc.toInt}cm, cubrirá el $pctAdulto%.0f%%."),
+                  div(cls:="xx-small text-muted mt-2 fst-italic",
+                    s"Portería Fútbol 7 Prebenjamín: ${pAncho.toInt}m × ${pAlto.toInt}m (reglamento RFFM)")
+                )
+              }
+            )
+          ),
+
+          // BLOQUE E: RUTA DE CARRERA (MARKOV) ────────────────────────────────
+          div(cls:="card bg-dark border-info shadow mb-3",
+            div(cls:="card-header text-info fw-bold small", "🗺️ RUTA DE CARRERA (Markov)"),
+            div(cls:="card-body p-3",
+              markov match {
+                case None => div(cls:="text-center text-muted small py-3",
+                  "🗺️ Este módulo se activará cuando haya 2 temporadas completas registradas.")
+                case Some(m) =>
+                  val estados = m("estados").asInstanceOf[List[String]]
+                  val idxActual = m("estadoActualIdx").asInstanceOf[Int]
+                  val estadoActual = m("estadoActual").asInstanceOf[String]
+                  val siguienteEstado = m("siguienteEstado").asInstanceOf[String]
+                  val prob2Temp = m("probabilidad2Temp").asInstanceOf[Int]
+                  val velocidad = m("velocidadMejora").asInstanceOf[Double]
+                  val temporadasHasta = m("temporadasHastaSiguiente").asInstanceOf[Option[Double]]
+                  val temporadaEstimada = m("temporadaEstimada").asInstanceOf[String]
+                  val nTemp = m("nTemporadas").asInstanceOf[Int]
+
+                  div(
+                    // Linea de estados horizontales
+                    div(cls:="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-1",
+                      estados.zipWithIndex.map { case (est, i) =>
+                        frag(
+                          span(cls:=s"badge ${if (i == idxActual) "bg-info text-dark" else "bg-dark border border-secondary text-muted"} small",
+                            style:=(if (i == idxActual) "font-size:11px; padding:6px 10px;" else "font-size:10px;"), est),
+                          if (i < estados.size - 1) span(cls:="text-secondary mx-1", "→") else frag()
+                        )
+                      }
+                    ),
+                    div(cls:="row g-2 text-center mb-2",
+                      div(cls:="col-6",
+                        div(cls:="card bg-dark border-info h-100", div(cls:="card-body p-2",
+                          div(cls:="xx-small text-muted", if (siguienteEstado.nonEmpty) s"Prob. alcanzar $siguienteEstado en 2 temporadas" else "Ya en el nivel máximo"),
+                          div(cls:="fw-bold text-info fs-5", if (siguienteEstado.nonEmpty) s"$prob2Temp%" else "—")))),
+                      div(cls:="col-6",
+                        div(cls:="card bg-dark border-warning h-100", div(cls:="card-body p-2",
+                          div(cls:="xx-small text-muted", "Velocidad de mejora"),
+                          div(cls:="fw-bold text-warning fs-5", f"${if (velocidad>=0) "+" else ""}$velocidad%.1f pts/temp"))))
+                    ),
+                    if (temporadasHasta.nonEmpty) div(cls:="xx-small text-muted mb-2",
+                      f"Temporadas estimadas hasta $siguienteEstado: ${temporadasHasta.get}%.1f temporadas")
+                    else div(),
+                    div(cls:="small text-light mt-2",
+                      s"Basado en $nTemp temporadas de datos reales." +
+                      (if (siguienteEstado.nonEmpty && temporadaEstimada.nonEmpty)
+                        s" Con el ritmo actual, Héctor podría alcanzar el nivel $siguienteEstado en la temporada $temporadaEstimada."
+                       else if (siguienteEstado.isEmpty) " Héctor ya se encuentra en el nivel formativo más alto del modelo." else "")
+                    )
+                  )
+              }
             )
           ),
 
@@ -5362,6 +5563,26 @@ object HistoryController extends cask.Routes {
 </table>"""
     }.getOrElse("")
 
+    // BLOQUE A: Goal Coverage Mapping — dato diferenciador (geometria pura, sin IA)
+    val gcReport = DatabaseManager.calcularGoalCoverage()
+    val gcReportPctBase = gcReport("pctCoberturaEstirada").asInstanceOf[Double]
+    val gcReportPctAdulto = gcReport("pctCoberturaAdulto").asInstanceOf[Double]
+    val goalCoverageHtml =
+      s"""<div class="narrative" style="font-size:12px;">📐 Cobertura de portería actual: ${f"$gcReportPctBase%.0f"}% · Proyección adulta: ${f"$gcReportPctAdulto%.0f"}%</div>"""
+
+    // BLOQUE E: estado Markov en el informe de captacion (None si <2 temporadas cerradas)
+    val markovHtml = DatabaseManager.calcularMarkovPathway() match {
+      case Some(m) =>
+        val estadoActual = m("estadoActual").asInstanceOf[String]
+        val siguienteEstado = m("siguienteEstado").asInstanceOf[String]
+        val prob2Temp = m("probabilidad2Temp").asInstanceOf[Int]
+        if (siguienteEstado.nonEmpty)
+          s"""<div class="narrative" style="font-size:12px;">🗺️ Trayectoria proyectada: $estadoActual → $siguienteEstado con $prob2Temp% de probabilidad en 2 temporadas.</div>"""
+        else
+          s"""<div class="narrative" style="font-size:12px;">🗺️ Trayectoria proyectada: $estadoActual — nivel formativo máximo del modelo.</div>"""
+      case None => ""
+    }
+
     val presionRows = if (presionDist.isEmpty)
       "<tr><td colspan=\"2\">Sin datos suficientes de comportamiento bajo presión</td></tr>"
     else presionDist.map { d =>
@@ -5472,6 +5693,8 @@ object HistoryController extends cask.Routes {
 
 <p class="section-title">ANÁLISIS DE OJEADOR (IA)</p>
 <div class="narrative">${DatabaseManager.escHtml(analisisIA)}</div>
+$goalCoverageHtml
+$markovHtml
 
 <p class="section-title">OPORTUNIDADES RECIENTES</p>
 <table>

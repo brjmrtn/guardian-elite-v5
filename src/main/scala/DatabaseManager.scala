@@ -783,6 +783,26 @@ object DatabaseManager {
         ON CONFLICT (dia_semana, tipo_sesion) DO NOTHING
       """)
 
+      // ─────────────────────────────────────────────────────────────────────────────
+      // BLOQUE B — CONTRACT & LICENSE VAULT (Elite exclusivamente)
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS document_vault (
+        id          SERIAL PRIMARY KEY,
+        tipo        TEXT NOT NULL,
+        nombre      TEXT NOT NULL,
+        fecha       DATE DEFAULT CURRENT_DATE,
+        archivo_b64 TEXT NOT NULL,
+        notas       TEXT DEFAULT '',
+        created_at  TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // ─────────────────────────────────────────────────────────────────────────────
+      // BLOQUE C — SET-PIECE CONTROL (Elite exclusivamente)
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS corners_dominados INT DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS corners_cedidos INT DEFAULT 0")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS faltas_area_dominadas INT DEFAULT 0")
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -1199,7 +1219,8 @@ object DatabaseManager {
                 pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
                 mapaCampo: String,
                 lineasSup: Int = 0, scanningRate: Int = 0, esLocal: Option[Boolean] = None,
-                comportamientoPresion: String = "", nutricionPrepartido: String = ""
+                comportamientoPresion: String = "", nutricionPrepartido: String = "",
+                cornersDominados: Int = 0, cornersCedidos: Int = 0, faltasAreaDominadas: Int = 0
               ): Int = {
     val conn = getConnection()
     try {
@@ -1212,10 +1233,11 @@ object DatabaseManager {
           paradas, zona_goles, zona_tiros, zona_paradas, paradas_1v1, paradas_aereas,
           acciones_pie, clima, estadio, temperatura, notas_partido, video_url,
           reaccion_goles, fecha, status, tipo_partido, pc_t, pc_ok, pl_t, pl_ok,
-          torneo_nombre, fase, mapa_campo, lineas_superadas, scanning_rate, es_local
+          torneo_nombre, fase, mapa_campo, lineas_superadas, scanning_rate, es_local,
+          corners_dominados, corners_cedidos, faltas_area_dominadas
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          'PLAYED', ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?
+          'PLAYED', ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?
         ) RETURNING id
       """)
         s.setInt(1, rs.getInt("id"))
@@ -1251,6 +1273,9 @@ object DatabaseManager {
           case Some(v) => s.setBoolean(30, v)
           case None    => s.setNull(30, java.sql.Types.BOOLEAN)
         }
+        s.setInt(31, cornersDominados)
+        s.setInt(32, cornersCedidos)
+        s.setInt(33, faltasAreaDominadas)
         val idRs = s.executeQuery()
         val newMatchId = if (idRs.next()) idRs.getInt("id") else 0
         if ((comportamientoPresion.nonEmpty && comportamientoPresion != "NA") || nutricionPrepartido.nonEmpty) {
@@ -3562,7 +3587,8 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
                           p1v1: Int, pAir: Int, pPie: Int, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int,
                           mapaCampo: String, // <--- NUEVO PARAMETRO
                           distanciaKm: Double = 0.0, // <--- FOOTBAR
-                          comportamientoPresion: String = "", nutricionPrepartido: String = ""
+                          comportamientoPresion: String = "", nutricionPrepartido: String = "",
+                          cornersDominados: Int = 0, cornersCedidos: Int = 0, faltasAreaDominadas: Int = 0
                         ): Unit = {
     val conn = getConnection()
     try {
@@ -3575,7 +3601,8 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         status='PLAYED', goles_favor=?, goles_contra=?, minutos=?, nota=?, paradas=?,
         notas_partido=?, video_url=?, reaccion_goles=?, clima=?, estadio=?,
         zona_goles=?, zona_tiros=?, zona_paradas=?, paradas_1v1=?, paradas_aereas=?,
-        acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=?, mapa_campo=?
+        acciones_pie=?, pc_t=?, pc_ok=?, pl_t=?, pl_ok=?, mapa_campo=?,
+        corners_dominados=?, corners_cedidos=?, faltas_area_dominadas=?
       WHERE id=?
     """)
 
@@ -3586,7 +3613,8 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
       ps.setInt(14, p1v1); ps.setInt(15, pAir); ps.setInt(16, pPie)
       ps.setInt(17, pcTot); ps.setInt(18, pcOk); ps.setInt(19, plTot); ps.setInt(20, plOk)
       ps.setString(21, mapaCampo) // <--- NUEVO
-      ps.setInt(22, id)
+      ps.setInt(22, cornersDominados); ps.setInt(23, cornersCedidos); ps.setInt(24, faltasAreaDominadas)
+      ps.setInt(25, id)
 
       ps.executeUpdate()
 
@@ -4186,6 +4214,65 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
     } finally { conn.close() }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE C — SET-PIECE CONTROL (SQL puro, sin Gemini)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getSetPieceStats(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val sf = seasonFilter(seasonId)
+      val rs = conn.createStatement().executeQuery(
+        s"SELECT fecha, nota, corners_dominados, corners_cedidos, faltas_area_dominadas FROM matches WHERE status='PLAYED' $sf ORDER BY fecha ASC")
+      case class SP(fecha: String, nota: Double, dominados: Int, cedidos: Int, faltas: Int)
+      var rows = List[SP]()
+      while (rs.next()) rows = rows :+ SP(
+        rs.getString("fecha"), rs.getDouble("nota"),
+        rs.getInt("corners_dominados"), rs.getInt("corners_cedidos"), rs.getInt("faltas_area_dominadas")
+      )
+
+      // Solo partidos con algun dato de balon parado registrado
+      val conDatos = rows.filter(r => r.dominados > 0 || r.cedidos > 0)
+      val totalDominados = conDatos.map(_.dominados).sum
+      val totalCedidos = conDatos.map(_.cedidos).sum
+      val totalFaltas = conDatos.map(_.faltas).sum
+      val ratioDominio = if (totalDominados + totalCedidos > 0) totalDominados.toDouble / (totalDominados + totalCedidos) * 100 else 0.0
+
+      // Tendencia: primera mitad de temporada vs segunda mitad (por orden cronologico)
+      val n = conDatos.size
+      val (primeraMitad, segundaMitad) = conDatos.splitAt(n / 2)
+      def ratioDe(l: List[SP]): Double = {
+        val d = l.map(_.dominados).sum; val c = l.map(_.cedidos).sum
+        if (d + c > 0) d.toDouble / (d + c) * 100 else 0.0
+      }
+      val ratioPrimera = ratioDe(primeraMitad)
+      val ratioSegunda = ratioDe(segundaMitad)
+      val tendencia =
+        if (n < 4) "SIN_DATOS_SUFICIENTES"
+        else if (ratioSegunda > ratioPrimera + 5) "MEJORANDO"
+        else if (ratioSegunda < ratioPrimera - 5) "EMPEORANDO"
+        else "ESTABLE"
+
+      // Correlacion con nota: nota media cuando domina el area (>=70% ese partido) vs cuando no
+      def ratioPartido(r: SP): Double = if (r.dominados + r.cedidos > 0) r.dominados.toDouble / (r.dominados + r.cedidos) else -1.0
+      val partidosDominio = conDatos.filter(r => ratioPartido(r) >= 0.7)
+      val partidosNoDominio = conDatos.filter(r => { val rp = ratioPartido(r); rp >= 0 && rp < 0.7 })
+      val notaMediaDominio = if (partidosDominio.nonEmpty) partidosDominio.map(_.nota).sum / partidosDominio.size else 0.0
+      val notaMediaNoDominio = if (partidosNoDominio.nonEmpty) partidosNoDominio.map(_.nota).sum / partidosNoDominio.size else 0.0
+
+      // Serie para grafico de evolucion del ratio de dominio por partido
+      val serieFechas = conDatos.map(_.fecha.take(10))
+      val serieRatios = conDatos.map(r => { val rp = ratioPartido(r); if (rp < 0) 0.0 else rp * 100 })
+
+      Map(
+        "totalDominados" -> totalDominados, "totalCedidos" -> totalCedidos, "totalFaltas" -> totalFaltas,
+        "ratioDominio" -> ratioDominio, "tendencia" -> tendencia,
+        "ratioPrimera" -> ratioPrimera, "ratioSegunda" -> ratioSegunda,
+        "notaMediaDominio" -> notaMediaDominio, "notaMediaNoDominio" -> notaMediaNoDominio,
+        "nPartidosConDatos" -> conDatos.size,
+        "serieFechas" -> serieFechas, "serieRatios" -> serieRatios
+      )
+    } finally { conn.close() }
+  }
 
   // ── EMOTIONAL INTELLIGENCE ENGINE ─────────────────────────────────────────
   case class EmotionalEntry(fecha: String, animo: Int, energia: Int, notas: String,
@@ -5632,6 +5719,65 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         "hMadre"            -> hMadre,
         "midParent"         -> midParent,
         "advertenciaFecha"  -> advertenciaFecha
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE A — GOAL COVERAGE MAPPING (geometria pura, sin Gemini)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // tallaAdultaCmOverride: si se pasa (>0) se usa esa proyeccion adulta (p.ej. la ya
+  // calculada en /digital-twin con las alturas de los padres reales); si no, se calcula
+  // con la proyeccion por defecto (180/168) del propio Digital Twin.
+  def calcularGoalCoverage(tallaAdultaCmOverride: Double = 0.0): Map[String, Any] = {
+    // Dimensiones porteria Futbol 7 Prebenjamin (reglamento RFFM)
+    val porteriaAncho = 5.0  // metros
+    val porteriaAlto  = 2.0  // metros
+    val areaPorteria  = porteriaAncho * porteriaAlto
+
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT altura FROM physical_growth WHERE altura IS NOT NULL ORDER BY fecha DESC LIMIT 1")
+      val tallaCm = if (rs.next()) rs.getDouble("altura") else 118.0
+      val tallaM = tallaCm / 100.0
+
+      // Ratios anatomicos validados
+      val envergadura = tallaM * 1.06       // envergadura ~= altura x 1.06
+      val alcanceVertical = tallaM * 1.27   // alcance vertical de pie
+      val longitudBrazo = envergadura / 2.0
+
+      // Cobertura teorica en posicion central
+      val anchoCubierto = math.min(envergadura, porteriaAncho)
+      val altoCubierto  = math.min(alcanceVertical, porteriaAlto)
+      val areaCubiertaBase = anchoCubierto * altoCubierto
+      val pctCoberturaBase = (areaCubiertaBase / areaPorteria) * 100
+
+      // Cobertura con estirada lateral (alcance de un brazo a cada lado)
+      val anchoConEstirada = math.min(envergadura + longitudBrazo, porteriaAncho)
+      val areaCubiertaEstirada = anchoConEstirada * altoCubierto
+      val pctCoberturaEstirada = (areaCubiertaEstirada / areaPorteria) * 100
+
+      // Proyeccion adulta (usa la proyeccion ya calculada por el Digital Twin)
+      val tallaAdultaCm = if (tallaAdultaCmOverride > 0) tallaAdultaCmOverride
+        else getDigitalTwinData(180.0, 168.0).get("alturaProyectada").map(_.asInstanceOf[Double]).getOrElse(185.0)
+      val tallaAdultaM = tallaAdultaCm / 100.0
+      val envergaduraAdulta = tallaAdultaM * 1.06
+      val alcanceAdulto = tallaAdultaM * 1.27
+      val anchoAdultoEstirada = math.min(envergaduraAdulta + (envergaduraAdulta / 2.0), porteriaAncho)
+      val pctCoberturaAdulto = (math.min(anchoAdultoEstirada, porteriaAncho) *
+        math.min(alcanceAdulto, porteriaAlto) / areaPorteria) * 100
+
+      Map(
+        "tallaCm"              -> tallaCm,
+        "envergaduraCm"        -> (envergadura * 100),
+        "alcanceVerticalCm"    -> (alcanceVertical * 100),
+        "pctCoberturaBase"     -> pctCoberturaBase,
+        "pctCoberturaEstirada" -> pctCoberturaEstirada,
+        "tallaAdultaCm"        -> tallaAdultaCm,
+        "pctCoberturaAdulto"   -> pctCoberturaAdulto,
+        "porteriaAncho"        -> porteriaAncho,
+        "porteriaAlto"         -> porteriaAlto
       )
     } finally { conn.close() }
   }
@@ -7108,6 +7254,49 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       ps.setString(4, fixEncoding(rec))
       ps.setBoolean(5, esPrevio)
       ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE B — CONTRACT & LICENSE VAULT (Elite exclusivamente)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def saveDocumentVault(tipo: String, nombre: String, fecha: String, archivoB64: String, notas: String): Int = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO document_vault (tipo, nombre, fecha, archivo_b64, notas) VALUES (?, ?, ?::date, ?, ?) RETURNING id")
+      ps.setString(1, tipo)
+      ps.setString(2, fixEncoding(nombre))
+      ps.setString(3, fecha)
+      ps.setString(4, archivoB64)
+      ps.setString(5, fixEncoding(notas))
+      val rs = ps.executeQuery()
+      if (rs.next()) rs.getInt("id") else 0
+    } finally { conn.close() }
+  }
+
+  def getDocumentVaultList(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, tipo, nombre, fecha, notas FROM document_vault ORDER BY fecha DESC, id DESC")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "id" -> rs.getInt("id"), "tipo" -> rs.getString("tipo"),
+        "nombre" -> fixEncoding(rs.getString("nombre")), "fecha" -> rs.getDate("fecha").toString,
+        "notas" -> fixEncoding(Option(rs.getString("notas")).getOrElse(""))
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  def getDocumentVaultFile(id: Int): Option[(String, String)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT nombre, archivo_b64 FROM document_vault WHERE id = ?")
+      ps.setInt(1, id)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some((fixEncoding(rs.getString("nombre")), rs.getString("archivo_b64"))) else None
     } finally { conn.close() }
   }
 
@@ -8693,6 +8882,237 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
 
       Map("activo" -> true, "prediccion" -> prediccion, "factorPositivo" -> factorPositivo, "factorNegativo" -> factorNegativo)
     } finally { conn.close() }
+  }
+
+  // Inputs base del predictor (mismo cálculo que usa getRendimientoPrediccionAuto, expuesto para los escenarios)
+  private def getPrediccionInputsBase(): (Int, Double, Double, Boolean, Int) = {
+    val conn = getConnection()
+    try {
+      val rsUlt = conn.createStatement().executeQuery("SELECT fecha FROM matches WHERE status = 'PLAYED' ORDER BY fecha DESC LIMIT 1")
+      val fechaUltimoPartido = if (rsUlt.next()) Some(rsUlt.getDate("fecha").toLocalDate) else None
+
+      val rsProx = conn.createStatement().executeQuery("SELECT fecha, es_local FROM matches WHERE status = 'SCHEDULED' ORDER BY fecha ASC LIMIT 1")
+      val (fechaObjetivo, esLocal) = if (rsProx.next()) {
+        val fl = rsProx.getDate("fecha").toLocalDate
+        val elObj = rsProx.getObject("es_local")
+        (fl, if (elObj == null) false else rsProx.getBoolean("es_local"))
+      } else (LocalDate.now(), false)
+
+      val diasDescanso = fechaUltimoPartido
+        .map(f => java.time.temporal.ChronoUnit.DAYS.between(f, fechaObjetivo).toInt)
+        .filter(_ >= 0).getOrElse(7)
+
+      val acute = getWorkloads(7); val chronic = getWorkloads(28)
+      val acwr = StatsCalculator.calculateACWR(acute, chronic)
+
+      val rsSueno = conn.createStatement().executeQuery("SELECT horas_sueno FROM wellness ORDER BY fecha DESC LIMIT 1")
+      val horasSueno = if (rsSueno.next()) rsSueno.getDouble("horas_sueno") else 8.0
+
+      val rsAcademia = conn.createStatement().executeQuery("SELECT MAX(fecha) as f FROM trainings WHERE tipo ILIKE '%academia%'")
+      val diasDesdeAcademia = if (rsAcademia.next() && rsAcademia.getDate("f") != null)
+        java.time.temporal.ChronoUnit.DAYS.between(rsAcademia.getDate("f").toLocalDate, fechaObjetivo).toInt
+      else 14
+
+      (diasDescanso, acwr, horasSueno, esLocal, diasDesdeAcademia)
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE E — MARKOV CAREER PATHING: score actual sin Gemini (duplica solo la parte
+  // matematica de getMarketEstimatorData — NUNCA se puede llamar a esa función completa
+  // desde el render de pagina porque dispara AIProvider.ask).
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def calcularMarketScoreActual(): (Double, String) = {
+    val conn = getConnection()
+    try {
+      val rsBase = conn.createStatement().executeQuery("""
+        SELECT
+          COALESCE(AVG(nota), 0.0) AS nota_media,
+          COALESCE(AVG(paradas), 0.0) AS par_media,
+          COALESCE(AVG(paradas_1v1), 0.0) AS par1v1_media,
+          COALESCE(AVG(paradas_aereas), 0.0) AS paer_media,
+          COALESCE(AVG(CASE WHEN acciones_pie > 0
+                    THEN lineas_superadas::FLOAT / acciones_pie END), 0.0) AS bypass_efic,
+          COALESCE(
+            SUM(CASE WHEN goles_favor > goles_contra THEN 1 ELSE 0 END)::FLOAT
+            / NULLIF(COUNT(*), 0), 0.0) AS win_rate
+        FROM matches WHERE status='PLAYED'
+      """)
+      var notaMedia = 0.0; var par1v1 = 0.0; var parAer = 0.0; var parMedia = 0.0
+      var bypassEfic = 0.0; var winRate = 0.0
+      if (rsBase.next()) {
+        notaMedia = rsBase.getDouble("nota_media"); parMedia = rsBase.getDouble("par_media")
+        par1v1 = rsBase.getDouble("par1v1_media"); parAer = rsBase.getDouble("paer_media")
+        bypassEfic = rsBase.getDouble("bypass_efic"); winRate = rsBase.getDouble("win_rate")
+      }
+
+      val rsPsxg = conn.createStatement().executeQuery("""
+        SELECT
+          COALESCE(AVG(goles_contra), 0) as gc_media,
+          COALESCE(AVG(
+            CASE zona_goles
+              WHEN '5' THEN 0.85 WHEN '4' THEN 0.65 WHEN '6' THEN 0.65
+              WHEN '2' THEN 0.45 WHEN '8' THEN 0.45
+              ELSE 0.30
+            END
+          ), 0) as xg_media
+        FROM matches WHERE status='PLAYED' AND goles_contra > 0
+      """)
+      var psxgDelta = 0.0
+      if (rsPsxg.next()) psxgDelta = rsPsxg.getDouble("xg_media") - rsPsxg.getDouble("gc_media")
+
+      val rsEdad = conn.createStatement().executeQuery("SELECT fecha_nacimiento FROM seasons ORDER BY id DESC LIMIT 1")
+      val fechaNac = if (rsEdad.next()) Option(rsEdad.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2015-06-19") else "2015-06-19"
+      val edad = java.time.Period.between(java.time.LocalDate.parse(fechaNac), java.time.LocalDate.now()).getYears
+      val bioFactor: Double = if (edad <= 10) 0.70 else if (edad <= 12) 0.80
+                              else if (edad <= 14) 0.90 else if (edad <= 16) 1.00 else 1.10
+
+      val spvEfic: Double = {
+        val total = par1v1 * 1.5 + parAer * 1.2 + (parMedia - par1v1 - parAer)
+        if (total > 0) math.min(100.0, total * 10.0) else 0.0
+      }
+
+      val notaNorm: Double   = math.max(0, math.min(1.0, (notaMedia * 10.0 - 40.0) / 60.0))
+      val spvNorm: Double    = math.max(0, math.min(1.0, spvEfic / 100.0))
+      val bypassNorm: Double = math.max(0, math.min(1.0, bypassEfic))
+      val psxgNorm: Double   = math.max(0, math.min(1.0, (psxgDelta + 2.0) / 4.0))
+      val bioBoost: Double   = (bioFactor - 0.7) / 0.4
+
+      val rawScore: Double = notaNorm*35.0 + spvNorm*20.0 + bypassNorm*15.0 + psxgNorm*15.0 + winRate*10.0 + bioBoost*5.0
+
+      val percentilesRef: Map[Int, List[Int]] = Map(
+        9  -> List(15, 22, 35, 48, 62), 10 -> List(18, 26, 38, 51, 65), 11 -> List(20, 29, 42, 55, 68),
+        12 -> List(22, 32, 45, 58, 71), 13 -> List(25, 35, 48, 62, 74), 14 -> List(28, 38, 52, 65, 77),
+        15 -> List(30, 42, 55, 68, 80), 16 -> List(32, 45, 58, 71, 83), 17 -> List(35, 48, 62, 74, 86)
+      )
+      val edadRef = math.max(9, math.min(17, edad))
+      val refs = percentilesRef.getOrElse(edadRef, List(20, 35, 50, 65, 80))
+      val percentil: Int =
+        if (rawScore <= refs(0)) 5 else if (rawScore <= refs(1)) 15 else if (rawScore <= refs(2)) 35
+        else if (rawScore <= refs(3)) 60 else if (rawScore <= refs(4)) 80 else 95
+
+      val nivelKey: String =
+        if (percentil >= 90) "ELITE_NACIONAL"
+        else if (percentil >= 75) "ACADEMIA_PRIMERA"
+        else if (percentil >= 50) "ACADEMIA_REGIONAL"
+        else if (percentil >= 25) "FORMATIVO_MEDIO"
+        else "EN_DESARROLLO"
+
+      (rawScore, nivelKey)
+    } finally { conn.close() }
+  }
+
+  def calcularMarkovPathway(): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    val cerradas = try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT COALESCE(nombre, categoria, 'Temporada') as nombre, media FROM seasons WHERE fecha_fin IS NOT NULL ORDER BY id ASC")
+      var l = List[(String, Double)]()
+      while (rs.next()) l = l :+ (fixEncoding(rs.getString("nombre")), rs.getDouble("media"))
+      l
+    } finally { conn.close() }
+
+    if (cerradas.size < 2) return None
+
+    val estados = List("EN_DESARROLLO", "FORMATIVO_MEDIO", "ACADEMIA_REGIONAL", "ACADEMIA_PRIMERA", "ELITE_NACIONAL")
+    val estadosLabel = Map(
+      "EN_DESARROLLO" -> "EN DESARROLLO", "FORMATIVO_MEDIO" -> "FORMATIVO MEDIO",
+      "ACADEMIA_REGIONAL" -> "ACADEMIA REGIONAL", "ACADEMIA_PRIMERA" -> "ACADEMIA PRIMERA",
+      "ELITE_NACIONAL" -> "ÉLITE NACIONAL"
+    )
+
+    val (_, nivelActual) = calcularMarketScoreActual()
+    val idxActual = math.max(0, estados.indexOf(nivelActual))
+    val siguienteEstadoKey = if (idxActual < estados.size - 1) Some(estados(idxActual + 1)) else None
+
+    // Velocidad de mejora: puntos de rating FUT ganados por temporada (pendiente simple primera->ultima)
+    val primerRating = cerradas.head._2
+    val ultimoRating = cerradas.last._2
+    val temporadasTranscurridas = math.max(1, cerradas.size - 1)
+    val velocidadMejora = (ultimoRating - primerRating) / temporadasTranscurridas
+
+    val probabilidad2Temp: Int =
+      if (velocidadMejora > 5) 70
+      else if (velocidadMejora >= 2) 45
+      else 20
+
+    // Gap tipico entre niveles formativos (aproximacion — el modelo es deliberadamente simple)
+    val temporadasHastaSiguiente: Option[Double] =
+      if (siguienteEstadoKey.isEmpty || velocidadMejora <= 0) None
+      else Some(8.0 / velocidadMejora)
+
+    val anioActual = LocalDate.now().getYear
+    val temporadaEstimadaStr = temporadasHastaSiguiente.map(t => (anioActual + math.ceil(t).toInt).toString)
+
+    Some(Map(
+      "estadoActual"             -> estadosLabel.getOrElse(nivelActual, nivelActual),
+      "siguienteEstado"          -> siguienteEstadoKey.map(s => estadosLabel.getOrElse(s, s)).getOrElse(""),
+      "probabilidad2Temp"        -> probabilidad2Temp,
+      "velocidadMejora"          -> velocidadMejora,
+      "temporadasHastaSiguiente" -> temporadasHastaSiguiente,
+      "temporadaEstimada"        -> temporadaEstimadaStr.getOrElse(""),
+      "nTemporadas"              -> cerradas.size,
+      "estados"                  -> estados.map(s => estadosLabel.getOrElse(s, s)),
+      "estadoActualIdx"          -> idxActual
+    ))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE D — SIMULADOR WHAT-IF MEJORADO: escenarios predefinidos
+  // ─────────────────────────────────────────────────────────────────────────────
+  def simularEscenario(tipo: String): Map[String, Any] = {
+    val obs = fetchObsRegresion()
+    // El modelo de regresion (Prompt 1) exige >=30 observaciones para ser fiable
+    if (obs.size < 30) return Map("activo" -> false, "partidosDisponibles" -> obs.size)
+
+    val notaActualMedia = {
+      val conn = getConnection()
+      try {
+        val rs = conn.createStatement().executeQuery("SELECT AVG(nota) as m FROM matches WHERE status='PLAYED' AND nota > 0")
+        if (rs.next()) rs.getDouble("m") else 0.0
+      } finally { conn.close() }
+    }
+
+    val (diasDescansoBase, acwrBase, horasSuenoBase, esLocalBase, diasAcademiaBase) = getPrediccionInputsBase()
+
+    val escenario: Option[(Int, Double, Double, Int, String, String, String)] = tipo match {
+      case "SUENO_MEJORADO" => Some((
+        diasDescansoBase, acwrBase, horasSuenoBase + 0.5, diasAcademiaBase,
+        "Sueño profundo", "😴 Sueño Mejorado",
+        "Mejorar el sueño profundo 30 min/noche subiría la nota media de %.1f a %.1f en 10 semanas"
+      ))
+      case "ACWR_OPTIMO" => Some((
+        diasDescansoBase, 0.9, horasSuenoBase, diasAcademiaBase,
+        "ACWR óptimo (0.8-1.0)", "⚖️ ACWR Óptimo",
+        "Mantener el ACWR siempre entre 0.8 y 1.0 subiría la nota media de %.1f a %.1f en 10 semanas"
+      ))
+      case "ACADEMIA_EXTRA" => Some((
+        diasDescansoBase, acwrBase, horasSuenoBase, math.max(3, diasAcademiaBase - 7),
+        "Sesión de academia extra", "🥅 Academia Extra",
+        "Añadir una sesión de academia extra al mes subiría la nota media de %.1f a %.1f en 10 semanas"
+      ))
+      case "DESCANSO_OPTIMO" => Some((
+        3, acwrBase, horasSuenoBase, diasAcademiaBase,
+        "2-3 días de descanso antes del partido", "🛌 Descanso Óptimo",
+        "Tener siempre 2-3 días de descanso antes del partido subiría la nota media de %.1f a %.1f en 10 semanas"
+      ))
+      case _ => None
+    }
+
+    escenario match {
+      case None => Map("activo" -> false)
+      case Some((diasDescansoEsc, acwrEsc, horasSuenoEsc, diasAcademiaEsc, factorTxt, nombreTxt, fraseTpl)) =>
+        val notaProyectada = getRendimientoPrediccion(diasDescansoEsc, acwrEsc, horasSuenoEsc, esLocalBase, diasAcademiaEsc)
+        if (notaProyectada < 0) Map("activo" -> false)
+        else {
+          val diferencia = notaProyectada - notaActualMedia
+          Map(
+            "activo" -> true, "tipo" -> tipo, "nombre" -> nombreTxt,
+            "notaActual" -> notaActualMedia, "notaProyectada" -> notaProyectada, "diferencia" -> diferencia,
+            "factor" -> factorTxt, "frase" -> fraseTpl.format(notaActualMedia, notaProyectada)
+          )
+        }
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

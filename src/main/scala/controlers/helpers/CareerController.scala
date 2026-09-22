@@ -2349,12 +2349,55 @@ object CareerController extends cask.Routes {
     )
   }
 
+  // BLOQUE D: 4 tarjetas de escenarios rapidos — SQL/regresion pura, sin Gemini
+  private def escenariosRapidosSection(): Modifier = {
+    val tipos = Seq(
+      ("SUENO_MEJORADO", "😴"), ("ACWR_OPTIMO", "⚖️"), ("ACADEMIA_EXTRA", "🥅"), ("DESCANSO_OPTIMO", "🛌")
+    )
+    val resultados = tipos.map { case (tipo, icono) => (icono, DatabaseManager.simularEscenario(tipo)) }
+    val hayActivos = resultados.exists(_._2.getOrElse("activo", false).asInstanceOf[Boolean])
+
+    div(cls := "card bg-dark border-warning shadow mb-4",
+      div(cls := "card-header text-warning fw-bold small", "⚡ ESCENARIOS RÁPIDOS"),
+      div(cls := "card-body p-3",
+        if (!hayActivos)
+          div(cls := "text-center text-muted small py-3", "Necesitas más partidos registrados para activar los escenarios predictivos.")
+        else div(cls := "row g-2",
+          resultados.filter(_._2.getOrElse("activo", false).asInstanceOf[Boolean]).map { case (icono, r) =>
+            val nombre = r("nombre").asInstanceOf[String]
+            val notaActual = r("notaActual").asInstanceOf[Double]
+            val notaProy = r("notaProyectada").asInstanceOf[Double]
+            val diferencia = r("diferencia").asInstanceOf[Double]
+            val frase = r("frase").asInstanceOf[String]
+            val diffColor = if (diferencia > 0.05) "success" else if (diferencia < -0.05) "danger" else "secondary"
+            val diffSigno = if (diferencia >= 0) "+" else ""
+            div(cls := "col-md-6",
+              div(cls := "card bg-secondary bg-opacity-10 border-secondary h-100",
+                div(cls := "card-body p-3",
+                  div(cls := "fw-bold text-white small mb-2", nombre),
+                  div(cls := "d-flex align-items-center gap-2 mb-2",
+                    span(cls := "text-muted", f"$notaActual%.1f"),
+                    span(cls := "text-muted", "→"),
+                    span(cls := "fw-black fs-4 text-warning", f"$notaProy%.1f"),
+                    span(cls := s"badge bg-$diffColor", f"$diffSigno$diferencia%.1f")
+                  ),
+                  div(cls := "xx-small text-light", frase)
+                )
+              )
+            )
+          }
+        )
+      )
+    )
+  }
+
   @cask.get("/simulate")
   def simulatePage(request: cask.Request) = withAuth(request) {
     val content = basePage("simulate",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
           h2(cls := "text-white mb-4 text-center", "🔮 Simulador de Escenarios"),
+          escenariosRapidosSection(),
           div(cls := "card bg-dark border-secondary p-3 mb-4",
             div(cls := "fw-bold text-white small text-uppercase mb-3", "¿Qué pasa si...?"),
             simulatorForm(0.0, 0, 0, "DIV", 0)

@@ -343,6 +343,46 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
+                // ── BLOQUE C: SET-PIECE CONTROL (opcional) ────────────────
+                div(cls:="mb-4 p-3 border border-warning rounded bg-warning bg-opacity-10",
+                  label(cls:="form-label text-warning small fw-bold w-100 text-center mb-2", "🏴 BALÓN PARADO (opcional)"),
+                  div(cls:="row g-2",
+                    div(cls:="col-4 text-center",
+                      div(cls:="xx-small text-muted fw-bold mb-1", "Corners dominados"),
+                      div(cls:="d-flex align-items-center justify-content-center gap-1",
+                        button(tpe:="button", cls:="btn btn-outline-warning btn-sm px-2", onclick:="adjustSetPiece('cornersDominados',-1)", "-"),
+                        input(tpe:="number", name:="cornersDominados", id:="cornersDominados", value:="0",
+                          cls:="form-control form-control-sm text-center bg-dark text-warning fw-bold border-warning",
+                          style:="width:50px;", attr("inputmode"):="numeric", attr("min"):="0"),
+                        button(tpe:="button", cls:="btn btn-outline-warning btn-sm px-2", onclick:="adjustSetPiece('cornersDominados',1)", "+")
+                      ),
+                      div(cls:="xx-small text-muted mt-1", "Salidas aéreas exitosas — llegó con decisión")
+                    ),
+                    div(cls:="col-4 text-center",
+                      div(cls:="xx-small text-muted fw-bold mb-1", "Corners cedidos"),
+                      div(cls:="d-flex align-items-center justify-content-center gap-1",
+                        button(tpe:="button", cls:="btn btn-outline-warning btn-sm px-2", onclick:="adjustSetPiece('cornersCedidos',-1)", "-"),
+                        input(tpe:="number", name:="cornersCedidos", id:="cornersCedidos", value:="0",
+                          cls:="form-control form-control-sm text-center bg-dark text-warning fw-bold border-warning",
+                          style:="width:50px;", attr("inputmode"):="numeric", attr("min"):="0"),
+                        button(tpe:="button", cls:="btn btn-outline-warning btn-sm px-2", onclick:="adjustSetPiece('cornersCedidos',1)", "+")
+                      ),
+                      div(cls:="xx-small text-muted mt-1", "No salió o llegó tarde")
+                    ),
+                    div(cls:="col-4 text-center",
+                      div(cls:="xx-small text-muted fw-bold mb-1", "Faltas área dominadas"),
+                      div(cls:="d-flex align-items-center justify-content-center gap-1",
+                        button(tpe:="button", cls:="btn btn-outline-warning btn-sm px-2", onclick:="adjustSetPiece('faltasAreaDominadas',-1)", "-"),
+                        input(tpe:="number", name:="faltasAreaDominadas", id:="faltasAreaDominadas", value:="0",
+                          cls:="form-control form-control-sm text-center bg-dark text-warning fw-bold border-warning",
+                          style:="width:50px;", attr("inputmode"):="numeric", attr("min"):="0"),
+                        button(tpe:="button", cls:="btn btn-outline-warning btn-sm px-2", onclick:="adjustSetPiece('faltasAreaDominadas',1)", "+")
+                      ),
+                      div(cls:="xx-small text-muted mt-1", "Despejó con autoridad")
+                    )
+                  )
+                ),
+
                 // ── COMPORTAMIENTO BAJO PRESION ──────────────────────────
                 div(cls := "mb-4 p-2 border border-info rounded bg-info bg-opacity-10",
                   label(cls := "form-label text-info small fw-bold w-100 text-center", "🧠 COMPORTAMIENTO TRAS GOLES ENCAJADOS"),
@@ -428,6 +468,7 @@ object MatchController extends cask.Routes {
               function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
               function incCounter(key){var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val; document.getElementById('disp_'+key).value=val; updateActionData();}
               function adjustBypass(delta){var el=document.getElementById('lineasSuperadas'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
+              function adjustSetPiece(fieldId, delta){var el=document.getElementById(fieldId); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
               function adjustScanning(delta){var el=document.getElementById('scanningRate'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
               function updateActionData(){var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value]; document.getElementById('actionData').value = d.join(',');}
               function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
@@ -635,6 +676,10 @@ object MatchController extends cask.Routes {
     val goalsData  = getStr("goalsData")
     val lineasSup    = getInt("lineasSuperadas")
     val scanningRate = getInt("scanningRate")
+    // BLOQUE C: Set-Piece Control
+    val cornersDominados     = getInt("cornersDominados")
+    val cornersCedidos       = getInt("cornersCedidos")
+    val faltasAreaDominadas  = getInt("faltasAreaDominadas")
     val esLocalStr   = getStr("esLocal")
     val esLocalOpt: Option[Boolean] = esLocalStr match {
       case "true"  => Some(true)
@@ -690,10 +735,10 @@ object MatchController extends cask.Routes {
 
     // BLOQUE E: logMatch devuelve el id via RETURNING id — sin condicion de carrera con SELECT MAX(id)
     val savedMatchId: Int = if (scheduleId > 0) {
-      DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo, fbDistancia, comportamientoPresion, nutricionPrepartido)
+      DatabaseManager.playScheduledMatch(scheduleId, gf, gc, minutos, nota, paradas, cleanNotas, video, cleanReaccion, clima, estadio, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, pcTot, pcOk, plTot, plOk, mapaCampo, fbDistancia, comportamientoPresion, nutricionPrepartido, cornersDominados, cornersCedidos, faltasAreaDominadas)
       scheduleId
     } else {
-      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt, comportamientoPresion, nutricionPrepartido)
+      DatabaseManager.logMatch(cleanRival, gf, gc, minutos, nota, n.media, paradas, zonaGoles, zonaTiros, zonaParadas, p1v1, pAir, pPie, clima, estadio, temp, cleanNotas, video, cleanReaccion, fecha, tipo, pcTot, pcOk, plTot, plOk, mapaCampo, lineasSup, scanningRate, esLocalOpt, comportamientoPresion, nutricionPrepartido, cornersDominados, cornersCedidos, faltasAreaDominadas)
     }
 
     // Guardar contexto de goles encajados
