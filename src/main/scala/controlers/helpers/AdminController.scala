@@ -352,7 +352,7 @@ object AdminController extends cask.Routes {
       h4(cls := "mb-3", "📚 CALENDARIO ESCOLAR"),
       p(cls := "small text-muted",
         "Registra los periodos de exámenes o fin de trimestre de Héctor — Guardian los tendrá en cuenta al interpretar bajadas de energía o rendimiento que puedan tener origen escolar, no deportivo."),
-      form(action := "/settings/calendario-escolar/save", method := "post", cls := "row g-2 align-items-end mb-3",
+      form(action := "/settings/escolar/save", method := "post", cls := "row g-2 align-items-end mb-3",
         div(cls := "col-6 col-md-3",
           label(cls := "xx-small text-muted fw-bold", "Fecha inicio"),
           input(tpe := "date", name := "fechaInicio", cls := "form-control form-control-sm bg-dark text-white border-secondary", required := true)
@@ -384,14 +384,17 @@ object AdminController extends cask.Routes {
             div(cls := "small text-white fw-bold", calendarioEscolarTipoLabel(p("tipo").asInstanceOf[String])),
             div(cls := "xx-small text-muted", s"${p("fechaInicio")} → ${p("fechaFin")}" + (if (p("descripcion").asInstanceOf[String].nonEmpty) s" · ${p("descripcion")}" else ""))
           ),
-          form(action := s"/settings/calendario-escolar/$id/delete", method := "post",
+          form(action := s"/settings/escolar-delete/$id", method := "post",
             button(tpe := "submit", cls := "btn btn-sm btn-outline-danger fw-bold", "✕"))
         )
       })
     )
   }
 
-  @cask.post("/settings/calendario-escolar/save")
+  // BLOQUE FIX: Cask no distingue una ruta literal de un wildcard en el mismo nivel
+  // (/settings/calendario-escolar/save vs /settings/calendario-escolar/:id/delete) —
+  // mismo problema ya resuelto antes con las rutas de temporadas. Se separan los prefijos.
+  @cask.post("/settings/escolar/save")
   def saveCalendarioEscolar(request: cask.Request) = withAuth(request) {
     val p = parseBody(request)
     val fi = p.getOrElse("fechaInicio", ""); val ff = p.getOrElse("fechaFin", "")
@@ -399,7 +402,7 @@ object AdminController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
   }
 
-  @cask.post("/settings/calendario-escolar/:id/delete")
+  @cask.post("/settings/escolar-delete/:id")
   def deleteCalendarioEscolarAction(request: cask.Request, id: Int) = withAuth(request) {
     DatabaseManager.deleteCalendarioEscolar(id)
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
