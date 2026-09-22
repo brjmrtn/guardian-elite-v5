@@ -60,8 +60,8 @@ case class FootbarSession(
 object DatabaseManager {
   private val debugMode = sys.env.getOrElse("DEBUG_MODE", "false") == "true"
   private val dbHost = sys.env.getOrElse("DB_HOST", "")
-  private val dbName = sys.env.getOrElse("DB_NAME", "neondb")
-  private val dbUser = sys.env.getOrElse("DB_USER", "neondb_owner")
+  private val dbName = sys.env.getOrElse("DB_NAME", "")
+  private val dbUser = sys.env.getOrElse("DB_USER", "")
   private val dbPass = sys.env.getOrElse("DB_PASS", "")
 
   val url = s"jdbc:postgresql://$dbHost/$dbName?sslmode=require&options=-c%20client_encoding=UTF8"
