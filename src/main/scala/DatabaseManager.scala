@@ -803,6 +803,11 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS corners_cedidos INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS faltas_area_dominadas INT DEFAULT 0")
 
+      // ─────────────────────────────────────────────────────────────────────────────
+      // PROBLEMA 3 — MARCAR SESION COMO "NO ASISTIO" (ausencia intencional a la estructura semanal)
+      // ─────────────────────────────────────────────────────────────────────────────
+      stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS tipo_ausencia TEXT DEFAULT NULL")
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -6488,13 +6493,15 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso, tallaSentadoCm, longitudPiernaCm, kgMusculo, kgMasaOsea)
     } finally { conn.close() }
   }
+  // BLOQUE PROBLEMA 2/3: fecha editable (por defecto hoy) y tipoAusencia opcional (registro de "no asistio")
   def logTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int, rutina: String, feedbackEntrenador: String = "",
                    fbDistancia: Option[Double] = None, fbAltaIntensidad: Option[Int] = None, fbSprintMax: Option[Double] = None,
                    fbPctActividad: Option[Int] = None, fbTiempoActivo: Option[Int] = None,
-                   fbAceleraciones: Option[Int] = None, fbDesaceleraciones: Option[Int] = None): Unit = {
+                   fbAceleraciones: Option[Int] = None, fbDesaceleraciones: Option[Int] = None,
+                   fecha: String = "", tipoAusencia: Option[String] = None): Unit = {
     val conn=getConnection()
     try {
-      val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle, feedback_entrenador, fb_distancia, fb_alta_intensidad, fb_sprint_max, fb_pct_actividad, fb_tiempo_activo, fb_aceleraciones, fb_desaceleraciones) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle, feedback_entrenador, fb_distancia, fb_alta_intensidad, fb_sprint_max, fb_pct_actividad, fb_tiempo_activo, fb_aceleraciones, fb_desaceleraciones, fecha, tipo_ausencia) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::date,?)")
       s.setString(1,tipo); s.setString(2,fixEncoding(foco)); s.setInt(3,rpe); s.setInt(4,calidad); s.setInt(5, atencion); s.setString(6,fixEncoding(rutina))
       if (feedbackEntrenador.nonEmpty) s.setString(7, fixEncoding(feedbackEntrenador)) else s.setNull(7, java.sql.Types.VARCHAR)
       def setOptDouble(idx: Int, v: Option[Double]): Unit = v match { case Some(x) => s.setDouble(idx, x); case None => s.setNull(idx, java.sql.Types.DOUBLE) }
@@ -6506,6 +6513,11 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       } else {
         s.setNull(8, java.sql.Types.DOUBLE); s.setNull(9, java.sql.Types.INTEGER); s.setNull(10, java.sql.Types.DOUBLE)
         s.setNull(11, java.sql.Types.INTEGER); s.setNull(12, java.sql.Types.INTEGER); s.setNull(13, java.sql.Types.INTEGER); s.setNull(14, java.sql.Types.INTEGER)
+      }
+      s.setString(15, if (fecha.nonEmpty) fecha else LocalDate.now().toString)
+      tipoAusencia match {
+        case Some(t) if t.nonEmpty => s.setString(16, t)
+        case _ => s.setNull(16, java.sql.Types.VARCHAR)
       }
       s.executeUpdate()
       conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE")
@@ -6545,28 +6557,9 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         }
       }
 
-      // 2. DETECTOR DE PATRONES DE DOLOR (Dolor > 0 vs Tipo de Entreno)
-      // Buscamos si hay correlacion entre dolor y superficie/tipo en los ultimos 10 registros
-      val rsPain = conn.createStatement().executeQuery(
-        """
-      SELECT w.dolor, t.tipo, t.foco
-      FROM wellness w
-      JOIN trainings t ON w.fecha = t.fecha
-      WHERE w.dolor > 1
-      ORDER BY w.id DESC LIMIT 5
-      """
-      )
-
-      var painCount = 0
-      var lastContext = ""
-      while(rsPain.next()) {
-        painCount += 1
-        lastContext = fixEncoding(rsPain.getString("tipo")) + " (" + fixEncoding(rsPain.getString("foco")) + ")"
-      }
-
-      if (painCount >= 2) {
-        sb.append(s"🔍 PATRÓN DE DOLOR: Detectadas $painCount sesiones recientes con dolor. Contexto frecuente: $lastContext. Revisar calzado o dureza del terreno.\n")
-      }
+      // BLOQUE B7: la deteccion de dolor/malestar SOLO puede venir de datos estructurados
+      // (tabla injuries y wellness.energia) — nunca de wellness.dolor cruzado con el tipo/foco
+      // de entrenamiento, que generaba falsos positivos y confundia correlacion con causalidad.
 
       if (sb.isEmpty) "Sin anomalías biométricas detectadas hoy." else sb.toString().trim
 
@@ -6608,6 +6601,9 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   }
 
   // Solo sesiones esperadas de los ultimos 3 dias (dentro de la semana actual) sin registro. SQL puro.
+  // PROBLEMA 3: una ausencia registrada (tipo_ausencia IS NOT NULL) es una fila real de trainings
+  // para esa fecha+tipo, asi que sesionRegistrada() ya la cuenta como "registrada" — el aviso
+  // desaparece automaticamente, sin necesitar logica adicional aqui.
   def getSemanaIncompleta(): List[String] = {
     val conn = getConnection()
     try {
@@ -6673,8 +6669,13 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     } finally { conn.close() }
   }
 
-  // BLOQUE B4: sesiones esperadas segun weekly_structure sin registro en trainings/matches Elite,
-  // estimadas con RPE=5 (misma escala 60*rpe que el resto de getWorkloads) para no subestimar el ACWR.
+  // BLOQUE B4 / PROBLEMA 3: sesiones esperadas segun weekly_structure sin NINGUN registro en
+  // trainings/matches Elite, estimadas con RPE=5 (misma escala 60*rpe que el resto de getWorkloads)
+  // para no subestimar el ACWR. Las ausencias registradas (tipo_ausencia IS NOT NULL) SI cuentan
+  // como "registradas" para sesionRegistrada() — no se anade aqui ninguna carga sintetica para
+  // ellas — pero ya contribuyen carga real = 0 a traves de getWorkloads(), porque son una fila
+  // normal de trainings con rpe=0. Asi una ausencia planificada (rpe=0, sin carga) se distingue
+  // correctamente de una sesion simplemente olvidada (rpe=5 estimado).
   private def sesionesEsperadasNoRegistradas(days: Int): List[Double] = {
     val conn = getConnection()
     try {

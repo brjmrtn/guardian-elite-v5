@@ -349,7 +349,7 @@ object BioController extends cask.Routes {
       div(cls := "col-md-6",
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "PROGRESO TECNICO"), div(cls := "card-body p-2", canvas(id:="techChart", style:="max-height:200px;"))),
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "CURVA DE CRECIMIENTO"), div(cls := "card-body p-2", canvas(id:="growthChart", style:="max-height:150px;"))),
-        div(cls := "card bg-dark text-white border-success shadow mb-3", div(cls := "card-header bg-success text-dark fw-bold text-center", "REGISTRO ENTRENO"), div(cls := "card-body p-3", form(action := "/bio/save_training", method := "post", div(cls:="mb-3", label(cls:="small fw-bold", "Tipo"), select(name:="tipo", id:="trainingType", onchange:="toggleDrills()", cls:="form-select bg-dark text-white fw-bold",
+        div(cls := "card bg-dark text-white border-success shadow mb-3", div(cls := "card-header bg-success text-dark fw-bold text-center", "REGISTRO ENTRENO"), div(cls := "card-body p-3", form(action := "/bio/save_training", method := "post", div(cls:="mb-3", label(cls:="small fw-bold", "Fecha de la sesión"), input(tpe:="date", name:="fecha", id:="trainingFecha", cls:="form-control bg-dark text-white border-secondary fw-bold", value:=java.time.LocalDate.now().toString, required:=true)), div(cls:="mb-3", label(cls:="small fw-bold", "Tipo"), select(name:="tipo", id:="trainingType", onchange:="toggleDrills()", cls:="form-select bg-dark text-white fw-bold",
               option(value:="Club", if(tipoSesionHoy.contains("Club")) selected:="selected" else frag(), "Club"),
               option(value:="Academia", if(tipoSesionHoy.contains("Academia")) selected:="selected" else frag(), "Academia"),
               option(value:="Judo", if(tipoSesionHoy.contains("Judo")) selected:="selected" else frag(), "🥋 Judo"))), drillList, div(cls:="mb-3", label(cls:="small fw-bold", "Foco / Actividad"), div(cls:="d-flex gap-2", input(tpe:="text", name:="foco", id:="drillFocus", cls:="form-control fw-bold", placeholder:="Ej: Tiros, Resistencia...", required:=true), button(tpe:="button", id:="aiBtn", cls:="btn btn-warning fw-bold", onclick:="generateAI()", style:="display:none;", "🤖 IA"))), div(id:="manualDesign", style:="display:none;", textarea(name:="rutina", id:="rutinaText", cls:="form-control mb-3 fw-bold", rows:="4", placeholder:="Detalle de la sesion...")), div(id:="feedbackEntrenadorBox", style:="display:none;", cls:="mb-3", label(cls:="small text-info fw-bold", "🎓 FEEDBACK DEL ENTRENADOR (opcional)"), textarea(name:="feedbackEntrenador", cls:="form-control form-control-sm bg-dark text-white border-info", rows:="3", placeholder:="Qué dijo el entrenador de academia sobre la sesión...")),
@@ -373,7 +373,22 @@ object BioController extends cask.Routes {
               )
             )
           ),
-          div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success fw-bold", "Guardar Sesion")))),
+          input(tpe:="hidden", name:="tipoAusencia", id:="hiddenTipoAusencia", value:=""),
+          div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success fw-bold", "Guardar Sesion")),
+          div(cls:="text-center mt-2",
+            button(tpe:="button", id:="btnNoAsistio", cls:="btn btn-sm btn-outline-danger fw-bold", onclick:="toggleAusenciaPanel()", "❌ No asistió a esta sesión")
+          ),
+          div(id:="ausenciaPanel", style:="display:none;", cls:="mt-2 p-2 border border-danger rounded bg-danger bg-opacity-10",
+            label(cls:="xx-small text-muted fw-bold d-block mb-1", "Motivo de la ausencia"),
+            select(id:="motivoAusencia", cls:="form-select form-select-sm bg-dark text-white border-danger mb-2",
+              option(value:="ENFERMEDAD", "Enfermedad"),
+              option(value:="FAMILIAR", "Plan familiar / vacaciones"),
+              option(value:="DESCANSO", "Descanso planificado"),
+              option(value:="OTRO", "Otro")
+            ),
+            div(cls:="d-grid", button(tpe:="button", cls:="btn btn-sm btn-danger fw-bold", onclick:="confirmarAusencia()", "Confirmar ausencia"))
+          )
+          )),
           div(cls:="card bg-secondary bg-opacity-10 border-secondary", div(cls:="card-body p-2", h6(cls:="text-muted small mb-2", "+ Anadir Mision Tecnica (10 Sesiones)"), form(action:="/bio/add_drill", method:="post", cls:="d-flex gap-2", input(tpe:="text", name:="nombre", cls:="form-control form-control-sm fw-bold", placeholder:="Ej: Control Orientado", required:=true), button(tpe:="submit", cls:="btn btn-sm btn-secondary fw-bold", "Crear")))),
 
           // --- MODULO 8: SESIONES DE ACADEMIA (con audio-diario) ---
@@ -402,6 +417,13 @@ object BioController extends cask.Routes {
       function toggleDrills(){ var type=document.getElementById('trainingType').value; var container=document.getElementById('drillsContainer'); var manual=document.getElementById('manualDesign'); var aiBtn = document.getElementById('aiBtn'); var fbBox = document.getElementById('feedbackEntrenadorBox'); if(container){if(type.includes('Papa') && !type.includes('Jugador')) container.style.display='block'; else container.style.display='none';} if(manual){if(type.includes('Papa')) manual.style.display='block'; else manual.style.display='none';} if(aiBtn){if(type.includes('Papa')) aiBtn.style.display='block'; else aiBtn.style.display='none';} if(fbBox){fbBox.style.display = (type === 'Academia') ? 'block' : 'none';}
       var judoBox=document.getElementById('judoInfoBox'); var rpeRow=document.getElementById('rpeCalidadAtencionRow'); var esJudo=(type==='Judo'); if(judoBox) judoBox.style.display = esJudo ? 'block' : 'none'; if(rpeRow) rpeRow.style.display = esJudo ? 'none' : 'flex'; }
       function toggleFootbarTraining(){ var panel=document.getElementById('footbarTrainingPanel'); var chevron=document.getElementById('footbarTrainingChevron'); if(panel.style.display==='none'){panel.style.display='block'; chevron.textContent='▲';} else {panel.style.display='none'; chevron.textContent='▼';} }
+      // PROBLEMA 3: marcar sesion como "no asistio"
+      function toggleAusenciaPanel(){ var p=document.getElementById('ausenciaPanel'); p.style.display = (p.style.display==='none') ? 'block' : 'none'; }
+      function confirmarAusencia(){
+        var motivo = document.getElementById('motivoAusencia').value;
+        document.getElementById('hiddenTipoAusencia').value = motivo;
+        document.getElementById('trainingType').closest('form').submit();
+      }
       function generateAI(){ var focus = document.getElementById('drillFocus').value; var type = document.getElementById('trainingType').value; if(!focus) { alert('Pon un objetivo primero (ej: Velocidad)'); return; } document.getElementById('rutinaText').value = "Generando..."; fetch('/bio/ai_gen?focus='+encodeURIComponent(focus)+'&mode='+encodeURIComponent(type)).then(r=>r.text()).then(t => document.getElementById('rutinaText').value = t); }
       window.addEventListener('DOMContentLoaded', toggleDrills);
     """))))
@@ -454,14 +476,22 @@ object BioController extends cask.Routes {
     val params = parseBody(request)
     val tipo   = params.getOrElse("tipo", "")
     val foco   = params.getOrElse("foco", "")
+    // PROBLEMA 2: fecha editable — por defecto hoy, pero el padre puede registrar dias anteriores
+    val fecha  = params.getOrElse("fecha", "").toString match {
+      case f if f.nonEmpty => try { java.time.LocalDate.parse(f).toString } catch { case _: Exception => java.time.LocalDate.now().toString }
+      case _ => java.time.LocalDate.now().toString
+    }
+    // PROBLEMA 3: si es un registro de ausencia, fuerza rpe/calidad/atencion a 0 sin importar el formulario
+    val tipoAusencia = params.getOrElse("tipoAusencia", "").trim
+    val esAusencia = tipoAusencia.nonEmpty
     // BLOQUE C2: el judo se registra con carga estimada fija — el padre no puede conocer RPE/calidad/atencion reales
     val esJudo = tipo.equalsIgnoreCase("Judo")
-    val rpe    = if (esJudo) 5 else params.getOrElse("rpe", "7").toIntOption.getOrElse(7)
-    val calidad = if (esJudo) 3 else params.getOrElse("calidad", "8").toIntOption.getOrElse(8)
-    val att    = if (esJudo) 3 else params.getOrElse("atencion", "8").toIntOption.getOrElse(8)
+    val rpe    = if (esAusencia) 0 else if (esJudo) 5 else params.getOrElse("rpe", "7").toIntOption.getOrElse(7)
+    val calidad = if (esAusencia) 0 else if (esJudo) 3 else params.getOrElse("calidad", "8").toIntOption.getOrElse(8)
+    val att    = if (esAusencia) 0 else if (esJudo) 3 else params.getOrElse("atencion", "8").toIntOption.getOrElse(8)
     val rutina = params.getOrElse("rutina", "")
     val feedbackEntrenador = params.getOrElse("feedbackEntrenador", "")
-    val fbDistancia        = params.getOrElse("fbDistancia", "").toDoubleOption
+    val fbDistancia        = if (esAusencia) None else params.getOrElse("fbDistancia", "").toDoubleOption
     val fbAltaIntensidad   = params.getOrElse("fbAltaIntensidad", "").toDoubleOption.map(_.toInt)
     val fbSprintMax        = params.getOrElse("fbSprintMax", "").toDoubleOption
     val fbPctActividad     = params.getOrElse("fbPctActividad", "").toDoubleOption.map(_.toInt)
@@ -469,7 +499,8 @@ object BioController extends cask.Routes {
     val fbAceleraciones    = params.getOrElse("fbAceleraciones", "").toIntOption
     val fbDesaceleraciones = params.getOrElse("fbDesaceleraciones", "").toIntOption
     DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina, feedbackEntrenador,
-      fbDistancia, fbAltaIntensidad, fbSprintMax, fbPctActividad, fbTiempoActivo, fbAceleraciones, fbDesaceleraciones)
+      fbDistancia, fbAltaIntensidad, fbSprintMax, fbPctActividad, fbTiempoActivo, fbAceleraciones, fbDesaceleraciones,
+      fecha, if (esAusencia) Some(tipoAusencia) else None)
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.title("Entreno Guardado"), tags2.style(raw(getCss()))),
       body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';",
