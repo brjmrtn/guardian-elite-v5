@@ -182,18 +182,57 @@ object HistoryController extends cask.Routes {
   }
 
   @cask.get("/history")
-  def historyPage(request: cask.Request) = withAuth(request) {
-    val matches = DatabaseManager.getMatchesList()
+  def historyPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadas = DatabaseManager.getTodasTemporadas()
+    val activaId = DatabaseManager.getTemporadaActivaId()
+    val efectivo = if (temporadaId > 0) temporadaId else activaId
+
+    val matches = DatabaseManager.getMatchesList(efectivo)
 
     // B1: Z-Score de rendimiento por contexto (solo activo con >=15 partidos totales)
-    val zScoresByMatchId: Map[Int, Double] = DatabaseManager.getZScoreRendimiento()
+    val zScoresByMatchId: Map[Int, Double] = DatabaseManager.getZScoreRendimiento(efectivo)
       .map(z => z("matchId").asInstanceOf[Int] -> z("zScore").asInstanceOf[Double]).toMap
 
-    // 1. Generamos las filas de la tabla
+    // BLOQUE B6: temporada archivada — solo lectura + resumen de cierre
+    val temporadaSeleccionada = temporadas.find(_("id").asInstanceOf[Int] == efectivo)
+    val esArchivada = temporadaSeleccionada.exists(t => t("fechaFin").asInstanceOf[String].nonEmpty)
+
+    val archivadaBanner: Modifier = if (!esArchivada) div() else {
+      val nombre = temporadaSeleccionada.get("nombre").asInstanceOf[String]
+      div(cls := "alert alert-warning small p-2 mb-3",
+        s"📦 Viendo temporada archivada: $nombre. Esta temporada está cerrada.")
+    }
+
+    val resumenArchivada: Modifier = if (!esArchivada) div() else {
+      val cerrada = DatabaseManager.getTemporadasCerradas().find(_("id").asInstanceOf[Int] == efectivo)
+      cerrada match {
+        case Some(c) =>
+          val mejorPartidoTxt: String = matches.maxByOption(_.nota) match {
+            case Some(m) => s"vs ${fixEncoding(m.rival)} (${m.nota})"
+            case None => "—"
+          }
+          div(cls := "card bg-dark border-secondary shadow-sm mb-3 p-3",
+            div(cls := "row text-center g-2",
+              div(cls := "col-3", div(cls := "xx-small text-muted", "Nota media final"), div(cls := "fw-bold text-warning", f"${c("mediaFinal").asInstanceOf[Double]}%.1f")),
+              div(cls := "col-3", div(cls := "xx-small text-muted", "PJ"), div(cls := "fw-bold text-white", c("pj").asInstanceOf[Int].toString)),
+              div(cls := "col-3", div(cls := "xx-small text-muted", "Porterías a cero"), div(cls := "fw-bold text-info", c("porteriasCero").asInstanceOf[Int].toString)),
+              div(cls := "col-3", div(cls := "xx-small text-muted", "Mejor partido"),
+                div(cls := "fw-bold text-success small", mejorPartidoTxt))
+            ),
+            if (c("tieneInforme").asInstanceOf[Boolean])
+              div(cls := "text-center mt-2",
+                a(href := s"/admin/season-report/$efectivo", target := "_blank", cls := "small text-info", "📄 Ver informe de fin de temporada"))
+            else div()
+          )
+        case None => div()
+      }
+    }
+
+    // 1. Generamos las filas de la tabla (solo lectura si la temporada esta archivada)
     val tableRows = if (matches.isEmpty) {
       Seq(tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")))
     } else {
-      matches.map(m => renderMatchRow(m, zScoresByMatchId.get(m.id)))
+      matches.map(m => renderMatchRow(m, zScoresByMatchId.get(m.id), readOnly = esArchivada))
     }
 
     // 2. Definimos el contenido central (SIN llamar a basePage aqui)
@@ -203,6 +242,9 @@ object HistoryController extends cask.Routes {
           h2(cls := "text-warning mb-0", "HISTORIAL"),
           a(href := "/mapa-goles", cls := "btn btn-outline-danger btn-sm fw-bold", "MAPA DE GOLES")
         ),
+        seasonSelector(temporadas, efectivo, "/history"),
+        archivadaBanner,
+        resumenArchivada,
         div(cls := "card shadow-sm border-0",
           div(cls := "card-body p-0",
             table(cls := "table table-hover tm-table mb-0",
@@ -224,14 +266,16 @@ object HistoryController extends cask.Routes {
   }
 
   @cask.get("/mapa-goles")
-  def mapaGolesPage(request: cask.Request, temporada: String = "", rival: String = "") = withAuth(request) {
+  def mapaGolesPage(request: cask.Request, temporada: String = "", rival: String = "", temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
 
     val heatmap = if (rival.nonEmpty)
       DatabaseManager.getGoalHeatmapByRival(rival)
     else
-      DatabaseManager.getGoalHeatmap(temporada)
+      DatabaseManager.getGoalHeatmap(temporada, efectivo)
 
-    val matches    = DatabaseManager.getMatchesList()
+    val matches    = DatabaseManager.getMatchesList(efectivo)
     val totalGoles = heatmap.values.sum
 
     // Temporadas disponibles (anos distintos en el historial)
@@ -306,6 +350,8 @@ object HistoryController extends cask.Routes {
           // Header
           h2(cls := "text-center text-danger mb-1", "MAPA DE GOLES ENCAJADOS"),
           p(cls  := "text-center text-muted small mb-4", s"$tituloFiltro -- $totalGoles goles en total"),
+
+          seasonSelector(temporadasDb, efectivo, "/mapa-goles"),
 
           // Filtros
           div(cls := "card bg-dark border-secondary shadow mb-4",
@@ -966,8 +1012,10 @@ object HistoryController extends cask.Routes {
 
   // ── GK INFLUENCE ANALYTICS ───────────────────────────────────────────────
   @cask.get("/gk-influence")
-  def gkInfluencePage(request: cask.Request) = withAuth(request) {
-    val stats = DatabaseManager.getGKInfluenceStats()
+  def gkInfluencePage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val stats = DatabaseManager.getGKInfluenceStats(efectivo)
     if (stats.isEmpty) renderHtml(basePage("history",
       div(cls:="text-center text-muted py-5", "Sin partidos jugados aun")
     )) else {
@@ -1010,6 +1058,7 @@ object HistoryController extends cask.Routes {
               h2(cls:="text-info mb-0", "GK INFLUENCE ANALYTICS"),
               a(href:="/history", cls:="btn btn-outline-secondary btn-sm fw-bold", "Historial")
             ),
+            seasonSelector(temporadasDb, efectivo, "/gk-influence"),
 
             // Score principal
             div(cls:=s"card bg-dark border-$scoreColor shadow mb-4",
@@ -1122,8 +1171,10 @@ object HistoryController extends cask.Routes {
 
   // ── BIOMECANICA POSICIONAL ────────────────────────────────────────────────
   @cask.get("/biomecanica")
-  def biomecanicaPage(request: cask.Request) = withAuth(request) {
-    val stats = DatabaseManager.getBiomecPosicional()
+  def biomecanicaPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val stats = DatabaseManager.getBiomecPosicional(efectivo)
     if (stats.isEmpty) renderHtml(basePage("history",
       div(cls:="text-center text-muted py-5", "Sin partidos jugados aun")
     )) else {
@@ -1201,6 +1252,7 @@ object HistoryController extends cask.Routes {
               h2(cls:="text-warning mb-0", "BIOMECANICA POSICIONAL"),
               a(href:="/history", cls:="btn btn-outline-secondary btn-sm fw-bold", "Historial")
             ),
+            seasonSelector(temporadasDb, efectivo, "/biomecanica"),
 
             // Alertas puntos ciegos y zonas fuertes
             div(cls:="row g-2 mb-4",
@@ -2916,8 +2968,10 @@ object HistoryController extends cask.Routes {
 
   // == STRIKER CLUSTERING ======================================================
   @cask.get("/striker-clustering")
-  def strikerClusteringPage(request: cask.Request) = withAuth(request) {
-    val clusters = DatabaseManager.getStrikerClusters()
+  def strikerClusteringPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val clusters = DatabaseManager.getStrikerClusters(efectivo)
 
     val nRivales = clusters.size
     val arquetipos = Map(
@@ -2940,6 +2994,7 @@ object HistoryController extends cask.Routes {
             ),
             a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
           ),
+          seasonSelector(temporadasDb, efectivo, "/striker-clustering"),
 
           if (nRivales == 0) div(cls := "alert alert-secondary",
             "Sin datos suficientes. Registra partidos y clasifica los goles en el Match Center."
@@ -3035,12 +3090,14 @@ object HistoryController extends cask.Routes {
 
   // == SCANNING RATE ===========================================================
   @cask.get("/scanning-rate")
-  def scanningRatePage(request: cask.Request) = withAuth(request) {
+  def scanningRatePage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
     val conn = DatabaseManager.getConnection()
     val (partidos, avgScan, avgNota, corrData) = try {
       val rs = conn.createStatement().executeQuery(
         "SELECT fecha, rival, nota, scanning_rate, goles_contra " +
-          "FROM matches WHERE status='PLAYED' AND nota > 0 " +
+          s"FROM matches WHERE status='PLAYED' AND nota > 0 ${DatabaseManager.seasonFilter(efectivo)} " +
           "ORDER BY fecha DESC LIMIT 30")
       var rows = List[(String, String, Double, Int, Int)]()
       while (rs.next()) rows = rows :+ (
@@ -3091,6 +3148,7 @@ object HistoryController extends cask.Routes {
             ),
             a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
           ),
+          seasonSelector(temporadasDb, efectivo, "/scanning-rate"),
 
           div(cls := "card bg-dark border-secondary mb-3",
             div(cls := "card-body p-3 small text-muted",
@@ -3226,8 +3284,10 @@ object HistoryController extends cask.Routes {
 
   // == PSxG DELTA ==============================================================
   @cask.get("/psxg-delta")
-  def psxgDeltaPage(request: cask.Request) = withAuth(request) {
-    val d = DatabaseManager.getPSxGDeltaData()
+  def psxgDeltaPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val d = DatabaseManager.getPSxGDeltaData(efectivo)
 
     val nGoles: Int           = d("nGoles").asInstanceOf[Int]
     val xgTotal: Double       = d("xgTotal").asInstanceOf[Double]
@@ -3270,6 +3330,7 @@ object HistoryController extends cask.Routes {
               a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
             )
           ),
+          seasonSelector(temporadasDb, efectivo, "/psxg-delta"),
 
           if (nGoles == 0) div(cls := "alert alert-secondary",
             "Sin goles registrados con análisis. Clasifica los goles en el Match Center para ver el PSxG Delta."
@@ -3462,8 +3523,10 @@ object HistoryController extends cask.Routes {
 
   // == RED-ZONE ANALYTICS ======================================================
   @cask.get("/red-zone")
-  def redZonePage(request: cask.Request) = withAuth(request) {
-    val d = DatabaseManager.getRedZoneData()
+  def redZonePage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val d = DatabaseManager.getRedZoneData(efectivo)
 
     val totalPartidos: Int    = d("totalPartidos").asInstanceOf[Int]
     val avgNotaGlobal: Double = d("avgNotaGlobal").asInstanceOf[Double]
@@ -3518,6 +3581,7 @@ object HistoryController extends cask.Routes {
               a(href := "/dashboard", cls := "btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
             )
           ),
+          seasonSelector(temporadasDb, efectivo, "/red-zone"),
 
           if (totalPartidos < 5) div(cls := "alert alert-secondary",
             s"Datos insuficientes. Necesitas al menos 5 partidos registrados (tienes $totalPartidos)."
@@ -3751,8 +3815,10 @@ object HistoryController extends cask.Routes {
 
   // == MATCH CONTEXT ANALYTICS =================================================
   @cask.get("/match-context")
-  def matchContextPage(request: cask.Request) = withAuth(request) {
-    val d = DatabaseManager.getMatchContextData()
+  def matchContextPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val d = DatabaseManager.getMatchContextData(efectivo)
 
     val porTipo     = d("porTipo").asInstanceOf[List[Map[String, Any]]]
     val porClima    = d("porClima").asInstanceOf[List[Map[String, Any]]]
@@ -3849,6 +3915,7 @@ object HistoryController extends cask.Routes {
             ),
             a(href:="/dashboard", cls:="btn btn-outline-secondary btn-sm fw-bold", "Dashboard")
           ),
+          seasonSelector(temporadasDb, efectivo, "/match-context"),
 
           // Banner resumen
           if (totalPJ >= 3) div(cls:="row g-2 mb-3",

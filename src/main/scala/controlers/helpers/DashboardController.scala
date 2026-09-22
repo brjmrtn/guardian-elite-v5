@@ -13,7 +13,12 @@ object DashboardController extends cask.Routes {
     val smartInsights = DatabaseManager.getSmartInsights()
     val smartInsightsText = smartInsights.replaceAll("<[^>]+>", "").trim
     val card = DatabaseManager.getLatestCardData()
-    val matches = DatabaseManager.getMatchesList()
+    // BLOQUE B5: los KPIs del dashboard (nota media, PJ, racha) se calculan sobre la temporada activa
+    val temporadaActivaId = DatabaseManager.getTemporadaActivaId()
+    val temporadaActivaNombre = DatabaseManager.getTodasTemporadas()
+      .find(_("id").asInstanceOf[Int] == temporadaActivaId)
+      .map(_("nombre").asInstanceOf[String]).getOrElse("Temporada actual")
+    val matches = DatabaseManager.getMatchesList(temporadaActivaId)
     val chartData = DatabaseManager.getChartData()
     val aiMessage = DatabaseManager.getDeepAnalysis()
     val cognitiveInsight = DatabaseManager.getCognitiveInsight()
@@ -773,6 +778,11 @@ object DashboardController extends cask.Routes {
                 ),
                 div(style := "height:6px; background:#334155; border-radius:3px;",
                   div(style := s"height:6px; width:$xpPercent%; background:#d4af37; border-radius:3px;"))
+              ),
+              // BLOQUE B5: badge discreto de la temporada activa — lleva al historial
+              a(href := "/history", style := "text-decoration:none;",
+                div(style := "display:inline-block; margin-bottom:8px; font-size:9px; color:#94a3b8; background:#1e293b; border:1px solid #334155; border-radius:6px; padding:2px 8px;",
+                  s"📅 $temporadaActivaNombre")
               ),
               // KPIs rápidos
               div(cls := "row g-2",

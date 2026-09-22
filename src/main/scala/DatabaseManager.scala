@@ -1824,14 +1824,17 @@ RECOMENDACION: <texto>"""
   }
 
   // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
-  def getBenchmark(): Map[String, Any] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getBenchmark(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
       val rae = getRaeAdjustedStats()
+      val cacheKey = if (seasonId > 0) s"benchmark_$seasonId" else "benchmark"
 
-      val rsCache = conn.prepareStatement(
-        "SELECT payload FROM feature_cache WHERE cache_key = 'benchmark' AND updated_at > NOW() - INTERVAL '7 days'"
-      ).executeQuery()
+      val rsCacheStmt = conn.prepareStatement(
+        "SELECT payload FROM feature_cache WHERE cache_key = ? AND updated_at > NOW() - INTERVAL '7 days'")
+      rsCacheStmt.setString(1, cacheKey)
+      val rsCache = rsCacheStmt.executeQuery()
       if (rsCache.next()) {
         val json = ujson.read(rsCache.getString("payload"))
         return Map("percentil" -> json("percentil").str, "areas" -> json("areas").str,
@@ -1840,7 +1843,7 @@ RECOMENDACION: <texto>"""
 
       val card = getLatestCardData()
       val edad = calcularEdadExacta(card.fechaNacimiento)
-      val matches = getMatchesList() // ORDER BY fecha DESC
+      val matches = getMatchesList(seasonId) // ORDER BY fecha DESC
       val pj = matches.size
 
       if (pj < 3) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> true) ++ rae
@@ -1882,19 +1885,26 @@ REFERENCIA: <texto>"""
 
       val payload = ujson.Obj("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt)
       val upsert = conn.prepareStatement("""
-        INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('benchmark', ?, NOW())
+        INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW())
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
-      upsert.setString(1, ujson.write(payload))
+      upsert.setString(1, cacheKey)
+      upsert.setString(2, ujson.write(payload))
       upsert.executeUpdate()
 
       Map("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt, "sinDatos" -> false) ++ rae
     } finally { conn.close() }
   }
 
-  def invalidateBenchmarkCache(): Unit = {
+  // BLOQUE B3: invalida el cache de la temporada indicada (o el global si seasonId=0)
+  def invalidateBenchmarkCache(seasonId: Int = 0): Unit = {
+    val cacheKey = if (seasonId > 0) s"benchmark_$seasonId" else "benchmark"
     val conn = getConnection()
-    try { conn.createStatement().executeUpdate("DELETE FROM feature_cache WHERE cache_key = 'benchmark'") }
+    try {
+      val ps = conn.prepareStatement("DELETE FROM feature_cache WHERE cache_key = ?")
+      ps.setString(1, cacheKey)
+      ps.executeUpdate()
+    }
     finally { conn.close() }
   }
 
@@ -2636,7 +2646,9 @@ $analisisConcatenados"""
       val chronic = getWorkloads(28)
       val acwr = StatsCalculator.calculateACWR(acute, chronic)
 
-      val rsUltimo = conn.createStatement().executeQuery("SELECT MAX(fecha) as f FROM matches WHERE status='PLAYED'")
+      // BLOQUE B3: el partido de referencia para "dias desde el ultimo partido" debe ser de la temporada activa
+      val rsUltimo = conn.createStatement().executeQuery(
+        s"SELECT MAX(fecha) as f FROM matches WHERE status='PLAYED' ${seasonFilter(getTemporadaActivaId())}")
       val diasDesdePartido: Option[Int] =
         if (rsUltimo.next()) {
           val f = rsUltimo.getDate("f")
@@ -3080,8 +3092,9 @@ $analisisConcatenados"""
 
       val fallos = getTechnicalAlerts().take(3).mkString("; ")
 
+      // BLOQUE B3: zona vulnerable calculada solo con partidos de la temporada activa
       val rsZona = conn.createStatement().executeQuery(
-        "SELECT zona_goles FROM matches WHERE status='PLAYED' AND zona_goles IS NOT NULL AND zona_goles != '' ORDER BY fecha DESC LIMIT 10")
+        s"SELECT zona_goles FROM matches WHERE status='PLAYED' AND zona_goles IS NOT NULL AND zona_goles != '' ${seasonFilter(getTemporadaActivaId())} ORDER BY fecha DESC LIMIT 10")
       val zonaCounts = scala.collection.mutable.Map[String, Int]().withDefaultValue(0)
       while (rsZona.next()) rsZona.getString("zona_goles").split(",").filter(_.nonEmpty).foreach(z => zonaCounts(z.trim) += 1)
       val zonaVulnerable = if (zonaCounts.nonEmpty) zonaCounts.maxBy(_._2)._1 else "sin datos suficientes"
@@ -3416,6 +3429,28 @@ $analisisConcatenados"""
       diasDesdeUltimo("cognitivo_tests").filter(_ > 90).foreach(d => pendientesTrimestre += s"🧠 Test cognitivo pendiente (último hace $d días)")
       diasDesdeUltimo("psych_records").filter(_ > 90).foreach(d => pendientesTrimestre += s"🧠 Registro psicológico pendiente (último hace $d días)")
       diasDesdeUltimo("physical_growth").filter(_ > 90).foreach(d => pendientesTrimestre += s"📏 Registro de crecimiento pendiente (último hace $d días)")
+
+      // BLOQUE A — recordatorio de revision mensual del IDP (solo si hay temporada IDP activa)
+      val rsIdpRev = conn.createStatement().executeQuery("""
+        SELECT
+          EXTRACT(EPOCH FROM (CURRENT_DATE::timestamp - MAX(r.fecha)::timestamp)) / 86400 as dias
+        FROM idp_revisiones r
+        JOIN idp_temporadas t ON t.id = r.temporada_id
+        WHERE t.estado = 'ACTIVA'
+      """)
+      if (rsIdpRev.next()) {
+        val diasSinRevision = rsIdpRev.getInt("dias")
+        if (!rsIdpRev.wasNull()) {
+          if (diasSinRevision > 35)
+            pendientesTrimestre += s"🗺️ Revisión mensual del IDP pendiente (última hace $diasSinRevision días) — ve a IDP para registrarla."
+        } else {
+          val rsIdpActiva = conn.createStatement().executeQuery(
+            "SELECT COUNT(*) as n FROM idp_temporadas WHERE estado = 'ACTIVA'")
+          if (rsIdpActiva.next() && rsIdpActiva.getInt("n") > 0)
+            pendientesTrimestre += "🗺️ Aún no has hecho ninguna revisión mensual del IDP — ve a IDP para registrar la primera."
+        }
+      }
+
       val trimestralHtml = if (pendientesTrimestre.isEmpty) "" else
         s"<h3>📅 PENDIENTE TRIMESTRAL</h3><ul>${pendientesTrimestre.map(p => s"<li>$p</li>").mkString}</ul>"
 
@@ -3593,7 +3628,7 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
   }
 
   // --- LECTURA DE PARTIDOS EXTENDIDA ---
-  def getMatchesList(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='PLAYED' ORDER BY fecha DESC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse("")) } } finally {conn.close()}; l }
+  def getMatchesList(seasonId: Int = 0): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery(s"SELECT * FROM matches WHERE status='PLAYED' ${seasonFilter(seasonId)} ORDER BY fecha DESC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse("")) } } finally {conn.close()}; l }
   def getUpcomingMatches(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='SCHEDULED' ORDER BY fecha ASC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), "-", 0, 0, rs.getDate("fecha").toString, "", Option(rs.getString("estadio")).getOrElse(""), "", "", "", rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"),0,0,0,0, "", Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), 0,0,0,0,"","") } } finally {conn.close()}; l }
   def getMatchById(id: Int): Option[MatchLog] = { var m:Option[MatchLog]=None; val conn=getConnection(); try { val s=conn.prepareStatement("SELECT * FROM matches WHERE id = ?"); s.setInt(1,id); val rs=s.executeQuery(); if(rs.next()){ m=Some(MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse("Sol"), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse(""))) } } finally { conn.close() }; m }
   def getRivalScouting(rivalBusqueda: String): (List[MatchLog], Map[String, Int]) = { var matches = List[MatchLog](); var stats = scala.collection.mutable.Map("pj"->0, "gf"->0, "gc"->0, "ganados"->0, "empatados"->0, "perdidos"->0); val conn = getConnection(); try { val query = s"SELECT * FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED' ORDER BY fecha DESC"; val stmt = conn.prepareStatement(query); stmt.setString(1, s"%$rivalBusqueda%"); val rs = stmt.executeQuery(); while(rs.next()) { val (gf, gc) = (rs.getInt("goles_favor"), rs.getInt("goles_contra")); matches = matches :+ MatchLog(rs.getInt("id"), rs.getString("rival"), s"$gf-$gc", rs.getInt("minutos"), rs.getDouble("nota"), rs.getString("fecha"), Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse("")); stats("pj") += 1; stats("gf") += gf; stats("gc") += gc; if(gf > gc) stats("ganados") += 1 else if(gf == gc) stats("empatados") += 1 else stats("perdidos") += 1 } } finally { conn.close() }; (matches, stats.toMap) }
@@ -3700,14 +3735,14 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
   def getChartData(): String = { var l=List[String](); var d=List[Double](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT rival, media_historica FROM matches WHERE status='PLAYED' ORDER BY fecha ASC LIMIT 15"); while(rs.next()){ l=l:+s"'${rs.getString("rival")}'"; d=d:+rs.getDouble("media_historica") } } finally {conn.close()}; s"""{ "labels": [${l.mkString(",")}], "data": [${d.mkString(",")}] }""" }
   def getAchievements(): List[Achievement] = { var l=List[Achievement](); val conn=getConnection(); try { val s=conn.createStatement(); val r1=s.executeQuery("SELECT COUNT(*) FROM matches WHERE goles_contra=0 AND status='PLAYED'"); if(r1.next()&&r1.getInt(1)>=5) l=l:+Achievement("(M)","El Muro",r1.getInt(1)/5,""); val r2=s.executeQuery("SELECT COUNT(*) FROM matches WHERE nota>=9 AND status='PLAYED'"); if(r2.next()&&r2.getInt(1)>0) l=l:+Achievement("(E)","MVP",r2.getInt(1),"") } finally { conn.close() }; l }
   def getSeasonObjectives(): List[Objective] = { var l=List[Objective](); val conn=getConnection(); try { val rsObj=conn.createStatement().executeQuery("SELECT id, tipo, objetivo, descripcion FROM objectives"); val objs=new scala.collection.mutable.ListBuffer[(Int,String,Int,String)](); while(rsObj.next()) objs+=((rsObj.getInt("id"),rsObj.getString("tipo"),rsObj.getInt("objetivo"),rsObj.getString("descripcion"))); val rsStats=conn.createStatement().executeQuery("SELECT COUNT(*) as pj, COUNT(CASE WHEN goles_contra=0 THEN 1 END) as cs, AVG(nota) as media FROM matches WHERE status='PLAYED'"); var (cs,pj,md)=(0,0,0.0); if(rsStats.next()){cs=rsStats.getInt("cs");pj=rsStats.getInt("pj");md=rsStats.getDouble("media")}; objs.foreach { case (id,t,m,d) => val act=t match { case "CleanSheets"=>cs.toDouble case "MediaNota"=>md case "PartidosJugados"=>pj.toDouble case _=>0.0 }; l=l:+Objective(id,t,act,m,d) } } finally { conn.close() }; l }
-  def getGoalHeatmap(temporada: String = ""): Map[String, Int] = {
+  def getGoalHeatmap(temporada: String = "", seasonId: Int = 0): Map[String, Int] = {
     val zones = Seq("TL","TC","TR","ML","MC","MR","BL","BC","BR")
     val counts = scala.collection.mutable.Map(zones.map(_ -> 0): _*)
     val conn = getConnection()
     try {
-      val where = if (temporada.nonEmpty) s"AND fecha >= '$temporada-01-01' AND fecha <= '$temporada-12-31'" else ""
+      val whereAnio = if (temporada.nonEmpty) s"AND fecha >= '$temporada-01-01' AND fecha <= '$temporada-12-31'" else ""
       val rs = conn.createStatement().executeQuery(
-        s"SELECT zona_goles FROM matches WHERE status='PLAYED' AND zona_goles IS NOT NULL AND zona_goles != '' $where"
+        s"SELECT zona_goles FROM matches WHERE status='PLAYED' AND zona_goles IS NOT NULL AND zona_goles != '' $whereAnio ${seasonFilter(seasonId)}"
       )
       while (rs.next()) {
         val zg = rs.getString("zona_goles")
@@ -4034,11 +4069,13 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
   }
 
   // ── GK INFLUENCE ANALYTICS ────────────────────────────────────────────────
-  def getGKInfluenceStats(): Map[String, Any] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios para llamadas existentes)
+  def getGKInfluenceStats(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
+      val sf = seasonFilter(seasonId)
       // Distribuciones con pie (acciones_pie) y resultado posterior
-      val rs = conn.createStatement().executeQuery("""
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT
           AVG(acciones_pie) as avg_pie,
           SUM(acciones_pie) as total_pie,
@@ -4049,7 +4086,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
           COUNT(*) as pj,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as pcs,
           AVG(nota) as avg_nota
-        FROM matches WHERE status='PLAYED'
+        FROM matches WHERE status='PLAYED' $sf
       """)
       if (!rs.next()) return Map.empty
 
@@ -4065,7 +4102,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
 
       // Serie temporal: acciones_pie + nota por partido (ultimos 20)
       val rsSerie = conn.createStatement().executeQuery(
-        "SELECT fecha::TEXT, acciones_pie, nota, rival FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 20"
+        s"SELECT fecha::TEXT, acciones_pie, nota, rival FROM matches WHERE status='PLAYED' $sf ORDER BY fecha DESC LIMIT 20"
       )
       var serie = List[(String, Int, Double, String)]()
       while (rsSerie.next()) serie = serie :+ (
@@ -4073,11 +4110,11 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
       )
 
       // Distribucion por tipo de balon parado
-      val rsTipo = conn.createStatement().executeQuery("""
+      val rsTipo = conn.createStatement().executeQuery(s"""
         SELECT
           SUM(pc_t) as cent_total, SUM(pc_ok) as cent_ok,
           SUM(pl_t) as larg_total, SUM(pl_ok) as larg_ok
-        FROM matches WHERE status='PLAYED'
+        FROM matches WHERE status='PLAYED' $sf
       """)
       val (centTotal, centOk, largTotal, largOk) = if (rsTipo.next())
         (rsTipo.getInt(1), rsTipo.getInt(2), rsTipo.getInt(3), rsTipo.getInt(4))
@@ -4096,7 +4133,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
   }
 
   // ── BIOMECANICA POSICIONAL ─────────────────────────────────────────────────
-  def getBiomecPosicional(): Map[String, Any] = {
+  def getBiomecPosicional(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
       // Zonas de gol encajado vs zonas de parada (9 zonas: TL,TC,TR,ML,MC,MR,BL,BC,BR)
@@ -4106,7 +4143,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
       val tirosMap  = scala.collection.mutable.Map(zones.map(_ -> 0): _*)
 
       val rs = conn.createStatement().executeQuery(
-        "SELECT zona_goles, zona_paradas, zona_tiros FROM matches WHERE status='PLAYED'"
+        s"SELECT zona_goles, zona_paradas, zona_tiros FROM matches WHERE status='PLAYED' ${seasonFilter(seasonId)}"
       )
       while (rs.next()) {
         Option(rs.getString("zona_goles")).getOrElse("").split(",").filter(_.nonEmpty).foreach { z =>
@@ -4473,7 +4510,8 @@ Responde en espanol, tono positivo y motivador para un nino."""
   }
 
   // == FASE 8: PSxG DELTA (Post-Shot xG vs Goals Conceded) =====================
-  def getPSxGDeltaData(): Map[String, Any] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getPSxGDeltaData(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
       // Tabla de xG base por zona + situacion
@@ -4506,7 +4544,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
         "mg.minuto, m.fecha, m.rival, m.nota " +
         "FROM match_goals mg " +
         "JOIN matches m ON mg.match_id = m.id " +
-        "WHERE m.status = 'PLAYED' " +
+        s"WHERE m.status = 'PLAYED' ${seasonFilter(seasonId)} " +
         "ORDER BY m.fecha DESC")
 
       case class GoalRow(zona: String, situacion: String, responsabilidad: String,
@@ -4988,13 +5026,14 @@ Responde en espanol, tono positivo y motivador para un nino."""
   }
 
   // == FASE 7: STRIKER CLUSTERING ==============================================
-  def getStrikerClusters(): List[Map[String, Any]] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getStrikerClusters(seasonId: Int = 0): List[Map[String, Any]] = {
     val conn = getConnection()
     try {
       // Agrupamos rivales por perfil de ataque usando datos ya disponibles
       // Arquetipo: RAPIDO (muchos goles en contraataque/1v1), FISICO (muchos goles aereos/2v1),
       //            TECNICO (pocos goles pero alta nota rival), DIRECTO (muchos goles de tiro lejano)
-      val rs = conn.createStatement().executeQuery("""
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT
           m.rival,
           COUNT(DISTINCT m.id)                                              AS pj,
@@ -5012,7 +5051,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
           MAX(m.goles_contra)                                               AS gc_max
         FROM matches m
         LEFT JOIN match_goals mg ON mg.match_id = m.id
-        WHERE m.status = 'PLAYED'
+        WHERE m.status = 'PLAYED' ${seasonFilter(seasonId)}
         GROUP BY m.rival
         HAVING COUNT(DISTINCT m.id) >= 1
         ORDER BY gc_total DESC
@@ -5082,14 +5121,16 @@ Responde en espanol, tono positivo y motivador para un nino."""
   }
 
   // == FASE 7: RED-ZONE ANALYTICS ==============================================
-  def getRedZoneData(): Map[String, Any] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getRedZoneData(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
+      val sf = seasonFilter(seasonId)
       // 1. Media global de referencia
       val rsGlobal = conn.createStatement().executeQuery(
         "SELECT AVG(nota) as avg_nota, AVG(paradas) as avg_paradas, " +
         "AVG(goles_contra) as avg_gc, COUNT(*) as total " +
-        "FROM matches WHERE status='PLAYED' AND nota > 0")
+        s"FROM matches WHERE status='PLAYED' AND nota > 0 $sf")
       val (avgNotaGlobal, avgParadasGlobal, avgGcGlobal, totalPartidos) =
         if (rsGlobal.next()) (rsGlobal.getDouble("avg_nota"), rsGlobal.getDouble("avg_paradas"),
                               rsGlobal.getDouble("avg_gc"),   rsGlobal.getInt("total"))
@@ -5098,7 +5139,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 2. Partidos de alta presion: goles_contra >= 2 (asedio ofensivo)
       val rsAsedio = conn.createStatement().executeQuery(
         "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor, minutos " +
-        "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 2 " +
+        s"FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 2 $sf " +
         "ORDER BY fecha DESC LIMIT 30")
       var asedioRows = List[Map[String, Any]]()
       while (rsAsedio.next()) {
@@ -5119,7 +5160,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 3. Partidos disputados con minutos >= 70 (final del partido - zona de fatiga)
       val rsFatiga = conn.createStatement().executeQuery(
         "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor, minutos " +
-        "FROM matches WHERE status='PLAYED' AND nota > 0 AND minutos >= 70 " +
+        s"FROM matches WHERE status='PLAYED' AND nota > 0 AND minutos >= 70 $sf " +
         "ORDER BY fecha DESC LIMIT 30")
       var fatigaRows = List[Map[String, Any]]()
       while (rsFatiga.next()) {
@@ -5140,7 +5181,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       // 4. Partidos de derrota abultada (gc >= 3) — colapso total
       val rsColapso = conn.createStatement().executeQuery(
         "SELECT id, fecha, rival, nota, paradas, goles_contra, goles_favor " +
-        "FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 3 " +
+        s"FROM matches WHERE status='PLAYED' AND nota > 0 AND goles_contra >= 3 $sf " +
         "ORDER BY fecha DESC LIMIT 20")
       var colapsoRows = List[Map[String, Any]]()
       while (rsColapso.next()) {
@@ -5596,10 +5637,12 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   }
 
   // ── EFECTO MARIPOSA ──────────────────────────────────────────────────────
-  def getEfectoMariposa(): Map[String, Any] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getEfectoMariposa(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
-      val rs = conn.createStatement().executeQuery("""
+      val sf = seasonFilter(seasonId)
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT
           COUNT(*) as pj,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as clean_sheets,
@@ -5608,7 +5651,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
           SUM(CASE WHEN goles_favor = goles_contra THEN 1 ELSE 0 END) as empatados,
           SUM(CASE WHEN goles_favor < goles_contra THEN 1 ELSE 0 END) as perdidos,
           AVG(nota) as nota_media
-        FROM matches WHERE status = 'PLAYED'
+        FROM matches WHERE status = 'PLAYED' $sf
       """)
       if (!rs.next()) return Map("ok" -> false)
       val pj         = rs.getInt("pj")
@@ -5626,11 +5669,11 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       val nonCsWinRate = if (nonCs > 0) (nonCsWins.toDouble / nonCs * 100).toInt else 0
 
       // Clutch points: partidos ganados donde margen = 1 gol con nota >= 7.5
-      val rsClutch = conn.createStatement().executeQuery("""
+      val rsClutch = conn.createStatement().executeQuery(s"""
         SELECT COUNT(*) as clutch,
                SUM(goles_favor - goles_contra) as margen_total
         FROM matches
-        WHERE status = 'PLAYED'
+        WHERE status = 'PLAYED' $sf
           AND goles_favor > goles_contra
           AND (goles_favor - goles_contra) = 1
           AND nota >= 7.5
@@ -5639,14 +5682,14 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         (rsClutch.getInt("clutch"), rsClutch.getInt("margen_total")) else (0, 0)
 
       // Influence data: nota por resultado para gráfico
-      val rsInfluence = conn.createStatement().executeQuery("""
+      val rsInfluence = conn.createStatement().executeQuery(s"""
         SELECT
           CASE WHEN goles_favor > goles_contra THEN 'G'
                WHEN goles_favor = goles_contra THEN 'E'
                ELSE 'P' END as res,
           ROUND(nota::numeric, 1) as nota,
           COUNT(*) as cnt
-        FROM matches WHERE status = 'PLAYED'
+        FROM matches WHERE status = 'PLAYED' $sf
         GROUP BY res, ROUND(nota::numeric, 1)
         ORDER BY nota
       """)
@@ -5929,6 +5972,50 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       else None
     } finally { conn.close() }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE B1 — ARQUITECTURA DE TEMPORADAS: HELPERS (Elite exclusivamente)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getTemporadaActivaId(): Int = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1")
+      if (rs.next()) rs.getInt("id") else 0
+    } finally { conn.close() }
+  }
+
+  def getTodasTemporadas(): List[Map[String, Any]] = {
+    var result = List[Map[String, Any]]()
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, COALESCE(nombre, categoria, 'Temporada') as nombre, categoria, fecha_inicio, fecha_fin FROM seasons ORDER BY id DESC")
+      while (rs.next()) {
+        val fechaFin = Option(rs.getDate("fecha_fin")).map(_.toString)
+        result = result :+ Map(
+          "id"          -> rs.getInt("id"),
+          "nombre"      -> fixEncoding(Option(rs.getString("nombre")).getOrElse("")),
+          "categoria"   -> Option(rs.getString("categoria")).getOrElse(""),
+          "fechaInicio" -> Option(rs.getDate("fecha_inicio")).map(_.toString).getOrElse(""),
+          "fechaFin"    -> fechaFin.getOrElse(""),
+          "activa"      -> fechaFin.isEmpty
+        )
+      }
+    } finally { conn.close() }
+    result
+  }
+
+  // No privado: los controllers que construyen SQL inline (ej. /scanning-rate) tambien lo necesitan.
+  // DECISION: seasonId=0 significa "sin filtro" (todo el historico), NO "temporada activa".
+  // Esto es lo unico que hace cierta la premisa "el valor por defecto 0 garantiza que todos los
+  // sitios existentes siguen funcionando sin cambios": getMatchesList(), getStrikerClusters(), etc.
+  // se llaman desde muchos sitios fuera de las paginas del Bloque B4 (dashboard, admin, perfil
+  // publico, scouting report, moneyball...) que esperan el historico completo de la carrera, no solo
+  // la temporada activa. Las paginas del B4 resuelven "por defecto la temporada activa" ellas mismas
+  // (val efectivo = if (temporadaId > 0) temporadaId else getTemporadaActivaId()) antes de llamar aqui.
+  def seasonFilter(seasonId: Int): String =
+    if (seasonId > 0) s"AND season_id = $seasonId" else ""
 
   def getTemporadaActivaInfo(): Option[Map[String, Any]] = {
     val conn = getConnection()
@@ -6621,10 +6708,11 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     def acwr: Double = if (chronicLoad > 0) acuteLoad / chronicLoad else 0.0
   }
 
-  private def fetchRegistrosPartido(): List[RegistroPartido] = {
+  private def fetchRegistrosPartido(seasonId: Int = 0): List[RegistroPartido] = {
     val conn = getConnection()
     try {
-      val rs = conn.createStatement().executeQuery("""
+      val sf = seasonFilter(seasonId).replace("season_id", "m.season_id")
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT w.fecha::TEXT as w_fecha,
                w.sueno_profundo_min, w.sueno_ligero_min, w.sueno_despierto_min,
                w.horas_sueno, w.sueno as calidad, w.energia, w.animo,
@@ -6640,7 +6728,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                         (SELECT 0, rpe, 1, fecha FROM trainings)) loads
                   WHERE fecha <= w.fecha AND fecha > w.fecha - 28) as chronic_load
         FROM wellness w
-        JOIN matches m ON m.status = 'PLAYED' AND m.fecha > w.fecha AND m.fecha <= w.fecha + 2
+        JOIN matches m ON m.status = 'PLAYED' AND m.fecha > w.fecha AND m.fecha <= w.fecha + 2 $sf
         ORDER BY w.fecha ASC
       """)
       var list = List[RegistroPartido]()
@@ -6671,8 +6759,9 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       Map[String, Any]("nivel" -> n, "notaMedia" -> (if (grp.nonEmpty) grp.map(_.notaPartido).sum / grp.size else 0.0), "partidos" -> grp.size)
     }
 
-  def getSleepCorrelations(): Map[String, Any] = {
-    val all = fetchRegistrosPartido()
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getSleepCorrelations(seasonId: Int = 0): Map[String, Any] = {
+    val all = fetchRegistrosPartido(seasonId)
     val totalPares = all.size
 
     val conSuenoProfundo = all.filter(_.suenoProfundoMin.isDefined)
@@ -7111,11 +7200,13 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
   }
 
   // ── MATCH CONTEXT ANALYTICS ─────────────────────────────────────────────
-  def getMatchContextData(): Map[String, Any] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getMatchContextData(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
+      val sf = seasonFilter(seasonId)
       // 1. POR TIPO DE PARTIDO (LIGA / TORNEO / AMISTOSO)
-      val rsTipo = conn.createStatement().executeQuery("""
+      val rsTipo = conn.createStatement().executeQuery(s"""
         SELECT
           COALESCE(tipo_partido, 'LIGA') as tipo,
           COUNT(*) as pj,
@@ -7123,7 +7214,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
           AVG(goles_contra) as gc_media,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias,
           AVG(paradas) as paradas_media
-        FROM matches WHERE status='PLAYED'
+        FROM matches WHERE status='PLAYED' $sf
         GROUP BY COALESCE(tipo_partido, 'LIGA')
         ORDER BY nota_media DESC
       """)
@@ -7140,14 +7231,14 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       }
 
       // 2. POR CLIMA
-      val rsClima = conn.createStatement().executeQuery("""
+      val rsClima = conn.createStatement().executeQuery(s"""
         SELECT
           COALESCE(clima, 'Sin datos') as clima,
           COUNT(*) as pj,
           AVG(nota) as nota_media,
           AVG(goles_contra) as gc_media,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
-        FROM matches WHERE status='PLAYED' AND clima IS NOT NULL AND clima != ''
+        FROM matches WHERE status='PLAYED' AND clima IS NOT NULL AND clima != '' $sf
         GROUP BY COALESCE(clima, 'Sin datos')
         ORDER BY nota_media DESC
       """)
@@ -7163,7 +7254,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       }
 
       // 3. LOCAL vs VISITANTE — campo es_local de la tabla matches
-      val rsLV = conn.createStatement().executeQuery("""
+      val rsLV = conn.createStatement().executeQuery(s"""
         SELECT
           es_local,
           COUNT(*) as pj,
@@ -7171,7 +7262,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
           AVG(goles_contra) as gc_media,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
         FROM matches
-        WHERE status='PLAYED' AND es_local IS NOT NULL
+        WHERE status='PLAYED' AND es_local IS NOT NULL $sf
         GROUP BY es_local
       """)
       var localNota = 0.0; var localGC = 0.0; var localPJ = 0; var localLimpias = 0
@@ -7194,7 +7285,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       val visitGCFinal   = visitGC
 
       // 4. POR DURACIÓN (franjas de minutos)
-      val rsDur = conn.createStatement().executeQuery("""
+      val rsDur = conn.createStatement().executeQuery(s"""
         SELECT
           CASE
             WHEN minutos < 40 THEN 'Partido corto (<40 min)'
@@ -7206,7 +7297,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
           AVG(nota) as nota_media,
           AVG(goles_contra) as gc_media,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
-        FROM matches WHERE status='PLAYED' AND minutos > 0
+        FROM matches WHERE status='PLAYED' AND minutos > 0 $sf
         GROUP BY 1
         ORDER BY nota_media DESC
       """)
@@ -7222,14 +7313,14 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       }
 
       // 5. TENDENCIA MENSUAL (últimos 12 meses, para el gráfico de línea)
-      val rsTrend = conn.createStatement().executeQuery("""
+      val rsTrend = conn.createStatement().executeQuery(s"""
         SELECT
           TO_CHAR(DATE_TRUNC('month', fecha), 'MM/YY') as mes,
           AVG(nota) as nota_media,
           COUNT(*) as pj,
           SUM(CASE WHEN goles_contra = 0 THEN 1 ELSE 0 END) as limpias
         FROM matches
-        WHERE status='PLAYED' AND fecha >= CURRENT_DATE - INTERVAL '12 months'
+        WHERE status='PLAYED' AND fecha >= CURRENT_DATE - INTERVAL '12 months' $sf
         GROUP BY DATE_TRUNC('month', fecha)
         ORDER BY DATE_TRUNC('month', fecha) ASC
       """)
@@ -8384,10 +8475,12 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE B1 — Z-SCORE DE RENDIMIENTO POR CONTEXTO
   // ─────────────────────────────────────────────────────────────────────────────
-  def getZScoreRendimiento(): List[Map[String, Any]] = {
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getZScoreRendimiento(seasonId: Int = 0): List[Map[String, Any]] = {
     val conn = getConnection()
     try {
-      val rs = conn.createStatement().executeQuery("""
+      val sf = seasonFilter(seasonId).replace("season_id", "m.season_id")
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT m.id, m.clima, m.es_local, m.nota,
           (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 7.0
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
@@ -8400,7 +8493,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
              WHERE fecha <= m.fecha AND fecha > m.fecha - 28) as chronic_load
         FROM matches m
-        WHERE m.status = 'PLAYED' AND m.nota > 0
+        WHERE m.status = 'PLAYED' AND m.nota > 0 $sf
         ORDER BY m.fecha ASC
       """)
       case class MCtx(id: Int, clima: String, esLocal: Option[Boolean], nota: Double, acute: Double, chronic: Double) {
@@ -8436,8 +8529,9 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE B2 — DETECTOR DE TENDENCIA (media movil 5 partidos)
   // ─────────────────────────────────────────────────────────────────────────────
-  def getTrendLOESS(): Map[String, Any] = {
-    val matches = getMatchesList() // ORDER BY fecha DESC
+  // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
+  def getTrendLOESS(seasonId: Int = 0): Map[String, Any] = {
+    val matches = getMatchesList(seasonId) // ORDER BY fecha DESC
     val notasRecientesPrimero = matches.map(_.nota)
     if (notasRecientesPrimero.size < 20) return Map("activo" -> false)
 
@@ -8612,13 +8706,15 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     }
   }
 
-  def getAlertasEstadisticasPersonales(): List[String] = {
+  // BLOQUE B3: seasonId solo afecta a la parte de "nota de partido" (item 1) — el resto de
+  // baselines (sueno, ACWR, wellness) son fisiologicos y deben seguir usando todo el historico.
+  def getAlertasEstadisticasPersonales(seasonId: Int = 0): List[String] = {
     val conn = getConnection()
     try {
       var alertas = List[String]()
 
       // 1. Nota de partido: historico completo vs ultimo partido
-      val matches = getMatchesList() // DESC por fecha
+      val matches = getMatchesList(seasonId) // DESC por fecha
       val notasHist = matches.map(_.nota)
       if (notasHist.size >= 20) {
         val mu = media(notasHist); val sd = stddev(notasHist)

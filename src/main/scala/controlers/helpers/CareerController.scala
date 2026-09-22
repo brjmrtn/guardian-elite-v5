@@ -1757,8 +1757,10 @@ object CareerController extends cask.Routes {
 
   // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
   @cask.get("/benchmark")
-  def benchmarkPage(request: cask.Request) = withAuth(request) {
-    val d = DatabaseManager.getBenchmark()
+  def benchmarkPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val d = DatabaseManager.getBenchmark(efectivo)
     val sinDatos = d("sinDatos").asInstanceOf[Boolean]
     val raeFactor     = d("raeFactor").asInstanceOf[Double]
     val notaMediaReal = d("notaMediaReal").asInstanceOf[Double]
@@ -1794,8 +1796,10 @@ object CareerController extends cask.Routes {
           div(cls := "d-flex justify-content-between align-items-center mb-4",
             h2(cls := "text-white mb-0", "📊 Benchmark"),
             form(action := "/benchmark/refresh", method := "post",
+              input(tpe := "hidden", name := "temporadaId", value := efectivo.toString),
               button(tpe := "submit", cls := "btn btn-outline-warning btn-sm fw-bold", "🔄 Actualizar benchmark"))
           ),
+          seasonSelector(temporadasDb, efectivo, "/benchmark"),
           if (sinDatos)
             div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")
           else frag(
@@ -1821,8 +1825,11 @@ object CareerController extends cask.Routes {
 
   @cask.post("/benchmark/refresh")
   def refreshBenchmark(request: cask.Request) = withAuth(request) {
-    DatabaseManager.invalidateBenchmarkCache()
-    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/benchmark"))
+    val p = parseBody(request)
+    val temporadaId = p.getOrElse("temporadaId", "0").toIntOption.getOrElse(0)
+    DatabaseManager.invalidateBenchmarkCache(temporadaId)
+    val loc = if (temporadaId > 0) s"/benchmark?temporadaId=$temporadaId" else "/benchmark"
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> loc))
   }
 
   // ── MODULO 6: PERIODIZACION ANUAL ───────────────────────────────────────
@@ -1988,8 +1995,10 @@ object CareerController extends cask.Routes {
 
   // ── EFECTO MARIPOSA ──────────────────────────────────────────────────────
   @cask.get("/efecto-mariposa")
-  def efectoMariposaPage(request: cask.Request) = withAuth(request) {
-    val d    = DatabaseManager.getEfectoMariposa()
+  def efectoMariposaPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadasDb = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val d    = DatabaseManager.getEfectoMariposa(efectivo)
     val gear = DatabaseManager.getGearROI()
 
     if (!d.getOrElse("ok", false).asInstanceOf[Boolean]) {
@@ -2034,6 +2043,7 @@ object CareerController extends cask.Routes {
             ),
             a(href := "/career", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Carrera")
           ),
+          seasonSelector(temporadasDb, efectivo, "/efecto-mariposa"),
 
           // ── CLEAN SHEET IMPACT ──────────────────────────────────────────
           div(cls := "card bg-dark border-success shadow mb-3",

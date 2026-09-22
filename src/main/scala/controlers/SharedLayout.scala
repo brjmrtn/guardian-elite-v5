@@ -36,6 +36,29 @@ object SharedLayout {
     } catch { case _: Exception => s }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE B2 — SELECTOR DE TEMPORADA (paginas estacionales, Elite exclusivamente)
+  // ─────────────────────────────────────────────────────────────────────────────
+  def seasonSelector(temporadas: List[Map[String,Any]], seleccionadaId: Int, urlBase: String): Modifier =
+    div(cls := "d-flex align-items-center gap-2 mb-3",
+      span(cls := "text-muted small fw-bold", "📅 Temporada:"),
+      select(
+        cls := "form-select form-select-sm bg-dark text-white border-secondary",
+        style := "width:auto; font-size:11px;",
+        onchange := s"window.location='$urlBase?temporadaId='+this.value",
+        frag(temporadas.map { t =>
+          val id = t("id").asInstanceOf[Int]
+          val nombre = t("nombre").asInstanceOf[String]
+          val activa = t("activa").asInstanceOf[Boolean]
+          val label = if (activa) s"$nombre (actual)" else nombre
+          if (id == seleccionadaId)
+            option(value := id.toString, attr("selected") := "selected", label)
+          else
+            option(value := id.toString, label)
+        }: _*)
+      )
+    )
+
   def renderRedirect(url: String): cask.Response[Array[Byte]] =
     cask.Response(Array.empty[Byte], statusCode = 302,
       headers = Seq("Location" -> url, "Cache-Control" -> "no-store"))
@@ -50,7 +73,8 @@ object SharedLayout {
       attr("title") := texto, s"$icono ${f"$z%.1f"}σ")
   }
 
-  def renderMatchRow(m: MatchLog, zScoreOpt: Option[Double] = None) = {
+  // BLOQUE B6: readOnly oculta el lapiz de edicion cuando se ve una temporada archivada (cerrada)
+  def renderMatchRow(m: MatchLog, zScoreOpt: Option[Double] = None, readOnly: Boolean = false) = {
     val notaCls = if (m.nota >= 7) "table-success" else if (m.nota >= 5) "table-warning" else "table-danger"
     val audioIcon = if (m.analisisVoz.nonEmpty) span(style := "color:#8b5cf6;", "🎙️") else span("🎤")
     tr(cls := notaCls,
@@ -58,7 +82,7 @@ object SharedLayout {
       td(m.resultado),
       td(cls := "text-center fw-bold", m.nota.toString, zScoreOpt.map(zScoreBadge).getOrElse(frag())),
       td(cls := "text-end",
-        a(href := s"/match/edit/${m.id}", cls := "text-decoration-none me-2", "✏️"),
+        if (readOnly) frag() else a(href := s"/match/edit/${m.id}", cls := "text-decoration-none me-2", "✏️"),
         a(href := s"/audio-diary/partido/${m.id}", cls := "text-decoration-none", audioIcon)
       )
     )
