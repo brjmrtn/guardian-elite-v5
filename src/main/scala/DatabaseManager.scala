@@ -174,6 +174,18 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS sueno_ligero_min INT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS sueno_despierto_min INT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS fc_reposo INT DEFAULT NULL")
+      // Import FC por captura: exige una fila unica por fecha. logWellness ya guardaba
+      // una fila nueva en cada guardado (sin upsert), asi que antes de forzar la
+      // unicidad fusionamos duplicados historicos conservando la fila mas reciente.
+      stmt.executeUpdate("DELETE FROM wellness w1 USING wellness w2 WHERE w1.fecha = w2.fecha AND w1.fecha IS NOT NULL AND w1.id < w2.id")
+      stmt.executeUpdate("""
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wellness_fecha_unique') THEN
+            ALTER TABLE wellness ADD CONSTRAINT wellness_fecha_unique UNIQUE (fecha);
+          END IF;
+        END $$;
+      """)
 
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS match_goals (
         id              SERIAL PRIMARY KEY,
@@ -6484,7 +6496,21 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                    fcReposo: Option[Int] = None): Unit = {
     val conn=getConnection()
     try {
-      val s=conn.prepareStatement("INSERT INTO wellness (sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min, fc_reposo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      // Upsert por fecha: wellness.fecha es unica (ver initDB), asi que guardar dos
+      // veces el mismo dia actualiza la fila en vez de violar la restriccion.
+      // fc_reposo se conserva si esta llamada no trae uno nuevo, para no borrar
+      // una medicion ya importada desde la captura del smartwatch.
+      val s=conn.prepareStatement("""
+        INSERT INTO wellness (fecha, sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min, fc_reposo)
+        VALUES (CURRENT_DATE, ?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT (fecha) DO UPDATE SET
+          sueno = EXCLUDED.sueno, horas_sueno = EXCLUDED.horas_sueno, energia = EXCLUDED.energia, dolor = EXCLUDED.dolor,
+          zona_dolor = EXCLUDED.zona_dolor, altura = EXCLUDED.altura, peso = EXCLUDED.peso, animo = EXCLUDED.animo,
+          notas_conducta = EXCLUDED.notas_conducta, estado_fisico = EXCLUDED.estado_fisico,
+          sueno_profundo_min = EXCLUDED.sueno_profundo_min, sueno_ligero_min = EXCLUDED.sueno_ligero_min,
+          sueno_despierto_min = EXCLUDED.sueno_despierto_min,
+          fc_reposo = COALESCE(EXCLUDED.fc_reposo, wellness.fc_reposo)
+      """)
       s.setInt(1,sueno); s.setDouble(2, horas); s.setInt(3,energia); s.setInt(4,dolor); s.setString(5,fixEncoding(zona)); s.setInt(6, altura); s.setDouble(7, peso); s.setInt(8, animo); s.setString(9, fixEncoding(notas)); s.setString(10, estadoFisico)
       def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => s.setInt(idx, x); case None => s.setNull(idx, java.sql.Types.INTEGER) }
       setOptInt(11, suenoProfundoMin); setOptInt(12, suenoLigeroMin); setOptInt(13, suenoDespiertoMin)
@@ -6492,6 +6518,45 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       s.executeUpdate()
       if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso, tallaSentadoCm, longitudPiernaCm, kgMusculo, kgMasaOsea)
     } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Importacion de FC en reposo por captura de pantalla del smartwatch
+  // ─────────────────────────────────────────────────────────────────────────
+  def importFcReposoFromImage(base64Content: String, mimeType: String): Map[String, Any] = {
+    val prompt = "Analiza esta captura de pantalla de una app de smartwatch que muestra mediciones de frecuencia cardíaca. Extrae TODAS las mediciones visibles. Para cada medición devuelve la fecha en formato YYYY-MM-DD y el valor BPM como número entero. Si la fecha aparece como '21 sep' o '09-21' infiere el año como el año actual. Ignora mediciones con BPM=0, mayor de 200 o menor de 30. Devuelve ÚNICAMENTE un JSON válido sin backticks ni texto adicional: [{\"fecha\": \"YYYY-MM-DD\", \"bpm\": 76}, ...]. Si no puedes leer ninguna medición devuelve []."
+
+    val respuesta = AIProvider.ask(prompt, Some((mimeType, base64Content)), bypassCache = true)
+    val cleaned = respuesta.replace("```json", "").replace("```", "").trim
+    val mediciones = try { ujson.read(cleaned).arr } catch { case _: Exception => scala.collection.mutable.ArrayBuffer.empty[ujson.Value] }
+
+    var importados = 0
+    var yaExistian = 0
+    val detalle = scala.collection.mutable.ListBuffer[Map[String, Any]]()
+
+    val conn = getConnection()
+    try {
+      mediciones.foreach { m =>
+        val fechaOpt = try { Some(java.time.LocalDate.parse(m("fecha").str).toString) } catch { case _: Exception => None }
+        val bpmOpt   = try { Some(m("bpm").num.toInt) } catch { case _: Exception => None }
+        (fechaOpt, bpmOpt) match {
+          case (Some(fecha), Some(bpm)) if bpm >= 30 && bpm <= 200 =>
+            val ps = conn.prepareStatement(
+              """INSERT INTO wellness (fecha, fc_reposo) VALUES (?::date, ?)
+                 ON CONFLICT (fecha) DO UPDATE SET fc_reposo = EXCLUDED.fc_reposo
+                 WHERE wellness.fc_reposo IS NULL"""
+            )
+            ps.setString(1, fecha)
+            ps.setInt(2, bpm)
+            val actualizada = ps.executeUpdate() > 0
+            if (actualizada) { importados += 1; detalle += Map("fecha" -> fecha, "bpm" -> bpm, "estado" -> "importado") }
+            else { yaExistian += 1; detalle += Map("fecha" -> fecha, "bpm" -> bpm, "estado" -> "existia") }
+          case _ => ()
+        }
+      }
+    } finally { conn.close() }
+
+    Map("importados" -> importados, "yaExistian" -> yaExistian, "detalle" -> detalle.toList)
   }
   // BLOQUE PROBLEMA 2/3: fecha editable (por defecto hoy) y tipoAusencia opcional (registro de "no asistio")
   def logTraining(tipo: String, foco: String, rpe: Int, calidad: Int, atencion: Int, rutina: String, feedbackEntrenador: String = "",

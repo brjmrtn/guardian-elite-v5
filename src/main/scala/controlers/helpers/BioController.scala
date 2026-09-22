@@ -333,7 +333,7 @@ object BioController extends cask.Routes {
 
 
         // WELLNESS
-        div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUENO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠ Molestias"), option(value:="LESION", "X Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueno (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📱 Datos del smartwatch (opcional)"), div(cls:="row g-2", div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño profundo (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoProfundoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño ligero (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoLigeroMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Despierto (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoDespiertoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-danger fw-bold d-block mb-1", "❤️ Frecuencia cardíaca en reposo (BPM, opcional)"), input(tpe:="number", step:="1", min:="0", name:="fcReposo", cls:="form-control form-control-sm bg-dark text-white border-danger"), div(cls:="xx-small text-muted mt-1", "Mídela por la mañana antes de que Héctor se levante, 30 segundos con el reloj puesto.")), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="row mb-3", div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Talla sentado (cm)"), input(tpe:="number", step:="0.1", name:="tallaSentado", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)")), div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Long. pierna (cm)"), input(tpe:="number", step:="0.1", name:="longitudPierna", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📊 De la báscula inteligente y medidas (opcional)"), div(cls:="row g-2", div(cls:="col-6", label(cls:="xx-small text-muted", "Músculo (kg)"), input(tpe:="number", step:="0.1", min:="0", name:="kgMusculo", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-6", label(cls:="xx-small text-muted", "Masa ósea (kg)"), input(tpe:="number", step:="0.1", min:="0", name:="kgMasaOsea", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
+        div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUENO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠ Molestias"), option(value:="LESION", "X Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueno (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📱 Datos del smartwatch (opcional)"), div(cls:="row g-2", div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño profundo (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoProfundoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño ligero (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoLigeroMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Despierto (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoDespiertoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-danger fw-bold d-block mb-1", "❤️ Frecuencia cardíaca en reposo (BPM, opcional)"), input(tpe:="number", step:="1", min:="0", name:="fcReposo", cls:="form-control form-control-sm bg-dark text-white border-danger"), div(cls:="xx-small text-muted mt-1", "Mídela por la mañana antes de que Héctor se levante, 30 segundos con el reloj puesto.")), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;", onclick:="toggleFcImportPanel()", label(cls:="text-info fw-bold small mb-0", style:="cursor:pointer;", "📱 IMPORTAR FC DESDE CAPTURA DE PANTALLA"), span(id:="fcImportChevron", cls:="text-info small", "▼")), div(id:="fcImportPanel", style:="display:none;", div(cls:="xx-small text-muted mt-2 mb-2", "Sube una captura de la app del reloj con el historial de mediciones. Guardian extraerá las fechas y los valores de BPM e importará solo los días que no estén ya registrados."), input(tpe:="file", id:="fcImportFile", accept:="image/png,image/jpeg,image/webp", cls:="form-control form-control-sm bg-dark text-white border-secondary mb-2"), div(cls:="d-grid", button(tpe:="button", cls:="btn btn-sm btn-info fw-bold", onclick:="importarFcReposo()", "🧠 Importar mediciones")), div(id:="fcImportSpinner", style:="display:none;", cls:="text-center text-info small mt-2", "Analizando imagen con IA..."), div(id:="fcImportResultado", cls:="mt-2"))), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="row mb-3", div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Talla sentado (cm)"), input(tpe:="number", step:="0.1", name:="tallaSentado", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)")), div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Long. pierna (cm)"), input(tpe:="number", step:="0.1", name:="longitudPierna", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📊 De la báscula inteligente y medidas (opcional)"), div(cls:="row g-2", div(cls:="col-6", label(cls:="xx-small text-muted", "Músculo (kg)"), input(tpe:="number", step:="0.1", min:="0", name:="kgMusculo", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-6", label(cls:="xx-small text-muted", "Masa ósea (kg)"), input(tpe:="number", step:="0.1", min:="0", name:="kgMasaOsea", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
 
         // NUEVO: EVALUACION TECNICA (LABELS BLANCOS FORZADOS)
         div(cls:="card bg-secondary bg-opacity-25 border-warning shadow", div(cls:="card-header bg-warning text-dark fw-bold text-center", "EVALUACION TECNICA (MENSUAL)"), div(cls:="card-body p-3",
@@ -417,6 +417,39 @@ object BioController extends cask.Routes {
       function toggleDrills(){ var type=document.getElementById('trainingType').value; var container=document.getElementById('drillsContainer'); var manual=document.getElementById('manualDesign'); var aiBtn = document.getElementById('aiBtn'); var fbBox = document.getElementById('feedbackEntrenadorBox'); if(container){if(type.includes('Papa') && !type.includes('Jugador')) container.style.display='block'; else container.style.display='none';} if(manual){if(type.includes('Papa')) manual.style.display='block'; else manual.style.display='none';} if(aiBtn){if(type.includes('Papa')) aiBtn.style.display='block'; else aiBtn.style.display='none';} if(fbBox){fbBox.style.display = (type === 'Academia') ? 'block' : 'none';}
       var judoBox=document.getElementById('judoInfoBox'); var rpeRow=document.getElementById('rpeCalidadAtencionRow'); var esJudo=(type==='Judo'); if(judoBox) judoBox.style.display = esJudo ? 'block' : 'none'; if(rpeRow) rpeRow.style.display = esJudo ? 'none' : 'flex'; }
       function toggleFootbarTraining(){ var panel=document.getElementById('footbarTrainingPanel'); var chevron=document.getElementById('footbarTrainingChevron'); if(panel.style.display==='none'){panel.style.display='block'; chevron.textContent='▲';} else {panel.style.display='none'; chevron.textContent='▼';} }
+      function toggleFcImportPanel(){ var p=document.getElementById('fcImportPanel'); var c=document.getElementById('fcImportChevron'); if(p.style.display==='none'){p.style.display='block'; c.textContent='▲';} else {p.style.display='none'; c.textContent='▼';} }
+      function importarFcReposo(){
+        var fileInput = document.getElementById('fcImportFile');
+        var resultado = document.getElementById('fcImportResultado');
+        var spinner = document.getElementById('fcImportSpinner');
+        if(!fileInput.files || !fileInput.files[0]) { alert('Selecciona una imagen primero'); return; }
+        var fd = new FormData();
+        fd.append('imagen', fileInput.files[0]);
+        resultado.innerHTML = '';
+        spinner.style.display = 'block';
+        fetch('/bio/fc-import', { method:'POST', body: fd })
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            spinner.style.display = 'none';
+            if (data.importados === 0 && data.yaExistian === 0) {
+              resultado.innerHTML = '<div class="text-warning small">Gemini no pudo leer mediciones en la imagen. Prueba con una captura más nítida.</div>';
+              return;
+            }
+            if (data.importados === 0 && data.yaExistian > 0) {
+              resultado.innerHTML = '<div class="text-muted small">No se encontraron mediciones nuevas — todos los días ya estaban registrados.</div>';
+              return;
+            }
+            var rows = (data.detalle || []).map(function(d){
+              var icon = d.estado === 'importado' ? '✅' : '⏭️';
+              var partes = d.fecha.split('-');
+              var fechaFmt = partes.length === 3 ? (partes[2] + '/' + partes[1] + '/' + partes[0]) : d.fecha;
+              var estadoTxt = d.estado === 'importado' ? 'importado' : 'ya existía';
+              return '<div class="xx-small text-light py-1 border-bottom border-secondary">' + icon + ' ' + fechaFmt + ' — ' + d.bpm + ' BPM — ' + estadoTxt + '</div>';
+            }).join('');
+            resultado.innerHTML = '<div class="small text-success fw-bold mb-1">' + data.importados + ' importadas, ' + data.yaExistian + ' ya existían</div>' + rows;
+          })
+          .catch(function(){ spinner.style.display = 'none'; resultado.innerHTML = '<div class="text-danger small">Error al analizar la imagen.</div>'; });
+      }
       // PROBLEMA 3: marcar sesion como "no asistio"
       function toggleAusenciaPanel(){ var p=document.getElementById('ausenciaPanel'); p.style.display = (p.style.display==='none') ? 'block' : 'none'; }
       function confirmarAusencia(){
@@ -699,6 +732,45 @@ object BioController extends cask.Routes {
       case None => ()
     }
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Importacion de FC en reposo por captura de pantalla del smartwatch
+  // ─────────────────────────────────────────────────────────────────────────
+  @cask.post("/bio/fc-import")
+  def importFcReposo(request: cask.Request) = withAuth(request) {
+    val contentType = request.exchange.getRequestHeaders.getFirst("Content-Type")
+    val bodyBytes = request.data.readAllBytes()
+    val fields = parseMultipart(bodyBytes, contentType)
+
+    fields.get("imagen").filter(_.data.nonEmpty) match {
+      case Some(imagen) =>
+        val base64Content = java.util.Base64.getEncoder.encodeToString(imagen.data)
+        val fileName = imagen.filename.getOrElse("captura.jpg").toLowerCase
+        val mimeType =
+          if (fileName.endsWith(".png")) "image/png"
+          else if (fileName.endsWith(".webp")) "image/webp"
+          else "image/jpeg"
+
+        val resultado = DatabaseManager.importFcReposoFromImage(base64Content, mimeType)
+        val importados = resultado("importados").asInstanceOf[Int]
+        val yaExistian  = resultado("yaExistian").asInstanceOf[Int]
+        val detalle     = resultado("detalle").asInstanceOf[List[Map[String, Any]]]
+
+        val json = ujson.Obj(
+          "importados" -> importados,
+          "yaExistian" -> yaExistian,
+          "detalle" -> ujson.Arr(detalle.map(d => ujson.Obj(
+            "fecha" -> d("fecha").asInstanceOf[String],
+            "bpm" -> d("bpm").asInstanceOf[Int],
+            "estado" -> d("estado").asInstanceOf[String]
+          ): ujson.Value): _*)
+        )
+        cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
+      case None =>
+        val json = ujson.Obj("error" -> "No se recibio ninguna imagen")
+        cask.Response(json.render().getBytes("UTF-8"), statusCode = 400, headers = Seq("Content-Type" -> "application/json"))
+    }
   }
 
   @cask.get("/bio/document-vault/download/:id")
