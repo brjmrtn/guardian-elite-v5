@@ -691,6 +691,26 @@ object CareerController extends cask.Routes {
     val rpg = DatabaseManager.getRPGStatus()
     val percent = if(rpg.nextLevelXp > 0) (rpg.xp.toDouble / rpg.nextLevelXp.toDouble * 100).toInt else 100
 
+    // BLOQUE E: hitos de carrera — lista cronologica completa
+    val hitos = DatabaseManager.getTodosLosHitos()
+    val hitosSection: Modifier =
+      if (hitos.isEmpty) div()
+      else div(cls := "card bg-dark text-white border-warning shadow mb-4",
+        div(cls := "card-header bg-warning text-dark fw-bold text-center", "📜 HITOS DE CARRERA"),
+        div(cls := "card-body p-3",
+          hitos.map { h =>
+            val contexto = h("contexto").asInstanceOf[String]
+            div(cls := "border-start border-warning border-3 ps-2 mb-2",
+              div(cls := "d-flex justify-content-between",
+                span(cls := "fw-bold small", h("descripcion").asInstanceOf[String]),
+                span(cls := "xx-small text-muted", h("fecha").asInstanceOf[String])
+              ),
+              if (contexto.nonEmpty) div(cls := "xx-small text-muted fst-italic", contexto) else div()
+            )
+          }
+        )
+      )
+
     val content = basePage("career", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
         h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
@@ -727,9 +747,239 @@ object CareerController extends cask.Routes {
           )
         ),
 
-        div(cls:="d-grid mt-3",
-          a(href:="/career/comparativa", cls:="btn btn-outline-info fw-bold", "📊 Comparativa entre temporadas")
+        hitosSection,
+
+        div(cls:="d-grid gap-2 mt-3",
+          a(href:="/career/comparativa", cls:="btn btn-outline-info fw-bold", "📊 Comparativa entre temporadas"),
+          a(href:="/career/longitudinal", cls:="btn btn-outline-warning fw-bold", "📈 Comparativa longitudinal (Héctor vs sí mismo)")
         )
+      )
+    ))
+    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE F — COMPARATIVA LONGITUDINAL CON SI MISMO
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/career/longitudinal")
+  def longitudinalPage(request: cask.Request) = withAuth(request) {
+    val comp = DatabaseManager.getComparativaLongitudinal()
+    val suficiente = comp("suficiente").asInstanceOf[Boolean]
+
+    val body: Modifier = if (!suficiente) {
+      div(cls := "alert alert-secondary text-center py-5 mt-3",
+        "Este módulo se activará cuando tengas 2 temporadas completas registradas.")
+    } else {
+      val temporadas = comp("temporadas").asInstanceOf[List[Map[String, Any]]]
+      val labels = temporadas.map(_("temporada").asInstanceOf[String])
+      val labelsJs = labels.map(l => s""""${l.replace("\"","")}"""").mkString("[", ",", "]")
+
+      def serie(key: String): List[Double] = temporadas.map(_(key).asInstanceOf[Double])
+
+      val notaMediaJs   = serie("notaMedia").mkString("[", ",", "]")
+      val pctLimpiasJs  = serie("pctPorteriasCero").mkString("[", ",", "]")
+      val gcPartidoJs   = serie("gcPorPartido").mkString("[", ",", "]")
+
+      def pctCambio(vals: List[Double]): Option[Double] = vals match {
+        case primero :: _ if vals.size >= 2 && primero != 0 =>
+          Some((vals.last - primero) / math.abs(primero) * 100.0)
+        case _ => None
+      }
+
+      def flechaKpi(titulo: String, vals: List[Double], sufijo: String, masEsMejor: Boolean): Modifier = {
+        val cambio = pctCambio(vals)
+        val (icono, color) = cambio match {
+          case Some(c) if math.abs(c) <= 1 => ("→", "#6c757d")
+          case Some(c) if (if (masEsMejor) c > 0 else c < 0) => ("↑", "#28a745")
+          case Some(_) => ("↓", "#dc3545")
+          case None => ("—", "#6c757d")
+        }
+        div(cls := "col-4 text-center",
+          div(cls := "xx-small text-muted", titulo),
+          div(cls := "fw-bold", style := s"color:$color; font-size:18px;",
+            f"$icono ${vals.head}%.1f$sufijo → ${vals.last}%.1f$sufijo"),
+          cambio.map(c => div(cls := "xx-small", style := s"color:$color;", f"${if (c>=0) "+" else ""}$c%.0f%%")).getOrElse(div())
+        )
+      }
+
+      val notaIni = temporadas.head("notaMedia").asInstanceOf[Double]
+      val notaFin = temporadas.last("notaMedia").asInstanceOf[Double]
+      val pcsIni  = temporadas.head("pctPorteriasCero").asInstanceOf[Double]
+      val pcsFin  = temporadas.last("pctPorteriasCero").asInstanceOf[Double]
+      val cambioNotaPct = pctCambio(serie("notaMedia")).getOrElse(0.0)
+
+      val textoAuto = f"En ${temporadas.size} temporadas registradas, la nota media de Héctor pasó de $notaIni%.1f a $notaFin%.1f (${if (cambioNotaPct>=0) "+" else ""}$cambioNotaPct%.0f%%). Su tasa de porterías a cero ${if (pcsFin >= pcsIni) "mejoró" else "bajó"} de $pcsIni%.0f%% a $pcsFin%.0f%%."
+
+      div(
+        div(cls := "alert alert-secondary small mt-3", textoAuto),
+        div(cls := "card bg-dark border-warning shadow mb-3",
+          div(cls := "card-header text-warning fw-bold small", "EVOLUCIÓN POR TEMPORADA"),
+          div(cls := "card-body", div(style := "height:260px;", tag("canvas")(id := "chartLongitudinal")))
+        ),
+        div(cls := "row g-2 mb-3",
+          flechaKpi("Nota media", serie("notaMedia"), "", masEsMejor = true),
+          flechaKpi("% porterías a cero", serie("pctPorteriasCero"), "%", masEsMejor = true),
+          flechaKpi("GC por partido", serie("gcPorPartido"), "", masEsMejor = false)
+        ),
+        div(cls := "table-responsive",
+          table(cls := "table table-sm table-dark",
+            thead(tr(th("Temporada"), th(cls:="text-center","Nota"), th(cls:="text-center","GC/partido"), th(cls:="text-center","% Limpias"), th(cls:="text-center","FUT media"), th(cls:="text-center","Skills/mes"), th(cls:="text-center","Horas práctica"), th(cls:="text-center","ACWR medio"), th(cls:="text-center","Índice cognitivo"))),
+            tbody(
+              temporadas.map { t =>
+                val acwrTxt: String = t("acwrMedio").asInstanceOf[Option[Double]] match {
+                  case Some(a) => f"$a%.1f"
+                  case None => "—"
+                }
+                val cognitivoTxt: String = t("indiceCognitivoMedio").asInstanceOf[Option[Double]] match {
+                  case Some(a) => f"$a%.0f"
+                  case None => "—"
+                }
+                tr(
+                  td(t("temporada").asInstanceOf[String]),
+                  td(cls:="text-center", f"${t("notaMedia").asInstanceOf[Double]}%.1f"),
+                  td(cls:="text-center", f"${t("gcPorPartido").asInstanceOf[Double]}%.1f"),
+                  td(cls:="text-center", f"${t("pctPorteriasCero").asInstanceOf[Double]}%.0f%%"),
+                  td(cls:="text-center", f"${t("futMedia").asInstanceOf[Double]}%.0f"),
+                  td(cls:="text-center", f"${t("skillsPorMes").asInstanceOf[Double]}%.1f"),
+                  td(cls:="text-center", f"${t("horasPractica").asInstanceOf[Double]}%.0f"),
+                  td(cls:="text-center", acwrTxt),
+                  td(cls:="text-center", cognitivoTxt)
+                )
+              }
+            )
+          )
+        ),
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+        script(raw(s"""
+          var ctxLong = document.getElementById('chartLongitudinal');
+          if (ctxLong) {
+            new Chart(ctxLong, {
+              type: 'line',
+              data: { labels: $labelsJs, datasets: [
+                { label: 'Nota media', data: $notaMediaJs, borderColor: '#ffc107', borderWidth:2, tension:0.3 },
+                { label: '% porterías a cero', data: $pctLimpiasJs, borderColor: '#0dcaf0', borderWidth:2, tension:0.3, yAxisID: 'y1' },
+                { label: 'GC por partido', data: $gcPartidoJs, borderColor: '#dc3545', borderWidth:2, tension:0.3 }
+              ]},
+              options: { responsive:true, plugins:{ legend:{ labels:{ color:'#fff' } } },
+                scales: {
+                  x: { ticks:{color:'#aaa'}, grid:{color:'#333'} },
+                  y: { ticks:{color:'#aaa'}, grid:{color:'#333'} },
+                  y1: { position:'right', min:0, max:100, ticks:{color:'#aaa'}, grid:{display:false} }
+                }
+              }
+            });
+          }
+        """))
+      )
+    }
+
+    val content = basePage("career", div(cls := "row justify-content-center",
+      div(cls := "col-md-9 col-12",
+        div(cls := "d-flex justify-content-between align-items-center mb-2",
+          h2(cls := "text-warning mb-0", "📈 COMPARATIVA LONGITUDINAL"),
+          a(href := "/career/legacy", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Legado")
+        ),
+        div(cls := "text-muted small mb-2", "Héctor comparado con el Héctor de temporadas anteriores."),
+        body
+      )
+    ))
+    cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE G — PROYECCION DE CARGA PROXIMA SEMANA
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/career/acwr-proyeccion")
+  def acwrProyeccionPage(request: cask.Request, LUNES: String = "DESCANSO", MARTES: String = "DESCANSO",
+                          MIERCOLES: String = "DESCANSO", JUEVES: String = "DESCANSO", VIERNES: String = "DESCANSO",
+                          SABADO: String = "DESCANSO", DOMINGO: String = "DESCANSO") = withAuth(request) {
+    val diasSemana = Seq("LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO")
+    val seleccion = Map("LUNES" -> LUNES, "MARTES" -> MARTES, "MIERCOLES" -> MIERCOLES, "JUEVES" -> JUEVES,
+      "VIERNES" -> VIERNES, "SABADO" -> SABADO, "DOMINGO" -> DOMINGO)
+
+    val tiposSesion = Seq(
+      "DESCANSO" -> "😴 Descanso", "JUDO" -> "🥋 Judo", "EQUIPO" -> "⚽ Equipo", "ACADEMIA" -> "🥅 Academia",
+      "PARTIDO" -> "🏟️ Partido", "TORNEO" -> "🏆 Torneo (2 partidos)", "DOBLE_SESION" -> "🔁 Doble sesión"
+    )
+
+    val diasLabel = Map("LUNES" -> "Lunes", "MARTES" -> "Martes", "MIERCOLES" -> "Miércoles", "JUEVES" -> "Jueves",
+      "VIERNES" -> "Viernes", "SABADO" -> "Sábado", "DOMINGO" -> "Domingo")
+
+    val formulario = form(action := "/career/acwr-proyeccion", method := "get", cls := "row g-2 mb-3",
+      diasSemana.map { d =>
+        div(cls := "col-6 col-md-3 col-lg-auto",
+          label(cls := "xx-small text-muted fw-bold d-block", diasLabel(d)),
+          select(name := d, cls := "form-select form-select-sm bg-dark text-white border-secondary",
+            tiposSesion.map { case (v, lbl) => if (v == seleccion(d)) option(value := v, selected := "selected", lbl) else option(value := v, lbl) }
+          )
+        )
+      },
+      div(cls := "col-12", button(tpe := "submit", cls := "btn btn-warning fw-bold w-100", "PROYECTAR ACWR"))
+    )
+
+    val proyeccion = DatabaseManager.proyectarACWR(seleccion)
+    val dias = proyeccion("dias").asInstanceOf[List[Map[String, Any]]]
+    val alertas = proyeccion("alertas").asInstanceOf[List[String]]
+
+    def colorSemaforo(s: String): String = s match {
+      case "verde" => "#28a745"; case "amarillo" => "#ffc107"; case "naranja" => "#fd7e14"; case _ => "#dc3545"
+    }
+    def emojiSemaforo(s: String): String = s match {
+      case "verde" => "🟢"; case "amarillo" => "🟡"; case "naranja" => "🟠"; case _ => "🔴"
+    }
+
+    val labelsJs = dias.map(d => s""""${diasLabel(d("dia").asInstanceOf[String])}"""").mkString("[", ",", "]")
+    val acwrJs = dias.map(d => f"${d("acwr").asInstanceOf[Double]}%.2f").mkString("[", ",", "]")
+
+    val resultado = div(
+      div(cls := "card bg-dark border-warning shadow mb-3",
+        div(cls := "card-header text-warning fw-bold small", "ACWR PROYECTADO"),
+        div(cls := "card-body", div(style := "height:220px;", tag("canvas")(id := "chartProyeccion")))
+      ),
+      div(cls := "row g-2 mb-3",
+        dias.map { d =>
+          val sem = d("semaforo").asInstanceOf[String]
+          div(cls := "col-6 col-md-3 col-lg-auto text-center",
+            div(cls := "card p-2", style := s"background:#1e293b; border:1px solid ${colorSemaforo(sem)};",
+              div(cls := "xx-small text-muted", diasLabel(d("dia").asInstanceOf[String])),
+              div(style := "font-size:22px;", emojiSemaforo(sem)),
+              div(cls := "fw-bold", style := s"color:${colorSemaforo(sem)};", f"${d("acwr").asInstanceOf[Double]}%.2f")
+            )
+          )
+        }
+      ),
+      if (alertas.isEmpty) div()
+      else div(alertas.map { a =>
+        val esCritica = a.startsWith("🔴")
+        div(cls := s"alert ${if (esCritica) "alert-danger" else "alert-warning"} small p-2 mb-2", a)
+      })
+    )
+
+    val content = basePage("career", div(cls := "row justify-content-center",
+      div(cls := "col-md-9 col-12",
+        div(cls := "d-flex justify-content-between align-items-center mb-2",
+          h2(cls := "text-warning mb-0", "📅 PROYECCIÓN DE CARGA"),
+          a(href := "/bio/carga", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Carga")
+        ),
+        div(cls := "text-muted small mb-3", "Planifica las sesiones de la próxima semana y anticipa el ACWR resultante día a día."),
+        formulario,
+        resultado,
+        script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
+        script(raw(s"""
+          var ctxProy = document.getElementById('chartProyeccion');
+          if (ctxProy) {
+            new Chart(ctxProy, {
+              type: 'line',
+              data: { labels: $labelsJs, datasets: [
+                { label: 'ACWR proyectado', data: $acwrJs, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.15)', borderWidth:2, pointRadius:4, fill:true, tension:0.2 }
+              ]},
+              options: { responsive:true, plugins:{ legend:{ labels:{ color:'#fff' } } },
+                scales: { y: { min:0, max: Math.max(2.5, Math.max(...$acwrJs)+0.3), ticks:{color:'#aaa'}, grid:{color:'#333'} },
+                          x: { ticks:{color:'#aaa'}, grid:{color:'#333'} } }
+              }
+            });
+          }
+        """))
       )
     ))
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
@@ -923,7 +1173,10 @@ object CareerController extends cask.Routes {
             a(href := "/career/legacy", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Legado")
           ),
           div(cls := "card bg-dark border-secondary shadow p-2", selector),
-          body
+          body,
+          div(cls := "text-center mt-3",
+            a(href := "/career/longitudinal", cls := "btn btn-outline-warning btn-sm fw-bold", "📈 Ver comparativa longitudinal (todas las temporadas)")
+          )
         )
       )
     )

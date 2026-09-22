@@ -9,7 +9,7 @@ import scala.jdk.CollectionConverters._
 // --- DATA MODELS ---
 case class PlayerCardData(nombre: String, media: Int, posicion: String, fotoUrl: String, clubUrl: String, flagUrl: String, clubNombre: String, div: Int, han: Int, kic: Int, ref: Int, spd: Int, pos: Int, divRaw: Double, hanRaw: Double, kicRaw: Double, refRaw: Double, spdRaw: Double, posRaw: Double, fechaNacimiento: String, rffmUrl: String, rffmName: String, categoria: String)
 // MatchLog completo para Moneyball
-case class MatchLog(id: Int, rival: String, resultado: String, minutos: Int, nota: Double, fecha: String, clima: String, estadio: String, notas: String, video: String, reaccion: String, status: String, tipo: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int, analisisVoz: String, torneoNombre: String, fase: String, paradas: Int, p1v1: Int, pAir: Int, pPie: Int, zTiros: String, zGoles: String)
+case class MatchLog(id: Int, rival: String, resultado: String, minutos: Int, nota: Double, fecha: String, clima: String, estadio: String, notas: String, video: String, reaccion: String, status: String, tipo: String, pcTot: Int, pcOk: Int, plTot: Int, plOk: Int, analisisVoz: String, torneoNombre: String, fase: String, paradas: Int, p1v1: Int, pAir: Int, pPie: Int, zTiros: String, zGoles: String, cpi: Option[Double] = None)
 case class SeasonSummary(id: Int, categoria: String, clubUrl: String, fotoUrl: String, partidosJugados: Int, golesContra: Int, porteriasCero: Int, mediaFinal: Int)
 case class Achievement(icono: String, nombre: String, cantidad: Int, descripcion: String)
 case class GearItem(id: Int, nombre: String, tipo: String, usos: Int, maxUsos: Int, estado: String, img: String)
@@ -197,6 +197,28 @@ object DatabaseManager {
         era_parable     TEXT DEFAULT 'Dudoso',
         zona_gol        TEXT,
         notas           TEXT
+      )""")
+
+      // BLOQUE D: desglose tecnico de paradas
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS paradas_detalle (
+        id            SERIAL PRIMARY KEY,
+        match_id      INT REFERENCES matches(id) ON DELETE CASCADE,
+        numero_parada INT NOT NULL,
+        tecnica       TEXT DEFAULT NULL,
+        parte_cuerpo  TEXT DEFAULT NULL,
+        resultado     TEXT DEFAULT NULL,
+        zona_origen   TEXT DEFAULT NULL,
+        created_at    TIMESTAMP DEFAULT NOW()
+      )""")
+
+      // BLOQUE E: hitos automaticos de carrera
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS hitos_conseguidos (
+        id          SERIAL PRIMARY KEY,
+        tipo        TEXT NOT NULL UNIQUE,
+        descripcion TEXT NOT NULL,
+        fecha       DATE NOT NULL DEFAULT CURRENT_DATE,
+        contexto    TEXT DEFAULT '',
+        created_at  TIMESTAMP DEFAULT NOW()
       )""")
 
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS growth_history (
@@ -757,6 +779,18 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS pie_no_dominante_acciones INT DEFAULT 0")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS iniciativa_vocal TEXT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS guia_conversacion TEXT DEFAULT NULL")
+      // BLOQUE B: autopercepcion de Hector pre-partido (1-5)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS autopercepcion_prepartido INT DEFAULT NULL")
+      // BLOQUE C: contexto avanzado del partido
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS calentamiento_min INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS calentamiento_tipo TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS superficie TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS factores_externos TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS velocidad_distribucion TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS economia_movimiento INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS calidad_decision_pct INT DEFAULT NULL")
+      // BLOQUE H: indice de rendimiento contextual (CPI)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS cpi DOUBLE PRECISION DEFAULT NULL")
 
       // ─────────────────────────────────────────────────────────────────────────────
       // BLOQUE 5.4 — MICRO-OBJETIVOS SEMANALES
@@ -2668,6 +2702,47 @@ $analisisConcatenados"""
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE A — DEUDA DE SUENO ACUMULADA SEMANAL
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Calculo SQL/matematicas puras — sin Gemini, seguro de llamar en el render de pagina.
+  def calcularDeudaSueno(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT fecha::date as dia, horas_sueno, sueno_profundo_min
+        FROM wellness
+        WHERE fecha::date >= CURRENT_DATE - INTERVAL '7 days'
+        ORDER BY fecha DESC
+      """)
+      var diasConDatos = 0
+      var horasTotales = 0.0
+      var profundoTotal = 0
+      while (rs.next()) {
+        val h = rs.getDouble("horas_sueno")
+        if (h > 0) { horasTotales += h; diasConDatos += 1 }
+        val p = rs.getInt("sueno_profundo_min")
+        if (p > 0) profundoTotal += p
+      }
+      val horasOptimas = 10.0
+      val horasEsperadas = horasOptimas * diasConDatos
+      val deudaHoras = Math.max(0.0, horasEsperadas - horasTotales)
+      val mediaDiaria = if (diasConDatos > 0) horasTotales / diasConDatos else 0.0
+      val nivel = if (deudaHoras < 2) "MINIMA"
+        else if (deudaHoras < 5) "MODERADA"
+        else if (deudaHoras < 8) "ALTA"
+        else "CRITICA"
+      Map(
+        "diasConDatos"  -> diasConDatos,
+        "horasTotales"  -> horasTotales,
+        "mediaDiaria"   -> mediaDiaria,
+        "deudaHoras"    -> deudaHoras,
+        "nivel"         -> nivel,
+        "profundoMedio" -> (if (diasConDatos > 0) profundoTotal / diasConDatos else 0)
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE A — INDICE DE FORMA DIARIO
   // ─────────────────────────────────────────────────────────────────────────────
   // Calculo SQL/matematicas puras — sin Gemini, seguro de llamar en el render de pagina.
@@ -2753,12 +2828,24 @@ $analisisConcatenados"""
         )
       } else None
 
-      val forma = fcScore match {
+      val formaBase = fcScore match {
         case Some(fc) =>
           suenoScore * 0.20 + energiaScore * 0.20 + animoScore * 0.15 + acwrScore * 0.20 + descansoScore * 0.10 + phvScore * 0.05 + fc * 0.10
         case None =>
           suenoScore * 0.25 + energiaScore * 0.20 + animoScore * 0.15 + acwrScore * 0.25 + descansoScore * 0.10 + phvScore * 0.05
       }
+
+      // BLOQUE A: deuda de sueno acumulada como factor negativo del indice de forma
+      val deuda = calcularDeudaSueno()
+      val deudaDias = deuda("diasConDatos").asInstanceOf[Int]
+      val deudaHorasVal = deuda("deudaHoras").asInstanceOf[Double]
+      val deudaScore: Double =
+        if (deudaDias < 3) 0.0
+        else if (deudaHorasVal < 2) 0.0
+        else if (deudaHorasVal < 5) -0.5
+        else if (deudaHorasVal < 8) -1.5
+        else -2.5
+      val forma = Math.max(0.0, formaBase + deudaScore)
 
       val upsert = conn.prepareStatement("""
         INSERT INTO forma_diaria (fecha, indice_forma, sueno_score, energia_score, animo_score, acwr_score, descanso_score, phv_score)
@@ -2775,7 +2862,8 @@ $analisisConcatenados"""
         "indiceForma" -> forma,
         "suenoScore" -> suenoScore, "energiaScore" -> energiaScore, "animoScore" -> animoScore,
         "acwrScore" -> acwrScore, "descansoScore" -> descansoScore, "phvScore" -> phvScore,
-        "fcScore" -> fcScore, "tieneFcHoy" -> fcReposoHoy.isDefined
+        "fcScore" -> fcScore, "tieneFcHoy" -> fcReposoHoy.isDefined,
+        "deudaSueno" -> deuda
       )
     } finally { conn.close() }
   }
@@ -3147,7 +3235,23 @@ $analisisConcatenados"""
         case None => ""
       }
 
-      val prompt = s"""Eres el preparador de Héctor, portero de $edad años. Esta semana: próximo partido vs $rival el $fechaProx, ACWR=${"%.2f".format(acwr)} ($estadoAcwr), fallos recurrentes=${if (fallos.nonEmpty) fallos else "ninguno detectado"}, zona vulnerable=$zonaVulnerable.$errorVideoLinea Genera exactamente 3 bloques en texto plano: CONSIGNA_COCHE: [un foco mental o técnico positivo, máximo 2 frases, sin presión, para decirle de camino al entreno] / DESCANSO_CASA: [una pauta concreta de recuperación en casa según el ACWR, una frase accionable] / FOCO_SABADO: [un solo aspecto técnico que el padre debe observar desde la grada el sábado como observador neutral, máximo 2 frases]. Lenguaje para un padre, sin tecnicismos."""
+      // BLOQUE A: deuda de sueno — solo si es relevante (MODERADA o superior)
+      val deudaSem = calcularDeudaSueno()
+      val deudaNivelSem = deudaSem("nivel").asInstanceOf[String]
+      val deudaLinea =
+        if (deudaNivelSem == "MINIMA") ""
+        else s" Deuda de sueño acumulada esta semana: ${"%.1f".format(deudaSem("deudaHoras").asInstanceOf[Double])}h (nivel $deudaNivelSem, media ${"%.1f".format(deudaSem("mediaDiaria").asInstanceOf[Double])}h/noche). Ten esto en cuenta en el DESCANSO_CASA."
+
+      // BLOQUE I: firma de fatiga personal — solo si el ACWR es alto y hay datos suficientes
+      val firmaFatigaLinea = if (estadoAcwr != "ALTA") "" else {
+        val firma = getFirmaFatiga()
+        if (firma("suficiente").asInstanceOf[Boolean]) {
+          val dimension = firma("firmaFatiga").asInstanceOf[String]
+          s" Basado en el historial de Héctor, cuando llega cargado su $dimension tiende a bajar primero. El foco de observación del sábado debería ser precisamente eso — inclúyelo en el FOCO_SABADO."
+        } else ""
+      }
+
+      val prompt = s"""Eres el preparador de Héctor, portero de $edad años. Esta semana: próximo partido vs $rival el $fechaProx, ACWR=${"%.2f".format(acwr)} ($estadoAcwr), fallos recurrentes=${if (fallos.nonEmpty) fallos else "ninguno detectado"}, zona vulnerable=$zonaVulnerable.$errorVideoLinea$deudaLinea$firmaFatigaLinea Genera exactamente 3 bloques en texto plano: CONSIGNA_COCHE: [un foco mental o técnico positivo, máximo 2 frases, sin presión, para decirle de camino al entreno] / DESCANSO_CASA: [una pauta concreta de recuperación en casa según el ACWR, una frase accionable] / FOCO_SABADO: [un solo aspecto técnico que el padre debe observar desde la grada el sábado como observador neutral, máximo 2 frases]. Lenguaje para un padre, sin tecnicismos."""
 
       val resultado = AIProvider.ask(prompt, None, bypassCache = true)
       val up = conn.prepareStatement(
@@ -3673,7 +3777,7 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
   }
 
   // --- LECTURA DE PARTIDOS EXTENDIDA ---
-  def getMatchesList(seasonId: Int = 0): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery(s"SELECT * FROM matches WHERE status='PLAYED' ${seasonFilter(seasonId)} ORDER BY fecha DESC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse("")) } } finally {conn.close()}; l }
+  def getMatchesList(seasonId: Int = 0): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery(s"SELECT * FROM matches WHERE status='PLAYED' ${seasonFilter(seasonId)} ORDER BY fecha DESC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse(""), { val cpiV = rs.getDouble("cpi"); if (rs.wasNull()) None else Some(cpiV) }) } } finally {conn.close()}; l }
   def getUpcomingMatches(): List[MatchLog] = { var l=List[MatchLog](); val conn=getConnection(); try{ val rs=conn.createStatement().executeQuery("SELECT * FROM matches WHERE status='SCHEDULED' ORDER BY fecha ASC"); while(rs.next()){ l=l:+MatchLog(rs.getInt("id"), rs.getString("rival"), "-", 0, 0, rs.getDate("fecha").toString, "", Option(rs.getString("estadio")).getOrElse(""), "", "", "", rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"),0,0,0,0, "", Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), 0,0,0,0,"","") } } finally {conn.close()}; l }
   def getMatchById(id: Int): Option[MatchLog] = { var m:Option[MatchLog]=None; val conn=getConnection(); try { val s=conn.prepareStatement("SELECT * FROM matches WHERE id = ?"); s.setInt(1,id); val rs=s.executeQuery(); if(rs.next()){ m=Some(MatchLog(rs.getInt("id"), rs.getString("rival"), s"${rs.getInt("goles_favor")}-${rs.getInt("goles_contra")}", rs.getInt("minutos"), rs.getDouble("nota"), rs.getDate("fecha").toString, Option(rs.getString("clima")).getOrElse("Sol"), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse(""))) } } finally { conn.close() }; m }
   def getRivalScouting(rivalBusqueda: String): (List[MatchLog], Map[String, Int]) = { var matches = List[MatchLog](); var stats = scala.collection.mutable.Map("pj"->0, "gf"->0, "gc"->0, "ganados"->0, "empatados"->0, "perdidos"->0); val conn = getConnection(); try { val query = s"SELECT * FROM matches WHERE LOWER(rival) LIKE LOWER(?) AND status='PLAYED' ORDER BY fecha DESC"; val stmt = conn.prepareStatement(query); stmt.setString(1, s"%$rivalBusqueda%"); val rs = stmt.executeQuery(); while(rs.next()) { val (gf, gc) = (rs.getInt("goles_favor"), rs.getInt("goles_contra")); matches = matches :+ MatchLog(rs.getInt("id"), rs.getString("rival"), s"$gf-$gc", rs.getInt("minutos"), rs.getDouble("nota"), rs.getString("fecha"), Option(rs.getString("clima")).getOrElse(""), Option(rs.getString("estadio")).getOrElse(""), Option(rs.getString("notas_partido")).getOrElse(""), Option(rs.getString("video_url")).getOrElse(""), Option(rs.getString("reaccion_goles")).getOrElse(""), rs.getString("status"), Option(rs.getString("tipo_partido")).getOrElse("LIGA"), rs.getInt("pc_t"), rs.getInt("pc_ok"), rs.getInt("pl_t"), rs.getInt("pl_ok"), Option(rs.getString("analisis_voz")).getOrElse(""), Option(rs.getString("torneo_nombre")).getOrElse(""), Option(rs.getString("fase")).getOrElse(""), rs.getInt("paradas"), rs.getInt("paradas_1v1"), rs.getInt("paradas_aereas"), rs.getInt("acciones_pie"), Option(rs.getString("zona_tiros")).getOrElse(""), Option(rs.getString("zona_goles")).getOrElse("")); stats("pj") += 1; stats("gf") += gf; stats("gc") += gc; if(gf > gc) stats("ganados") += 1 else if(gf == gc) stats("empatados") += 1 else stats("perdidos") += 1 } } finally { conn.close() }; (matches, stats.toMap) }
@@ -3753,6 +3857,36 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         case None => ""
       }
 
+      // BLOQUE C: contexto avanzado del ultimo partido, cuando esta disponible
+      val rsContexto = conn.createStatement().executeQuery("""
+        SELECT calentamiento_min, calentamiento_tipo, superficie, factores_externos,
+               velocidad_distribucion, economia_movimiento, calidad_decision_pct
+        FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 1""")
+      val contextoLine = if (rsContexto.next()) {
+        val partes = scala.collection.mutable.ListBuffer[String]()
+        val calMin = rsContexto.getInt("calentamiento_min"); if (!rsContexto.wasNull()) partes += s"calentamiento de $calMin min"
+        Option(rsContexto.getString("calentamiento_tipo")).filter(_.nonEmpty).foreach(t => partes += s"tipo $t")
+        Option(rsContexto.getString("superficie")).filter(_.nonEmpty).foreach(s => partes += s"césped $s")
+        Option(rsContexto.getString("velocidad_distribucion")).filter(_.nonEmpty).foreach(v => partes += s"velocidad de distribución $v")
+        val econ = rsContexto.getInt("economia_movimiento"); if (!rsContexto.wasNull()) partes += s"economía de movimiento $econ/5"
+        val calidad = rsContexto.getInt("calidad_decision_pct"); if (!rsContexto.wasNull()) partes += s"calidad de decisión $calidad%"
+        Option(rsContexto.getString("factores_externos")).filter(_.nonEmpty).foreach(f => partes += s"factor externo relevante: $f")
+        if (partes.isEmpty) "" else s"\nContexto avanzado del último partido: ${partes.mkString(", ")}.\n"
+      } else ""
+
+      // BLOQUE A: deuda de sueno acumulada — solo si es relevante (MODERADA o superior)
+      val deudaHoy = calcularDeudaSueno()
+      val deudaNivelHoy = deudaHoy("nivel").asInstanceOf[String]
+      val deudaLine =
+        if (deudaNivelHoy == "MINIMA") ""
+        else s"\nDeuda de sueño acumulada esta semana: ${"%.1f".format(deudaHoy("deudaHoras").asInstanceOf[Double])}h (nivel: $deudaNivelHoy). Media de ${"%.1f".format(deudaHoy("mediaDiaria").asInstanceOf[Double])}h/noche, óptimo 10h para su edad.\n"
+
+      // BLOQUE H: CPI medio de la temporada, cuando esta disponible
+      val cpiLine = getCpiMedioTemporada() match {
+        case Some(cpiMedio) => s"\nSu CPI medio de la temporada es ${"%.1f".format(cpiMedio)} — ajustado por dificultad real de cada partido (rival, condiciones físicas, clima, si jugó en casa o fuera). Da más peso a este dato que a la nota media simple.\n"
+        case None => ""
+      }
+
       // Cambio aqui: Llamamos a AIProvider.ask
       val prompt = s"""Eres un analista de rendimiento de porteros de élite. Fecha de hoy: $fechaHoy. Temporada en curso: $temporadaActual. Analiza ÚNICAMENTE los datos de esta temporada.
 
@@ -3760,7 +3894,7 @@ CONTEXTO FOOTBAR — PORTERO: Héctor es portero. Los porteros recorren estructu
 
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}$basculaLine$rubricaLine
+${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cpiLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -4424,14 +4558,24 @@ Responde en espanol, tono positivo y motivador para un nino."""
   def updateMatchExtras(matchId: Int,
                          rubricaPosicion: Option[Int], rubricaDecisiones: Option[Int], rubricaPies: Option[Int],
                          rubricaComunicacion: Option[Int], rubricaActitud: Option[Int],
-                         posicionSet: String, alturaBloque: String, pieNoDominanteAcciones: Int, iniciativaVocal: String): Unit = {
+                         posicionSet: String, alturaBloque: String, pieNoDominanteAcciones: Int, iniciativaVocal: String,
+                         // BLOQUE B: autopercepcion pre-partido de Hector (1-5)
+                         autopercepcionPrepartido: Option[Int] = None,
+                         // BLOQUE C: contexto avanzado del partido
+                         calentamientoMin: Option[Int] = None, calentamientoTipo: String = "",
+                         superficie: String = "", factoresExternos: String = "",
+                         velocidadDistribucion: String = "", economiaMovimiento: Option[Int] = None,
+                         calidadDecisionPct: Option[Int] = None): Unit = {
     if (matchId <= 0) return
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement("""
         UPDATE matches SET
           rubrica_posicion=?, rubrica_decisiones=?, rubrica_pies=?, rubrica_comunicacion=?, rubrica_actitud=?,
-          posicion_set=?, altura_bloque=?, pie_no_dominante_acciones=?, iniciativa_vocal=?
+          posicion_set=?, altura_bloque=?, pie_no_dominante_acciones=?, iniciativa_vocal=?,
+          autopercepcion_prepartido=COALESCE(?, autopercepcion_prepartido),
+          calentamiento_min=?, calentamiento_tipo=?, superficie=?, factores_externos=?,
+          velocidad_distribucion=?, economia_movimiento=?, calidad_decision_pct=?
         WHERE id=?""")
       def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => ps.setInt(idx, x); case None => ps.setNull(idx, java.sql.Types.INTEGER) }
       setOptInt(1, rubricaPosicion); setOptInt(2, rubricaDecisiones); setOptInt(3, rubricaPies)
@@ -4440,8 +4584,507 @@ Responde en espanol, tono positivo y motivador para un nino."""
       if (alturaBloque.nonEmpty) ps.setString(7, alturaBloque) else ps.setNull(7, java.sql.Types.VARCHAR)
       ps.setInt(8, pieNoDominanteAcciones)
       if (iniciativaVocal.nonEmpty) ps.setString(9, iniciativaVocal) else ps.setNull(9, java.sql.Types.VARCHAR)
-      ps.setInt(10, matchId)
+      setOptInt(10, autopercepcionPrepartido)
+      setOptInt(11, calentamientoMin)
+      if (calentamientoTipo.nonEmpty) ps.setString(12, calentamientoTipo) else ps.setNull(12, java.sql.Types.VARCHAR)
+      if (superficie.nonEmpty) ps.setString(13, superficie) else ps.setNull(13, java.sql.Types.VARCHAR)
+      if (factoresExternos.nonEmpty) ps.setString(14, fixEncoding(factoresExternos)) else ps.setNull(14, java.sql.Types.VARCHAR)
+      if (velocidadDistribucion.nonEmpty) ps.setString(15, velocidadDistribucion) else ps.setNull(15, java.sql.Types.VARCHAR)
+      setOptInt(16, economiaMovimiento)
+      setOptInt(17, calidadDecisionPct)
+      ps.setInt(18, matchId)
       ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // BLOQUE B1: guarda temporalmente la autopercepcion de Hector antes de que el partido
+  // se registre formalmente — se lee desde el formulario de partido para pre-rellenar.
+  def guardarAutopercepcionTemporal(valor: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+      ps.setString(1, s"autopercepcion_prepartido_${LocalDate.now().toString}")
+      ps.setString(2, valor.toString)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getAutopercepcionTemporalHoy(): Option[Int] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT payload FROM feature_cache WHERE cache_key = ?")
+      ps.setString(1, s"autopercepcion_prepartido_${LocalDate.now().toString}")
+      val rs = ps.executeQuery()
+      if (rs.next()) rs.getString("payload").toIntOption else None
+    } finally { conn.close() }
+  }
+
+  // BLOQUE B3: cruza la autopercepcion pre-partido con el indice de forma calculado ese dia
+  def getAutopercepcionVsForma(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT m.fecha, m.rival, m.autopercepcion_prepartido, m.nota, f.indice_forma
+        FROM matches m
+        JOIN forma_diaria f ON f.fecha = m.fecha::date
+        WHERE m.status='PLAYED' AND m.autopercepcion_prepartido IS NOT NULL AND f.indice_forma IS NOT NULL
+        ORDER BY m.fecha DESC
+      """)
+      var l = List[Map[String, Any]]()
+      while (rs.next()) {
+        val autop = rs.getInt("autopercepcion_prepartido")
+        val forma = rs.getDouble("indice_forma")
+        // Normaliza el indice de forma (0-10) a escala 1-5 para poder comparar con la autopercepcion
+        val formaEn5 = math.min(5.0, math.max(1.0, forma / 2.0))
+        l = l :+ Map(
+          "fecha" -> rs.getDate("fecha").toString, "rival" -> Option(rs.getString("rival")).getOrElse(""),
+          "autopercepcion" -> autop, "indiceForma" -> forma, "formaEn5" -> formaEn5,
+          "divergencia" -> (autop - formaEn5), "nota" -> rs.getDouble("nota")
+        )
+      }
+      l
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE D — DESGLOSE TECNICO DE PARADAS
+  // ─────────────────────────────────────────────────────────────────────────────
+  def saveParadaDetalle(matchId: Int, numeroParada: Int, tecnica: String, parteCuerpo: String, resultado: String, zonaOrigen: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO paradas_detalle (match_id, numero_parada, tecnica, parte_cuerpo, resultado, zona_origen) VALUES (?,?,?,?,?,?)")
+      ps.setInt(1, matchId); ps.setInt(2, numeroParada)
+      if (tecnica.nonEmpty) ps.setString(3, tecnica) else ps.setNull(3, java.sql.Types.VARCHAR)
+      if (parteCuerpo.nonEmpty) ps.setString(4, parteCuerpo) else ps.setNull(4, java.sql.Types.VARCHAR)
+      if (resultado.nonEmpty) ps.setString(5, resultado) else ps.setNull(5, java.sql.Types.VARCHAR)
+      if (zonaOrigen.nonEmpty) ps.setString(6, zonaOrigen) else ps.setNull(6, java.sql.Types.VARCHAR)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def deleteParadasDetalle(matchId: Int): Unit = {
+    val conn = getConnection()
+    try { val ps = conn.prepareStatement("DELETE FROM paradas_detalle WHERE match_id = ?"); ps.setInt(1, matchId); ps.executeUpdate() }
+    finally { conn.close() }
+  }
+
+  def getParadasDetalleMatch(matchId: Int): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT numero_parada, tecnica, parte_cuerpo, resultado, zona_origen FROM paradas_detalle WHERE match_id=? ORDER BY numero_parada ASC")
+      ps.setInt(1, matchId)
+      val rs = ps.executeQuery()
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "numeroParada" -> rs.getInt("numero_parada"),
+        "tecnica" -> Option(rs.getString("tecnica")).getOrElse(""),
+        "parteCuerpo" -> Option(rs.getString("parte_cuerpo")).getOrElse(""),
+        "resultado" -> Option(rs.getString("resultado")).getOrElse(""),
+        "zonaOrigen" -> Option(rs.getString("zona_origen")).getOrElse("")
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  // SQL puro — agrupa por tecnica, calcula la mas usada y la de mejor tasa de resultado limpio
+  def getParadasAnalysis(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val sf = if (seasonId > 0) s"AND m.season_id = $seasonId" else ""
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT pd.tecnica, COUNT(*) as usos,
+               COUNT(CASE WHEN pd.resultado IN ('ATRAPADO_LIMPIO','DESPEJADO_ZONA_SEGURA') THEN 1 END) as limpias
+        FROM paradas_detalle pd
+        JOIN matches m ON m.id = pd.match_id
+        WHERE pd.tecnica IS NOT NULL $sf
+        GROUP BY pd.tecnica
+        ORDER BY usos DESC
+      """)
+      var porTecnica = List[Map[String, Any]]()
+      var total = 0
+      while (rs.next()) {
+        val usos = rs.getInt("usos"); total += usos
+        val limpias = rs.getInt("limpias")
+        val pct = if (usos > 0) limpias * 100.0 / usos else 0.0
+        porTecnica = porTecnica :+ Map("tecnica" -> rs.getString("tecnica"), "usos" -> usos, "limpias" -> limpias, "pctLimpio" -> pct)
+      }
+      val masUsada = porTecnica.sortBy(m => -m("usos").asInstanceOf[Int]).headOption.map(_("tecnica").asInstanceOf[String])
+      val mejorTasa = porTecnica.filter(_("usos").asInstanceOf[Int] >= 3).sortBy(m => -m("pctLimpio").asInstanceOf[Double]).headOption.map(_("tecnica").asInstanceOf[String])
+      Map("total" -> total, "porTecnica" -> porTecnica, "masUsada" -> masUsada, "mejorTasaLimpia" -> mejorTasa)
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE E — HITOS AUTOMATICOS DE CARRERA
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro — se llama desde un hilo de fondo al guardar un partido o un entrenamiento.
+  def detectarHitos(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      def cuenta(sql: String): Int = { val rs = conn.createStatement().executeQuery(sql); if (rs.next()) rs.getInt(1) else 0 }
+      def existe(sql: String): Boolean = cuenta(sql) > 0
+
+      // (tipo, descripcion, se_cumple, contexto)
+      val candidatos = scala.collection.mutable.ListBuffer[(String, String, Boolean, String)]()
+
+      candidatos += (("PRIMERA_PORTERIA_CERO", "Primera portería a cero de la carrera",
+        existe("SELECT 1 FROM matches WHERE status='PLAYED' AND goles_contra=0"), ""))
+
+      val pj = cuenta("SELECT COUNT(*) FROM matches WHERE status='PLAYED'")
+      candidatos += (("PARTIDO_10", "10º partido registrado", pj >= 10, ""))
+      candidatos += (("PARTIDO_50", "50º partido registrado", pj >= 50, ""))
+      candidatos += (("PARTIDO_100", "100º partido registrado", pj >= 100, ""))
+
+      candidatos += (("PRIMERA_NOTA_9", "Primera nota de 9 o superior",
+        existe("SELECT 1 FROM matches WHERE status='PLAYED' AND nota >= 9"), ""))
+
+      candidatos += (("CINCO_PARADAS_PARTIDO", "Primer partido con 5 o más paradas",
+        existe("SELECT 1 FROM matches WHERE status='PLAYED' AND paradas >= 5"), ""))
+
+      val rsUlt3 = conn.createStatement().executeQuery(
+        "SELECT goles_contra FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 3")
+      val ult3 = scala.collection.mutable.ListBuffer[Int]()
+      while (rsUlt3.next()) ult3 += rsUlt3.getInt("goles_contra")
+      candidatos += (("TRES_LIMPIAS_SEGUIDAS", "Tres porterías a cero consecutivas",
+        ult3.size == 3 && ult3.forall(_ == 0), ""))
+
+      // ACWR en zona verde (acwr_score >= 8) durante el ultimo mes natural completo
+      val rsAcwrMes = conn.createStatement().executeQuery("""
+        SELECT COUNT(*) as dias, AVG(acwr_score) as media, MIN(acwr_score) as minimo
+        FROM forma_diaria
+        WHERE fecha >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+          AND fecha < date_trunc('month', CURRENT_DATE)
+      """)
+      val acwrMesOk = if (rsAcwrMes.next()) rsAcwrMes.getInt("dias") >= 20 && rsAcwrMes.getDouble("minimo") >= 8.0 else false
+      candidatos += (("ACWR_VERDE_MES", "Primer mes completo con ACWR en zona verde", acwrMesOk, ""))
+
+      // Temporada cerrada mas reciente sin ningun registro de LESION durante su rango de fechas
+      val rsTempCerrada = conn.createStatement().executeQuery(
+        "SELECT id, COALESCE(nombre, categoria, 'Temporada') as nombre, fecha_inicio, fecha_fin FROM seasons WHERE fecha_fin IS NOT NULL ORDER BY fecha_fin DESC LIMIT 1")
+      if (rsTempCerrada.next()) {
+        val nombreTemp = fixEncoding(rsTempCerrada.getString("nombre"))
+        val fi = rsTempCerrada.getDate("fecha_inicio"); val ff = rsTempCerrada.getDate("fecha_fin")
+        val sinLesion = fi != null && ff != null && {
+          val ps = conn.prepareStatement("SELECT COUNT(*) FROM wellness WHERE estado_fisico='LESION' AND fecha >= ? AND fecha <= ?")
+          ps.setDate(1, fi); ps.setDate(2, ff)
+          val r = ps.executeQuery(); (if (r.next()) r.getInt(1) else 0) == 0
+        }
+        candidatos += (("TEMPORADA_SIN_LESION", "Primera temporada completa sin lesiones", sinLesion, nombreTemp))
+
+        val rsNotaMedia = conn.prepareStatement("SELECT AVG(nota) as m FROM matches WHERE status='PLAYED' AND season_id=?")
+        rsNotaMedia.setInt(1, rsTempCerrada.getInt("id"))
+        val rNota = rsNotaMedia.executeQuery()
+        val notaMediaOk = rNota.next() && rNota.getDouble("m") >= 7.0
+        candidatos += (("NOTA_MEDIA_7", "Primera temporada con nota media ≥7", notaMediaOk, nombreTemp))
+      }
+
+      val rsSkills = conn.createStatement().executeQuery(
+        "SELECT COUNT(*) as total, COUNT(CASE WHEN conseguido THEN 1 END) as conseguidas FROM goalkeeper_skills")
+      val (totalSkills, conseguidas) = if (rsSkills.next()) (rsSkills.getInt("total"), rsSkills.getInt("conseguidas")) else (0, 0)
+      val pctSkills = if (totalSkills > 0) conseguidas * 100.0 / totalSkills else 0.0
+      candidatos += (("CHECKLIST_50PCT", "50% del checklist de habilidades conseguido", totalSkills > 0 && pctSkills >= 50.0, ""))
+      candidatos += (("CHECKLIST_100PCT", "100% del checklist de habilidades conseguido", totalSkills > 0 && pctSkills >= 100.0, ""))
+
+      candidatos += (("PRIMERA_ACADEMIA_FEEDBACK", "Primer feedback del entrenador de academia registrado",
+        existe("SELECT 1 FROM trainings WHERE feedback_entrenador IS NOT NULL AND feedback_entrenador != ''"), ""))
+
+      // Inserta solo los que se cumplen — el UNIQUE(tipo) + ON CONFLICT DO NOTHING evita duplicados
+      var nuevos = List[Map[String, Any]]()
+      candidatos.filter(_._3).foreach { case (tipo, descripcion, _, contexto) =>
+        val ps = conn.prepareStatement(
+          "INSERT INTO hitos_conseguidos (tipo, descripcion, contexto) VALUES (?,?,?) ON CONFLICT (tipo) DO NOTHING")
+        ps.setString(1, tipo); ps.setString(2, descripcion); ps.setString(3, contexto)
+        if (ps.executeUpdate() > 0) {
+          val fecha = LocalDate.now().toString
+          nuevos = nuevos :+ Map("tipo" -> tipo, "descripcion" -> descripcion, "fecha" -> fecha, "contexto" -> contexto)
+          TelegramService.enviar(s"🏆 NUEVO HITO: $descripcion — $fecha")
+        }
+      }
+      nuevos
+    } finally { conn.close() }
+  }
+
+  def getHitosRecientes(dias: Int = 7): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT tipo, descripcion, fecha, contexto FROM hitos_conseguidos WHERE fecha >= CURRENT_DATE - ? ORDER BY fecha DESC")
+      ps.setInt(1, dias)
+      val rs = ps.executeQuery()
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "tipo" -> rs.getString("tipo"), "descripcion" -> fixEncoding(rs.getString("descripcion")),
+        "fecha" -> rs.getDate("fecha").toString, "contexto" -> fixEncoding(Option(rs.getString("contexto")).getOrElse(""))
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  def getTodosLosHitos(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT tipo, descripcion, fecha, contexto FROM hitos_conseguidos ORDER BY fecha ASC")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "tipo" -> rs.getString("tipo"), "descripcion" -> fixEncoding(rs.getString("descripcion")),
+        "fecha" -> rs.getDate("fecha").toString, "contexto" -> fixEncoding(Option(rs.getString("contexto")).getOrElse(""))
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE G — PROYECCION DE CARGA PROXIMA SEMANA
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/matematicas puras — sin Gemini.
+  private def cargaEstimadaSesion(tipo: String): Double = tipo match {
+    case "DESCANSO"     => 0.0
+    case "JUDO"         => 60 * 5
+    case "EQUIPO"       => 60 * 7
+    case "ACADEMIA"     => 60 * 8
+    case "PARTIDO"      => 45 * 4
+    case "TORNEO"       => 2 * 45 * 4
+    case "DOBLE_SESION" => 60 * 7 + 60 * 8
+    case _              => 0.0
+  }
+
+  /** Carga real diaria (partidos+entrenos) de los ultimos `dias` dias, ordenada de mas antiguo a mas reciente (hoy incluido al final). */
+  private def cargasDiariasRecientes(dias: Int): List[Double] = {
+    val conn = getConnection()
+    try {
+      val hoy = LocalDate.now()
+      val porDia = scala.collection.mutable.Map[String, Double]().withDefaultValue(0.0)
+      val rsM = conn.prepareStatement("SELECT fecha, minutos FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - ?")
+      rsM.setInt(1, dias - 1)
+      val rM = rsM.executeQuery()
+      while (rM.next()) porDia(rM.getDate("fecha").toString) += rM.getInt("minutos") * 4.0
+      val rsT = conn.prepareStatement("SELECT fecha, rpe, fb_distancia FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      rsT.setInt(1, dias - 1)
+      val rT = rsT.executeQuery()
+      while (rT.next()) {
+        val fb = rT.getDouble("fb_distancia")
+        porDia(rT.getDate("fecha").toString) += 60 * rT.getInt("rpe") * (1 + fb * 0.05)
+      }
+      (dias - 1 to 0 by -1).map(offset => porDia(hoy.minusDays(offset).toString)).toList
+    } finally { conn.close() }
+  }
+
+  /**
+   * Proyecta el ACWR dia a dia de la proxima semana. `sesionesProximas` mapea el nombre del dia
+   * (LUNES..DOMINGO) al tipo de sesion prevista. La cronica usa la carga real de las ultimas 4
+   * semanas; la aguda combina los dias reales que aun quedan en la ventana movil de 7 dias con
+   * las sesiones proyectadas.
+   */
+  def proyectarACWR(sesionesProximas: Map[String, String]): Map[String, Any] = {
+    val diasSemana = Seq("LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO")
+    val real7 = cargasDiariasRecientes(7) // 7 valores, mas antiguo -> hoy
+    val proyectado = diasSemana.map(d => cargaEstimadaSesion(sesionesProximas.getOrElse(d, "DESCANSO"))).toList
+    val combinado = real7 ++ proyectado // 14 valores: dias -6..0 (reales) + dias +1..+7 (proyectados)
+
+    val cargaCronica28 = getWorkloads(28).sum
+    val cronicaSemanalEquivalente = if (cargaCronica28 > 0) cargaCronica28 / 4.0 else 0.0
+
+    val faseBio = try getBioBandingData().getOrElse("faseBio", "").toString catch { case _: Exception => "" }
+    val circaPhvActivo = faseBio.contains("PICO ACTIVO")
+
+    def semaforo(acwr: Double): String =
+      if (acwr <= 0.0) "verde"
+      else if (acwr < 0.8) "amarillo"
+      else if (acwr <= 1.3) "verde"
+      else if (acwr <= 1.5) "naranja"
+      else "rojo"
+
+    var alertas = List[String]()
+    val dias = (1 to 7).map { i =>
+      val ventana = combinado.slice(i, i + 7)
+      val acuteSemanal = ventana.sum
+      val acwr = if (cronicaSemanalEquivalente > 0) acuteSemanal / cronicaSemanalEquivalente else 0.0
+      val nombreDia = diasSemana(i - 1)
+      val tipoSesion = sesionesProximas.getOrElse(nombreDia, "DESCANSO")
+      val sem = semaforo(acwr)
+
+      if (acwr > 1.5) {
+        val diaAnterior = if (i > 1) diasSemana(i - 2) else "domingo anterior"
+        alertas = alertas :+ s"⚠️ El $nombreDia proyecta sobrecarga (ACWR ${"%.2f".format(acwr)}). Considera reducir la sesión del $diaAnterior."
+      }
+      if (circaPhvActivo && acwr > 1.3) {
+        alertas = alertas :+ s"🔴 PRIORIDAD MÁXIMA: Héctor está en pico activo de crecimiento (Circa-PHV) y el $nombreDia proyecta ACWR ${"%.2f".format(acwr)}. Riesgo de lesión elevado — considera aligerar esa sesión."
+      }
+
+      Map("dia" -> nombreDia, "tipoSesion" -> tipoSesion, "acwr" -> acwr, "semaforo" -> sem)
+    }.toList
+
+    Map("dias" -> dias, "alertas" -> alertas, "circaPhvActivo" -> circaPhvActivo, "cronicaSemanalEquivalente" -> cronicaSemanalEquivalente)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE I — FIRMA DE FATIGA PERSONAL
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/matematicas puras — sin Gemini. Requiere >=8 partidos con ACWR alto (acwr_score<6) y rubrica completa.
+  def getFirmaFatiga(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rsCansado = conn.createStatement().executeQuery("""
+        SELECT AVG(m.rubrica_posicion) as pos, AVG(m.rubrica_decisiones) as dec,
+               AVG(m.rubrica_pies) as pies, AVG(m.rubrica_comunicacion) as com,
+               AVG(m.rubrica_actitud) as act, COUNT(*) as n
+        FROM matches m
+        JOIN forma_diaria f ON f.fecha = m.fecha::date
+        WHERE m.status='PLAYED' AND f.acwr_score < 6 AND m.rubrica_posicion IS NOT NULL
+      """)
+      if (!rsCansado.next()) return Map("suficiente" -> false, "n" -> 0)
+      val n = rsCansado.getInt("n")
+      if (n < 8) return Map("suficiente" -> false, "n" -> n)
+
+      val dimensionesCansado = Map(
+        "Posición" -> rsCansado.getDouble("pos"), "Decisiones bajo presión" -> rsCansado.getDouble("dec"),
+        "Juego con los pies" -> rsCansado.getDouble("pies"), "Comunicación" -> rsCansado.getDouble("com"),
+        "Actitud y concentración" -> rsCansado.getDouble("act")
+      )
+
+      val rsNormal = conn.createStatement().executeQuery("""
+        SELECT AVG(rubrica_posicion) as pos, AVG(rubrica_decisiones) as dec, AVG(rubrica_pies) as pies,
+               AVG(rubrica_comunicacion) as com, AVG(rubrica_actitud) as act
+        FROM matches WHERE status='PLAYED' AND rubrica_posicion IS NOT NULL
+      """)
+      rsNormal.next()
+      val dimensionesNormal = Map(
+        "Posición" -> rsNormal.getDouble("pos"), "Decisiones bajo presión" -> rsNormal.getDouble("dec"),
+        "Juego con los pies" -> rsNormal.getDouble("pies"), "Comunicación" -> rsNormal.getDouble("com"),
+        "Actitud y concentración" -> rsNormal.getDouble("act")
+      )
+
+      val comparativa = dimensionesNormal.keys.map { dim =>
+        val normal = dimensionesNormal(dim); val cansado = dimensionesCansado(dim)
+        Map("dimension" -> dim, "normal" -> normal, "cansado" -> cansado, "diferencia" -> (normal - cansado))
+      }.toList.sortBy(m => -m("diferencia").asInstanceOf[Double])
+
+      val firmaFatiga = comparativa.headOption.map(_("dimension").asInstanceOf[String]).getOrElse("")
+
+      Map("suficiente" -> true, "n" -> n, "comparativa" -> comparativa, "firmaFatiga" -> firmaFatiga)
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE J — RATIO DE ENTRENAMIENTO ESPECIFICO DE PORTERO
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/matematicas puras — sin Gemini.
+  def getRatioEntrenamientoEspecifico(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val efectivo = if (seasonId > 0) seasonId else getTemporadaActivaId()
+      val rsFechas = conn.prepareStatement("SELECT fecha_inicio, fecha_fin FROM seasons WHERE id=?")
+      rsFechas.setInt(1, efectivo)
+      val rf = rsFechas.executeQuery()
+      val (fi, ff) = if (rf.next())
+        (Option(rf.getDate("fecha_inicio")).map(_.toString).getOrElse("2000-01-01"),
+         Option(rf.getDate("fecha_fin")).map(_.toString).getOrElse(LocalDate.now().toString))
+      else ("2000-01-01", LocalDate.now().toString)
+
+      val ps = conn.prepareStatement("""
+        SELECT
+          COUNT(CASE WHEN tipo = 'Academia' THEN 1 END) as especifico,
+          COUNT(CASE WHEN tipo = 'Club' THEN 1 END) as colectivo,
+          COUNT(CASE WHEN tipo = 'Judo' THEN 1 END) as complementario,
+          COUNT(*) as total
+        FROM trainings
+        WHERE fecha >= ?::date AND fecha <= ?::date AND tipo_ausencia IS NULL
+      """)
+      ps.setString(1, fi); ps.setString(2, ff)
+      val rs = ps.executeQuery()
+      rs.next()
+      val especifico = rs.getInt("especifico"); val colectivo = rs.getInt("colectivo")
+      val complementario = rs.getInt("complementario"); val total = rs.getInt("total")
+      val ratioEspecifico = if (total > 0) especifico * 100.0 / total else 0.0
+
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+      val (recMin, recMax) =
+        if (edad <= 8) (15.0, 20.0)
+        else if (edad <= 10) (25.0, 30.0)
+        else if (edad <= 12) (35.0, 40.0)
+        else (45.0, 55.0)
+
+      Map(
+        "especifico" -> especifico, "colectivo" -> colectivo, "complementario" -> complementario, "total" -> total,
+        "ratioEspecifico" -> ratioEspecifico, "edad" -> edad, "recMin" -> recMin, "recMax" -> recMax,
+        "porDebajo" -> (ratioEspecifico < recMin), "porEncima" -> (ratioEspecifico >= recMin)
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE H — INDICE DE RENDIMIENTO CONTEXTUAL (CPI)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/matematicas puras — sin Gemini.
+  def calcularCPI(matchId: Int): Double = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT rival, nota, clima, es_local, fecha FROM matches WHERE id=?")
+      ps.setInt(1, matchId)
+      val r = ps.executeQuery()
+      if (!r.next()) return 0.0
+      val rival = Option(r.getString("rival")).getOrElse("")
+      val nota = r.getDouble("nota")
+      val clima = Option(r.getString("clima")).getOrElse("")
+      val esLocalValue = r.getBoolean("es_local")
+      val esFuera = !r.wasNull() && !esLocalValue
+      val fecha = r.getDate("fecha").toString
+
+      // Factor rival: comparamos los goles encajados de media contra este rival con la media global
+      val rsRival = conn.prepareStatement("SELECT AVG(goles_contra) as m, COUNT(*) as n FROM matches WHERE status='PLAYED' AND LOWER(rival)=LOWER(?)")
+      rsRival.setString(1, rival)
+      val rrR = rsRival.executeQuery()
+      val (mediaRival, nRival) = if (rrR.next()) (rrR.getDouble("m"), rrR.getInt("n")) else (0.0, 0)
+      val rsGlobal = conn.createStatement().executeQuery("SELECT AVG(goles_contra) as m FROM matches WHERE status='PLAYED'")
+      val mediaGlobal = if (rsGlobal.next()) rsGlobal.getDouble("m") else 0.0
+      val factorRival =
+        if (nRival < 2 || mediaGlobal <= 0) 1.0
+        else if (mediaRival > mediaGlobal * 1.3) 1.2
+        else if (mediaRival < mediaGlobal * 0.7) 0.8
+        else 1.0
+
+      // Factor condiciones fisicas: indice de forma calculado ese dia
+      val rsForma = conn.prepareStatement("SELECT indice_forma FROM forma_diaria WHERE fecha = ?::date")
+      rsForma.setString(1, fecha)
+      val rf = rsForma.executeQuery()
+      val factorForma =
+        if (rf.next()) { val forma = rf.getDouble("indice_forma"); if (forma < 5.0) 0.9 else if (forma >= 8.0) 1.1 else 1.0 }
+        else 1.0
+
+      val factorClima = if (clima == "Lluvia" || clima.startsWith("Fr")) 1.1 else 1.0
+      val factorSede = if (esFuera) 1.05 else 1.0
+
+      val cpi = nota * factorRival * factorForma * factorClima * factorSede
+      math.min(10.0, math.max(1.0, cpi))
+    } finally { conn.close() }
+  }
+
+  // Calcula y guarda el CPI en background tras guardar el partido — nunca bloquea la respuesta.
+  def actualizarCPI(matchId: Int): Unit = {
+    new Thread(() => {
+      try {
+        val cpi = calcularCPI(matchId)
+        val conn = getConnection()
+        try {
+          val up = conn.prepareStatement("UPDATE matches SET cpi=? WHERE id=?")
+          up.setDouble(1, cpi); up.setInt(2, matchId)
+          up.executeUpdate()
+        } finally { conn.close() }
+      } catch { case e: Exception => println(s"[!] actualizarCPI error: ${e.getMessage}") }
+    }).start()
+  }
+
+  /** CPI medio de la temporada activa, para usar en getDeepAnalysis() en lugar de la nota media cuando hay datos. */
+  def getCpiMedioTemporada(): Option[Double] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        s"SELECT AVG(cpi) as m, COUNT(*) as n FROM matches WHERE status='PLAYED' AND cpi IS NOT NULL ${seasonFilter(getTemporadaActivaId())}")
+      if (rs.next() && rs.getInt("n") > 0) Some(rs.getDouble("m")) else None
     } finally { conn.close() }
   }
 
@@ -4507,14 +5150,30 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val conn = getConnection()
       try {
         val card = getLatestCardData(); val edad = calcularEdadExacta(card.fechaNacimiento)
-        val ps = conn.prepareStatement("SELECT rival, goles_favor, goles_contra, nota, reaccion_goles FROM matches WHERE id=?")
+        val ps = conn.prepareStatement("SELECT fecha, rival, goles_favor, goles_contra, nota, reaccion_goles, autopercepcion_prepartido FROM matches WHERE id=?")
         ps.setInt(1, matchId)
         val rs = ps.executeQuery()
         if (rs.next()) {
           val rival = rs.getString("rival"); val gf = rs.getInt("goles_favor"); val gc = rs.getInt("goles_contra")
           val nota = rs.getDouble("nota"); val comportamiento = Option(rs.getString("reaccion_goles")).getOrElse("N/A")
 
-          val prompt = s"""Héctor, portero de $edad años, acaba de jugar contra $rival. Resultado: $gf-$gc. Nota: $nota. Comportamiento tras goles: $comportamiento. El padre va a comer con él ahora. Dame en texto plano: QUE_RESALTAR: [una acción positiva específica y concreta para mencionar con naturalidad en la comida] / QUE_CALLAR: [un error que debe evitar mencionar hoy, con una frase explicando por qué callarlo beneficia la resiliencia a esta edad] / ACCION_POSITIVA: [una micro-acción para esta tarde que refuerce la confianza, sin hablar de fútbol]. Lenguaje para un padre, no para un entrenador."""
+          // BLOQUE B3: autopercepcion pre-partido vs indice de forma calculado ese dia
+          val autopercepcionObj = rs.getObject("autopercepcion_prepartido")
+          val autopercepcionLinea = if (autopercepcionObj == null) "" else {
+            val autop = rs.getInt("autopercepcion_prepartido")
+            val fechaPartido = rs.getDate("fecha").toString
+            val rsForma = conn.prepareStatement("SELECT indice_forma FROM forma_diaria WHERE fecha = ?::date")
+            rsForma.setString(1, fechaPartido)
+            val rf = rsForma.executeQuery()
+            if (rf.next()) {
+              val forma = rf.getDouble("indice_forma")
+              val formaEn5 = math.min(5.0, math.max(1.0, forma / 2.0))
+              val coincide = math.abs(autop - formaEn5) <= 1.0
+              s" Antes del partido Héctor dijo que se encontraba $autop/5. El Índice de Forma calculado era ${"%.1f".format(forma)}. ${if (coincide) "Coinciden" else "Divergen significativamente"}."
+            } else ""
+          }
+
+          val prompt = s"""Héctor, portero de $edad años, acaba de jugar contra $rival. Resultado: $gf-$gc. Nota: $nota. Comportamiento tras goles: $comportamiento.$autopercepcionLinea El padre va a comer con él ahora. Dame en texto plano: QUE_RESALTAR: [una acción positiva específica y concreta para mencionar con naturalidad en la comida] / QUE_CALLAR: [un error que debe evitar mencionar hoy, con una frase explicando por qué callarlo beneficia la resiliencia a esta edad] / ACCION_POSITIVA: [una micro-acción para esta tarde que refuerce la confianza, sin hablar de fútbol]. Lenguaje para un padre, no para un entrenador."""
 
           val guia = AIProvider.ask(prompt, None, bypassCache = true)
           val up = conn.prepareStatement("UPDATE matches SET guia_conversacion=? WHERE id=?")
@@ -6322,6 +6981,75 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     val conn = getConnection()
     try {
       Map("season1" -> getTemporadaStats(conn, id1), "season2" -> getTemporadaStats(conn, id2))
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE F — COMPARATIVA LONGITUDINAL CON SI MISMO (activa con >=2 temporadas)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/matematicas puras — sin Gemini.
+  def getComparativaLongitudinal(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val temporadas = getSeasonsForSelector().reverse // cronologico ascendente
+      if (temporadas.size < 2) return Map("suficiente" -> false, "n" -> temporadas.size)
+
+      val cognitivoTests = getCognitivoTests() // (fecha, indice) — pequeno, se filtra en memoria por temporada
+
+      val datos = temporadas.map { case (id, label) =>
+        val stats = getTemporadaStats(conn, id)
+        val pj = stats.getOrElse("pj", 0).asInstanceOf[Int]
+        val pcs = stats.getOrElse("porteriasCero", 0).asInstanceOf[Int]
+        val gc = stats.getOrElse("gc", 0).asInstanceOf[Int]
+        val pctPorteriasCero = if (pj > 0) pcs * 100.0 / pj else 0.0
+        val gcPorPartido = if (pj > 0) gc.toDouble / pj else 0.0
+        val futMedia = Seq("div","han","kic","ref","spd","pos").map(k => stats.getOrElse(k, 0.0).asInstanceOf[Double]).sum / 6.0
+
+        val rsFechas = conn.prepareStatement("SELECT fecha_inicio, fecha_fin FROM seasons WHERE id=?")
+        rsFechas.setInt(1, id)
+        val rf = rsFechas.executeQuery()
+        val (fechaIni, fechaFin) = if (rf.next()) (Option(rf.getDate("fecha_inicio")), Option(rf.getDate("fecha_fin"))) else (None, None)
+
+        val acwrMedio: Option[Double] = (fechaIni, fechaFin) match {
+          case (Some(a), Some(b)) =>
+            val ps = conn.prepareStatement("SELECT AVG(acwr_score) as m, COUNT(*) as n FROM forma_diaria WHERE fecha >= ? AND fecha <= ?")
+            ps.setDate(1, a); ps.setDate(2, b)
+            val r = ps.executeQuery()
+            if (r.next() && r.getInt("n") > 0) Some(r.getDouble("m")) else None
+          case _ => None
+        }
+
+        val indiceCognitivoMedio: Option[Double] = (fechaIni, fechaFin) match {
+          case (Some(a), Some(b)) =>
+            val enRango = cognitivoTests.filter { t =>
+              val f = t("fecha").asInstanceOf[String]
+              f >= a.toString && f <= b.toString
+            }
+            if (enRango.nonEmpty) Some(enRango.map(_("indice").asInstanceOf[Double]).sum / enRango.size) else None
+          case _ => None
+        }
+
+        // Velocidad de aprendizaje: skills conseguidas por mes de temporada
+        val mesesTemporada = (fechaIni, fechaFin) match {
+          case (Some(a), Some(b)) => math.max(1, java.time.Period.between(a.toLocalDate, b.toLocalDate).toTotalMonths.toInt)
+          case _ => 1
+        }
+        val skillsPorMes = stats.getOrElse("skillsConseguidas", 0).asInstanceOf[Int].toDouble / mesesTemporada
+
+        Map(
+          "temporada" -> label,
+          "notaMedia" -> stats.getOrElse("notaMedia", 0.0).asInstanceOf[Double],
+          "gcPorPartido" -> gcPorPartido,
+          "pctPorteriasCero" -> pctPorteriasCero,
+          "futMedia" -> futMedia,
+          "skillsPorMes" -> skillsPorMes,
+          "horasPractica" -> stats.getOrElse("horasPractica", 0.0).asInstanceOf[Double],
+          "acwrMedio" -> acwrMedio,
+          "indiceCognitivoMedio" -> indiceCognitivoMedio
+        )
+      }
+
+      Map("suficiente" -> true, "n" -> temporadas.size, "temporadas" -> datos)
     } finally { conn.close() }
   }
   def saveRivalInfo(nombre: String, estilo: String, claves: String, notas: String): Unit = { val conn = getConnection(); try { conn.createStatement().executeUpdate(s"DELETE FROM rivals WHERE LOWER(nombre) = LOWER('${fixEncoding(nombre)}')"); val ps = conn.prepareStatement("INSERT INTO rivals (nombre, estilo_juego, jugadores_clave, notas_scouting) VALUES (?,?,?,?)"); ps.setString(1, fixEncoding(nombre)); ps.setString(2, estilo); ps.setString(3, fixEncoding(claves)); ps.setString(4, fixEncoding(notas)); ps.executeUpdate() } finally { conn.close() } }

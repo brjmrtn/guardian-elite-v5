@@ -45,10 +45,26 @@ object MatchController extends cask.Routes {
     cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
   }
 
+  // BLOQUE B1: autopercepcion pre-partido registrada desde el banner del dashboard — SQL puro, sin Gemini
+  @cask.post("/match/autopercepcion")
+  def guardarAutopercepcion(request: cask.Request) = withAuth(request) {
+    val bodyString = new String(request.data.readAllBytes(), "UTF-8")
+    val formData = bodyString.split("&").filter(_.nonEmpty).map { part =>
+      val pair = part.split("=", 2)
+      java.net.URLDecoder.decode(pair(0), "UTF-8") -> (if (pair.length > 1) java.net.URLDecoder.decode(pair(1), "UTF-8") else "")
+    }.toMap
+    val valor = formData.getOrElse("valor", "").toIntOption.getOrElse(0)
+    if (valor >= 1 && valor <= 5) DatabaseManager.guardarAutopercepcionTemporal(valor)
+    val json = ujson.Obj("ok" -> (valor >= 1 && valor <= 5))
+    cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
+  }
+
   @cask.get("/match-center")
   def matchCenterPage(request: cask.Request, scheduleId: Int = 0) = withAuth(request) {
     val today = java.time.LocalDate.now().toString
     var preRival = ""; var preFecha = today; var isScheduled = false; var preEstadio = ""
+    // BLOQUE B2: si ya se registro la autopercepcion desde el banner del dashboard, viene pre-seleccionada
+    val autopercepcionPrefill = DatabaseManager.getAutopercepcionTemporalHoy()
 
     // Si venimos de un partido programado, cargamos datos
     if(scheduleId > 0) {
@@ -445,6 +461,81 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
+                // ── BLOQUE B2: AUTOPERCEPCION PRE-PARTIDO DE HECTOR ───────
+                div(cls := "mb-4 p-2 border border-primary rounded bg-primary bg-opacity-10",
+                  label(cls := "form-label text-white small fw-bold w-100 text-center", "🎯 ¿Cómo se encontraba Héctor antes del partido?"),
+                  div(cls := "btn-group w-100", attr("role") := "group",
+                    Seq((1, "😞 1"), (2, "😕 2"), (3, "😐 3"), (4, "🙂 4"), (5, "😃 5")).map { case (v, txt) =>
+                      frag(
+                        input(tpe := "radio", cls := "btn-check", name := "autopercepcionPrepartido", id := s"autop$v", value := v.toString,
+                          if (autopercepcionPrefill.contains(v)) attr("checked") := "checked" else frag()),
+                        label(cls := "btn btn-outline-primary btn-sm", `for` := s"autop$v", txt)
+                      )
+                    }
+                  ),
+                  div(cls := "xx-small text-muted mt-1 text-center", "1=Muy mal · 2=Regular · 3=Normal · 4=Bien · 5=Muy bien")
+                ),
+
+                // ── BLOQUE C: CONTEXTO AVANZADO (opcional) ─────────────────
+                div(cls := "mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
+                  div(cls := "d-flex justify-content-between align-items-center", style := "cursor:pointer;", onclick := "toggleContextoAvanzado()",
+                    label(cls := "text-white fw-bold small mb-0", style := "cursor:pointer;", "⚙️ CONTEXTO AVANZADO (opcional)"),
+                    span(id := "contextoAvanzadoChevron", cls := "text-white small", "▼")
+                  ),
+                  div(id := "contextoAvanzadoPanel", style := "display:none;",
+                    div(cls := "row g-2 mt-1",
+                      div(cls := "col-6",
+                        label(cls := "xx-small text-muted fw-bold", "Minutos de calentamiento"),
+                        input(tpe := "number", step := "1", min := "0", name := "calentamientoMin", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+                      ),
+                      div(cls := "col-6",
+                        label(cls := "xx-small text-muted fw-bold", "Tipo de calentamiento"),
+                        select(name := "calentamientoTipo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                          option(value := "", "— Sin especificar —"),
+                          option(value := "NINGUNO", "Ninguno"),
+                          option(value := "CARRERA_SUAVE", "Carrera suave"),
+                          option(value := "ESPECIFICO_PORTERO", "Específico de portero"),
+                          option(value := "COMPLETO_EQUIPO", "Completo con el equipo")
+                        )
+                      )
+                    ),
+                    div(cls := "mt-2",
+                      label(cls := "xx-small text-muted fw-bold", "Tipo de césped"),
+                      select(name := "superficie", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                        option(value := "", "— Sin especificar —"),
+                        option(value := "NATURAL", "Natural"),
+                        option(value := "ARTIFICIAL", "Artificial"),
+                        option(value := "TIERRA", "Tierra"),
+                        option(value := "INTERIOR", "Interior")
+                      )
+                    ),
+                    div(cls := "mt-2",
+                      label(cls := "xx-small text-muted fw-bold", "¿Hay algún factor externo relevante hoy? (enfermedad incipiente, mal descanso por viaje, examen, cumpleaños...)"),
+                      textarea(name := "factoresExternos", cls := "form-control form-control-sm bg-dark text-white border-secondary", rows := "2")
+                    ),
+                    div(cls := "mt-2",
+                      label(cls := "xx-small text-muted fw-bold", "Velocidad de transición parada → distribución"),
+                      div(cls := "xx-small text-muted mb-1", "El tiempo desde que para el balón hasta que lo pone en juego. Los porteros de élite distribuyen en <4s para presionar al rival antes de que se reorganice."),
+                      select(name := "velocidadDistribucion", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                        option(value := "", "— Sin especificar —"),
+                        option(value := "INMEDIATO", "Inmediato (<3 segundos)"),
+                        option(value := "NORMAL", "Normal (3-6 segundos)"),
+                        option(value := "LENTO", "Lento (>6 segundos)")
+                      )
+                    ),
+                    div(cls := "mt-2",
+                      label(cls := "xx-small text-muted fw-bold", "Economía de movimiento (Dive Economy)"),
+                      div(cls := "xx-small text-muted mb-1", "¿Cuántas paradas fueron innecesariamente acrobáticas cuando con mejor posición inicial hubieran sido cómodas? 1=Muchas dives innecesarias · 5=Siempre llegó con comodidad"),
+                      input(tpe := "range", cls := "form-range", min := "1", max := "5", name := "economiaMovimiento")
+                    ),
+                    div(cls := "mt-2",
+                      label(cls := "xx-small text-muted fw-bold", "Calidad de decisión (independiente del resultado, %)"),
+                      div(cls := "xx-small text-muted mb-1", "¿Qué % de las decisiones tomó correctamente independientemente de si el resultado fue favorable? Un portero puede decidir bien y que el balón entre de rebote, o quedarse estático y que el delantero falle."),
+                      input(tpe := "number", step := "1", min := "0", max := "100", name := "calidadDecisionPct", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+                    )
+                  )
+                ),
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
@@ -453,6 +544,7 @@ object MatchController extends cask.Routes {
             script(raw("""
               function toggleFootbar(){var p=document.getElementById('footbarPanel');var c=document.getElementById('footbarChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
               function toggleRubrica(){var p=document.getElementById('rubricaPanel');var c=document.getElementById('rubricaChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
+              function toggleContextoAvanzado(){var p=document.getElementById('contextoAvanzadoPanel');var c=document.getElementById('contextoAvanzadoChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
               function calcNotaSugerida(){
                 var ids=['rubricaPosicion','rubricaDecisiones','rubricaPies','rubricaComunicacion','rubricaActitud'];
                 var vals=ids.map(function(id){var v=document.getElementById(id).value;return v?parseInt(v):null;});
@@ -703,6 +795,18 @@ object MatchController extends cask.Routes {
     val pieNoDominanteAcciones  = getInt("pieNoDominanteAcciones")
     val iniciativaVocal         = getStr("iniciativaVocal")
 
+    // BLOQUE B2: autopercepcion pre-partido (opcional)
+    val autopercepcionPrepartido = getOptInt("autopercepcionPrepartido")
+
+    // BLOQUE C: contexto avanzado del partido (opcional)
+    val calentamientoMin      = getOptInt("calentamientoMin")
+    val calentamientoTipo     = getStr("calentamientoTipo")
+    val superficie             = getStr("superficie")
+    val factoresExternos       = getStr("factoresExternos")
+    val velocidadDistribucion  = getStr("velocidadDistribucion")
+    val economiaMovimiento     = getOptInt("economiaMovimiento")
+    val calidadDecisionPct     = getOptInt("calidadDecisionPct")
+
     // Footbar (sensor GPS de rendimiento) — opcional
     val fbDistancia        = getDouble("fbDistancia")
     val fbAltaIntensidad   = getDouble("fbAltaIntensidad")
@@ -769,9 +873,20 @@ object MatchController extends cask.Routes {
     }
 
     // Bloque 4.1/4.3: Rubrica y metricas de cantera + Bloque 4.4: guia de conversacion en background
+    // BLOQUE B2/C: autopercepcion pre-partido y contexto avanzado (opcionales)
     DatabaseManager.updateMatchExtras(savedMatchId, rubricaPosicion, rubricaDecisiones, rubricaPies,
-      rubricaComunicacion, rubricaActitud, posicionSet, alturaBloque, pieNoDominanteAcciones, iniciativaVocal)
+      rubricaComunicacion, rubricaActitud, posicionSet, alturaBloque, pieNoDominanteAcciones, iniciativaVocal,
+      autopercepcionPrepartido, calentamientoMin, calentamientoTipo, superficie,
+      factoresExternos, velocidadDistribucion, economiaMovimiento, calidadDecisionPct)
     DatabaseManager.generarGuiaConversacion(savedMatchId)
+
+    // BLOQUE H: calcula el CPI del partido en background, sin bloquear la respuesta
+    DatabaseManager.actualizarCPI(savedMatchId)
+
+    // BLOQUE E: detecta hitos de carrera tras guardar el partido — en background, nunca bloquea la respuesta
+    new Thread(new Runnable {
+      def run(): Unit = DatabaseManager.detectarHitos()
+    }).start()
 
     // BLOQUE G3: notificacion Telegram al guardar el partido — en background, nunca bloquea la respuesta
     new Thread(new Runnable {

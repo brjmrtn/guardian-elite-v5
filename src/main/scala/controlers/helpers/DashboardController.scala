@@ -220,6 +220,36 @@ object DashboardController extends cask.Routes {
         )
     }
 
+    // ── BLOQUE E: HITOS CONSEGUIDOS EN LOS ULTIMOS 7 DIAS (SQL puro, sin Gemini) ──
+    val hitosRecientes = DatabaseManager.getHitosRecientes(7)
+    val hitosWidget: Modifier =
+      if (hitosRecientes.isEmpty) div()
+      else div(cls := "card bg-dark border-warning shadow mb-3 p-3", style := "border-left:6px solid #d4af37;",
+        hitosRecientes.map { h =>
+          div(cls := "small fw-bold", style := "color:#facc15;", s"🏆 NUEVO HITO CONSEGUIDO: ${h("descripcion")}")
+        }
+      )
+
+    // ── BLOQUE A: DEUDA DE SUENO ACUMULADA SEMANAL (SQL puro, sin Gemini) ─────
+    val deudaSueno = formaHoy("deudaSueno").asInstanceOf[Map[String, Any]]
+    val deudaNivel = deudaSueno("nivel").asInstanceOf[String]
+    val deudaHorasDash = deudaSueno("deudaHoras").asInstanceOf[Double]
+    val deudaMediaDash = deudaSueno("mediaDiaria").asInstanceOf[Double]
+    val deudaSuenoWidget: Modifier = deudaNivel match {
+      case "MODERADA" =>
+        div(cls := "card bg-dark border-info shadow-sm mb-3 p-2",
+          div(cls := "xx-small", style := "color:#e2e8f0;",
+            raw(f"💤 Deuda de sueño esta semana: <strong>${deudaHorasDash}%.1fh</strong> — media de ${deudaMediaDash}%.1fh/noche")))
+      case "ALTA" =>
+        div(cls := "card bg-dark border-warning shadow-sm mb-3 p-2",
+          div(cls := "xx-small", style := "color:#fde68a;",
+            raw(f"⚠️ Deuda de sueño alta: <strong>${deudaHorasDash}%.1fh acumuladas</strong> (${deudaMediaDash}%.1fh/noche de media)")))
+      case "CRITICA" =>
+        div(cls := "alert alert-danger fw-bold shadow mb-3", style := "border-left:6px solid #dc3545;",
+          raw(f"🔴 Deuda de sueño crítica: <strong>${deudaHorasDash}%.1fh acumuladas</strong> esta semana"))
+      case _ => div()
+    }
+
     // ── BLOQUE C: MODO DIA DE PARTIDO (SQL/cache, sin Gemini en el render) ────
     val diaPartidoBanner: Modifier = if (!esDiaDePartido) div() else {
       val indice = formaHoy("indiceForma").asInstanceOf[Double]
@@ -232,6 +262,12 @@ object DashboardController extends cask.Routes {
                      else if (fc >= 3.0) "FC reposo elevada — vigilar cansancio" else "FC reposo muy elevada — posible fatiga acumulada"
         div(cls := "xx-small", style := "color:#cbd5e1;", s"❤️ FC reposo hoy: $interp")
       } else div()
+
+      // BLOQUE A: deuda de sueno en el modo dia de partido si es ALTA o CRITICA
+      val deudaLinea: Modifier = if (deudaNivel == "ALTA" || deudaNivel == "CRITICA")
+        div(cls := "xx-small fw-bold", style := "color:#fda4af;",
+          f"💤 Deuda de sueño de la semana: ${deudaHorasDash}%.1fh — puede afectar concentración y reflejos.")
+      else div()
 
       // BLOQUE F3: aviso de riesgo de lesion en el modo dia de partido
       val riesgoLinea: Modifier = if (riesgoEsAltoOCritico)
@@ -301,6 +337,20 @@ object DashboardController extends cask.Routes {
           a(href := "/match-center", cls := "btn btn-warning fw-bold w-100 mt-3", "⚽ REGISTRAR PARTIDO")
       }
 
+      // ── BLOQUE B1: AUTOPERCEPCION DE HECTOR PRE-PARTIDO ───────────────────
+      val autopercepcionHoy = DatabaseManager.getAutopercepcionTemporalHoy()
+      val autopercepcionWidget: Modifier = div(cls := "mt-2 pt-2", style := "border-top:1px solid #334155;",
+        div(cls := "xx-small fw-bold mb-1", style := "color:#facc15;", "🎯 ¿Cómo dice Héctor que se encuentra hoy? (pregúntale de camino al campo)"),
+        div(cls := "d-flex gap-1",
+          Seq((1, "😞"), (2, "😕"), (3, "😐"), (4, "🙂"), (5, "😃")).map { case (v, emoji) =>
+            val activo = autopercepcionHoy.contains(v)
+            button(tpe := "button", id := s"dashAutop$v",
+              cls := s"btn btn-sm flex-fill ${if (activo) "btn-warning" else "btn-outline-light"}",
+              onclick := s"registrarAutopercepcionDashboard($v)", s"$emoji $v")
+          }
+        )
+      )
+
       div(id := "diaPartidoBanner",
         style := "background: linear-gradient(135deg, #451a03 0%, #1e293b 100%); border-radius:16px; padding:18px; margin-bottom:16px; border:1px solid #d4af37;",
         div(cls := "d-flex justify-content-between align-items-start",
@@ -311,10 +361,12 @@ object DashboardController extends cask.Routes {
               span(cls := "xx-small text-muted", "ÍNDICE DE FORMA")
             ),
             fcLinea,
+            deudaLinea,
             riesgoLinea
           ),
           span(style := "cursor:pointer; color:#94a3b8; font-size:18px;", onclick := "cerrarDiaPartidoBanner()", "✕")
         ),
+        autopercepcionWidget,
         rivalCard,
         div(cls := "row g-2 mt-2", tarjetas),
         microObjetivoLinea,
@@ -731,8 +783,12 @@ object DashboardController extends cask.Routes {
         microObjetivoWidget,
         preparacionWidget,
 
+        // ── BLOQUE E: HITOS RECIENTES ────────────────────────────────────────
+        hitosWidget,
+
         // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
         formaWidget,
+        deudaSuenoWidget,
         riesgoLesionWidget,
 
         // ── HERO HEADER (dark) ─────────────────────────────────────────────
@@ -920,7 +976,8 @@ object DashboardController extends cask.Routes {
                     )
                   )
                 }: _*)
-              )
+              ),
+              a(href := "/career/acwr-proyeccion", cls := "btn btn-sm btn-outline-warning fw-bold w-100", "📅 Planificar próxima semana")
             ),
 
             // Radar + heatmap táctico
@@ -1011,6 +1068,17 @@ object DashboardController extends cask.Routes {
         )
       ),
       script(raw("""
+        function registrarAutopercepcionDashboard(v){
+          fetch('/match/autopercepcion', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'valor='+v })
+            .then(function(){
+              for (var i=1;i<=5;i++){
+                var btn = document.getElementById('dashAutop'+i);
+                if (!btn) continue;
+                btn.classList.remove('btn-warning'); btn.classList.remove('btn-outline-light');
+                btn.classList.add(i===v ? 'btn-warning' : 'btn-outline-light');
+              }
+            });
+        }
         function cerrarDiaPartidoBanner(){
           var b = document.getElementById('diaPartidoBanner');
           if (b) b.style.display = 'none';

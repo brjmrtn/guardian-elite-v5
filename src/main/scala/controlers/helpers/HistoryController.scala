@@ -265,6 +265,73 @@ object HistoryController extends cask.Routes {
     renderHtml(basePage("history", mainContent))
   }
 
+  // ── BLOQUE D: DESGLOSE TECNICO DE PARADAS (opcional, post-registro) ───────
+  @cask.get("/history/paradas/:matchId")
+  def paradasDesglosePage(request: cask.Request, matchId: Int) = withAuth(request) {
+    DatabaseManager.getMatchById(matchId) match {
+      case None => renderHtml(basePage("history", div(cls:="text-center text-muted py-5", "Partido no encontrado")))
+      case Some(m) =>
+        val guardadas = DatabaseManager.getParadasDetalleMatch(matchId).map(p => p("numeroParada").asInstanceOf[Int] -> p).toMap
+        val tecnicas = Seq("DOS_MANOS", "UNA_MANO", "TIP_OVER", "BLOQUEO_CUERPO", "PARADA_PIES", "OTRO")
+        val resultados = Seq("ATRAPADO_LIMPIO", "DESPEJADO_ZONA_SEGURA", "DESPEJADO_PELIGRO", "RECHAZADO")
+        val content = basePage("history",
+          div(cls:="row justify-content-center",
+            div(cls:="col-md-8 col-12",
+              div(cls:="d-flex justify-content-between align-items-center mb-3",
+                h2(cls:="text-warning mb-0", "📊 DESGLOSE DE PARADAS"),
+                a(href:="/history", cls:="btn btn-outline-secondary btn-sm fw-bold", "← Historial")
+              ),
+              div(cls:="text-muted small mb-3", s"vs ${fixEncoding(m.rival)} — ${m.fecha.take(10)} — ${m.paradas} paradas registradas"),
+              form(action := s"/history/paradas/$matchId/save", method := "post",
+                (1 to m.paradas).map { n =>
+                  val previa = guardadas.get(n)
+                  div(cls:="card bg-dark border-secondary shadow-sm mb-2 p-2",
+                    div(cls:="fw-bold small text-info mb-1", s"Parada #$n"),
+                    div(cls:="row g-2",
+                      div(cls:="col-6",
+                        label(cls:="xx-small text-muted", "Técnica"),
+                        select(name := s"tecnica_$n", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                          option(value := "", "— Sin especificar —"),
+                          tecnicas.map(t => if (previa.exists(_("tecnica") == t)) option(value := t, selected := "selected", t) else option(value := t, t))
+                        )
+                      ),
+                      div(cls:="col-6",
+                        label(cls:="xx-small text-muted", "Resultado"),
+                        select(name := s"resultado_$n", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                          option(value := "", "— Sin especificar —"),
+                          resultados.map(r => if (previa.exists(_("resultado") == r)) option(value := r, selected := "selected", r) else option(value := r, r))
+                        )
+                      )
+                    )
+                  )
+                },
+                div(cls:="d-grid mt-3", button(tpe:="submit", cls:="btn btn-info fw-bold", "Guardar desglose"))
+              )
+            )
+          )
+        )
+        renderHtml(content)
+    }
+  }
+
+  @cask.post("/history/paradas/:matchId/save")
+  def paradasDesguardar(request: cask.Request, matchId: Int) = withAuth(request) {
+    val bodyString = new String(request.data.readAllBytes(), "UTF-8")
+    val formData = bodyString.split("&").filter(_.nonEmpty).map { part =>
+      val pair = part.split("=", 2)
+      java.net.URLDecoder.decode(pair(0), "UTF-8") -> (if (pair.length > 1) java.net.URLDecoder.decode(pair(1), "UTF-8") else "")
+    }.toMap
+    DatabaseManager.getMatchById(matchId).foreach { m =>
+      DatabaseManager.deleteParadasDetalle(matchId) // limpiar si es re-guardado, igual que match_goals
+      (1 to m.paradas).foreach { n =>
+        val tecnica = formData.getOrElse(s"tecnica_$n", "")
+        val resultado = formData.getOrElse(s"resultado_$n", "")
+        if (tecnica.nonEmpty || resultado.nonEmpty) DatabaseManager.saveParadaDetalle(matchId, n, tecnica, "", resultado, "")
+      }
+    }
+    cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
+  }
+
   @cask.get("/mapa-goles")
   def mapaGolesPage(request: cask.Request, temporada: String = "", rival: String = "", temporadaId: Int = 0) = withAuth(request) {
     val temporadasDb = DatabaseManager.getTodasTemporadas()
@@ -1176,6 +1243,39 @@ object HistoryController extends cask.Routes {
     val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
     val stats = DatabaseManager.getBiomecPosicional(efectivo)
     val setPieceStats = DatabaseManager.getSetPieceStats(efectivo) // BLOQUE C
+
+    // BLOQUE D: desglose tecnico de paradas — solo se muestra con >=20 paradas con detalle
+    val paradasAnalysis = DatabaseManager.getParadasAnalysis(efectivo)
+    val paradasAnalysisWidget: Modifier = {
+      val totalDetalle = paradasAnalysis("total").asInstanceOf[Int]
+      if (totalDetalle < 20) div()
+      else {
+        val porTecnica = paradasAnalysis("porTecnica").asInstanceOf[List[Map[String, Any]]]
+        val masUsada = paradasAnalysis("masUsada").asInstanceOf[Option[String]]
+        val mejorTasa = paradasAnalysis("mejorTasaLimpia").asInstanceOf[Option[String]]
+        div(cls:="card bg-dark border-info shadow mb-4",
+          div(cls:="card-header text-info fw-bold small", "🧤 DESGLOSE TÉCNICO DE PARADAS"),
+          div(cls:="card-body p-3",
+            div(cls:="small text-white mb-2",
+              masUsada.map(t => s"Técnica más usada: $t.").getOrElse("") +
+                mejorTasa.map(t => s" Mejor tasa de resultado limpio: $t.").getOrElse("")
+            ),
+            table(cls:="table table-sm table-dark mb-0",
+              thead(tr(th("Técnica"), th(cls:="text-center","Usos"), th(cls:="text-center","% Limpio"))),
+              tbody(
+                porTecnica.map { t =>
+                  tr(
+                    td(t("tecnica").asInstanceOf[String]),
+                    td(cls:="text-center", t("usos").asInstanceOf[Int].toString),
+                    td(cls:="text-center", f"${t("pctLimpio").asInstanceOf[Double]}%.0f%%")
+                  )
+                }
+              )
+            )
+          )
+        )
+      }
+    }
     if (stats.isEmpty) renderHtml(basePage("history",
       div(cls:="text-center text-muted py-5", "Sin partidos jugados aun")
     )) else {
@@ -1434,6 +1534,8 @@ object HistoryController extends cask.Routes {
                 )
               }
             },
+
+            paradasAnalysisWidget,
 
             script(raw("""
             function switchMode(mode) {
@@ -3840,6 +3942,37 @@ object HistoryController extends cask.Routes {
               )
             )
           ) else frag(),
+
+          // BLOQUE I: firma de fatiga personal — solo con >=8 partidos con ACWR alto y rubrica completa
+          {
+            val firma = DatabaseManager.getFirmaFatiga()
+            if (!firma("suficiente").asInstanceOf[Boolean]) frag()
+            else {
+              val comparativa = firma("comparativa").asInstanceOf[List[Map[String, Any]]]
+              val dimensionPrincipal = firma("firmaFatiga").asInstanceOf[String]
+              div(cls := "card bg-dark border-danger shadow mb-3",
+                div(cls := "card-header text-danger fw-bold small", "🔬 FIRMA DE FATIGA PERSONAL"),
+                div(cls := "card-body p-3",
+                  div(cls := "small text-white mb-2", s"Cuando Héctor llega cargado, lo primero que falla es: ", strong(dimensionPrincipal)),
+                  div(cls := "table-responsive",
+                    table(cls := "table table-sm table-dark mb-0",
+                      thead(tr(th("Dimensión"), th(cls:="text-center","Media normal"), th(cls:="text-center","Media bajo fatiga"), th(cls:="text-center","Diferencia"))),
+                      tbody(
+                        comparativa.map { c =>
+                          tr(
+                            td(c("dimension").asInstanceOf[String]),
+                            td(cls:="text-center", f"${c("normal").asInstanceOf[Double]}%.1f"),
+                            td(cls:="text-center", f"${c("cansado").asInstanceOf[Double]}%.1f"),
+                            td(cls:="text-center", f"${c("diferencia").asInstanceOf[Double]}%.1f")
+                          )
+                        }
+                      )
+                    )
+                  )
+                )
+              )
+            }
+          },
 
           script(raw(s"""
             (function() {

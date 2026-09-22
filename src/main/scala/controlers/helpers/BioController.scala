@@ -67,6 +67,29 @@ object BioController extends cask.Routes {
     val academiaSessions = DatabaseManager.getAcademiaSessions().take(5)
     val tipoSesionHoy = DatabaseManager.getTipoSesionHoy() // BLOQUE B3: pre-relleno segun estructura semanal
 
+    // --- BLOQUE J: RATIO DE ENTRENAMIENTO ESPECIFICO (solo lectura/calculo, sin Gemini) ---
+    val ratioEntreno = DatabaseManager.getRatioEntrenamientoEspecifico()
+    val ratioEntrenoWidget: Modifier = {
+      val total = ratioEntreno("total").asInstanceOf[Int]
+      if (total == 0) div()
+      else {
+        val ratioEspecifico = ratioEntreno("ratioEspecifico").asInstanceOf[Double]
+        val edad = ratioEntreno("edad").asInstanceOf[Int]
+        val recMin = ratioEntreno("recMin").asInstanceOf[Double]
+        val recMax = ratioEntreno("recMax").asInstanceOf[Double]
+        val porDebajo = ratioEntreno("porDebajo").asInstanceOf[Boolean]
+        div(cls := "card bg-dark text-white border-secondary shadow mb-3",
+          div(cls := "card-header text-secondary fw-bold text-center small", "⚖️ RATIO DE ENTRENAMIENTO ESPECÍFICO"),
+          div(cls := "card-body p-2",
+            canvas(id := "ratioEntrenoChart", style := "max-height:180px;"),
+            div(cls := "small text-white text-center mt-2", f"Esta temporada: $ratioEspecifico%.0f%% específico de portero · Recomendado para $edad años: ${recMin.toInt}-${recMax.toInt}%%"),
+            if (porDebajo) div(cls := "xx-small text-warning text-center mt-1", "⚠️ El ratio de entrenamiento específico está por debajo del recomendado para su edad. Considera hablar con el entrenador de academia sobre añadir sesiones extra.")
+            else div(cls := "xx-small text-success text-center mt-1", "✅ Buen ratio de entrenamiento específico para su edad.")
+          )
+        )
+      }
+    }
+
     // --- BLOQUE A4: VALIDACION DEL INDICE DE FORMA (solo lectura/calculo, sin Gemini) ---
     val formaCorrelacion = DatabaseManager.getFormaCorrelacion()
     val formaSuficiente = formaCorrelacion("suficiente").asInstanceOf[Boolean]
@@ -101,6 +124,32 @@ object BioController extends cask.Routes {
               )
             ),
             n15Modifier
+          )
+        )
+      }
+
+    // --- BLOQUE B3: AUTOPERCEPCION VS INDICE DE FORMA (solo lectura/calculo, sin Gemini) ---
+    val autopercepcionVsForma = DatabaseManager.getAutopercepcionVsForma()
+    val autopercepcionWidget: Modifier =
+      if (autopercepcionVsForma.size < 5) div()
+      else {
+        val mayoresDivergencias = autopercepcionVsForma.sortBy(m => -math.abs(m("divergencia").asInstanceOf[Double])).take(3)
+        val mediaDivergencia = autopercepcionVsForma.map(_("divergencia").asInstanceOf[Double]).sum / autopercepcionVsForma.size
+        val patron =
+          if (mediaDivergencia > 0.5) "Héctor tiende a SOBRESTIMAR cómo se va a encontrar — suele decir que está mejor de lo que luego indican sus datos de sueño, energía y carga."
+          else if (mediaDivergencia < -0.5) "Héctor tiende a SUBESTIMAR cómo se va a encontrar — suele decir que está peor de lo que luego indican sus datos de sueño, energía y carga."
+          else "No hay un patrón claro de sobre o subestimación — su autopercepción suele coincidir con el Índice de Forma."
+        div(cls := "card bg-dark border-primary shadow mt-3",
+          div(cls := "card-header text-white fw-bold text-center small", "🎯 AUTOPERCEPCIÓN VS ÍNDICE DE FORMA"),
+          div(cls := "card-body p-3",
+            div(cls := "small text-white mb-2", patron),
+            div(cls := "xx-small text-muted fw-bold mb-1", "Mayores divergencias:"),
+            mayoresDivergencias.map { m =>
+              div(cls := "d-flex justify-content-between xx-small border-bottom border-secondary py-1",
+                span(cls := "text-muted", s"${m("fecha")} vs ${m("rival")}"),
+                span(cls := "text-light", f"Dijo ${m("autopercepcion").asInstanceOf[Int]}/5 · Forma ${m("formaEn5").asInstanceOf[Double]}%.1f/5 · Nota ${m("nota").asInstanceOf[Double]}%.1f")
+              )
+            }
           )
         )
       }
@@ -349,6 +398,7 @@ object BioController extends cask.Routes {
       div(cls := "col-md-6",
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "PROGRESO TECNICO"), div(cls := "card-body p-2", canvas(id:="techChart", style:="max-height:200px;"))),
         div(cls := "card bg-dark text-white border-secondary shadow mb-3", div(cls := "card-header text-secondary fw-bold text-center small", "CURVA DE CRECIMIENTO"), div(cls := "card-body p-2", canvas(id:="growthChart", style:="max-height:150px;"))),
+        ratioEntrenoWidget,
         div(cls := "card bg-dark text-white border-success shadow mb-3", div(cls := "card-header bg-success text-dark fw-bold text-center", "REGISTRO ENTRENO"), div(cls := "card-body p-3", form(action := "/bio/save_training", method := "post", div(cls:="mb-3", label(cls:="small fw-bold", "Fecha de la sesión"), input(tpe:="date", name:="fecha", id:="trainingFecha", cls:="form-control bg-dark text-white border-secondary fw-bold", value:=java.time.LocalDate.now().toString, required:=true)), div(cls:="mb-3", label(cls:="small fw-bold", "Tipo"), select(name:="tipo", id:="trainingType", onchange:="toggleDrills()", cls:="form-select bg-dark text-white fw-bold",
               option(value:="Club", if(tipoSesionHoy.contains("Club")) selected:="selected" else frag(), "Club"),
               option(value:="Academia", if(tipoSesionHoy.contains("Academia")) selected:="selected" else frag(), "Academia"),
@@ -408,11 +458,21 @@ object BioController extends cask.Routes {
             )
           ),
 
-          formaValidacionWidget
+          formaValidacionWidget,
+          autopercepcionWidget
         )
       ), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""
       const gCtx=document.getElementById('growthChart');const gData=$growthData;if(gCtx){new Chart(gCtx,{type:'line',data:{labels:gData.labels,datasets:[{label:'Altura (cm)',data:gData.data,borderColor:'#0dcaf0',borderWidth:3,tension:0.3,pointBackgroundColor:'#fff',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#eee',font:{weight:'bold'}},grid:{color:'#444'},pointLabels:{color:'#fff'}},x:{display:false}}}});}
       const tCtx=document.getElementById('techChart');const tData=$techChart;if(tCtx){new Chart(tCtx,{type:'line',data:tData,options:{responsive:true,maintainAspectRatio:false,scales:{y:{min:0,max:10,ticks:{color:'#eee'},grid:{color:'#444'}},x:{ticks:{color:'#eee'}}}}});}
+      const ratioCtx=document.getElementById('ratioEntrenoChart');
+      if(ratioCtx){
+        new Chart(ratioCtx,{type:'doughnut',
+          data:{labels:['Específico (Academia)','Colectivo (Club)','Complementario (Judo)'],
+            datasets:[{data:[${ratioEntreno("especifico").asInstanceOf[Int]},${ratioEntreno("colectivo").asInstanceOf[Int]},${ratioEntreno("complementario").asInstanceOf[Int]}],
+              backgroundColor:['#0dcaf0','#ffc107','#8b5cf6']}]},
+          options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#eee',font:{size:10}}}}}
+        });
+      }
       $formaChartJs
       function toggleDrills(){ var type=document.getElementById('trainingType').value; var container=document.getElementById('drillsContainer'); var manual=document.getElementById('manualDesign'); var aiBtn = document.getElementById('aiBtn'); var fbBox = document.getElementById('feedbackEntrenadorBox'); if(container){if(type.includes('Papa') && !type.includes('Jugador')) container.style.display='block'; else container.style.display='none';} if(manual){if(type.includes('Papa')) manual.style.display='block'; else manual.style.display='none';} if(aiBtn){if(type.includes('Papa')) aiBtn.style.display='block'; else aiBtn.style.display='none';} if(fbBox){fbBox.style.display = (type === 'Academia') ? 'block' : 'none';}
       var judoBox=document.getElementById('judoInfoBox'); var rpeRow=document.getElementById('rpeCalidadAtencionRow'); var esJudo=(type==='Judo'); if(judoBox) judoBox.style.display = esJudo ? 'block' : 'none'; if(rpeRow) rpeRow.style.display = esJudo ? 'none' : 'flex'; }
@@ -534,6 +594,11 @@ object BioController extends cask.Routes {
     DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina, feedbackEntrenador,
       fbDistancia, fbAltaIntensidad, fbSprintMax, fbPctActividad, fbTiempoActivo, fbAceleraciones, fbDesaceleraciones,
       fecha, if (esAusencia) Some(tipoAusencia) else None)
+
+    // BLOQUE E: detecta hitos de carrera tras guardar el entreno — en background, nunca bloquea la respuesta
+    new Thread(new Runnable {
+      def run(): Unit = DatabaseManager.detectarHitos()
+    }).start()
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.title("Entreno Guardado"), tags2.style(raw(getCss()))),
       body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';",
@@ -822,6 +887,9 @@ object BioController extends cask.Routes {
           div(cls := "d-flex justify-content-between align-items-center mb-3",
             h2(cls := "text-warning mb-0", "GRAFICO DE CARGA"),
             a(href := "/bio", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Bio")
+          ),
+          div(cls := "d-grid mb-3",
+            a(href := "/career/acwr-proyeccion", cls := "btn btn-outline-warning btn-sm fw-bold", "📅 Planificar próxima semana")
           ),
 
           // ACWR + KPIs

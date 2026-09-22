@@ -80,9 +80,12 @@ object SharedLayout {
     tr(cls := notaCls,
       td(div(fixEncoding(m.rival)), div(cls := "xx-small text-muted", m.fecha.take(10))),
       td(m.resultado),
-      td(cls := "text-center fw-bold", m.nota.toString, zScoreOpt.map(zScoreBadge).getOrElse(frag())),
+      td(cls := "text-center fw-bold", m.nota.toString,
+        m.cpi.map(c => span(cls := "xx-small text-info d-block", attr("title") := "El CPI ajusta la nota por la dificultad real del contexto: rival, condiciones físicas, clima y si jugó en casa o fuera.", f"CPI: $c%.1f")).getOrElse(frag()),
+        zScoreOpt.map(zScoreBadge).getOrElse(frag())),
       td(cls := "text-end",
         if (readOnly) frag() else a(href := s"/match/edit/${m.id}", cls := "text-decoration-none me-2", "✏️"),
+        if (m.paradas > 0) a(href := s"/history/paradas/${m.id}", cls := "text-decoration-none me-2", attr("title") := "Desglosar paradas", "📊") else frag(),
         a(href := s"/audio-diary/partido/${m.id}", cls := "text-decoration-none", audioIcon)
       )
     )
