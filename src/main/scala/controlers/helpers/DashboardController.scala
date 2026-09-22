@@ -220,6 +220,26 @@ object DashboardController extends cask.Routes {
         )
     }
 
+    // ── BLOQUE A6 (RFMF): RESULTADOS DETECTADOS PENDIENTES DE CONFIRMAR ──────
+    val rfmfPendientes = DatabaseManager.getPartidosRFMFPendientes()
+    val rfmfPendientesWidget: Modifier =
+      if (rfmfPendientes.isEmpty) div()
+      else div(rfmfPendientes.map { m =>
+        val id = m("id").asInstanceOf[Int]
+        val rival = m("rival").asInstanceOf[String]
+        val gf = m("golesFavor").asInstanceOf[Int]
+        val gc = m("golesContra").asInstanceOf[Int]
+        div(cls := "card bg-dark border-warning shadow-sm mb-3 p-2",
+          div(cls := "xx-small text-warning fw-bold", s"📋 RESULTADO DETECTADO en RFMF: vs $rival · $gf-$gc · ¿Confirmar?"),
+          div(cls := "d-flex gap-2 mt-1",
+            form(action := s"/match/rfmf-pendiente/$id/confirmar", method := "post", cls := "flex-fill",
+              button(tpe := "submit", cls := "btn btn-sm btn-warning fw-bold w-100", "✅ Confirmar")),
+            form(action := s"/match/rfmf-pendiente/$id/descartar", method := "post", cls := "flex-fill",
+              button(tpe := "submit", cls := "btn btn-sm btn-outline-secondary fw-bold w-100", "✕ No es este"))
+          )
+        )
+      })
+
     // ── BLOQUE RFFM: BENCHMARK REAL VS CATEGORIA (SQL puro, sin Gemini) ───────
     val rffmWidget: Modifier = DatabaseManager.getPercentilRealHector() match {
       case Some(p) =>
@@ -235,6 +255,24 @@ object DashboardController extends cask.Routes {
         )
       case None => div()
     }
+
+    // ── BLOQUE I: SKILLS DETECTADAS EN EL FEEDBACK DE ACADEMIA (sin Gemini) ────
+    val sugerenciasSkill = DatabaseManager.getSugerenciasSkillPendientes()
+    val sugerenciasSkillWidget: Modifier =
+      if (sugerenciasSkill.isEmpty) div()
+      else div(sugerenciasSkill.map { s =>
+        val skillId = s("skillId").asInstanceOf[Int]
+        val habilidad = s("habilidad").asInstanceOf[String]
+        div(cls := "card bg-dark border-info shadow-sm mb-3 p-2",
+          div(cls := "xx-small text-info fw-bold", s"💡 El entrenador trabajó $habilidad — ¿actualizar el checklist?"),
+          div(cls := "d-flex gap-2 mt-1",
+            form(action := s"/skills/sugerencia/$skillId/confirmar", method := "post", cls := "flex-fill",
+              button(tpe := "submit", cls := "btn btn-sm btn-info fw-bold w-100", "✅ Marcar conseguida")),
+            form(action := s"/skills/sugerencia/$skillId/descartar", method := "post", cls := "flex-fill",
+              button(tpe := "submit", cls := "btn btn-sm btn-outline-secondary fw-bold w-100", "✕ Aún no"))
+          )
+        )
+      })
 
     // ── BLOQUE E: HITOS CONSEGUIDOS EN LOS ULTIMOS 7 DIAS (SQL puro, sin Gemini) ──
     val hitosRecientes = DatabaseManager.getHitosRecientes(7)
@@ -345,6 +383,12 @@ object DashboardController extends cask.Routes {
         if (obj.nonEmpty) div(cls := "xx-small mt-2", style := "color:#cbd5e1;", s"🎯 Micro-objetivo: $obj") else div()
       }
 
+      // BLOQUE E: coincidencia con las condiciones de rendimiento pico historicas — SQL puro
+      val condicionesPicoLinea: Modifier = DatabaseManager.getCoincidenciaConCondicionesPico() match {
+        case Some(pct) => div(cls := "xx-small mt-2", style := "color:#cbd5e1;", s"🎯 Coincidencia con condiciones pico: $pct%")
+        case None => div()
+      }
+
       val botonRegistrar = hayRival match {
         case true =>
           val scheduleId = info("scheduleId").asInstanceOf[Int]
@@ -386,6 +430,7 @@ object DashboardController extends cask.Routes {
         rivalCard,
         div(cls := "row g-2 mt-2", tarjetas),
         microObjetivoLinea,
+        condicionesPicoLinea,
         botonRegistrar
       )
     }
@@ -799,6 +844,9 @@ object DashboardController extends cask.Routes {
         microObjetivoWidget,
         preparacionWidget,
 
+        // ── BLOQUE I: SUGERENCIAS DE SKILL DESDE EL FEEDBACK ─────────────────
+        sugerenciasSkillWidget,
+
         // ── BLOQUE E: HITOS RECIENTES ────────────────────────────────────────
         hitosWidget,
 
@@ -806,6 +854,7 @@ object DashboardController extends cask.Routes {
         formaWidget,
         deudaSuenoWidget,
         riesgoLesionWidget,
+        rfmfPendientesWidget,
         rffmWidget,
 
         // ── HERO HEADER (dark) ─────────────────────────────────────────────

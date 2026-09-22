@@ -59,12 +59,27 @@ object MatchController extends cask.Routes {
     cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
   }
 
+  // BLOQUE A6 (RFMF): confirmar/descartar un resultado detectado automaticamente desde rffm.es
+  @cask.post("/match/rfmf-pendiente/:matchId/confirmar")
+  def confirmarRfmfPendiente(request: cask.Request, matchId: Int) = withAuth(request) {
+    DatabaseManager.confirmarPartidoRFMFPendiente(matchId)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/"))
+  }
+
+  @cask.post("/match/rfmf-pendiente/:matchId/descartar")
+  def descartarRfmfPendiente(request: cask.Request, matchId: Int) = withAuth(request) {
+    DatabaseManager.descartarPartidoRFMFPendiente(matchId)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/"))
+  }
+
   @cask.get("/match-center")
   def matchCenterPage(request: cask.Request, scheduleId: Int = 0) = withAuth(request) {
     val today = java.time.LocalDate.now().toString
     var preRival = ""; var preFecha = today; var isScheduled = false; var preEstadio = ""
     // BLOQUE B2: si ya se registro la autopercepcion desde el banner del dashboard, viene pre-seleccionada
     val autopercepcionPrefill = DatabaseManager.getAutopercepcionTemporalHoy()
+    // BLOQUE O: rutina pre-partido definida (si existe, se pregunta en el formulario)
+    val rutinaActiva = DatabaseManager.getRutinaActiva()
 
     // Si venimos de un partido programado, cargamos datos
     if(scheduleId > 0) {
@@ -207,6 +222,34 @@ object MatchController extends cask.Routes {
                   ),
                   input(tpe:="hidden", name:="actionData", id:="actionData", value:="0,0,0"), input(tpe:="hidden", id:="cnt_p1v1", value:="0"), input(tpe:="hidden", id:="cnt_pAir", value:="0"), input(tpe:="hidden", id:="cnt_pPie", value:="0"),
 
+                  // BLOQUE H: desglose de 1v1 por angulo de entrada (opcional)
+                  div(cls:="mb-2 mt-2 p-2 border border-info rounded bg-info bg-opacity-10",
+                    div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;", onclick:="toggleAngulo1v1()",
+                      label(cls:="text-info fw-bold small mb-0", style:="cursor:pointer;", "📐 DESGLOSE POR ÁNGULO (opcional)"),
+                      span(id:="angulo1v1Chevron", cls:="text-info small", "▼")
+                    ),
+                    div(id:="angulo1v1Panel", style:="display:none;",
+                      div(cls:="xx-small text-muted mt-2 mb-2", "Para cada 1v1, indica desde qué ángulo llegó el rival y si fue parada o gol."),
+                      Seq(("central", "CENTRAL"), ("izq", "DIAGONAL IZQ"), ("der", "DIAGONAL DER")).map { case (key, label_) =>
+                        div(cls:="row g-2 align-items-center mb-2",
+                          div(cls:="col-4 xx-small text-white fw-bold", label_),
+                          div(cls:="col-4 d-flex align-items-center justify-content-center gap-1",
+                            button(tpe:="button", cls:="btn btn-outline-success btn-sm px-2", onclick:=s"adjustAngulo1v1('${key}_ok',-1)", "-"),
+                            input(tpe:="text", id:=s"angulo_${key}_ok", value:="0", cls:="form-control form-control-sm text-center bg-dark text-success fw-bold border-success", style:="width:45px;", readonly:=true),
+                            button(tpe:="button", cls:="btn btn-outline-success btn-sm px-2", onclick:=s"adjustAngulo1v1('${key}_ok',1)", "+")
+                          ),
+                          div(cls:="col-4 d-flex align-items-center justify-content-center gap-1",
+                            button(tpe:="button", cls:="btn btn-outline-danger btn-sm px-2", onclick:=s"adjustAngulo1v1('${key}_gc',-1)", "-"),
+                            input(tpe:="text", id:=s"angulo_${key}_gc", value:="0", cls:="form-control form-control-sm text-center bg-dark text-danger fw-bold border-danger", style:="width:45px;", readonly:=true),
+                            button(tpe:="button", cls:="btn btn-outline-danger btn-sm px-2", onclick:=s"adjustAngulo1v1('${key}_gc',1)", "+")
+                          )
+                        )
+                      },
+                      div(cls:="row xx-small text-muted", div(cls:="col-4"), div(cls:="col-4 text-center", "paradas"), div(cls:="col-4 text-center", "goles")),
+                      input(tpe:="hidden", name:="angulo1v1Data", id:="angulo1v1DataInput", value:="")
+                    )
+                  ),
+
                   // SCANNING RATE — Escaneos antes de recibir el balon
                   div(cls:="mb-2 mt-3 p-2 border border-info rounded bg-info bg-opacity-10",
                     label(cls:="form-label text-info small fw-bold w-100 text-center mb-2", "👁️ SCANNING RATE — Escaneos de campo"),
@@ -225,6 +268,21 @@ object MatchController extends cask.Routes {
                     ),
                     div(cls:="text-center xx-small text-muted mt-1",
                       "Nº de veces que mira al campo antes de recibir una cesion"
+                    ),
+                    // BLOQUE G: efectividad del scanning — de esos escaneos, cuantos encontraron compañero libre
+                    div(cls:="d-flex align-items-center justify-content-center gap-3 mt-3 pt-2 border-top border-info",
+                      button(tpe:="button", cls:="btn btn-outline-info btn-sm px-3", onclick:="adjustScanningEfectivo(-1)", "-"),
+                      div(cls:="text-center",
+                        input(tpe:="number", name:="scanningEfectivo", id:="scanningEfectivo",
+                          value:="0", cls:="form-control form-control-sm text-center bg-dark text-info fw-bold border-info",
+                          style:="width:70px; font-size:1.3rem;",
+                          attr("inputmode"):="numeric", attr("min"):="0"),
+                        div(cls:="xx-small text-muted mt-1", "efectivos")
+                      ),
+                      button(tpe:="button", cls:="btn btn-outline-info btn-sm px-3", onclick:="adjustScanningEfectivo(1)", "+")
+                    ),
+                    div(cls:="text-center xx-small text-muted mt-1",
+                      "De esos escaneos, ¿cuántas veces encontró un compañero libre?"
                     )
                   ),
 
@@ -536,6 +594,56 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
+                // ── BLOQUE S: TOOLKIT DE REGULACIÓN EMOCIONAL (solo si hay goles encajados) ──
+                div(id := "regulacionEmocionalPanel", style := "display:none;", cls := "mb-4 p-2 border border-info rounded bg-info bg-opacity-10",
+                  label(cls := "form-label text-info small fw-bold w-100 text-center", "🧠 ¿QUÉ HIZO HÉCTOR EN LOS 30 SEGUNDOS DESPUÉS DEL GOL MÁS IMPORTANTE?"),
+                  div(cls := "xx-small text-muted text-center mb-2", "Clave para su perfil de regulación emocional."),
+                  div(cls := "row g-1",
+                    Seq(
+                      ("HABLA_SOLO", "🗣️ Habla solo (refuerzo interno)"), ("RESPIRA", "😤 Miró al cielo y respiró"),
+                      ("ENFADO", "😠 Golpeó postes / gestos de enfado"), ("NEUTRAL", "😐 Sin reacción visible"),
+                      ("REORGANIZA", "🧭 Buscó a los defensas para reorganizarse"), ("DECAIDO", "😔 Bajó la cabeza y tardó en recuperarse")
+                    ).map { case (v, txt) =>
+                      div(cls := "col-6",
+                        input(tpe := "radio", cls := "btn-check", name := "regulacionEmocional", id := s"regem_$v", value := v),
+                        label(cls := "btn btn-outline-info btn-sm w-100 mb-1", `for` := s"regem_$v", txt)
+                      )
+                    }
+                  )
+                ),
+
+                // ── BLOQUE O: RUTINA PRE-PARTIDO (solo si hay una rutina definida) ──
+                if (rutinaActiva.nonEmpty) div(cls := "mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
+                  label(cls := "form-label text-white small fw-bold w-100 text-center", "🔄 ¿Siguió Héctor su rutina pre-partido?"),
+                  div(cls := "btn-group w-100", attr("role") := "group",
+                    Seq(("SI", "✅ Sí"), ("NO", "❌ No"), ("SIN_RUTINA", "🤷 Sin rutina hoy")).map { case (v, txt) =>
+                      frag(
+                        input(tpe := "radio", cls := "btn-check", name := "rutinaPrepartido", id := s"rutina_$v", value := v),
+                        label(cls := "btn btn-outline-secondary btn-sm", `for` := s"rutina_$v", txt)
+                      )
+                    }
+                  )
+                ) else frag(),
+
+                // ── BLOQUE B: AUTOEVAL COMPORTAMIENTO DEL PADRE EN LA BANDA (privado) ──
+                div(cls := "mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
+                  label(cls := "form-label text-white small fw-bold w-100 text-center", "👨 ¿CÓMO TE COMPORTASTE EN LA BANDA HOY?"),
+                  div(cls := "btn-group w-100 flex-wrap", attr("role") := "group",
+                    Seq(
+                      (1, "😤 1"), (2, "😕 2"), (3, "😐 3"), (4, "🙂 4"), (5, "🧘 5")
+                    ).map { case (v, txt) =>
+                      frag(
+                        input(tpe := "radio", cls := "btn-check", name := "conductaPadre", id := s"conducta$v", value := v.toString),
+                        label(cls := "btn btn-outline-secondary btn-sm", `for` := s"conducta$v", txt)
+                      )
+                    }
+                  ),
+                  div(cls := "xx-small text-muted mt-1 text-center",
+                    "1=Grité instrucciones o correcciones · 2=Algún gesto negativo bajo presión · 3=Neutral · 4=Solo refuerzo positivo · 5=Observador puro"),
+                  div(cls := "xx-small text-muted fst-italic text-center mt-1",
+                    "Autoevaluación — solo visible para ti, nunca en el perfil público.")
+                ),
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
@@ -557,11 +665,21 @@ object MatchController extends cask.Routes {
               }
               var currentMode='save';var goals=[];var saves=[];var origins=[];
               function setMode(mode){currentMode=mode;}
-              function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');}}
+              function registerAction(zone){const cell=document.querySelector('.zone-'+zone);const marker=cell.querySelector('.action-marker');if(currentMode==='save'){saves.push(zone);marker.innerHTML+='<span style="color:#198754; font-weight:bold;">*</span>';document.getElementById('parInput').value=parseInt(document.getElementById('parInput').value||0)+1;document.getElementById('hiddenParadas').value=saves.join(',');}else{goals.push(zone);marker.innerHTML+='<span style="color:#dc3545; font-weight:bold;">*</span>';document.getElementById('gcInput').value=parseInt(document.getElementById('gcInput').value||0)+1;document.getElementById('hiddenGoles').value=goals.join(',');toggleRegulacionEmocional();}}
+              function toggleRegulacionEmocional(){var gc=parseInt(document.getElementById('gcInput').value||0);var p=document.getElementById('regulacionEmocionalPanel');if(p) p.style.display = gc>0 ? 'block' : 'none';}
               function incCounter(key){var el=document.getElementById('cnt_'+key); var val=parseInt(el.value||0)+1; el.value=val; document.getElementById('disp_'+key).value=val; updateActionData();}
               function adjustBypass(delta){var el=document.getElementById('lineasSuperadas'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
               function adjustSetPiece(fieldId, delta){var el=document.getElementById(fieldId); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
               function adjustScanning(delta){var el=document.getElementById('scanningRate'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
+              function adjustScanningEfectivo(delta){var el=document.getElementById('scanningEfectivo'); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;}
+              function toggleAngulo1v1(){var p=document.getElementById('angulo1v1Panel');var c=document.getElementById('angulo1v1Chevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
+              function adjustAngulo1v1(key,delta){
+                var el=document.getElementById('angulo_'+key); var v=Math.max(0,parseInt(el.value||0)+delta); el.value=v;
+                var keys=['central_ok','central_gc','izq_ok','izq_gc','der_ok','der_gc'];
+                var obj={};
+                keys.forEach(function(k){ obj[k]=parseInt(document.getElementById('angulo_'+k).value||0); });
+                document.getElementById('angulo1v1DataInput').value=JSON.stringify(obj);
+              }
               function updateActionData(){var d = [document.getElementById('cnt_p1v1').value, document.getElementById('cnt_pAir').value, document.getElementById('cnt_pPie').value]; document.getElementById('actionData').value = d.join(',');}
               function toggleOrigin(el,origin){el.classList.toggle('active');el.classList.toggle('btn-warning');if(origins.includes(origin)){origins=origins.filter(o=>o!==origin);}else{origins.push(origin);}document.getElementById('hiddenOrigin').value=origins.join(',');}
               function pass(type, success) { var totEl = document.getElementById(type+'Tot'); var okEl = document.getElementById(type+'Ok'); var dispEl = document.getElementById('display_'+type); var t = parseInt(totEl.value)+1; var o = parseInt(okEl.value) + (success ? 1 : 0); totEl.value=t; okEl.value=o; dispEl.value = o + '/' + t; updatePassData(); }
@@ -807,6 +925,17 @@ object MatchController extends cask.Routes {
     val economiaMovimiento     = getOptInt("economiaMovimiento")
     val calidadDecisionPct     = getOptInt("calidadDecisionPct")
 
+    // BLOQUE B: autoevaluacion privada de la conducta del padre en la banda (opcional)
+    val conductaPadre = getOptInt("conductaPadre")
+    // BLOQUE G: efectividad del scanning (amplia scanning_rate)
+    val scanningEfectivo = getInt("scanningEfectivo")
+    // BLOQUE H: desglose de 1v1 por angulo de entrada (JSON, opcional)
+    val angulo1v1Data = getStr("angulo1v1Data")
+    // BLOQUE O: rutina pre-partido (opcional)
+    val rutinaPrepartido = getStr("rutinaPrepartido")
+    // BLOQUE S: toolkit de regulacion emocional (opcional, solo si hubo goles encajados)
+    val regulacionEmocional = getStr("regulacionEmocional")
+
     // Footbar (sensor GPS de rendimiento) — opcional
     val fbDistancia        = getDouble("fbDistancia")
     val fbAltaIntensidad   = getDouble("fbAltaIntensidad")
@@ -848,6 +977,7 @@ object MatchController extends cask.Routes {
     // Guardar contexto de goles encajados
     if (goalsData.nonEmpty) {
       DatabaseManager.deleteMatchGoals(savedMatchId)  // limpiar si es re-save
+      var minutosGoles = List[Int]()
       goalsData.split(";").foreach { row =>
         val parts = row.split("\\|", -1)
         if (parts.length >= 6) {
@@ -859,8 +989,11 @@ object MatchController extends cask.Routes {
           val zona     = if (parts.length > 5) parts(5) else ""
           val notaG    = if (parts.length > 6) parts(6) else ""
           DatabaseManager.saveMatchGoal(savedMatchId, minuto, origen, situacion, resp, parable, zona, notaG)
+          minutosGoles = minutosGoles :+ minuto
         }
       }
+      // BLOQUE Q: rendimiento por fase del partido — el cuarto se deriva del minuto ya registrado por gol
+      DatabaseManager.saveMinutoGoles(savedMatchId, minutosGoles)
     }
 
     // Guardar datos Footbar (solo si se ha introducido distancia)
@@ -877,7 +1010,7 @@ object MatchController extends cask.Routes {
     DatabaseManager.updateMatchExtras(savedMatchId, rubricaPosicion, rubricaDecisiones, rubricaPies,
       rubricaComunicacion, rubricaActitud, posicionSet, alturaBloque, pieNoDominanteAcciones, iniciativaVocal,
       autopercepcionPrepartido, calentamientoMin, calentamientoTipo, superficie,
-      factoresExternos, velocidadDistribucion, economiaMovimiento, calidadDecisionPct)
+      factoresExternos, velocidadDistribucion, economiaMovimiento, calidadDecisionPct, conductaPadre, scanningEfectivo, angulo1v1Data, rutinaPrepartido, regulacionEmocional)
     DatabaseManager.generarGuiaConversacion(savedMatchId)
 
     // BLOQUE H: calcula el CPI del partido en background, sin bloquear la respuesta

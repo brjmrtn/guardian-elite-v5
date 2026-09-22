@@ -1502,6 +1502,36 @@ object CareerController extends cask.Routes {
         real depende del mercado de transferencias, el interés de clubes concretos y factores no cuantificables.""")
       ),
 
+      // BLOQUE K: Club Readiness Score — SQL puro, sin Gemini
+      {
+        val readinessData = DatabaseManager.getClubReadinessScore()
+        val readiness = readinessData("readiness").asInstanceOf[Int]
+        val interpretacion = readinessData("interpretacion").asInstanceOf[String]
+        val readinessColor = if (readiness <= 30) "danger" else if (readiness <= 50) "warning" else if (readiness <= 70) "info" else if (readiness <= 85) "primary" else "success"
+        val factores = Seq(
+          ("Progreso IDP", readinessData("progresoIdp").asInstanceOf[Double]),
+          ("Rating vs categoría", readinessData("ratingCategoria").asInstanceOf[Double]),
+          ("Estabilidad psicológica", readinessData("estabilidadPsico").asInstanceOf[Double]),
+          ("ACWR en zona verde", readinessData("acwrVerdePct").asInstanceOf[Double]),
+          ("Visibilidad", readinessData("visibilidad").asInstanceOf[Double])
+        )
+        div(cls := "card bg-dark border-warning shadow mb-4",
+          div(cls := "card-header text-warning fw-bold small", "🎯 CLUB READINESS SCORE"),
+          div(cls := "card-body p-3",
+            div(cls := "text-center mb-3",
+              div(cls := s"display-3 fw-black text-$readinessColor", readiness.toString),
+              div(cls := s"badge bg-$readinessColor", interpretacion)
+            ),
+            factores.map { case (nombre, valor) =>
+              div(cls := "mb-2",
+                div(cls := "d-flex justify-content-between xx-small", span(nombre), span(f"${valor}%.1f/20")),
+                div(cls := "progress", style := "height:8px;", div(cls := "progress-bar bg-warning", style := f"width:${valor / 20.0 * 100}%.0f%%;"))
+              )
+            }
+          )
+        )
+      },
+
       if (evoLabels.nonEmpty)
         script(raw(s"""
           new Chart(document.getElementById('chartEvoMarket'), {
@@ -1685,17 +1715,40 @@ object CareerController extends cask.Routes {
   // ── MODULO 2: CHECKLIST DE HABILIDADES DE PORTERO ───────────────────────
   private val skillCategoryOrder = Seq("Tecnica basica", "Juego con los pies", "Comportamiento en el area", "Mental")
 
+  // BLOQUE N: niveles de automatismo (metodologia Ajax/Barca) sobre una habilidad ya conseguida
+  private def nivelAutomatismoSelector(s: GoalkeeperSkill): Modifier = {
+    val nivel = s.nivelAutomatismo.getOrElse("")
+    div(cls := "d-flex gap-1 mt-1",
+      Seq(
+        ("CONSCIENTE", "🟡", "Lo hace pero tiene que pensar"),
+        ("AUTOMATICO", "🔵", "Ya es un hábito, lo hace sin pensar en condiciones normales"),
+        ("INSTINTIVO", "🟢", "Lo hace bajo presión máxima, es suyo para siempre")
+      ).map { case (valor, icono, titulo) =>
+        form(action := "/skills/nivel", method := "post", attr("title") := titulo,
+          input(tpe := "hidden", name := "skillId", value := s.id.toString),
+          input(tpe := "hidden", name := "nivel", value := valor),
+          button(tpe := "submit", cls := s"btn btn-sm ${if (nivel == valor) "btn-secondary" else "btn-outline-secondary"} xx-small", s"$icono ${valor.take(4)}")
+        )
+      }
+    )
+  }
+
   private def skillRow(s: GoalkeeperSkill) = {
     val equipoWarning = if (s.conseguido && s.contextoConseguido.contains("EQUIPO"))
       div(cls := "badge bg-warning text-dark xx-small mt-1", "⚠️ Confirmar en academia o partido")
     else span()
 
-    div(cls := "d-flex align-items-start justify-content-between gap-2 py-2 border-bottom border-secondary",
+    // BLOQUE N: borde amarillo parpadeante mientras la habilidad esta en nivel CONSCIENTE
+    val consciente = s.conseguido && s.nivelAutomatismo.contains("CONSCIENTE")
+    val filaStyle: Modifier = if (consciente) style := "animation: pulseYellow 2s infinite;" else frag()
+
+    div(cls := "d-flex align-items-start justify-content-between gap-2 py-2 border-bottom border-secondary", filaStyle,
       div(cls := "flex-fill",
         div(cls := "d-flex align-items-center gap-2",
           span(if (s.conseguido) "✅" else "⬜"),
           span(cls := (if (s.conseguido) "text-white fw-bold" else "text-muted"), s.habilidad)
         ),
+        if (s.conseguido) nivelAutomatismoSelector(s) else frag(),
         if (s.conseguido)
           div(cls := "xx-small text-muted",
             s"${s.fechaConseguido.getOrElse("")} · ${s.contextoConseguido.getOrElse("")}")
@@ -1825,6 +1878,29 @@ object CareerController extends cask.Routes {
       )
     )
     renderHtml(content)
+  }
+
+  // BLOQUE I: confirmar/descartar una skill sugerida automaticamente desde el feedback de academia
+  @cask.post("/skills/sugerencia/:skillId/confirmar")
+  def confirmarSugerenciaSkill(request: cask.Request, skillId: Int) = withAuth(request) {
+    DatabaseManager.confirmarSkillDesdeSugerencia(skillId)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/"))
+  }
+
+  @cask.post("/skills/sugerencia/:skillId/descartar")
+  def descartarSugerenciaSkillAction(request: cask.Request, skillId: Int) = withAuth(request) {
+    DatabaseManager.descartarSugerenciaSkill(skillId)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/"))
+  }
+
+  // BLOQUE N: actualiza el nivel de automatismo (CONSCIENTE/AUTOMATICO/INSTINTIVO) de una skill conseguida
+  @cask.post("/skills/nivel")
+  def actualizarNivelAutomatismo(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val skillId = p.getOrElse("skillId", "0").toIntOption.getOrElse(0)
+    val nivel = p.getOrElse("nivel", "")
+    if (skillId > 0 && Seq("CONSCIENTE", "AUTOMATICO", "INSTINTIVO").contains(nivel)) DatabaseManager.setNivelAutomatismo(skillId, nivel)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/goalkeeper-skills"))
   }
 
   @cask.post("/goalkeeper-skills/toggle")
@@ -2043,6 +2119,60 @@ object CareerController extends cask.Routes {
       )
     )
 
+    // BLOQUE A5 (RFMF): posicion real de Hector en la categoria — independiente del benchmark IA
+    val rffmReal = d("rffmReal").asInstanceOf[Option[Map[String, Any]]]
+    val rffmSection: Modifier = rffmReal match {
+      case Some(p) =>
+        val mediaGc = p("mediaGcHector").asInstanceOf[Double]
+        val percentil = p("percentilGC").asInstanceOf[Int]
+        val totalEquipos = p("totalEquipos").asInstanceOf[Int]
+        val totalPartidos = p("totalPartidos").asInstanceOf[Int]
+        val fuente = p("fuenteDatos").asInstanceOf[String]
+        val fechaActualizado = DatabaseManager.getRffmFechaCalculo().getOrElse("—")
+        div(cls := "card bg-dark border-info shadow mb-3",
+          div(cls := "card-header text-info fw-bold small", "📊 POSICIÓN REAL EN LA CATEGORÍA (RFMF Madrid)"),
+          div(cls := "card-body p-3",
+            div(cls := "small text-white mb-2", f"Héctor encaja $mediaGc%.1f goles/partido · Percentil $percentil de $totalEquipos equipos Prebenjamín F7 Madrid"),
+            div(cls := "progress mb-2", style := "height:14px;",
+              div(cls := "progress-bar bg-info fw-bold", style := s"width:$percentil%;", s"P$percentil")
+            ),
+            div(cls := "xx-small text-muted", s"Datos de $totalPartidos partidos · $fuente · Actualizado el $fechaActualizado")
+          )
+        )
+      case None =>
+        div(cls := "card bg-dark border-secondary shadow mb-3 p-3 text-center text-muted small",
+          "📡 Sincronizando datos de la RFMF...")
+    }
+
+    // BLOQUE E: perfil de condiciones de rendimiento pico — SQL puro, sin Gemini
+    val condicionesPico = DatabaseManager.getCondicionesPico()
+    val condicionesPicoSection: Modifier =
+      if (!condicionesPico("suficiente").asInstanceOf[Boolean]) div()
+      else {
+        val formaMediaPico = condicionesPico("formaMediaPico").asInstanceOf[Double]
+        val suenoPico = condicionesPico("suenoPico").asInstanceOf[Double]
+        val acwrPico = condicionesPico("acwrPico").asInstanceOf[Double]
+        val descansoPico = condicionesPico("descansoPico").asInstanceOf[Double]
+        val climaFrecuente = condicionesPico("climaFrecuente").asInstanceOf[String]
+        val sedeFrecuente = condicionesPico("sedeFrecuente").asInstanceOf[String]
+        val autopercepcionPico = condicionesPico("autopercepcionPico").asInstanceOf[Double]
+        div(cls := "card bg-dark border-warning shadow mb-3",
+          div(cls := "card-header text-warning fw-bold small", "🎯 PERFIL DE CONDICIONES PICO"),
+          div(cls := "card-body p-3",
+            div(cls := "xx-small text-muted mb-2", "Media de sus 10 mejores partidos (por CPI o nota) de la temporada activa."),
+            div(cls := "row text-center g-2",
+              div(cls := "col-4", div(cls := "xx-small text-muted", "Índice de forma"), div(cls := "fw-bold text-warning", f"$formaMediaPico%.1f")),
+              div(cls := "col-4", div(cls := "xx-small text-muted", "Sueño"), div(cls := "fw-bold text-info", f"$suenoPico%.1f")),
+              div(cls := "col-4", div(cls := "xx-small text-muted", "Descanso"), div(cls := "fw-bold text-info", f"$descansoPico%.1f")),
+              div(cls := "col-4", div(cls := "xx-small text-muted", "ACWR"), div(cls := "fw-bold text-info", f"$acwrPico%.1f")),
+              div(cls := "col-4", div(cls := "xx-small text-muted", "Clima frecuente"), div(cls := "fw-bold text-white small", if (climaFrecuente.nonEmpty) climaFrecuente else "—")),
+              div(cls := "col-4", div(cls := "xx-small text-muted", "Sede frecuente"), div(cls := "fw-bold text-white small", sedeFrecuente match { case "true" => "Local"; case "false" => "Fuera"; case _ => "—" }))
+            ),
+            if (autopercepcionPico > 0) div(cls := "xx-small text-muted mt-2", f"Autopercepción media pre-partido en esos días: $autopercepcionPico%.1f/5") else div()
+          )
+        )
+      }
+
     val content = basePage("benchmark",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
@@ -2053,6 +2183,8 @@ object CareerController extends cask.Routes {
               button(tpe := "submit", cls := "btn btn-outline-warning btn-sm fw-bold", "🔄 Actualizar benchmark"))
           ),
           seasonSelector(temporadasDb, efectivo, "/benchmark"),
+          rffmSection,
+          condicionesPicoSection,
           if (sinDatos)
             div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")
           else frag(
@@ -3339,16 +3471,150 @@ object CareerController extends cask.Routes {
   private def bestOf(vals: List[(Double, String)], lowerIsBetter: Boolean): Option[(Double, String)] =
     if (vals.isEmpty) None else Some(if (lowerIsBetter) vals.minBy(_._1) else vals.maxBy(_._1))
 
-  private def bestMarkCard(label: String, best: Option[(Double, String)], sufijo: String, decimales: Int) = {
+  private def bestMarkCard(label: String, best: Option[(Double, String)], sufijo: String, decimales: Int,
+                            tipoNorma: String = "") = {
     val valorTxt: String = best.map { case (v, _) => if (decimales > 0) f"$v%.2f$sufijo" else f"${v.toInt}%d$sufijo" }.getOrElse("—")
     val fechaTxt: String = best.map(_._2).getOrElse("")
+
+    // BLOQUE M: percentil segun normas Eurofit Espana, si hay tabla para este tipo/edad
+    val percentilLinea: Modifier = if (tipoNorma.isEmpty) frag() else best match {
+      case Some((v, _)) =>
+        val edad = DatabaseManager.calcularEdadExacta(DatabaseManager.getLatestCardData().fechaNacimiento)
+        val p = DatabaseManager.getPercentilTestFisico(tipoNorma, v, edad)
+        if (p("disponible").asInstanceOf[Boolean]) {
+          val percentil = p("percentil").asInstanceOf[Int]
+          div(cls := "xx-small text-info mt-1", f"Percentil $percentil para $edad años (Normas Eurofit)")
+        } else frag()
+      case None => frag()
+    }
+
     div(cls := "col-6 col-md-4",
       div(cls := "card bg-dark border-warning text-center py-3",
         div(cls := "text-warning fw-bold fs-5", valorTxt),
         div(cls := "xx-small text-muted", label),
-        div(cls := "xx-small text-muted", fechaTxt)
+        div(cls := "xx-small text-muted", fechaTxt),
+        percentilLinea
       )
     )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE R — TESTS DE MOVILIDAD ESPECIFICOS DE PORTERO
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/movilidad-tests")
+  def movilidadTestsPage(request: cask.Request) = withAuth(request) {
+    val tests = DatabaseManager.getMovilidadTests()
+    val ultimo = tests.lastOption
+    val asimetriaAlta = ultimo.flatMap(_("asimetria").asInstanceOf[Option[Int]]).exists(_ > 5)
+
+    val fechasJs = tests.map(t => s""""${t("fecha").asInstanceOf[String]}"""").mkString("[", ",", "]")
+    def serieOptInt(key: String): String = tests.map(t => t(key).asInstanceOf[Option[Int]].map(_.toString).getOrElse("null")).mkString("[", ",", "]")
+    val pieJs = serieOptInt("alcancePie")
+    val derJs = serieOptInt("alcanceLateralDer")
+    val izqJs = serieOptInt("alcanceLateralIzq")
+    val asimetriaJs = serieOptInt("asimetria")
+
+    val content = basePage("movilidad-tests",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-9 col-12",
+          h2(cls := "text-white mb-4 text-center", "🤸 Tests de Movilidad"),
+
+          if (asimetriaAlta) div(cls := "alert alert-danger text-center fw-bold mb-4",
+            f"⚠️ Diferencia de ${ultimo.flatMap(_("asimetria").asInstanceOf[Option[Int]]).getOrElse(0)}cm entre brazos — asimetría lateral significativa. Comunicar al preparador físico.")
+          else span(),
+
+          if (tests.isEmpty) div(cls := "alert alert-secondary text-center", "Sin tests de movilidad registrados todavía")
+          else div(
+            div(cls := "card bg-dark border-info shadow mb-4",
+              div(cls := "card-header text-info fw-bold small", "ALCANCE DE PIE Y LATERALES (cm)"),
+              div(cls := "card-body", div(style := "height:220px;", canvas(id := "chartMovilidad")))
+            ),
+            div(cls := "card bg-dark border-warning shadow mb-4",
+              div(cls := "card-header text-warning fw-bold small", "ASIMETRÍA LATERAL (cm) — vigilar >5cm"),
+              div(cls := "card-body", div(style := "height:180px;", canvas(id := "chartAsimetria")))
+            ),
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
+              const fechasMov = $fechasJs;
+              new Chart(document.getElementById('chartMovilidad'), {
+                type: 'line',
+                data: { labels: fechasMov, datasets: [
+                  { label: 'Alcance de pie', data: $pieJs, borderColor: '#0dcaf0', tension: 0.3, spanGaps: true },
+                  { label: 'Lateral derecho', data: $derJs, borderColor: '#20c997', tension: 0.3, spanGaps: true },
+                  { label: 'Lateral izquierdo', data: $izqJs, borderColor: '#d4af37', tension: 0.3, spanGaps: true }
+                ]},
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#ccc' } } },
+                  scales: { x: { ticks: { color: '#aaa' } }, y: { ticks: { color: '#aaa' } } }
+                }
+              });
+              new Chart(document.getElementById('chartAsimetria'), {
+                type: 'bar',
+                data: { labels: fechasMov, datasets: [{ label: 'Asimetría (cm)', data: $asimetriaJs, backgroundColor: 'rgba(255,193,7,0.6)' }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: { x: { ticks: { color: '#aaa' } }, y: { beginAtZero: true, ticks: { color: '#aaa' } } }
+                }
+              });
+            """))
+          ),
+
+          div(cls := "card bg-dark border-secondary p-3 mb-4",
+            div(cls := "fw-bold text-white small text-uppercase mb-3", "➕ Registrar nuevo test"),
+            div(cls := "xx-small text-muted mb-3",
+              "Alcance de pie: sentado con piernas extendidas, cm que alcanza más allá de los pies (movilidad de cadera). ",
+              "Rotación de hombro: junta las manos por detrás — completa/parcial/limitada. ",
+              "Alcance lateral: tumbado, cm que alcanza con cada brazo extendido."
+            ),
+            form(action := "/movilidad-tests/save", method := "post",
+              div(cls := "mb-2",
+                label(cls := "xx-small text-muted fw-bold", "FECHA"),
+                input(tpe := "date", name := "fecha", cls := "form-control form-control-sm bg-dark text-white border-secondary", value := java.time.LocalDate.now().toString, required := true)
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Alcance de pie (cm)"),
+                  input(tpe := "number", name := "alcancePie", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Rotación de hombro"),
+                  select(name := "rotacionHombro", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+                    option(value := "", "— Sin especificar —"),
+                    option(value := "COMPLETA", "Completa"), option(value := "PARCIAL", "Parcial"), option(value := "LIMITADA", "Limitada")
+                  )
+                )
+              ),
+              div(cls := "row g-2 mb-2",
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Alcance lateral derecho (cm)"),
+                  input(tpe := "number", name := "alcanceLateralDer", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+                ),
+                div(cls := "col-6",
+                  label(cls := "xx-small text-muted fw-bold", "Alcance lateral izquierdo (cm)"),
+                  input(tpe := "number", name := "alcanceLateralIzq", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+                )
+              ),
+              div(cls := "mb-3",
+                label(cls := "xx-small text-muted fw-bold", "Notas"),
+                input(tpe := "text", name := "notas", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+              ),
+              div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold", "Guardar test"))
+            )
+          )
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
+  @cask.post("/movilidad-tests/save")
+  def saveMovilidadTestAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.saveMovilidadTest(
+      p.getOrElse("fecha", ""), p.get("alcancePie").flatMap(_.toIntOption), p.getOrElse("rotacionHombro", ""),
+      p.get("alcanceLateralDer").flatMap(_.toIntOption), p.get("alcanceLateralIzq").flatMap(_.toIntOption), p.getOrElse("notas", "")
+    )
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/movilidad-tests"))
   }
 
   @cask.get("/physical-tests")
@@ -3392,9 +3658,9 @@ object CareerController extends cask.Routes {
           else span(),
 
           div(cls := "row g-2 mb-4",
-            bestMarkCard("Mejor 10m", bestV10, "s", 2),
+            bestMarkCard("Mejor 10m", bestV10, "s", 2, "velocidad10m"),
             bestMarkCard("Mejor 30m", bestV30, "s", 2),
-            bestMarkCard("Mejor salto vertical", bestSV, "cm", 0),
+            bestMarkCard("Mejor salto vertical", bestSV, "cm", 0, "saltoVertical"),
             bestMarkCard("Mejor Illinois", bestAg, "s", 2),
             bestMarkCard("Mejor lanzamiento", bestLM, "cm", 0)
           ),

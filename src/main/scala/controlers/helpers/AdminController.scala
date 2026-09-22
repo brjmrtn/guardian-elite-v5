@@ -278,20 +278,50 @@ object AdminController extends cask.Routes {
 
     val msgBox: Modifier = if (msg.nonEmpty) div(cls := "alert alert-info small p-2 mb-3", msg) else div()
 
+    // BLOQUE A7: tipo de liga de la temporada activa (INTERNA/RFMF) y equipo de Hector en la RFMF
+    val ligaConfig = DatabaseManager.getLigaRFMFConfig()
+    val ligaTipo = ligaConfig("ligaTipo").asInstanceOf[String]
+    val nombreEquipo = ligaConfig("nombreEquipo").asInstanceOf[String]
+    val grupoIdSeason = ligaConfig("grupoId").asInstanceOf[String]
+    val esRfmf = ligaTipo == "RFMF"
+
     div(cls := "card bg-dark text-white border-info shadow p-4 mb-3",
-      h4(cls := "text-info mb-3", "📊 BENCHMARK RFFM"),
+      h4(cls := "text-info mb-3", "📊 BENCHMARK RFMF"),
       msgBox,
       estadoBox,
       p(cls := "small text-muted",
-        "Guardian sincroniza cada lunes a las 6:00 AM los resultados de la categoría Prebenjamín F7 de la RFFM para calcular en qué percentil está Héctor frente a su categoría real."),
+        "Guardian sincroniza cada lunes a las 6:00 AM los resultados de la categoría Prebenjamín F7 de la RFMF para calcular en qué percentil está Héctor frente a su categoría real."),
       form(action := "/admin/rffm/sync", method := "post", cls := "d-grid mb-3",
         button(tpe := "submit", cls := "btn btn-info fw-bold", if (enProgreso) "⏳ Sincronizando..." else "🔄 Sincronizar ahora")
       ),
+      div(cls := "border-top border-secondary pt-3 mb-3",
+        h6(cls := "text-muted small text-uppercase mb-2", "Temporada activa"),
+        form(action := "/admin/rffm/liga", method := "post", cls := "row g-2 align-items-end",
+          div(cls := "col-4",
+            label(cls := "xx-small text-muted fw-bold", "Tipo de liga"),
+            select(name := "ligaTipo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+              option(value := "INTERNA", if (!esRfmf) selected := "selected" else frag(), "Interna / amistosa"),
+              option(value := "RFMF", if (esRfmf) selected := "selected" else frag(), "Liga oficial RFMF")
+            )
+          ),
+          div(cls := "col-4",
+            label(cls := "xx-small text-muted fw-bold", "Nombre del equipo (RFMF)"),
+            input(tpe := "text", name := "nombreEquipo", cls := "form-control form-control-sm bg-dark text-white border-secondary", value := nombreEquipo, placeholder := "Ej: Rayo Vallecano B")
+          ),
+          div(cls := "col-4",
+            label(cls := "xx-small text-muted fw-bold", "ID de grupo (opcional)"),
+            input(tpe := "text", name := "grupoId", cls := "form-control form-control-sm bg-dark text-white border-secondary", value := grupoIdSeason)
+          ),
+          div(cls := "col-12", button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold w-100 mt-1", "Guardar liga"))
+        ),
+        div(cls := "xx-small text-muted mt-1",
+          "Si es liga oficial RFMF y pones el nombre del equipo, Guardian detectará automáticamente los resultados de Héctor y los propondrá para confirmar en el dashboard.")
+      ),
       div(cls := "border-top border-secondary pt-3",
-        h6(cls := "text-muted small text-uppercase mb-2", "Configuración"),
+        h6(cls := "text-muted small text-uppercase mb-2", "Configuración de competición"),
         form(action := "/admin/rffm/config", method := "post", cls := "row g-2 align-items-end",
           div(cls := "col-6",
-            label(cls := "xx-small text-muted fw-bold", "ID de competición RFFM"),
+            label(cls := "xx-small text-muted fw-bold", "ID de competición RFMF"),
             input(tpe := "text", name := "competicionId", cls := "form-control form-control-sm bg-dark text-white border-secondary", value := competicionId)
           ),
           div(cls := "col-4",
@@ -303,6 +333,102 @@ object AdminController extends cask.Routes {
         div(cls := "xx-small text-muted mt-1", "Cambia el ID si Héctor pasa a otro grupo de la competición en temporadas futuras.")
       )
     )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE C — CALENDARIO DE CARGA COGNITIVA ESCOLAR
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def calendarioEscolarTipoLabel(tipo: String): String = tipo match {
+    case "EXAMENES" => "📝 Exámenes"
+    case "TRIMESTRE_FIN" => "📅 Fin de trimestre"
+    case "VACACIONES" => "🏖️ Vacaciones"
+    case "EVENTO_ESPECIAL" => "🎉 Evento especial"
+    case other => other
+  }
+  private def calendarioEscolarPanel(): Modifier = {
+    val periodos = DatabaseManager.getCalendarioEscolar()
+    div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3",
+      h4(cls := "mb-3", "📚 CALENDARIO ESCOLAR"),
+      p(cls := "small text-muted",
+        "Registra los periodos de exámenes o fin de trimestre de Héctor — Guardian los tendrá en cuenta al interpretar bajadas de energía o rendimiento que puedan tener origen escolar, no deportivo."),
+      form(action := "/settings/calendario-escolar/save", method := "post", cls := "row g-2 align-items-end mb-3",
+        div(cls := "col-6 col-md-3",
+          label(cls := "xx-small text-muted fw-bold", "Fecha inicio"),
+          input(tpe := "date", name := "fechaInicio", cls := "form-control form-control-sm bg-dark text-white border-secondary", required := true)
+        ),
+        div(cls := "col-6 col-md-3",
+          label(cls := "xx-small text-muted fw-bold", "Fecha fin"),
+          input(tpe := "date", name := "fechaFin", cls := "form-control form-control-sm bg-dark text-white border-secondary", required := true)
+        ),
+        div(cls := "col-6 col-md-3",
+          label(cls := "xx-small text-muted fw-bold", "Tipo"),
+          select(name := "tipo", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+            option(value := "EXAMENES", "📝 Exámenes"),
+            option(value := "TRIMESTRE_FIN", "📅 Fin de trimestre"),
+            option(value := "VACACIONES", "🏖️ Vacaciones"),
+            option(value := "EVENTO_ESPECIAL", "🎉 Evento especial")
+          )
+        ),
+        div(cls := "col-6 col-md-3",
+          label(cls := "xx-small text-muted fw-bold", "Descripción (opcional)"),
+          input(tpe := "text", name := "descripcion", cls := "form-control form-control-sm bg-dark text-white border-secondary")
+        ),
+        div(cls := "col-12", button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold w-100 mt-1", "Añadir periodo"))
+      ),
+      if (periodos.isEmpty) div(cls := "text-muted small text-center py-2", "Sin periodos registrados.")
+      else div(periodos.map { p =>
+        val id = p("id").asInstanceOf[Int]
+        div(cls := "d-flex justify-content-between align-items-center border-bottom border-secondary py-2",
+          div(
+            div(cls := "small text-white fw-bold", calendarioEscolarTipoLabel(p("tipo").asInstanceOf[String])),
+            div(cls := "xx-small text-muted", s"${p("fechaInicio")} → ${p("fechaFin")}" + (if (p("descripcion").asInstanceOf[String].nonEmpty) s" · ${p("descripcion")}" else ""))
+          ),
+          form(action := s"/settings/calendario-escolar/$id/delete", method := "post",
+            button(tpe := "submit", cls := "btn btn-sm btn-outline-danger fw-bold", "✕"))
+        )
+      })
+    )
+  }
+
+  @cask.post("/settings/calendario-escolar/save")
+  def saveCalendarioEscolar(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val fi = p.getOrElse("fechaInicio", ""); val ff = p.getOrElse("fechaFin", "")
+    if (fi.nonEmpty && ff.nonEmpty) DatabaseManager.saveCalendarioEscolar(fi, ff, p.getOrElse("tipo", "EXAMENES"), p.getOrElse("descripcion", ""))
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
+  }
+
+  @cask.post("/settings/calendario-escolar/:id/delete")
+  def deleteCalendarioEscolarAction(request: cask.Request, id: Int) = withAuth(request) {
+    DatabaseManager.deleteCalendarioEscolar(id)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE O — RUTINA PRE-PARTIDO DE HECTOR
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def rutinaPrepartidoPanel(): Modifier = {
+    val rutina = DatabaseManager.getRutinaActiva()
+    div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3",
+      h4(cls := "mb-3", "🔄 RUTINA PRE-PARTIDO DE HÉCTOR"),
+      p(cls := "small text-muted",
+        "Describe la rutina habitual de Héctor antes de un partido — Guardian podrá comparar su rendimiento cuando la sigue y cuando no."),
+      rutina.map(r => div(cls := "alert alert-secondary small p-2 mb-3", strong("Rutina actual: "), r)).getOrElse(div()),
+      form(action := "/settings/rutina/save", method := "post",
+        textarea(name := "descripcion", cls := "form-control form-control-sm bg-dark text-white border-secondary mb-2", rows := "3",
+          placeholder := "Ej: Se pone siempre primero el guante derecho, bebe agua, hace tres saltos...",
+          if (rutina.nonEmpty) rutina.get else ""),
+        button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold w-100", "Guardar rutina")
+      )
+    )
+  }
+
+  @cask.post("/settings/rutina/save")
+  def saveRutinaAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    val descripcion = p.getOrElse("descripcion", "")
+    if (descripcion.trim.nonEmpty) DatabaseManager.saveRutinaDefinicion(descripcion)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
   }
 
   @cask.get("/settings") def settingsPage(backupMsg: String = "", rffmMsg: String = "") = {
@@ -336,7 +462,7 @@ object AdminController extends cask.Routes {
       script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-flex gap-2 mt-2",
       a(href:="/videoteca", cls:="btn btn-warning fw-bold flex-grow-1", "🎬 VIDEOTECA"),
       a(href:="/admin", cls:="btn btn-outline-danger fw-bold", "⚙️ ADMIN")
-    ), weeklyStructurePanel(), perfilPublicoPanel(), rffmBenchmarkPanel(rffmMsg), backupsPanel(backupMsg)));
+    ), weeklyStructurePanel(), perfilPublicoPanel(), rffmBenchmarkPanel(rffmMsg), calendarioEscolarPanel(), rutinaPrepartidoPanel(), backupsPanel(backupMsg)));
     renderHtml(basePage("settings", content))
   }
 
@@ -437,6 +563,15 @@ object AdminController extends cask.Routes {
     DatabaseManager.setRffmConfig(p.getOrElse("competicionId", ""), p.getOrElse("temporada", ""))
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
       "Location" -> s"/settings?rffmMsg=${java.net.URLEncoder.encode("✅ Configuración RFFM guardada.", "UTF-8")}"
+    ))
+  }
+
+  @cask.post("/admin/rffm/liga")
+  def saveLigaRFMF(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    DatabaseManager.setLigaRFMFConfig(p.getOrElse("ligaTipo", "INTERNA"), p.getOrElse("nombreEquipo", ""), p.getOrElse("grupoId", ""))
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/settings?rffmMsg=${java.net.URLEncoder.encode("✅ Liga de la temporada guardada.", "UTF-8")}"
     ))
   }
 

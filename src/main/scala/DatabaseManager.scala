@@ -29,7 +29,9 @@ case class MedicalReport(id: Int, fecha: String, tipo: String, diagnostico: Stri
 case class GoalkeeperSkill(
   id: Int, categoria: String, habilidad: String, conseguido: Boolean,
   fechaConseguido: Option[String], contextoConseguido: Option[String], notas: String,
-  fechaInicioTrabajo: Option[String] = None
+  fechaInicioTrabajo: Option[String] = None,
+  // BLOQUE N: nivel de automatismo — NULL/CONSCIENTE/AUTOMATICO/INSTINTIVO
+  nivelAutomatismo: Option[String] = None
 )
 // Registro de visibilidad y oportunidades (torneos, pruebas, contactos, ojeadores...)
 case class Opportunity(
@@ -119,6 +121,10 @@ object DatabaseManager {
         rffm_team_name   TEXT,
         judo_belt        TEXT DEFAULT 'Blanco'
       )""")
+      // BLOQUE A1 (RFMF): liga oficial de la temporada activa vs interna/amistosa
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS rffm_nombre_equipo TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS rffm_grupo_id TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE seasons ADD COLUMN IF NOT EXISTS liga_tipo TEXT DEFAULT 'INTERNA'")
 
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS matches (
         id               SERIAL PRIMARY KEY,
@@ -492,6 +498,8 @@ object DatabaseManager {
         notas                TEXT DEFAULT ''
       )""")
       stmt.executeUpdate("ALTER TABLE goalkeeper_skills ADD COLUMN IF NOT EXISTS fecha_inicio_trabajo DATE")
+      // BLOQUE N: niveles de automatismo (metodologia Ajax/Barca) — NULL/CONSCIENTE/AUTOMATICO/INSTINTIVO
+      stmt.executeUpdate("ALTER TABLE goalkeeper_skills ADD COLUMN IF NOT EXISTS nivel_automatismo TEXT DEFAULT NULL")
       val rsSkillsCount = stmt.executeQuery("SELECT COUNT(*) FROM goalkeeper_skills")
       if (rsSkillsCount.next() && rsSkillsCount.getInt(1) == 0) {
         val seedSkills = Seq(
@@ -824,6 +832,46 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS calidad_decision_pct INT DEFAULT NULL")
       // BLOQUE H: indice de rendimiento contextual (CPI)
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS cpi DOUBLE PRECISION DEFAULT NULL")
+      // BLOQUE B: autoevaluacion de la conducta del padre en la banda (1-5, privado, nunca publico)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS conducta_padre INT DEFAULT NULL")
+      // BLOQUE G: efectividad del scanning (amplia scanning_rate existente)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS scanning_efectivo INT DEFAULT 0")
+      // BLOQUE H: exito en 1v1 por angulo de entrada (JSON)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS angulo_1v1_data TEXT DEFAULT NULL")
+      // BLOQUE O: rutina pre-partido
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS rutina_prepartido TEXT DEFAULT NULL")
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS rutina_definicion (
+        id          SERIAL PRIMARY KEY,
+        descripcion TEXT NOT NULL,
+        activa      BOOLEAN DEFAULT TRUE,
+        created_at  TIMESTAMP DEFAULT NOW()
+      )""")
+      // BLOQUE Q: rendimiento por fase del partido (JSON goles por cuarto)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS minuto_goles TEXT DEFAULT NULL")
+      // BLOQUE R: tests de movilidad especificos de portero
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS movilidad_tests (
+        id                      SERIAL PRIMARY KEY,
+        fecha                   DATE NOT NULL DEFAULT CURRENT_DATE,
+        alcance_pie_cm          INT DEFAULT NULL,
+        rotacion_hombro         TEXT DEFAULT NULL,
+        alcance_lateral_der_cm  INT DEFAULT NULL,
+        alcance_lateral_izq_cm  INT DEFAULT NULL,
+        asimetria_lateral_cm    INT DEFAULT NULL,
+        notas                   TEXT DEFAULT '',
+        created_at              TIMESTAMP DEFAULT NOW()
+      )""")
+      // BLOQUE S: toolkit de regulacion emocional
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS regulacion_emocional TEXT DEFAULT NULL")
+
+      // BLOQUE C: calendario de carga cognitiva escolar
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS calendario_escolar (
+        id           SERIAL PRIMARY KEY,
+        fecha_inicio DATE NOT NULL,
+        fecha_fin    DATE NOT NULL,
+        tipo         TEXT NOT NULL,
+        descripcion  TEXT DEFAULT '',
+        created_at   TIMESTAMP DEFAULT NOW()
+      )""")
 
       // ─────────────────────────────────────────────────────────────────────────────
       // BLOQUE 5.4 — MICRO-OBJETIVOS SEMANALES
@@ -1524,10 +1572,42 @@ object DatabaseManager {
           Option(rs.getDate("fecha_conseguido")).map(_.toString),
           Option(rs.getString("contexto_conseguido")),
           Option(rs.getString("notas")).getOrElse(""),
-          Option(rs.getDate("fecha_inicio_trabajo")).map(_.toString)
+          Option(rs.getDate("fecha_inicio_trabajo")).map(_.toString),
+          Option(rs.getString("nivel_automatismo"))
         )
       }
       list
+    } finally { conn.close() }
+  }
+
+  // BLOQUE N: actualiza el nivel de automatismo de una habilidad ya conseguida
+  def setNivelAutomatismo(id: Int, nivel: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE goalkeeper_skills SET nivel_automatismo = ? WHERE id = ? AND conseguido = TRUE")
+      if (nivel.nonEmpty) ps.setString(1, nivel) else ps.setNull(1, java.sql.Types.VARCHAR)
+      ps.setInt(2, id)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Desglose por nivel de automatismo de las habilidades conseguidas — para getDeepAnalysis(). */
+  def getAutomatismoBreakdown(): Map[String, Int] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT nivel_automatismo, COUNT(*) as n FROM goalkeeper_skills WHERE conseguido = TRUE GROUP BY nivel_automatismo")
+      var instintivas = 0; var automaticas = 0; var conscientes = 0
+      while (rs.next()) {
+        val n = rs.getInt("n")
+        Option(rs.getString("nivel_automatismo")) match {
+          case Some("INSTINTIVO") => instintivas = n
+          case Some("AUTOMATICO") => automaticas = n
+          case Some("CONSCIENTE") => conscientes = n
+          case _ => ()
+        }
+      }
+      Map("instintivas" -> instintivas, "automaticas" -> automaticas, "conscientes" -> conscientes)
     } finally { conn.close() }
   }
 
@@ -1938,6 +2018,8 @@ RECOMENDACION: <texto>"""
     val conn = getConnection()
     try {
       val rae = getRaeAdjustedStats()
+      // BLOQUE A4 (RFMF): percentil real contra la categoria — complementa, nunca reemplaza, el analisis de Gemini
+      val rffmReal: Map[String, Any] = Map("rffmReal" -> getPercentilRealHector(seasonId))
       val cacheKey = if (seasonId > 0) s"benchmark_$seasonId" else "benchmark"
 
       val rsCacheStmt = conn.prepareStatement(
@@ -1947,7 +2029,7 @@ RECOMENDACION: <texto>"""
       if (rsCache.next()) {
         val json = ujson.read(rsCache.getString("payload"))
         return Map("percentil" -> json("percentil").str, "areas" -> json("areas").str,
-                   "referencia" -> json("referencia").str, "sinDatos" -> false) ++ rae
+                   "referencia" -> json("referencia").str, "sinDatos" -> false) ++ rae ++ rffmReal
       }
 
       val card = getLatestCardData()
@@ -1955,7 +2037,7 @@ RECOMENDACION: <texto>"""
       val matches = getMatchesList(seasonId) // ORDER BY fecha DESC
       val pj = matches.size
 
-      if (pj < 3) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> true) ++ rae
+      if (pj < 3) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> true) ++ rae ++ rffmReal
 
       val notaMedia = matches.map(_.nota).sum / pj
       def gcOf(m: MatchLog): Int = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(1)
@@ -2001,7 +2083,7 @@ REFERENCIA: <texto>"""
       upsert.setString(2, ujson.write(payload))
       upsert.executeUpdate()
 
-      Map("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt, "sinDatos" -> false) ++ rae
+      Map("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt, "sinDatos" -> false) ++ rae ++ rffmReal
     } finally { conn.close() }
   }
 
@@ -2878,7 +2960,13 @@ $analisisConcatenados"""
         else if (deudaHorasVal < 5) -0.5
         else if (deudaHorasVal < 8) -1.5
         else -2.5
-      val forma = Math.max(0.0, formaBase + deudaScore)
+      // BLOQUE C: carga cognitiva escolar (examenes/fin de trimestre) como factor negativo adicional
+      val periodoEscolarHoy = periodoEscolarEnFecha(conn, LocalDate.now().toString)
+      val cognitivoScore: Double = periodoEscolarHoy match {
+        case Some("EXAMENES") | Some("TRIMESTRE_FIN") => -0.5
+        case _ => 0.0
+      }
+      val forma = Math.max(0.0, formaBase + deudaScore + cognitivoScore)
 
       val upsert = conn.prepareStatement("""
         INSERT INTO forma_diaria (fecha, indice_forma, sueno_score, energia_score, animo_score, acwr_score, descanso_score, phv_score)
@@ -3284,7 +3372,14 @@ $analisisConcatenados"""
         } else ""
       }
 
-      val prompt = s"""Eres el preparador de Héctor, portero de $edad años. Esta semana: próximo partido vs $rival el $fechaProx, ACWR=${"%.2f".format(acwr)} ($estadoAcwr), fallos recurrentes=${if (fallos.nonEmpty) fallos else "ninguno detectado"}, zona vulnerable=$zonaVulnerable.$errorVideoLinea$deudaLinea$firmaFatigaLinea Genera exactamente 3 bloques en texto plano: CONSIGNA_COCHE: [un foco mental o técnico positivo, máximo 2 frases, sin presión, para decirle de camino al entreno] / DESCANSO_CASA: [una pauta concreta de recuperación en casa según el ACWR, una frase accionable] / FOCO_SABADO: [un solo aspecto técnico que el padre debe observar desde la grada el sábado como observador neutral, máximo 2 frases]. Lenguaje para un padre, sin tecnicismos."""
+      // BLOQUE C: carga cognitiva escolar (examenes/fin de trimestre)
+      val cargaEscolarLinea = getPeriodoEscolarHoy() match {
+        case Some("EXAMENES") | Some("TRIMESTRE_FIN") =>
+          " Esta semana coincide con período de exámenes escolares — la bajada de energía o rendimiento puede tener origen escolar, no deportivo. Ten esto en cuenta en el tono del mensaje."
+        case _ => ""
+      }
+
+      val prompt = s"""Eres el preparador de Héctor, portero de $edad años. Esta semana: próximo partido vs $rival el $fechaProx, ACWR=${"%.2f".format(acwr)} ($estadoAcwr), fallos recurrentes=${if (fallos.nonEmpty) fallos else "ninguno detectado"}, zona vulnerable=$zonaVulnerable.$errorVideoLinea$deudaLinea$firmaFatigaLinea$cargaEscolarLinea Genera exactamente 3 bloques en texto plano: CONSIGNA_COCHE: [un foco mental o técnico positivo, máximo 2 frases, sin presión, para decirle de camino al entreno] / DESCANSO_CASA: [una pauta concreta de recuperación en casa según el ACWR, una frase accionable] / FOCO_SABADO: [un solo aspecto técnico que el padre debe observar desde la grada el sábado como observador neutral, máximo 2 frases]. Lenguaje para un padre, sin tecnicismos."""
 
       val resultado = AIProvider.ask(prompt, None, bypassCache = true)
       val up = conn.prepareStatement(
@@ -3633,10 +3728,16 @@ $analisisConcatenados"""
       val trimestralHtml = if (pendientesTrimestre.isEmpty) "" else
         s"<h3>📅 PENDIENTE TRIMESTRAL</h3><ul>${pendientesTrimestre.map(p => s"<li>$p</li>").mkString}</ul>"
 
+      // BLOQUE C: aviso si la semana que entra es de carga escolar alta
+      val cargaEscolarHtml = if (haySemanaEscolarCargada(7))
+        """<p style="color:#fd7e14;"><strong>📚 Semana de carga escolar alta</strong> — reduce expectativas de rendimiento deportivo.</p>"""
+      else ""
+
       s"""
       <html><body style="font-family:sans-serif; color:#222;">
         <h2>Guardian Elite — Resumen semana del $hoy</h2>
         $alertaHtml
+        $cargaEscolarHtml
         <h3>⚽ Partidos ($numPartidos)</h3>
         <ul>$partidosHtml</ul>
         <h3>🏃 Entrenamientos ($numEntrenos)</h3>
@@ -3914,6 +4015,19 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         if (deudaNivelHoy == "MINIMA") ""
         else s"\nDeuda de sueño acumulada esta semana: ${"%.1f".format(deudaHoy("deudaHoras").asInstanceOf[Double])}h (nivel: $deudaNivelHoy). Media de ${"%.1f".format(deudaHoy("mediaDiaria").asInstanceOf[Double])}h/noche, óptimo 10h para su edad.\n"
 
+      // BLOQUE C: carga cognitiva escolar (examenes/fin de trimestre) — SQL puro, sin Gemini
+      val cargaEscolarLine = getPeriodoEscolarHoy() match {
+        case Some("EXAMENES") | Some("TRIMESTRE_FIN") =>
+          "\nEsta semana coincide con período de exámenes escolares — la bajada de energía o rendimiento puede tener origen escolar, no deportivo.\n"
+        case _ => ""
+      }
+
+      // BLOQUE N: desglose de habilidades por nivel de automatismo
+      val automatismo = getAutomatismoBreakdown()
+      val automatismoLine =
+        if (automatismo.values.sum == 0) ""
+        else s"\nHabilidades instintivas: ${automatismo("instintivas")} · Automáticas: ${automatismo("automaticas")} · Conscientes: ${automatismo("conscientes")}. Las habilidades conscientes son el área de trabajo actual — son las que fallan primero bajo presión.\n"
+
       // BLOQUE H: CPI medio de la temporada, cuando esta disponible
       val cpiLine = getCpiMedioTemporada() match {
         case Some(cpiMedio) => s"\nSu CPI medio de la temporada es ${"%.1f".format(cpiMedio)} — ajustado por dificultad real de cada partido (rival, condiciones físicas, clima, si jugó en casa o fuera). Da más peso a este dato que a la nota media simple.\n"
@@ -3927,7 +4041,7 @@ CONTEXTO FOOTBAR — PORTERO: Héctor es portero. Los porteros recorren estructu
 
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cpiLine
+${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$cpiLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -3937,7 +4051,17 @@ Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de cód
 <p><strong>Conclusión:</strong> [una frase motivadora y concreta sobre qué trabajar para la próxima semana]</p>
 
 No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda persona dirigiéndote a Hector directamente. Si hay datos de distancia y sprint, analiza si hay correlación entre carga física y rendimiento. Si distancia > 3km con nota baja, o sprint alto con nota baja, menciónalo como señal de fatiga. Habla siempre en presente o futuro próximo. No menciones fechas del año anterior. La temporada actual es $temporadaActual."""
-      AIProvider.ask(prompt).replace("```html","").replace("```","").trim
+      val analisis = AIProvider.ask(prompt).replace("```html","").replace("```","").trim
+
+      // BLOQUE B: conducta del padre — NUNCA se envia a Gemini (dato privado sobre el padre, no
+      // sobre Hector); se anade de forma deterministica al final si la media reciente es baja.
+      val conductaPadreLine = {
+        val cp = getConductaPadreAnalysis()
+        if (cp("suficiente").asInstanceOf[Boolean] && cp("mediaConducta").asInstanceOf[Double] < 3.0)
+          "<p><strong>Nota privada:</strong> La conducta del padre en la banda ha sido valorada como intervencionista en los últimos partidos. Esto puede estar influyendo en el estado emocional de Héctor.</p>"
+        else ""
+      }
+      analisis + conductaPadreLine
     } catch {
       case e:Exception =>
         e.printStackTrace() // Esto hara que el error aparezca en el log de Render/Consola
@@ -4598,7 +4722,17 @@ Responde en espanol, tono positivo y motivador para un nino."""
                          calentamientoMin: Option[Int] = None, calentamientoTipo: String = "",
                          superficie: String = "", factoresExternos: String = "",
                          velocidadDistribucion: String = "", economiaMovimiento: Option[Int] = None,
-                         calidadDecisionPct: Option[Int] = None): Unit = {
+                         calidadDecisionPct: Option[Int] = None,
+                         // BLOQUE B: autoevaluacion privada de la conducta del padre en la banda (1-5)
+                         conductaPadre: Option[Int] = None,
+                         // BLOQUE G: efectividad del scanning (amplia scanning_rate)
+                         scanningEfectivo: Int = 0,
+                         // BLOQUE H: exito en 1v1 por angulo de entrada (JSON)
+                         angulo1v1Data: String = "",
+                         // BLOQUE O: rutina pre-partido (SI/NO/SIN_RUTINA)
+                         rutinaPrepartido: String = "",
+                         // BLOQUE S: regulacion emocional tras el gol mas importante
+                         regulacionEmocional: String = ""): Unit = {
     if (matchId <= 0) return
     val conn = getConnection()
     try {
@@ -4608,7 +4742,12 @@ Responde en espanol, tono positivo y motivador para un nino."""
           posicion_set=?, altura_bloque=?, pie_no_dominante_acciones=?, iniciativa_vocal=?,
           autopercepcion_prepartido=COALESCE(?, autopercepcion_prepartido),
           calentamiento_min=?, calentamiento_tipo=?, superficie=?, factores_externos=?,
-          velocidad_distribucion=?, economia_movimiento=?, calidad_decision_pct=?
+          velocidad_distribucion=?, economia_movimiento=?, calidad_decision_pct=?,
+          conducta_padre=COALESCE(?, conducta_padre),
+          scanning_efectivo=?,
+          angulo_1v1_data=COALESCE(NULLIF(?, ''), angulo_1v1_data),
+          rutina_prepartido=COALESCE(NULLIF(?, ''), rutina_prepartido),
+          regulacion_emocional=COALESCE(NULLIF(?, ''), regulacion_emocional)
         WHERE id=?""")
       def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => ps.setInt(idx, x); case None => ps.setNull(idx, java.sql.Types.INTEGER) }
       setOptInt(1, rubricaPosicion); setOptInt(2, rubricaDecisiones); setOptInt(3, rubricaPies)
@@ -4625,8 +4764,722 @@ Responde en espanol, tono positivo y motivador para un nino."""
       if (velocidadDistribucion.nonEmpty) ps.setString(15, velocidadDistribucion) else ps.setNull(15, java.sql.Types.VARCHAR)
       setOptInt(16, economiaMovimiento)
       setOptInt(17, calidadDecisionPct)
-      ps.setInt(18, matchId)
+      setOptInt(18, conductaPadre)
+      ps.setInt(19, scanningEfectivo)
+      ps.setString(20, angulo1v1Data)
+      ps.setString(21, rutinaPrepartido)
+      ps.setString(22, regulacionEmocional)
+      ps.setInt(23, matchId)
       ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE C — CALENDARIO DE CARGA COGNITIVA ESCOLAR
+  // ─────────────────────────────────────────────────────────────────────────────
+  def saveCalendarioEscolar(fechaInicio: String, fechaFin: String, tipo: String, descripcion: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO calendario_escolar (fecha_inicio, fecha_fin, tipo, descripcion) VALUES (?::date, ?::date, ?, ?)")
+      ps.setString(1, fechaInicio); ps.setString(2, fechaFin); ps.setString(3, tipo); ps.setString(4, fixEncoding(descripcion))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getCalendarioEscolar(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, fecha_inicio, fecha_fin, tipo, descripcion FROM calendario_escolar ORDER BY fecha_inicio DESC")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "id" -> rs.getInt("id"), "fechaInicio" -> rs.getDate("fecha_inicio").toString, "fechaFin" -> rs.getDate("fecha_fin").toString,
+        "tipo" -> rs.getString("tipo"), "descripcion" -> fixEncoding(Option(rs.getString("descripcion")).getOrElse(""))
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  def deleteCalendarioEscolar(id: Int): Unit = {
+    val conn = getConnection()
+    try { val ps = conn.prepareStatement("DELETE FROM calendario_escolar WHERE id=?"); ps.setInt(1, id); ps.executeUpdate() }
+    finally { conn.close() }
+  }
+
+  /** Tipo de periodo escolar (EXAMENES/TRIMESTRE_FIN/...) que cubre una fecha concreta, si lo hay. */
+  private def periodoEscolarEnFecha(conn: Connection, fecha: String): Option[String] = {
+    val ps = conn.prepareStatement("SELECT tipo FROM calendario_escolar WHERE ?::date >= fecha_inicio AND ?::date <= fecha_fin ORDER BY id DESC LIMIT 1")
+    ps.setString(1, fecha); ps.setString(2, fecha)
+    val rs = ps.executeQuery()
+    if (rs.next()) Some(rs.getString("tipo")) else None
+  }
+
+  def getPeriodoEscolarHoy(): Option[String] = {
+    val conn = getConnection()
+    try periodoEscolarEnFecha(conn, LocalDate.now().toString) finally conn.close()
+  }
+
+  /** True si esa fecha cae en un periodo de EXAMENES — para el badge del historial de partidos. */
+  def esFechaDeExamenes(fecha: String): Boolean = {
+    val conn = getConnection()
+    try periodoEscolarEnFecha(conn, fecha).contains("EXAMENES") finally conn.close()
+  }
+
+  /** True si algun dia entre hoy y los proximos `dias` cae en EXAMENES o TRIMESTRE_FIN. */
+  def haySemanaEscolarCargada(dias: Int = 7): Boolean = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT 1 FROM calendario_escolar
+        WHERE tipo IN ('EXAMENES','TRIMESTRE_FIN')
+          AND fecha_inicio <= CURRENT_DATE + ? AND fecha_fin >= CURRENT_DATE
+        LIMIT 1
+      """)
+      ps.setInt(1, dias)
+      ps.executeQuery().next()
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE D — DETECTOR DE JETLAG SOCIAL
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro — sin Gemini.
+  def detectarJetlagSocial(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          AVG(CASE WHEN EXTRACT(DOW FROM fecha) IN (1,2,3,4,5) THEN horas_sueno END) as media_semana,
+          AVG(CASE WHEN EXTRACT(DOW FROM fecha) IN (0,6) THEN horas_sueno END) as media_finde,
+          STDDEV(horas_sueno) as variabilidad,
+          COUNT(*) as n
+        FROM wellness
+        WHERE fecha >= CURRENT_DATE - INTERVAL '28 days' AND horas_sueno > 0
+      """)
+      if (!rs.next() || rs.getInt("n") < 14) return None
+      val mediaSemana = rs.getDouble("media_semana")
+      val semanaNula = rs.wasNull()
+      val mediaFinde = rs.getDouble("media_finde")
+      val findeNulo = rs.wasNull()
+      if (semanaNula || findeNulo || mediaSemana <= 0 || mediaFinde <= 0) return None
+      val diff = mediaFinde - mediaSemana
+      if (math.abs(diff) > 1.5)
+        Some(f"⏰ Patrón de jetlag social detectado: $mediaSemana%.1fh entre semana vs $mediaFinde%.1fh el fin de semana. Esta inconsistencia puede desajustar el reloj biológico y afectar el rendimiento del sábado.")
+      else None
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE E — DETECTOR DE CONDICIONES DE RENDIMIENTO PICO
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro — analiza los 10 partidos con mayor CPI o nota. Requiere >=15 partidos con Indice de Forma.
+  def getCondicionesPico(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rsN = conn.createStatement().executeQuery("""
+        SELECT COUNT(*) as n FROM matches m
+        LEFT JOIN forma_diaria f ON f.fecha = m.fecha::date
+        WHERE m.status = 'PLAYED' AND f.indice_forma IS NOT NULL
+          AND m.season_id = (SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1)
+      """)
+      val n = if (rsN.next()) rsN.getInt("n") else 0
+      if (n < 15) return Map("suficiente" -> false, "n" -> n)
+
+      val rs = conn.createStatement().executeQuery("""
+        SELECT AVG(f.indice_forma) as forma_media_pico,
+          AVG(f.sueno_score) as sueno_pico,
+          AVG(f.acwr_score) as acwr_pico,
+          AVG(f.descanso_score) as descanso_pico,
+          MODE() WITHIN GROUP (ORDER BY m.clima) as clima_frecuente,
+          MODE() WITHIN GROUP (ORDER BY m.es_local::text) as sede_frecuente,
+          AVG(m.autopercepcion_prepartido) as autopercepcion_pico
+        FROM (
+          SELECT * FROM matches
+          WHERE status = 'PLAYED' AND season_id = (SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1)
+          ORDER BY COALESCE(cpi, nota) DESC LIMIT 10
+        ) m
+        LEFT JOIN forma_diaria f ON f.fecha = m.fecha::date
+      """)
+      if (!rs.next()) return Map("suficiente" -> false, "n" -> n)
+      Map(
+        "suficiente" -> true, "n" -> n,
+        "formaMediaPico" -> rs.getDouble("forma_media_pico"),
+        "suenoPico" -> rs.getDouble("sueno_pico"),
+        "acwrPico" -> rs.getDouble("acwr_pico"),
+        "descansoPico" -> rs.getDouble("descanso_pico"),
+        "climaFrecuente" -> Option(rs.getString("clima_frecuente")).getOrElse(""),
+        "sedeFrecuente" -> Option(rs.getString("sede_frecuente")).getOrElse(""),
+        "autopercepcionPico" -> rs.getDouble("autopercepcion_pico")
+      )
+    } finally { conn.close() }
+  }
+
+  /** Compara las condiciones de HOY con el perfil de condiciones pico. None si no hay perfil suficiente. */
+  def getCoincidenciaConCondicionesPico(): Option[Int] = {
+    val pico = getCondicionesPico()
+    if (!pico("suficiente").asInstanceOf[Boolean]) return None
+    val hoy = calcularFormaHoy()
+    val suenoHoy = hoy("suenoScore").asInstanceOf[Double]
+    val acwrHoy = hoy("acwrScore").asInstanceOf[Double]
+    val descansoHoy = hoy("descansoScore").asInstanceOf[Double]
+    val suenoPico = pico("suenoPico").asInstanceOf[Double]
+    val acwrPico = pico("acwrPico").asInstanceOf[Double]
+    val descansoPico = pico("descansoPico").asInstanceOf[Double]
+    val distanciaMedia = (math.abs(suenoHoy - suenoPico) + math.abs(acwrHoy - acwrPico) + math.abs(descansoHoy - descansoPico)) / 3.0
+    val coincidencia = math.max(0, math.min(100, (100 - distanciaMedia * 10).toInt))
+    Some(coincidencia)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE F — TRACKER CORRECCION PASO NEGATIVO (amplia /biomecanica)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro — usa posicion_set, que ya existe en matches. Requiere >=8 goles con dato.
+  def getPasoNegativoTrend(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val sf = seasonFilter(if (seasonId > 0) seasonId else 0)
+      val rsTotal = conn.createStatement().executeQuery(
+        s"SELECT COUNT(*) as n FROM matches WHERE status='PLAYED' AND posicion_set IS NOT NULL $sf")
+      val total = if (rsTotal.next()) rsTotal.getInt("n") else 0
+      if (total < 8) return Map("suficiente" -> false, "n" -> total)
+
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT EXTRACT(MONTH FROM fecha) as mes,
+          COUNT(*) as goles_con_data,
+          SUM(CASE WHEN posicion_set = 'PASO_NEGATIVO' THEN 1 ELSE 0 END) as paso_negativo,
+          ROUND(100.0 * SUM(CASE WHEN posicion_set = 'PASO_NEGATIVO' THEN 1 ELSE 0 END)
+            / NULLIF(COUNT(*), 0)) as pct_paso_negativo
+        FROM matches
+        WHERE status = 'PLAYED' AND posicion_set IS NOT NULL $sf
+        GROUP BY EXTRACT(MONTH FROM fecha)
+        ORDER BY mes
+      """)
+      var serie = List[Map[String, Any]]()
+      while (rs.next()) serie = serie :+ Map(
+        "mes" -> rs.getInt("mes"), "golesConData" -> rs.getInt("goles_con_data"),
+        "pasoNegativo" -> rs.getInt("paso_negativo"), "pctPasoNegativo" -> rs.getInt("pct_paso_negativo")
+      )
+      val tendencia =
+        if (serie.size < 2) "SIN_TENDENCIA"
+        else if (serie.last("pctPasoNegativo").asInstanceOf[Int] < serie.head("pctPasoNegativo").asInstanceOf[Int]) "CORRIGIENDO"
+        else "ESTABLE_O_PEOR"
+      Map("suficiente" -> true, "n" -> total, "serie" -> serie, "tendencia" -> tendencia)
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE H — EXITO EN 1V1 POR ANGULO DE ENTRADA
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/JSON puro — sin Gemini. Requiere >=15 acciones 1v1 con angulo.
+  def get1v1ByAngulo(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val sf = seasonFilter(seasonId)
+      val rs = conn.createStatement().executeQuery(
+        s"SELECT angulo_1v1_data FROM matches WHERE status='PLAYED' AND angulo_1v1_data IS NOT NULL AND angulo_1v1_data != '' $sf")
+      var okC = 0; var gcC = 0; var okI = 0; var gcI = 0; var okD = 0; var gcD = 0
+      while (rs.next()) {
+        try {
+          val j = ujson.read(rs.getString("angulo_1v1_data"))
+          def num(k: String): Int = try j(k).num.toInt catch { case _: Exception => 0 }
+          okC += num("central_ok"); gcC += num("central_gc")
+          okI += num("izq_ok"); gcI += num("izq_gc")
+          okD += num("der_ok"); gcD += num("der_gc")
+        } catch { case _: Exception => () }
+      }
+      val total = okC + gcC + okI + gcI + okD + gcD
+      if (total < 15) return Map("suficiente" -> false, "n" -> total)
+      def pct(ok: Int, gc: Int): Double = if (ok + gc > 0) ok * 100.0 / (ok + gc) else 0.0
+      Map(
+        "suficiente" -> true, "n" -> total,
+        "central" -> Map("ok" -> okC, "gc" -> gcC, "pct" -> pct(okC, gcC)),
+        "izquierda" -> Map("ok" -> okI, "gc" -> gcI, "pct" -> pct(okI, gcI)),
+        "derecha" -> Map("ok" -> okD, "gc" -> gcD, "pct" -> pct(okD, gcD))
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE I — DETECCION AUTOMATICA DE SKILLS EN EL FEEDBACK (sin Gemini)
+  // ─────────────────────────────────────────────────────────────────────────────
+  private val skillFeedbackKeywords: Map[String, List[String]] = Map(
+    "POSICION_MANOS"   -> List("manos", "posición de manos"),
+    "POSICION_PIES"    -> List("pies", "metatarsos", "posición de set"),
+    "CAIDA_DERECHA"    -> List("caída derecha", "lado derecho"),
+    "CAIDA_IZQUIERDA"  -> List("caída izquierda", "lado izquierdo"),
+    "COMUNICACION"     -> List("comunicación", "voz", "hablar", "organizar"),
+    "SALIDAS_AEREAS"   -> List("salidas aéreas", "balones aéreos", "córners"),
+    "ANTICIPACION_1V1" -> List("1v1", "uno contra uno", "salida", "achique"),
+    "PASE_CORTO"       -> List("pase corto", "salida corta"),
+    "PASE_LARGO"       -> List("pase largo", "distribución larga")
+  )
+
+  def detectarSkillsEnFeedback(texto: String): List[String] = {
+    val lower = texto.toLowerCase
+    skillFeedbackKeywords.filter { case (_, kws) => kws.exists(lower.contains) }.keys.toList
+  }
+
+  // Mapea el codigo de skill detectado a las palabras clave que se buscan en goalkeeper_skills.habilidad
+  private val skillFeedbackHabilidadMatch: Map[String, List[String]] = Map(
+    "POSICION_MANOS"   -> List("manos"),
+    "POSICION_PIES"    -> List("pies"),
+    "CAIDA_DERECHA"    -> List("lateral derecha"),
+    "CAIDA_IZQUIERDA"  -> List("lateral izquierda"),
+    "COMUNICACION"     -> List("voz", "comunicaci"),
+    "SALIDAS_AEREAS"   -> List("aéreo", "aereo"),
+    "ANTICIPACION_1V1" -> List("1v1"),
+    "PASE_CORTO"       -> List("pase corto"),
+    "PASE_LARGO"       -> List("pase largo")
+  )
+
+  /** Guarda, para cada skill detectada en el feedback y aun no conseguida, una sugerencia pendiente en feature_cache. */
+  def guardarSugerenciasSkillDesdeFeedback(feedback: String): Unit = {
+    if (feedback.trim.isEmpty) return
+    val detectadas = detectarSkillsEnFeedback(feedback)
+    if (detectadas.isEmpty) return
+    val conn = getConnection()
+    try {
+      val rsSkills = conn.createStatement().executeQuery("SELECT id, habilidad FROM goalkeeper_skills WHERE conseguido = FALSE")
+      var pendientes = List[(Int, String)]()
+      while (rsSkills.next()) pendientes = pendientes :+ (rsSkills.getInt("id"), rsSkills.getString("habilidad"))
+
+      detectadas.foreach { codigo =>
+        val claves = skillFeedbackHabilidadMatch.getOrElse(codigo, List.empty)
+        pendientes.find { case (_, habilidad) => claves.exists(k => habilidad.toLowerCase.contains(k)) }.foreach {
+          case (skillId, habilidad) =>
+            val ps = conn.prepareStatement(
+              "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+            ps.setString(1, s"skill_sugerida_$skillId")
+            ps.setString(2, ujson.write(ujson.Obj("skillId" -> skillId, "habilidad" -> habilidad)))
+            ps.executeUpdate()
+        }
+      }
+    } finally { conn.close() }
+  }
+
+  def getSugerenciasSkillPendientes(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT payload FROM feature_cache WHERE cache_key LIKE 'skill_sugerida_%'")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) {
+        try {
+          val j = ujson.read(rs.getString("payload"))
+          l = l :+ Map("skillId" -> j("skillId").num.toInt, "habilidad" -> fixEncoding(j("habilidad").str))
+        } catch { case _: Exception => () }
+      }
+      l
+    } finally { conn.close() }
+  }
+
+  def descartarSugerenciaSkill(skillId: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("DELETE FROM feature_cache WHERE cache_key = ?")
+      ps.setString(1, s"skill_sugerida_$skillId"); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Marca la skill como conseguida hoy y limpia la sugerencia pendiente. */
+  def confirmarSkillDesdeSugerencia(skillId: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE goalkeeper_skills SET conseguido=TRUE, fecha_conseguido=CURRENT_DATE, contexto_conseguido='Detectado en feedback de academia' WHERE id=?")
+      ps.setInt(1, skillId); ps.executeUpdate()
+    } finally { conn.close() }
+    descartarSugerenciaSkill(skillId)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE J — PERSPECTIVA DEL OJEADOR EXTERNO (amplia /scouting-report)
+  // ─────────────────────────────────────────────────────────────────────────────
+  /** Solo lectura de cache (30 dias) — NUNCA llama a Gemini. Para usar en el render de la pagina. */
+  def getOjeadorExternoCache(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT payload FROM feature_cache WHERE cache_key = 'ojeador_externo' AND updated_at > NOW() - INTERVAL '30 days'")
+      val rs = ps.executeQuery()
+      if (rs.next()) Some(rs.getString("payload")) else None
+    } finally { conn.close() }
+  }
+
+  /** Llama a Gemini — SOLO desde el boton explicito "Vista del ojeador externo". Cache 30 dias. */
+  def generarOjeadorExternoNarrative(): String = {
+    val conn = getConnection()
+    try {
+      val card = getLatestCardData()
+      val edad = calcularEdadExacta(card.fechaNacimiento)
+      val temporadaId = getTemporadaActivaId()
+      val matches = getMatchesList(temporadaId)
+      val pj = matches.size
+      if (pj < 3) return "Se necesitan al menos 3 partidos registrados esta temporada para generar esta vista."
+
+      val notaMedia = matches.map(_.nota).sum / pj
+      def gcOf(m: MatchLog): Int = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(0)
+      val cleanSheets = matches.count(gcOf(_) == 0)
+      val pctCS = cleanSheets * 100 / pj
+      val alturaActual = try getBioBandingData().getOrElse("alturaActual", 0.0).asInstanceOf[Double] catch { case _: Exception => 0.0 }
+
+      val datosTemporada = s"Edad: $edad años. Partidos esta temporada: $pj. Nota media: ${"%.1f".format(notaMedia)}. Porterías a cero: $cleanSheets de $pj ($pctCS%%). Altura actual: ${if (alturaActual > 0) f"$alturaActual%.0fcm" else "sin dato"}."
+
+      val prompt = s"""Eres un ojeador profesional que acaba de ver a Héctor por PRIMERA VEZ. No tienes acceso a su historial — solo a los datos de esta temporada. Escribe tu informe en primera persona, tono frío y analítico, como si lo reportaras a tu director deportivo. Incluye: morfología y proyección, nivel técnico observado, perfil mental percibido, proyección de nivel (EN_DESARROLLO / FORMATIVO_MEDIO / ACADEMIA_REGIONAL / ACADEMIA_PRIMERA / ELITE_NACIONAL), recomendación (SEGUIMIENTO_6M / SEGUIMIENTO_12M / NO_SEGUIMIENTO / FICHAR_YA). Máximo 5 párrafos. No menciones Guardian. Datos: $datosTemporada"""
+
+      val texto = AIProvider.ask(prompt, None, bypassCache = true)
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('ojeador_externo', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
+      ps.setString(1, texto); ps.executeUpdate()
+      texto
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE K — CLUB READINESS SCORE (amplia /market-estimator)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/matematicas puras — sin Gemini. Cada factor aporta hasta 20 puntos (total 0-100).
+  def getClubReadinessScore(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // 1) Progreso medio del IDP activo (0-20)
+      val rsIdp = conn.createStatement().executeQuery("""
+        SELECT AVG(o.progreso_pct) as m FROM idp_objetivos o
+        JOIN idp_temporadas t ON t.id = o.temporada_id
+        WHERE t.estado = 'ACTIVA'
+      """)
+      val progresoIdp = if (rsIdp.next() && !rsIdp.wasNull()) rsIdp.getDouble("m") / 100.0 * 20.0 else 0.0
+
+      // 2) Rating vs categoria — percentil real RFMF si esta disponible (0-20)
+      val ratingCategoria = getPercentilRealHector() match {
+        case Some(p) => p("percentilGC").asInstanceOf[Int] / 100.0 * 20.0
+        case None => 0.0
+      }
+
+      // 3) Estabilidad psicologica — media de motivacion+disfrute del ultimo registro (0-20)
+      val rsPsych = conn.createStatement().executeQuery(
+        "SELECT motivacion, disfrute FROM psych_records ORDER BY fecha DESC LIMIT 1")
+      val estabilidadPsico = if (rsPsych.next()) ((rsPsych.getInt("motivacion") + rsPsych.getInt("disfrute")) / 2.0) / 5.0 * 20.0 else 0.0
+
+      // 4) % de semanas del ultimo mes con ACWR en zona verde (0-20)
+      val rsAcwr = conn.createStatement().executeQuery("""
+        SELECT COUNT(*) as total, COUNT(CASE WHEN acwr_score >= 8 THEN 1 END) as verde
+        FROM forma_diaria WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
+      """)
+      val acwrVerdePct = if (rsAcwr.next() && rsAcwr.getInt("total") > 0) rsAcwr.getInt("verde").toDouble / rsAcwr.getInt("total") * 20.0 else 0.0
+
+      // 5) Visibilidad — oportunidades/eventos registrados este año (0-20; 5 eventos = maximo)
+      val rsVis = conn.createStatement().executeQuery(
+        "SELECT COUNT(*) as n FROM opportunities WHERE EXTRACT(YEAR FROM fecha) = EXTRACT(YEAR FROM CURRENT_DATE)")
+      val visibilidad = if (rsVis.next()) math.min(20.0, rsVis.getInt("n") * 4.0) else 0.0
+
+      val readiness = (progresoIdp + ratingCategoria + estabilidadPsico + acwrVerdePct + visibilidad).toInt
+
+      val interpretacion =
+        if (readiness <= 30) "No preparado"
+        else if (readiness <= 50) "Seguimiento 12m"
+        else if (readiness <= 70) "Seguimiento 6m"
+        else if (readiness <= 85) "Candidato"
+        else "Listo ahora"
+
+      Map(
+        "readiness" -> readiness, "interpretacion" -> interpretacion,
+        "progresoIdp" -> progresoIdp, "ratingCategoria" -> ratingCategoria,
+        "estabilidadPsico" -> estabilidadPsico, "acwrVerdePct" -> acwrVerdePct, "visibilidad" -> visibilidad
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE L — ARCO COMPLETO DE CARRERA (amplia Digital Twin + Markov)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL/matematicas puras — reusa calcularMarkovPathway(), sin llamadas adicionales a Gemini.
+  def getArcoCompletoData(): Map[String, Any] = {
+    val card = getLatestCardData()
+    val edadActual = calcularEdadExacta(card.fechaNacimiento)
+    val categorias = List(("Benjamín", 8), ("Alevín", 10), ("Infantil", 12), ("Cadete", 14), ("Juvenil", 16), ("Profesional", 18))
+    val markov = calcularMarkovPathway()
+
+    val proyeccionAcademiaPrimera: Option[Int] = markov.flatMap { m =>
+      val estados = List("EN_DESARROLLO", "FORMATIVO_MEDIO", "ACADEMIA_REGIONAL", "ACADEMIA_PRIMERA", "ELITE_NACIONAL")
+      val idxActual = m("estadoActualIdx").asInstanceOf[Int]
+      val idxAcademiaPrimera = estados.indexOf("ACADEMIA_PRIMERA")
+      val velocidad = m("velocidadMejora").asInstanceOf[Double]
+      if (idxActual >= idxAcademiaPrimera) Some(edadActual)
+      else if (velocidad <= 0) None
+      else {
+        val pasos = idxAcademiaPrimera - idxActual
+        val anios = pasos * (8.0 / velocidad) // mismo supuesto de "gap" de 8 pts FUT por nivel que calcularMarkovPathway()
+        Some((edadActual + anios).toInt)
+      }
+    }
+
+    Map(
+      "edadActual" -> edadActual, "categorias" -> categorias,
+      "tieneMarkov" -> markov.isDefined, "edadProyectadaAcademiaPrimera" -> proyeccionAcademiaPrimera
+    )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE M — TABLAS CIENTIFICAS PARA TEST FISICOS (normas Eurofit Espana)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (p25, p50, p75). Velocidad 10m en segundos (menor es mejor); salto vertical en cm (mayor es mejor).
+  private val normasVelocidad10m: Map[Int, (Double, Double, Double)] = Map(
+    6 -> (2.80, 2.60, 2.40), 7 -> (2.65, 2.45, 2.25),
+    8 -> (2.52, 2.32, 2.12), 9 -> (2.40, 2.20, 2.00),
+    10 -> (2.28, 2.08, 1.88)
+  )
+  private val normasSaltoVertical: Map[Int, (Int, Int, Int)] = Map(
+    6 -> (18, 23, 28), 7 -> (21, 27, 33),
+    8 -> (24, 30, 37), 9 -> (28, 34, 41),
+    10 -> (31, 38, 45)
+  )
+
+  /** Percentil e interpretacion de un test fisico frente a las normas Eurofit Espana. None si no hay tabla para ese tipo/edad. */
+  def getPercentilTestFisico(tipo: String, valor: Double, edad: Int): Map[String, Any] = {
+    def desdeVelocidad(p25: Double, p50: Double, p75: Double): Int =
+      if (valor <= p75) 90 else if (valor <= p50) 65 else if (valor <= p25) 35 else 10
+    def desdeSalto(p25: Int, p50: Int, p75: Int): Int =
+      if (valor >= p75) 90 else if (valor >= p50) 65 else if (valor >= p25) 35 else 10
+
+    val percentilOpt: Option[Int] = tipo match {
+      case "velocidad10m" => normasVelocidad10m.get(edad).map { case (p25, p50, p75) => desdeVelocidad(p25, p50, p75) }
+      case "saltoVertical" => normasSaltoVertical.get(edad).map { case (p25, p50, p75) => desdeSalto(p25, p50, p75) }
+      case _ => None
+    }
+    percentilOpt match {
+      case Some(p) => Map("disponible" -> true, "percentil" -> p, "edad" -> edad, "fuente" -> "Normas Eurofit España")
+      case None => Map("disponible" -> false)
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE O — RUTINA PRE-PARTIDO
+  // ─────────────────────────────────────────────────────────────────────────────
+  def saveRutinaDefinicion(descripcion: String): Unit = {
+    val conn = getConnection()
+    try {
+      conn.createStatement().executeUpdate("UPDATE rutina_definicion SET activa = FALSE WHERE activa = TRUE")
+      val ps = conn.prepareStatement("INSERT INTO rutina_definicion (descripcion, activa) VALUES (?, TRUE)")
+      ps.setString(1, fixEncoding(descripcion)); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getRutinaActiva(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT descripcion FROM rutina_definicion WHERE activa = TRUE ORDER BY id DESC LIMIT 1")
+      if (rs.next()) Some(fixEncoding(rs.getString("descripcion"))) else None
+    } finally { conn.close() }
+  }
+
+  /** SQL puro — compara la nota media segun si Hector siguio su rutina pre-partido o no. Requiere >=10 partidos con el dato. */
+  def getRutinaAnalysis(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT rutina_prepartido, nota FROM matches WHERE status='PLAYED' AND rutina_prepartido IS NOT NULL AND rutina_prepartido != 'SIN_RUTINA'")
+      var siList = List[Double](); var noList = List[Double]()
+      while (rs.next()) {
+        val nota = rs.getDouble("nota")
+        rs.getString("rutina_prepartido") match {
+          case "SI" => siList = siList :+ nota
+          case "NO" => noList = noList :+ nota
+          case _ => ()
+        }
+      }
+      val n = siList.size + noList.size
+      if (n < 10) return Map("suficiente" -> false, "n" -> n)
+      Map(
+        "suficiente" -> true, "n" -> n,
+        "notaMediaSigue" -> (if (siList.nonEmpty) siList.sum / siList.size else 0.0),
+        "notaMediaNoSigue" -> (if (noList.nonEmpty) noList.sum / noList.size else 0.0),
+        "nSigue" -> siList.size, "nNoSigue" -> noList.size
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE P — TRANSFERENCIA DE ENTRENAMIENTO
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro — conecta el feedback del entrenador de academia con la rubrica del partido siguiente.
+  def getTransferenciaEntrenamiento(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val dimensiones = Seq(
+        "rubrica_posicion" -> "Posición", "rubrica_decisiones" -> "Decisiones bajo presión",
+        "rubrica_pies" -> "Juego con los pies", "rubrica_comunicacion" -> "Comunicación",
+        "rubrica_actitud" -> "Actitud"
+      )
+      dimensiones.map { case (col, label) =>
+        val rs = conn.createStatement().executeQuery(s"""
+          SELECT ma.$col as antes, md.$col as despues
+          FROM trainings t
+          CROSS JOIN LATERAL (
+            SELECT $col FROM matches WHERE status='PLAYED' AND fecha::date < t.fecha::date AND $col IS NOT NULL
+            ORDER BY fecha DESC LIMIT 1
+          ) ma
+          CROSS JOIN LATERAL (
+            SELECT $col FROM matches WHERE status='PLAYED' AND fecha::date > t.fecha::date
+              AND fecha::date <= t.fecha::date + INTERVAL '7 days' AND $col IS NOT NULL
+            ORDER BY fecha ASC LIMIT 1
+          ) md
+          WHERE t.tipo = 'Academia' AND t.feedback_entrenador IS NOT NULL AND t.feedback_entrenador != ''
+        """)
+        var n = 0; var mejoras = 0
+        while (rs.next()) {
+          n += 1
+          if (rs.getInt("despues") > rs.getInt("antes")) mejoras += 1
+        }
+        val pct = if (n > 0) mejoras * 100.0 / n else 0.0
+        Map("dimension" -> label, "n" -> n, "mejoras" -> mejoras, "pctTransferencia" -> pct)
+      }.toList
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE Q — RENDIMIENTO POR FASE DEL PARTIDO
+  // ─────────────────────────────────────────────────────────────────────────────
+  // El cuarto (Q1-Q4) se deriva del minuto de cada gol, ya registrado en el desglose de goles.
+  def saveMinutoGoles(matchId: Int, minutos: List[Int]): Unit = {
+    if (matchId <= 0) return
+    def cuartoDe(m: Int): String = if (m <= 12) "q1" else if (m <= 25) "q2" else if (m <= 37) "q3" else "q4"
+    val counts = scala.collection.mutable.Map("q1" -> 0, "q2" -> 0, "q3" -> 0, "q4" -> 0)
+    minutos.foreach(m => counts(cuartoDe(m)) += 1)
+    val json = ujson.write(ujson.Obj("q1" -> counts("q1"), "q2" -> counts("q2"), "q3" -> counts("q3"), "q4" -> counts("q4")))
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE matches SET minuto_goles = ? WHERE id = ?")
+      ps.setString(1, json); ps.setInt(2, matchId); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Agrega los JSON de minuto_goles y calcula la distribucion de goles por cuarto. Requiere >=15 goles con dato. */
+  def getRendimientoPorFase(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val sf = seasonFilter(seasonId)
+      val rs = conn.createStatement().executeQuery(
+        s"SELECT minuto_goles FROM matches WHERE status='PLAYED' AND minuto_goles IS NOT NULL AND minuto_goles != '' $sf")
+      var q1 = 0; var q2 = 0; var q3 = 0; var q4 = 0
+      while (rs.next()) {
+        try {
+          val j = ujson.read(rs.getString("minuto_goles"))
+          def num(k: String): Int = try j(k).num.toInt catch { case _: Exception => 0 }
+          q1 += num("q1"); q2 += num("q2"); q3 += num("q3"); q4 += num("q4")
+        } catch { case _: Exception => () }
+      }
+      val total = q1 + q2 + q3 + q4
+      if (total < 15) return Map("suficiente" -> false, "n" -> total)
+      def pct(n: Int): Double = n * 100.0 / total
+      Map(
+        "suficiente" -> true, "n" -> total,
+        "q1" -> q1, "q2" -> q2, "q3" -> q3, "q4" -> q4,
+        "pctQ1" -> pct(q1), "pctQ2" -> pct(q2), "pctQ3" -> pct(q3), "pctQ4" -> pct(q4)
+      )
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE R — TESTS DE MOVILIDAD ESPECIFICOS DE PORTERO
+  // ─────────────────────────────────────────────────────────────────────────────
+  def saveMovilidadTest(fecha: String, alcancePie: Option[Int], rotacionHombro: String,
+                         alcanceLateralDer: Option[Int], alcanceLateralIzq: Option[Int], notas: String): Unit = {
+    val asimetria = (alcanceLateralDer, alcanceLateralIzq) match {
+      case (Some(d), Some(i)) => Some(math.abs(d - i))
+      case _ => None
+    }
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO movilidad_tests (fecha, alcance_pie_cm, rotacion_hombro, alcance_lateral_der_cm, alcance_lateral_izq_cm, asimetria_lateral_cm, notas)
+        VALUES (?::date, ?, ?, ?, ?, ?, ?)
+      """)
+      ps.setString(1, if (fecha.nonEmpty) fecha else LocalDate.now().toString)
+      def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => ps.setInt(idx, x); case None => ps.setNull(idx, java.sql.Types.INTEGER) }
+      setOptInt(2, alcancePie)
+      if (rotacionHombro.nonEmpty) ps.setString(3, rotacionHombro) else ps.setNull(3, java.sql.Types.VARCHAR)
+      setOptInt(4, alcanceLateralDer); setOptInt(5, alcanceLateralIzq); setOptInt(6, asimetria)
+      ps.setString(7, fixEncoding(notas))
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getMovilidadTests(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT * FROM movilidad_tests ORDER BY fecha ASC")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) {
+        def optInt(col: String): Option[Int] = { val v = rs.getInt(col); if (rs.wasNull()) None else Some(v) }
+        l = l :+ Map(
+          "id" -> rs.getInt("id"), "fecha" -> rs.getDate("fecha").toString,
+          "alcancePie" -> optInt("alcance_pie_cm"), "rotacionHombro" -> Option(rs.getString("rotacion_hombro")).getOrElse(""),
+          "alcanceLateralDer" -> optInt("alcance_lateral_der_cm"), "alcanceLateralIzq" -> optInt("alcance_lateral_izq_cm"),
+          "asimetria" -> optInt("asimetria_lateral_cm"), "notas" -> fixEncoding(Option(rs.getString("notas")).getOrElse(""))
+        )
+      }
+      l
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE S — TOOLKIT DE REGULACION EMOCIONAL
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro — distribucion de comportamientos tras gol encajado + correlacion con la nota. Requiere >=8 registros.
+  def getRegulacionEmocional(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT regulacion_emocional, nota FROM matches WHERE status='PLAYED' AND goles_contra > 0 AND regulacion_emocional IS NOT NULL")
+      var n = 0
+      val conteo = scala.collection.mutable.Map[String, Int]().withDefaultValue(0)
+      val notasPorComportamiento = scala.collection.mutable.Map[String, List[Double]]().withDefaultValue(Nil)
+      while (rs.next()) {
+        n += 1
+        val comp = rs.getString("regulacion_emocional")
+        conteo(comp) += 1
+        notasPorComportamiento(comp) = notasPorComportamiento(comp) :+ rs.getDouble("nota")
+      }
+      if (n < 8) return Map("suficiente" -> false, "n" -> n)
+
+      val distribucion = conteo.toList.map { case (comp, c) => Map("comportamiento" -> comp, "n" -> c, "pct" -> (c * 100.0 / n)) }
+      val notaReorganiza = notasPorComportamiento.get("REORGANIZA").filter(_.nonEmpty).map(l => l.sum / l.size)
+      val notaDecaido = notasPorComportamiento.get("DECAIDO").filter(_.nonEmpty).map(l => l.sum / l.size)
+      val patronDominante = conteo.toList.sortBy(-_._2).headOption.map(_._1).getOrElse("")
+      val pctDecaido = conteo("DECAIDO") * 100.0 / n
+      val pctSaludable = (conteo("REORGANIZA") + conteo("RESPIRA")) * 100.0 / n
+
+      Map(
+        "suficiente" -> true, "n" -> n, "distribucion" -> distribucion,
+        "notaReorganiza" -> notaReorganiza, "notaDecaido" -> notaDecaido,
+        "patronDominante" -> patronDominante, "pctDecaido" -> pctDecaido, "pctSaludable" -> pctSaludable
+      )
+    } finally { conn.close() }
+  }
+
+  // BLOQUE B (autoeval padre): cruza conducta_padre con la nota del partido. NUNCA usar en
+  // /hector ni en el informe de captacion — es un dato privado del padre, no del jugador.
+  def getConductaPadreAnalysis(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT conducta_padre, nota FROM matches WHERE status='PLAYED' AND conducta_padre IS NOT NULL")
+      var n = 0; var sumaConducta = 0.0
+      var puntos = List[(Int, Double)]()
+      while (rs.next()) {
+        n += 1
+        val c = rs.getInt("conducta_padre")
+        sumaConducta += c
+        puntos = puntos :+ (c, rs.getDouble("nota"))
+      }
+      if (n < 10) return Map("suficiente" -> false, "n" -> n)
+      val mediaConducta = sumaConducta / n
+      val notaMediaIntervencionista = puntos.filter(_._1 <= 2).map(_._2) match { case l if l.nonEmpty => l.sum / l.size; case _ => 0.0 }
+      val notaMediaObservador = puntos.filter(_._1 >= 4).map(_._2) match { case l if l.nonEmpty => l.sum / l.size; case _ => 0.0 }
+      Map(
+        "suficiente" -> true, "n" -> n, "mediaConducta" -> mediaConducta,
+        "notaMediaIntervencionista" -> notaMediaIntervencionista, "notaMediaObservador" -> notaMediaObservador
+      )
     } finally { conn.close() }
   }
 
@@ -5284,6 +6137,9 @@ Responde en espanol, tono positivo y motivador para un nino."""
       }
 
       calcularPercentilesRFFM()
+      // BLOQUE A6: si la temporada activa juega liga oficial RFMF, detecta resultados nuevos
+      val pendientesDetectados = try detectarPartidosRFMF() catch { case e: Exception => if (debugMode) println(s"[RFFM] detectarPartidosRFMF error: ${e.getMessage}"); List.empty }
+      if (pendientesDetectados.nonEmpty) TelegramService.enviar(s"📋 RFMF: ${pendientesDetectados.size} resultado(s) nuevo(s) detectados — confírmalos en Guardian.")
       rffmFailCountSet(0)
       val msg = s"✅ Sync RFFM completado: $totalPartidosNuevos partidos nuevos en ${gruposFinal.size} grupos (${LocalDate.now()})"
       rffmSyncEstado(msg)
@@ -5362,6 +6218,37 @@ Responde en espanol, tono positivo y motivador para un nino."""
     ))
   }
 
+  // BLOQUE A6/A7: configuracion de liga oficial RFMF de la temporada activa
+  def getLigaRFMFConfig(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT liga_tipo, rffm_nombre_equipo, rffm_grupo_id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1")
+      if (rs.next()) Map(
+        "ligaTipo" -> Option(rs.getString("liga_tipo")).getOrElse("INTERNA"),
+        "nombreEquipo" -> Option(rs.getString("rffm_nombre_equipo")).getOrElse(""),
+        "grupoId" -> Option(rs.getString("rffm_grupo_id")).getOrElse("")
+      ) else Map("ligaTipo" -> "INTERNA", "nombreEquipo" -> "", "grupoId" -> "")
+    } finally { conn.close() }
+  }
+
+  def setLigaRFMFConfig(ligaTipo: String, nombreEquipo: String, grupoId: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "UPDATE seasons SET liga_tipo=?, rffm_nombre_equipo=?, rffm_grupo_id=? WHERE id = (SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1)")
+      ps.setString(1, if (ligaTipo.nonEmpty) ligaTipo else "INTERNA")
+      if (nombreEquipo.trim.nonEmpty) ps.setString(2, fixEncoding(nombreEquipo.trim)) else ps.setNull(2, java.sql.Types.VARCHAR)
+      if (grupoId.trim.nonEmpty) ps.setString(3, grupoId.trim) else ps.setNull(3, java.sql.Types.VARCHAR)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def getRffmFechaCalculo(): Option[String] = {
+    val conn = getConnection()
+    try getUltimoPercentilRFFM(conn).map(_("fechaCalculo").asInstanceOf[String]) finally conn.close()
+  }
+
   /** Percentil real de Hector frente a la categoria. None si no hay percentiles calculados (>=10 equipos). */
   def getPercentilRealHector(seasonId: Int = 0): Option[Map[String, Any]] = {
     val conn = getConnection()
@@ -5398,6 +6285,75 @@ Responde en espanol, tono positivo y motivador para un nino."""
           "fuenteDatos"      -> s"RFFM Prebenjamín F7 Madrid temporada ${getRffmTemporada()}"
         )
       }
+    } finally { conn.close() }
+  }
+
+  // BLOQUE A6 (RFMF): si la temporada activa juega liga oficial RFMF, detecta resultados
+  // del equipo de Hector en rffm_benchmark que aun no esten registrados en matches y los
+  // crea como RESULTADO_PENDIENTE para que el padre los confirme. Skip total si liga_tipo='INTERNA'.
+  def detectarPartidosRFMF(): List[Int] = {
+    val conn = getConnection()
+    try {
+      val rsSeason = conn.createStatement().executeQuery(
+        "SELECT id, liga_tipo, rffm_nombre_equipo FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1")
+      if (!rsSeason.next()) return List.empty
+      val seasonId = rsSeason.getInt("id")
+      val ligaTipo = Option(rsSeason.getString("liga_tipo")).getOrElse("INTERNA")
+      val equipo = Option(rsSeason.getString("rffm_nombre_equipo")).getOrElse("")
+      if (ligaTipo != "RFMF" || equipo.trim.isEmpty) return List.empty
+
+      val patron = s"%${equipo.trim}%"
+      val ps = conn.prepareStatement("""
+        INSERT INTO matches (season_id, fecha, rival, tipo_partido, status, goles_favor, goles_contra)
+        SELECT ?, rb.fecha,
+          CASE WHEN LOWER(rb.equipo_local) LIKE LOWER(?) THEN rb.equipo_visita ELSE rb.equipo_local END,
+          'LIGA', 'RESULTADO_PENDIENTE',
+          CASE WHEN LOWER(rb.equipo_local) LIKE LOWER(?) THEN rb.goles_local ELSE rb.goles_visita END,
+          CASE WHEN LOWER(rb.equipo_local) LIKE LOWER(?) THEN rb.goles_visita ELSE rb.goles_local END
+        FROM rffm_benchmark rb
+        WHERE (LOWER(rb.equipo_local) LIKE LOWER(?) OR LOWER(rb.equipo_visita) LIKE LOWER(?))
+          AND rb.fecha IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.season_id = ? AND m.fecha = rb.fecha)
+        RETURNING id
+      """)
+      ps.setInt(1, seasonId)
+      ps.setString(2, patron); ps.setString(3, patron); ps.setString(4, patron)
+      ps.setString(5, patron); ps.setString(6, patron)
+      ps.setInt(7, seasonId)
+      val rs = ps.executeQuery()
+      var nuevos = List[Int]()
+      while (rs.next()) nuevos = nuevos :+ rs.getInt("id")
+      nuevos
+    } finally { conn.close() }
+  }
+
+  def getPartidosRFMFPendientes(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, rival, fecha, goles_favor, goles_contra FROM matches WHERE status='RESULTADO_PENDIENTE' ORDER BY fecha DESC")
+      var l = List[Map[String, Any]]()
+      while (rs.next()) l = l :+ Map(
+        "id" -> rs.getInt("id"), "rival" -> fixEncoding(rs.getString("rival")), "fecha" -> rs.getDate("fecha").toString,
+        "golesFavor" -> rs.getInt("goles_favor"), "golesContra" -> rs.getInt("goles_contra")
+      )
+      l
+    } finally { conn.close() }
+  }
+
+  def confirmarPartidoRFMFPendiente(matchId: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE matches SET status='PLAYED' WHERE id=? AND status='RESULTADO_PENDIENTE'")
+      ps.setInt(1, matchId); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  def descartarPartidoRFMFPendiente(matchId: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("DELETE FROM matches WHERE id=? AND status='RESULTADO_PENDIENTE'")
+      ps.setInt(1, matchId); ps.executeUpdate()
     } finally { conn.close() }
   }
 

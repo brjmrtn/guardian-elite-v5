@@ -1244,6 +1244,97 @@ object HistoryController extends cask.Routes {
     val stats = DatabaseManager.getBiomecPosicional(efectivo)
     val setPieceStats = DatabaseManager.getSetPieceStats(efectivo) // BLOQUE C
 
+    // BLOQUE F: correccion del paso negativo — requiere >=8 goles con posicion_set
+    val pasoNegativo = DatabaseManager.getPasoNegativoTrend(efectivo)
+    val pasoNegativoWidget: Modifier =
+      if (!pasoNegativo("suficiente").asInstanceOf[Boolean]) div()
+      else {
+        val serie = pasoNegativo("serie").asInstanceOf[List[Map[String, Any]]]
+        val tendencia = pasoNegativo("tendencia").asInstanceOf[String]
+        val labelsJs = serie.map(m => s"'Mes ${m("mes").asInstanceOf[Int]}'").mkString("[", ",", "]")
+        val dataJs = serie.map(m => m("pctPasoNegativo").asInstanceOf[Int].toString).mkString("[", ",", "]")
+        val mensaje = tendencia match {
+          case "CORRIGIENDO" => div(cls := "xx-small text-success fw-bold", "✅ Corrigiendo")
+          case "ESTABLE_O_PEOR" => div(cls := "xx-small text-warning fw-bold", "⚠️ Comunicar al entrenador de academia.")
+          case _ => div()
+        }
+        div(cls := "card bg-dark border-secondary shadow mb-4",
+          div(cls := "card-header text-white fw-bold small", "📉 CORRECCIÓN DEL PASO NEGATIVO"),
+          div(cls := "card-body p-3",
+            div(style := "height:180px;", tag("canvas")(id := "chartPasoNegativo")),
+            mensaje,
+            script(raw(s"""
+              var ctxPN = document.getElementById('chartPasoNegativo');
+              if (ctxPN) {
+                new Chart(ctxPN, { type: 'line',
+                  data: { labels: $labelsJs, datasets: [{ label: '% goles con paso negativo', data: $dataJs,
+                    borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.1)', borderWidth:2, pointRadius:4, fill:true, tension:0.3 }] },
+                  options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } },
+                    scales: { y: { min:0, max:100, ticks:{color:'#aaa'}, grid:{color:'#333'} }, x: { ticks:{color:'#888'}, grid:{color:'#333'} } } }
+                });
+              }
+            """))
+          )
+        )
+      }
+
+    // BLOQUE Q: vulnerabilidad temporal — goles encajados por cuarto del partido
+    val rendimientoFase = DatabaseManager.getRendimientoPorFase(efectivo)
+    val vulnerabilidadWidget: Modifier =
+      if (!rendimientoFase("suficiente").asInstanceOf[Boolean]) div()
+      else {
+        val pctQ1 = rendimientoFase("pctQ1").asInstanceOf[Double]; val pctQ4 = rendimientoFase("pctQ4").asInstanceOf[Double]
+        val labelsJs = List("Q1 (1-12min)", "Q2 (13-25min)", "Q3 (26-37min)", "Q4 (38-50min)").map(l => s"'$l'").mkString("[", ",", "]")
+        val dataJs = List(rendimientoFase("q1").asInstanceOf[Int], rendimientoFase("q2").asInstanceOf[Int], rendimientoFase("q3").asInstanceOf[Int], rendimientoFase("q4").asInstanceOf[Int]).mkString("[", ",", "]")
+        div(cls := "card bg-dark border-secondary shadow mb-4",
+          div(cls := "card-header text-white fw-bold small", "⏱️ VULNERABILIDAD TEMPORAL"),
+          div(cls := "card-body p-3",
+            div(style := "height:180px;", tag("canvas")(id := "chartVulnerabilidad")),
+            if (pctQ1 > 40) div(cls := "xx-small text-warning fw-bold mt-2", "⚠️ Héctor encaja muchos goles en el primer cuarto — problema de arranque en frío. Revisar calentamiento.") else div(),
+            if (pctQ4 > 40) div(cls := "xx-small text-warning fw-bold mt-1", "⚠️ Muchos goles en el último cuarto — problema de concentración tardía o fatiga.") else div(),
+            script(raw(s"""
+              var ctxVuln = document.getElementById('chartVulnerabilidad');
+              if (ctxVuln) {
+                new Chart(ctxVuln, { type: 'bar',
+                  data: { labels: $labelsJs, datasets: [{ label: 'Goles encajados', data: $dataJs,
+                    backgroundColor: ['#0dcaf0','#20c997','#ffc107','#dc3545'] }] },
+                  options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } },
+                    scales: { y: { beginAtZero:true, ticks:{color:'#aaa', stepSize:1}, grid:{color:'#333'} }, x: { ticks:{color:'#888'}, grid:{color:'#333'} } } }
+                });
+              }
+            """))
+          )
+        )
+      }
+
+    // BLOQUE H: exito en 1v1 por angulo de entrada — requiere >=15 acciones con angulo
+    val angulo1v1 = DatabaseManager.get1v1ByAngulo(efectivo)
+    val angulo1v1Widget: Modifier =
+      if (!angulo1v1("suficiente").asInstanceOf[Boolean]) div()
+      else {
+        val central = angulo1v1("central").asInstanceOf[Map[String, Any]]
+        val izquierda = angulo1v1("izquierda").asInstanceOf[Map[String, Any]]
+        val derecha = angulo1v1("derecha").asInstanceOf[Map[String, Any]]
+        def barra(nombre: String, datos: Map[String, Any]): Modifier = {
+          val pct = datos("pct").asInstanceOf[Double]
+          val ok = datos("ok").asInstanceOf[Int]; val gc = datos("gc").asInstanceOf[Int]
+          val color = if (pct < 40) "danger" else if (pct < 60) "warning" else "success"
+          div(cls := "mb-2",
+            div(cls := "d-flex justify-content-between xx-small", span(nombre), span(cls := s"text-$color fw-bold", f"$pct%.0f%% ($ok/${ok + gc})")),
+            div(cls := "progress", style := "height:10px;", div(cls := s"progress-bar bg-$color", style := f"width:$pct%.0f%%;"))
+          )
+        }
+        val alertas = Seq("CENTRAL" -> central, "DIAGONAL IZQUIERDA" -> izquierda, "DIAGONAL DERECHA" -> derecha)
+          .filter { case (_, d) => d("pct").asInstanceOf[Double] < 40 && (d("ok").asInstanceOf[Int] + d("gc").asInstanceOf[Int]) >= 3 }
+        div(cls := "card bg-dark border-warning shadow mb-4",
+          div(cls := "card-header text-warning fw-bold small", "🎯 ÉXITO EN 1V1 POR ÁNGULO"),
+          div(cls := "card-body p-3",
+            barra("CENTRAL", central), barra("DIAGONAL IZQUIERDA", izquierda), barra("DIAGONAL DERECHA", derecha),
+            alertas.map { case (nombre, _) => div(cls := "xx-small text-danger fw-bold mt-1", s"⚠️ Tasa de éxito baja en $nombre — foco de trabajo para el entrenador.") }
+          )
+        )
+      }
+
     // BLOQUE D: desglose tecnico de paradas — solo se muestra con >=20 paradas con detalle
     val paradasAnalysis = DatabaseManager.getParadasAnalysis(efectivo)
     val paradasAnalysisWidget: Modifier = {
@@ -1536,6 +1627,9 @@ object HistoryController extends cask.Routes {
             },
 
             paradasAnalysisWidget,
+            pasoNegativoWidget,
+            angulo1v1Widget,
+            vulnerabilidadWidget,
 
             script(raw("""
             function switchMode(mode) {
@@ -1723,6 +1817,89 @@ object HistoryController extends cask.Routes {
           )
         )
       ) else div(),
+
+      // BLOQUE S: toolkit de regulacion emocional tras gol encajado
+      {
+        val re = DatabaseManager.getRegulacionEmocional()
+        if (!re("suficiente").asInstanceOf[Boolean]) div()
+        else {
+          val distribucion = re("distribucion").asInstanceOf[List[Map[String, Any]]]
+          val notaReorganiza = re("notaReorganiza").asInstanceOf[Option[Double]]
+          val notaDecaido = re("notaDecaido").asInstanceOf[Option[Double]]
+          val pctDecaido = re("pctDecaido").asInstanceOf[Double]
+          val pctSaludable = re("pctSaludable").asInstanceOf[Double]
+          val labelsJs = distribucion.map(d => s""""${d("comportamiento")}"""").mkString("[", ",", "]")
+          val dataJs = distribucion.map(d => d("n").asInstanceOf[Int].toString).mkString("[", ",", "]")
+          val comparativa: Modifier = (notaReorganiza, notaDecaido) match {
+            case (Some(nr), Some(nd)) => div(cls := "small text-white mt-2", f"Cuando se reorganiza con la defensa, la nota media del resto del partido es $nr%.1f. Cuando decae, es $nd%.1f.")
+            case _ => div()
+          }
+          div(cls := "card bg-dark border-info shadow mb-3",
+            div(cls := "card-header text-info fw-bold small", "🧠 TOOLKIT DE REGULACIÓN EMOCIONAL"),
+            div(cls := "card-body p-3",
+              div(style := "height:200px;", tag("canvas")(id := "chartRegulacionEmocional")),
+              comparativa,
+              if (pctDecaido > 40) div(cls := "xx-small text-warning fw-bold mt-2", "⚠️ Más del 40% de las veces decae tras un gol — trabajar con el entrenador.")
+              else if (pctSaludable >= 50) div(cls := "xx-small text-success fw-bold mt-2", "✅ Héctor muestra señales de regulación emocional saludable")
+              else div(),
+              script(raw(s"""
+                var ctxRE = document.getElementById('chartRegulacionEmocional');
+                if (ctxRE) {
+                  new Chart(ctxRE, { type: 'doughnut',
+                    data: { labels: $labelsJs, datasets: [{ data: $dataJs,
+                      backgroundColor: ['#0dcaf0','#20c997','#dc3545','#6c757d','#ffc107','#8b5cf6'] }] },
+                    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{color:'#eee', font:{size:10}} } } }
+                  });
+                }
+              """))
+            )
+          )
+        }
+      },
+
+      // BLOQUE O: nota media segun si siguio la rutina pre-partido o no
+      {
+        val ra = DatabaseManager.getRutinaAnalysis()
+        if (!ra("suficiente").asInstanceOf[Boolean]) div()
+        else {
+          val notaSigue = ra("notaMediaSigue").asInstanceOf[Double]
+          val notaNoSigue = ra("notaMediaNoSigue").asInstanceOf[Double]
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "🔄 RUTINA PRE-PARTIDO"),
+            div(cls := "card-body p-3",
+              div(cls := "small text-white", f"Cuando sigue su rutina pre-partido, la nota media es $notaSigue%.1f. Cuando no la sigue, es $notaNoSigue%.1f.")
+            )
+          )
+        }
+      },
+
+      // BLOQUE B: impacto de la conducta del padre en la banda — solo visible aqui, nunca en publico
+      {
+        val cp = DatabaseManager.getConductaPadreAnalysis()
+        if (!cp("suficiente").asInstanceOf[Boolean]) div()
+        else {
+          val mediaConducta = cp("mediaConducta").asInstanceOf[Double]
+          val notaInterv = cp("notaMediaIntervencionista").asInstanceOf[Double]
+          val notaObs = cp("notaMediaObservador").asInstanceOf[Double]
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "👨 IMPACTO DEL PADRE EN EL RENDIMIENTO"),
+            div(cls := "card-body p-3",
+              div(cls := "row text-center g-2",
+                div(cls := "col-6",
+                  div(cls := "xx-small text-muted", "Nota media (banda intervencionista 1-2)"),
+                  div(cls := "fw-bold text-warning", if (notaInterv > 0) f"$notaInterv%.1f" else "—")
+                ),
+                div(cls := "col-6",
+                  div(cls := "xx-small text-muted", "Nota media (banda observadora 4-5)"),
+                  div(cls := "fw-bold text-success", if (notaObs > 0) f"$notaObs%.1f" else "—")
+                )
+              ),
+              div(cls := "xx-small text-muted mt-2 fst-italic",
+                f"Autoevaluación media: $mediaConducta%.1f/5 · dato privado, nunca visible en el perfil público ni en informes de captación.")
+            )
+          )
+        }
+      },
 
       script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
       {
@@ -3270,16 +3447,17 @@ object HistoryController extends cask.Routes {
     val conn = DatabaseManager.getConnection()
     val (partidos, avgScan, avgNota, corrData) = try {
       val rs = conn.createStatement().executeQuery(
-        "SELECT fecha, rival, nota, scanning_rate, goles_contra " +
+        "SELECT fecha, rival, nota, scanning_rate, goles_contra, scanning_efectivo " +
           s"FROM matches WHERE status='PLAYED' AND nota > 0 ${DatabaseManager.seasonFilter(efectivo)} " +
           "ORDER BY fecha DESC LIMIT 30")
-      var rows = List[(String, String, Double, Int, Int)]()
+      var rows = List[(String, String, Double, Int, Int, Int)]()
       while (rs.next()) rows = rows :+ (
         rs.getString("fecha").take(10),
         Option(rs.getString("rival")).getOrElse(""),
         rs.getDouble("nota"),
         rs.getInt("scanning_rate"),
-        rs.getInt("goles_contra")
+        rs.getInt("goles_contra"),
+        rs.getInt("scanning_efectivo")
       )
       val conDatos = rows.filter(_._4 > 0)
       val avg  = if (conDatos.nonEmpty) conDatos.map(_._4.toDouble).sum / conDatos.size else 0.0
@@ -3298,6 +3476,13 @@ object HistoryController extends cask.Routes {
     } finally { conn.close() }
 
     val conDatos   = partidos.count(_._4 > 0)
+    // BLOQUE G: efectividad del scanning — de los escaneos, cuantos encontraron compañero libre
+    val sumScan      = partidos.filter(_._4 > 0).map(_._4).sum
+    val sumEfectivo  = partidos.filter(_._4 > 0).map(_._6).sum
+    val ratioEfectividad = if (sumScan > 0) sumEfectivo * 100.0 / sumScan else 0.0
+    val efectividadJson = partidos.reverse.map { case (_, _, _, scan, _, efectivo) =>
+      if (scan > 0) f"${efectivo * 100.0 / scan}%.0f" else "null"
+    }.mkString("[", ",", "]")
     val avgScanStr = f"$avgScan%.1f"
     val corrStr    = (if (corrData >= 0) "+" else "") + f"$corrData%.2f"
     val corrColor  = if (corrData >= 0.4) "success" else if (corrData >= 0.2) "info"
@@ -3368,6 +3553,16 @@ object HistoryController extends cask.Routes {
             )
           ),
 
+          // BLOQUE G: ratio de efectividad del scanning
+          if (conDatos == 0) frag() else div(cls := "card bg-dark border-success shadow mb-3",
+            div(cls := "card-body p-3 text-center",
+              div(cls := "xx-small text-muted fw-bold", "EFECTIVIDAD DEL SCANNING"),
+              div(cls := "display-5 fw-black text-success", f"$ratioEfectividad%.0f%%"),
+              div(cls := "xx-small text-muted mt-1",
+                "% de escaneos que terminaron en encontrar un compañero libre. Escanear mucho sin encontrar opciones vale menos que escanear lo justo y decidir bien — este ratio mide la calidad de la lectura, no solo la cantidad.")
+            )
+          ),
+
           // Grafico dual
           if (conDatos >= 3) div(cls := "card bg-dark border-secondary shadow mb-3",
             div(cls := "card-header text-white fw-bold small",
@@ -3375,6 +3570,17 @@ object HistoryController extends cask.Routes {
             div(cls := "card-body p-3",
               div(style := "height:220px;",
                 tag("canvas")(id := "scanChart")
+              )
+            )
+          ) else frag(),
+
+          // BLOQUE G: frecuencia vs efectividad, dos ejes Y
+          if (conDatos >= 3) div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small",
+              "Frecuencia vs Efectividad del scanning — últimos 30 partidos"),
+            div(cls := "card-body p-3",
+              div(style := "height:220px;",
+                tag("canvas")(id := "scanEfectividadChart")
               )
             )
           ) else frag(),
@@ -3389,17 +3595,20 @@ object HistoryController extends cask.Routes {
                     th(cls := "xx-small text-muted", "FECHA"),
                     th(cls := "xx-small text-muted", "RIVAL"),
                     th(cls := "xx-small text-muted text-center", "ESCANEOS"),
+                    th(cls := "xx-small text-muted text-center", "EFECTIVOS"),
                     th(cls := "xx-small text-muted text-center", "GC"),
                     th(cls := "xx-small text-muted text-center", "NOTA")
                   )),
                   tbody(
-                    frag(partidos.map { case (fecha, rival, nota, scan, gc) =>
+                    frag(partidos.map { case (fecha, rival, nota, scan, gc, efectivo) =>
                       val notaCls = if (nota >= 7) "success" else if (nota >= 5) "warning" else "danger"
                       tr(
                         td(cls := "xx-small text-muted", fecha),
                         td(cls := "xx-small", rival),
                         td(cls := s"xx-small text-center fw-bold text-info",
                           if (scan > 0) scan.toString else "—"),
+                        td(cls := s"xx-small text-center fw-bold text-success",
+                          if (scan > 0) efectivo.toString else "—"),
                         td(cls := "xx-small text-center text-danger", gc.toString),
                         td(cls := s"xx-small text-center fw-bold text-$notaCls", f"$nota%.1f")
                       )
@@ -3449,6 +3658,30 @@ object HistoryController extends cask.Routes {
                   }
                 }
               });
+
+              var ctxEf = document.getElementById('scanEfectividadChart');
+              if (ctxEf) {
+                new Chart(ctxEf.getContext('2d'), {
+                  data: {
+                    labels: $labelsJson,
+                    datasets: [
+                      { type: 'bar', label: 'Escaneos (frecuencia)', data: $scanJson,
+                        backgroundColor: 'rgba(13,202,240,0.4)', borderColor: 'rgba(13,202,240,0.8)', yAxisID: 'yFrec' },
+                      { type: 'line', label: '% Efectividad', data: $efectividadJson,
+                        borderColor: 'rgba(40,167,69,0.9)', tension: 0.3, pointRadius: 4, spanGaps: true, yAxisID: 'yEfec' }
+                    ]
+                  },
+                  options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+                    scales: {
+                      x: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#333' } },
+                      yFrec: { position: 'left', beginAtZero: true, ticks: { color: '#0dcaf0', stepSize: 1 }, grid: { color: '#333' } },
+                      yEfec: { position: 'right', min: 0, max: 100, ticks: { color: '#28a745' }, grid: { drawOnChartArea: false } }
+                    }
+                  }
+                });
+              }
             })();
           """))
         )
@@ -4882,6 +5115,57 @@ object HistoryController extends cask.Routes {
             )
           ),
 
+          // BLOQUE L: ARCO COMPLETO DE CARRERA — linea de tiempo con hitos formativos
+          {
+            val arco = DatabaseManager.getArcoCompletoData()
+            val edadActualArco = arco("edadActual").asInstanceOf[Int]
+            val categorias = arco("categorias").asInstanceOf[List[(String, Int)]]
+            val tieneMarkov = arco("tieneMarkov").asInstanceOf[Boolean]
+            val edadProyAcademiaPrimera = arco("edadProyectadaAcademiaPrimera").asInstanceOf[Option[Int]]
+
+            val edadMin = 6.0; val edadMax = 20.0
+            def xDe(edad: Double): Double = 30 + (edad - edadMin) / (edadMax - edadMin) * 540
+
+            val puntosHtml = categorias.map { case (nombre, edadInicio) =>
+              val x = xDe(edadInicio.toDouble)
+              s"""<circle cx="$x" cy="60" r="5" fill="#334155" stroke="#94a3b8" stroke-width="1.5"/>
+                  <text x="$x" y="82" text-anchor="middle" font-size="10" fill="#94a3b8">$nombre</text>
+                  <text x="$x" y="94" text-anchor="middle" font-size="9" fill="#64748b">$edadInicio años</text>"""
+            }.mkString("\n")
+
+            val xHoy = xDe(edadActualArco.toDouble)
+            val hoyHtml =
+              s"""<line x1="$xHoy" y1="15" x2="$xHoy" y2="60" stroke="#facc15" stroke-width="2" stroke-dasharray="3,2"/>
+                  <circle cx="$xHoy" cy="60" r="7" fill="#facc15" stroke="#1e293b" stroke-width="2"/>
+                  <text x="$xHoy" y="12" text-anchor="middle" font-size="10" font-weight="bold" fill="#facc15">ESTÁS AQUÍ</text>"""
+
+            val proyeccionHtml = if (tieneMarkov && edadProyAcademiaPrimera.nonEmpty) {
+              val xProy = xDe(math.min(edadMax, edadProyAcademiaPrimera.get.toDouble))
+              s"""<line x1="$xProy" y1="60" x2="$xProy" y2="105" stroke="#0dcaf0" stroke-width="2" stroke-dasharray="3,2"/>
+                  <circle cx="$xProy" cy="60" r="6" fill="#0dcaf0"/>
+                  <text x="$xProy" y="118" text-anchor="middle" font-size="9" fill="#0dcaf0">Academia Primera (proy.)</text>"""
+            } else ""
+
+            val textoProyeccion: Modifier = if (tieneMarkov && edadProyAcademiaPrimera.nonEmpty)
+              div(cls := "small text-light mt-2 text-center", s"A este ritmo, Héctor podría estar en nivel Academia Primera a los ${edadProyAcademiaPrimera.get} años.")
+            else if (!tieneMarkov)
+              div(cls := "xx-small text-muted mt-2 text-center", "Las proyecciones se activarán con 2 temporadas completas registradas.")
+            else div()
+
+            div(cls := "card bg-dark border-secondary shadow mb-3",
+              div(cls := "card-header text-white fw-bold small", "🗺️ ARCO COMPLETO DE CARRERA"),
+              div(cls := "card-body p-3",
+                raw(s"""<svg viewBox="0 0 600 130" style="width:100%; height:auto;">
+                  <line x1="30" y1="60" x2="570" y2="60" stroke="#334155" stroke-width="2"/>
+                  $puntosHtml
+                  $hoyHtml
+                  $proyeccionHtml
+                </svg>"""),
+                textoProyeccion
+              )
+            )
+          },
+
           // Barras de comparativa con elite
           div(cls:="card bg-dark border-secondary shadow mb-3",
             div(cls:="card-header text-white fw-bold small", "Comparativa vs Porteros de Elite (Media Profesional)"),
@@ -5597,6 +5881,13 @@ object HistoryController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/video-history"))
   }
 
+  // BLOQUE J: genera (con Gemini) la vista del ojeador externo — solo al pulsar boton, cache 30 dias
+  @cask.post("/scouting-report/ojeador-externo")
+  def generarOjeadorExternoAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.generarOjeadorExternoNarrative()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/scouting-report"))
+  }
+
   @cask.get("/scouting-report")
   def scoutingReportPage(request: cask.Request) = withAuth(request) {
     val card      = DatabaseManager.getLatestCardData()
@@ -5740,6 +6031,19 @@ object HistoryController extends cask.Routes {
       case None => ""
     }
 
+    // BLOQUE F: correccion del paso negativo, cuando hay datos suficientes
+    val pasoNegativoHtml = {
+      val pn = DatabaseManager.getPasoNegativoTrend()
+      if (!pn("suficiente").asInstanceOf[Boolean]) "" else {
+        val tendenciaTxt = pn("tendencia").asInstanceOf[String] match {
+          case "CORRIGIENDO" => "mejorando (menos partidos con paso negativo con el tiempo)"
+          case "ESTABLE_O_PEOR" => "estable o empeorando — recomendable trabajarlo con el entrenador"
+          case _ => "sin tendencia clara todavía"
+        }
+        s"""<div class="narrative" style="font-size:12px;">📉 Corrección del Paso Negativo: $tendenciaTxt</div>"""
+      }
+    }
+
     // BLOQUE RFFM: percentil real de Hector vs la categoria (None si aun no hay >=10 equipos sincronizados)
     val rffmHtml = DatabaseManager.getPercentilRealHector() match {
       case Some(p) =>
@@ -5747,6 +6051,49 @@ object HistoryController extends cask.Routes {
         val totalEquipos = p("totalEquipos").asInstanceOf[Int]
         s"""<div class="narrative" style="font-size:12px;">📊 Rendimiento vs categoría: percentil $percentil en GC/partido sobre $totalEquipos equipos de Prebenjamín F7 Madrid (RFFM)</div>"""
       case None => ""
+    }
+
+    // BLOQUE N: tabla de habilidades con su nivel de automatismo
+    val automatismoTablaHtml = {
+      val skills = DatabaseManager.getGoalkeeperSkills().filter(_.conseguido)
+      if (skills.isEmpty) "" else {
+        def nivelLabel(n: Option[String]): String = n match {
+          case Some("INSTINTIVO") => "🟢 Instintivo"; case Some("AUTOMATICO") => "🔵 Automático"
+          case Some("CONSCIENTE") => "🟡 Consciente"; case _ => "—"
+        }
+        val filas = skills.map(s => s"""<tr><td>${DatabaseManager.escHtml(s.habilidad)}</td><td>${DatabaseManager.escHtml(s.categoria)}</td><td style="text-align:center;">${nivelLabel(s.nivelAutomatismo)}</td></tr>""").mkString("")
+        s"""<p class="section-title">🧤 NIVEL DE AUTOMATISMO DE LAS HABILIDADES</p>
+            <table><thead><tr><th>Habilidad</th><th>Categoría</th><th style="text-align:center;">Nivel</th></tr></thead><tbody>$filas</tbody></table>"""
+      }
+    }
+
+    // BLOQUE S: regulacion emocional bajo presion — patron dominante
+    val regulacionHtml = {
+      val re = DatabaseManager.getRegulacionEmocional()
+      if (!re("suficiente").asInstanceOf[Boolean]) "" else {
+        val patron = re("patronDominante").asInstanceOf[String]
+        s"""<div class="narrative" style="font-size:12px;">🧠 Regulación emocional bajo presión: $patron</div>"""
+      }
+    }
+
+    // BLOQUE K: Club Readiness Score — SQL puro, sin Gemini
+    val readinessHtml = {
+      val r = DatabaseManager.getClubReadinessScore()
+      val readiness = r("readiness").asInstanceOf[Int]
+      val interpretacion = r("interpretacion").asInstanceOf[String]
+      s"""<div class="narrative" style="font-size:12px;">🎯 Club Readiness Score: $readiness/100 — $interpretacion</div>"""
+    }
+
+    // BLOQUE J: perspectiva del ojeador externo — solo lectura de cache (30 dias), nunca llama a Gemini aqui
+    val ojeadorExternoHtml = DatabaseManager.getOjeadorExternoCache() match {
+      case Some(texto) =>
+        s"""<p class="section-title">👁️ VISTA DEL OJEADOR EXTERNO</p><div class="narrative">${DatabaseManager.escHtml(texto)}</div>"""
+      case None =>
+        """<div class="no-print" style="text-align:center; margin:16px 0;">
+             <form action="/scouting-report/ojeador-externo" method="post">
+               <button type="submit" class="print-btn" style="background:#555; color:#fff;">👁️ Vista del ojeador externo</button>
+             </form>
+           </div>"""
     }
 
     val presionRows = if (presionDist.isEmpty)
@@ -5861,7 +6208,12 @@ object HistoryController extends cask.Routes {
 <div class="narrative">${DatabaseManager.escHtml(analisisIA)}</div>
 $goalCoverageHtml
 $markovHtml
+$pasoNegativoHtml
 $rffmHtml
+$readinessHtml
+$automatismoTablaHtml
+$regulacionHtml
+$ojeadorExternoHtml
 
 <p class="section-title">OPORTUNIDADES RECIENTES</p>
 <table>

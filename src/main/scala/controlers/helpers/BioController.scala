@@ -90,6 +90,40 @@ object BioController extends cask.Routes {
       }
     }
 
+    // --- BLOQUE P: TRANSFERENCIA DE ENTRENAMIENTO (solo lectura/calculo, sin Gemini) ---
+    val transferencia = DatabaseManager.getTransferenciaEntrenamiento()
+    val transferenciaTotal = transferencia.map(_("n").asInstanceOf[Int]).sum
+    val transferenciaWidget: Modifier =
+      if (transferenciaTotal < 5) div()
+      else {
+        val mejorasTotal = transferencia.map(_("mejoras").asInstanceOf[Int]).sum
+        val pctGlobal = if (transferenciaTotal > 0) mejorasTotal * 100.0 / transferenciaTotal else 0.0
+        div(cls := "card bg-dark text-white border-info shadow mb-3",
+          div(cls := "card-header text-info fw-bold text-center small", "🔁 TRANSFERENCIA DE ENTRENAMIENTO"),
+          div(cls := "card-body p-3",
+            div(cls := "small text-white text-center mb-2", f"El $pctGlobal%.0f%% de lo que trabaja en academia se ve mejorado en el siguiente partido"),
+            transferencia.filter(_("n").asInstanceOf[Int] > 0).map { d =>
+              val dim = d("dimension").asInstanceOf[String]
+              val pct = d("pctTransferencia").asInstanceOf[Double]
+              val n = d("n").asInstanceOf[Int]
+              div(cls := "mb-2",
+                div(cls := "d-flex justify-content-between xx-small", span(s"$dim ($n)"), span(f"$pct%.0f%%")),
+                div(cls := "progress", style := "height:8px;", div(cls := s"progress-bar ${if (pct < 30) "bg-danger" else "bg-info"}", style := f"width:$pct%.0f%%;")),
+                if (pct < 30) div(cls := "xx-small text-danger mt-1", s"⚠️ Los trabajos de $dim en academia no se están transfiriendo al partido — puede necesitar más repeticiones o un enfoque diferente")
+                else div()
+              )
+            }
+          )
+        )
+      }
+
+    // --- BLOQUE D: DETECTOR DE JETLAG SOCIAL (solo lectura/calculo, sin Gemini) ---
+    val jetlagWidget: Modifier = DatabaseManager.detectarJetlagSocial() match {
+      case Some(msg) => div(cls := "card bg-dark border-secondary shadow-sm mb-3 p-2",
+        div(cls := "xx-small text-white", msg))
+      case None => div()
+    }
+
     // --- BLOQUE A4: VALIDACION DEL INDICE DE FORMA (solo lectura/calculo, sin Gemini) ---
     val formaCorrelacion = DatabaseManager.getFormaCorrelacion()
     val formaSuficiente = formaCorrelacion("suficiente").asInstanceOf[Boolean]
@@ -459,7 +493,9 @@ object BioController extends cask.Routes {
           ),
 
           formaValidacionWidget,
-          autopercepcionWidget
+          autopercepcionWidget,
+          jetlagWidget,
+          transferenciaWidget
         )
       ), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""
       const gCtx=document.getElementById('growthChart');const gData=$growthData;if(gCtx){new Chart(gCtx,{type:'line',data:{labels:gData.labels,datasets:[{label:'Altura (cm)',data:gData.data,borderColor:'#0dcaf0',borderWidth:3,tension:0.3,pointBackgroundColor:'#fff',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#eee',font:{weight:'bold'}},grid:{color:'#444'},pointLabels:{color:'#fff'}},x:{display:false}}}});}
@@ -594,6 +630,9 @@ object BioController extends cask.Routes {
     DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina, feedbackEntrenador,
       fbDistancia, fbAltaIntensidad, fbSprintMax, fbPctActividad, fbTiempoActivo, fbAceleraciones, fbDesaceleraciones,
       fecha, if (esAusencia) Some(tipoAusencia) else None)
+
+    // BLOQUE I: detecta skills trabajadas en el feedback del entrenador de academia — sin Gemini
+    if (tipo == "Academia" && feedbackEntrenador.nonEmpty) DatabaseManager.guardarSugerenciasSkillDesdeFeedback(feedbackEntrenador)
 
     // BLOQUE E: detecta hitos de carrera tras guardar el entreno — en background, nunca bloquea la respuesta
     new Thread(new Runnable {
