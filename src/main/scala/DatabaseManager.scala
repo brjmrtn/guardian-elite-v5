@@ -9442,12 +9442,12 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                   FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                         UNION ALL
                         (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-                  WHERE fecha <= w.fecha AND fecha > w.fecha - 7) as acute_load,
+                  WHERE fecha <= w.fecha AND EXTRACT(EPOCH FROM (w.fecha::timestamp - fecha::timestamp)) / 86400 < 7) as acute_load,
                (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
                   FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                         UNION ALL
                         (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-                  WHERE fecha <= w.fecha AND fecha > w.fecha - 28) as chronic_load
+                  WHERE fecha <= w.fecha AND EXTRACT(EPOCH FROM (w.fecha::timestamp - fecha::timestamp)) / 86400 < 28) as chronic_load
         FROM wellness w
         JOIN matches m ON m.status = 'PLAYED' AND m.fecha > w.fecha AND m.fecha <= w.fecha + 2 $sf
         ORDER BY w.fecha ASC
@@ -11257,12 +11257,12 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND fecha > m.fecha - 7) as acute_load,
+             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 7) as acute_load,
           (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND fecha > m.fecha - 28) as chronic_load
+             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 28) as chronic_load
         FROM matches m
         WHERE m.status = 'PLAYED' AND m.nota > 0 $sf
         ORDER BY m.fecha ASC
@@ -11339,14 +11339,14 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND fecha > m.fecha - 7) as acute_load,
+             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 7) as acute_load,
           (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND fecha > m.fecha - 28) as chronic_load,
-          COALESCE((SELECT w.horas_sueno FROM wellness w WHERE w.fecha = m.fecha - 1), 0) as horas_sueno,
-          COALESCE((m.fecha - (SELECT MAX(t.fecha) FROM trainings t WHERE t.tipo ILIKE '%academia%' AND t.fecha <= m.fecha)), 999) as dias_desde_academia
+             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 28) as chronic_load,
+          COALESCE((SELECT w.horas_sueno FROM wellness w WHERE EXTRACT(EPOCH FROM (m.fecha::timestamp - w.fecha::timestamp)) / 86400 = 1), 0) as horas_sueno,
+          COALESCE((EXTRACT(EPOCH FROM (m.fecha::timestamp - (SELECT MAX(t.fecha) FROM trainings t WHERE t.tipo ILIKE '%academia%' AND t.fecha <= m.fecha)::timestamp)) / 86400), 999) as dias_desde_academia
         FROM matches m
         WHERE m.status = 'PLAYED' AND m.nota > 0
         ORDER BY m.fecha ASC
