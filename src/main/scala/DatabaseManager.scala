@@ -93,6 +93,17 @@ object DatabaseManager {
   // La unica diferencia es que ahora devuelve una conexion del pool, no una nueva.
   def getConnection(): Connection = pool.getConnection()
 
+  // ══════════════════════════════════════════════════════════════════
+  // REGLA PERMANENTE — RESTAS DE FECHAS EN POSTGRESQL
+  // NUNCA restar dos columnas DATE o TIMESTAMP directamente.
+  // SIEMPRE usar:
+  //   EXTRACT(EPOCH FROM (fecha1::timestamp - fecha2::timestamp)) / 86400
+  // para obtener el número de días entre dos fechas.
+  // La resta directa (fecha1 - fecha2) produce un tipo 'interval' en
+  // PostgreSQL que no es compatible con comparaciones numéricas y
+  // genera el error: operator does not exist: timestamp - integer
+  // ══════════════════════════════════════════════════════════════════
+
   // --- INICIALIZACION DE TABLAS (se llama UNA vez al arrancar el servidor) ---
   // Centraliza todos los CREATE TABLE IF NOT EXISTS que antes estaban dispersos
   // por cada metodo de consulta, eliminando el overhead en cada request.
