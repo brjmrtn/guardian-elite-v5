@@ -131,11 +131,20 @@ object AdminController extends cask.Routes {
         div(cls := "border border-secondary rounded p-3 mb-3",
           div(cls := "d-flex justify-content-between align-items-start",
             div(
-              div(cls := "fw-bold text-warning", s"${temp("nombre")} — ${temp("categoria")}"),
+              div(id := "nombreTemporadaView", cls := "fw-bold text-warning", s"${temp("nombre")} — ${temp("categoria")}"),
+              form(id := "formEditarNombreTemporada", action := "/admin/season-action/rename", method := "post",
+                cls := "d-none d-flex gap-2 align-items-center mt-1",
+                input(tpe := "text", name := "nombre", value := temp("nombre").toString,
+                  cls := "form-control form-control-sm fw-bold", style := "max-width:160px;", required := true),
+                button(tpe := "submit", cls := "btn btn-sm btn-success fw-bold", "Guardar")
+              ),
               div(cls := "xx-small text-muted", s"Inicio: ${temp("fechaInicio")}"),
               div(cls := "small text-white mt-1", s"$pj partidos jugados · media ${"%.1f".format(media)}")
             ),
             div(cls := "d-flex gap-2",
+              button(tpe := "button", cls := "btn btn-sm btn-outline-secondary fw-bold",
+                onclick := "document.getElementById('nombreTemporadaView').classList.toggle('d-none');document.getElementById('formEditarNombreTemporada').classList.toggle('d-none');",
+                "✏️ Editar nombre"),
               if (pj > 0) form(action := "/admin/season-action/close", method := "post",
                 button(tpe := "submit", cls := "btn btn-sm btn-outline-danger fw-bold",
                   onclick := "return confirm('¿Cerrar la temporada actual? Esta acción no se puede deshacer.');",
@@ -1264,6 +1273,27 @@ object AdminController extends cask.Routes {
       case Right(m) => m
       case Left(e) => e
     }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+    ))
+  }
+
+  // FIX 4A: permite corregir manualmente el nombre de la temporada activa (ej. "20206-27" -> "2026-27")
+  @cask.postForm("/admin/season-action/rename")
+  def renombrarTemporada(request: cask.Request, nombre: String = "") = withAuth(request) {
+    val nuevoNombre = fixEncoding(nombre).trim
+    val msg =
+      if (nuevoNombre.isEmpty) "Nombre vacío"
+      else {
+        val conn = DatabaseManager.getConnection()
+        try {
+          val ps = conn.prepareStatement(
+            "UPDATE seasons SET nombre = ? WHERE id = (SELECT MAX(id) FROM seasons WHERE fecha_fin IS NULL)")
+          ps.setString(1, nuevoNombre)
+          ps.executeUpdate()
+          "Temporada renombrada"
+        } finally { conn.close() }
+      }
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
       "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
     ))

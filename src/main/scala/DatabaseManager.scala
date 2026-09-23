@@ -1264,7 +1264,7 @@ object DatabaseManager {
 
       // 2. Analisis de Biotipo y Composicion
       val imc = if(currentH > 0) currentW / Math.pow(currentH/100, 2) else 0.0
-      sb.append(s"<div class='mb-3 text-white'><b>[stats] COMPOSICION:</b> ${currentH}cm / ${currentW}kg</div>")
+      sb.append(s"<div class='mb-3 text-white'><b>📊 COMPOSICION:</b> ${currentH}cm / ${currentW}kg</div>")
 
       val (perfilNombre, perfilDesc) = if (imc < 15) {
         ("<span class='text-info fw-bold'>VELOCISTA</span>", "Peso ligero que favorece la <b>agilidad pura</b> y velocidad de desplazamiento.")
@@ -1273,12 +1273,12 @@ object DatabaseManager {
       } else {
         ("<span class='text-warning fw-bold'>TANQUE</span>", "Mayor masa corporal. Ventaja en <b>proteccion de balon</b> y duelos 1v1.")
       }
-      sb.append(s"<div class='mb-3 small text-light'><b>[scout] Perfil Fisico:</b> $perfilNombre. $perfilDesc</div>")
+      sb.append(s"<div class='mb-3 small text-light'><b>🔍 Perfil Fisico:</b> $perfilNombre. $perfilDesc</div>")
 
       // 3. Alerta de Estiron (Solo si hay historial)
       if (hasPrev && currentH > prevH && currentW <= prevW) {
         sb.append("<div class='alert alert-warning p-2 small mb-3'>")
-        sb.append("<b>[hueso] ESTIRON DETECTADO:</b> Ha crecido en altura sin aumentar masa. ")
+        sb.append("<b>🦴 ESTIRON DETECTADO:</b> Ha crecido en altura sin aumentar masa. ")
         sb.append("Es probable que este algo mas impreciso. Trabajar <b>propiocepcion</b>.</div>")
       }
 
@@ -1290,7 +1290,9 @@ object DatabaseManager {
       rsCh.setInt(1, 28); val rsChR = rsCh.executeQuery()
       val chronicLoads = Seq(if (rsChR.next()) rsChR.getDouble(1) else 0.0)
       val acuteAvg = if (acuteLoads.nonEmpty) acuteLoads.sum / 7.0 else 0.0
-      val chronicAvg = if (chronicLoads.nonEmpty) chronicLoads.sum / 28.0 else 1.0
+      val chronicAvgRaw = if (chronicLoads.nonEmpty) chronicLoads.sum / 28.0 else 1.0
+      // FIX 2: mismo floor que StatsCalculator.calculateACWR — evita un ratio disparado
+      val chronicAvg = Math.max(chronicAvgRaw, acuteAvg * 0.3)
       val acwr = if (chronicAvg > 0) acuteAvg / chronicAvg else 0.0
 
       // 5. Grafico de Barras ACWR
@@ -1310,9 +1312,9 @@ object DatabaseManager {
       sb.append("<div class='card bg-primary bg-opacity-10 border-primary p-3 mb-2'>")
       sb.append("<h6 class='text-primary fw-bold'><i class='fas fa-clipboard-list'></i> Plan Recomendado:</h6>")
       if (acwr > 1.5) {
-        sb.append("<p class='small text-warning mb-0'><b>[!] FATIGA DETECTADA:</b> Sesion teorica o tecnica manual sentado.</p>")
+        sb.append("<p class='small text-warning mb-0'><b>⚠️ FATIGA DETECTADA:</b> Sesion teorica o tecnica manual sentado.</p>")
       } else {
-        sb.append("<p class='small text-light mb-0'><b>[OK] LISTO:</b> Coordinacion de pies y blocajes en movimiento.</p>")
+        sb.append("<p class='small text-light mb-0'><b>✅ LISTO:</b> Coordinacion de pies y blocajes en movimiento.</p>")
       }
       sb.append("</div>")
 
@@ -2919,9 +2921,10 @@ $analisisConcatenados"""
         (rsW.getDouble("horas_sueno"), sp, rsW.getInt("energia"), rsW.getInt("animo"), fc)
       } else (0.0, None: Option[Int], 3, 3, None: Option[Int])
 
-      val acute = getWorkloads(7)
-      val chronic = getWorkloads(28)
-      val acwr = StatsCalculator.calculateACWR(acute, chronic)
+      // FIX 2: si el historico es insuficiente (<3 semanas con datos), acwr_score neutro en vez de penalizar
+      val acwrEstado = calcularACWRConEstado()
+      val acwrInsuficiente = acwrEstado("status").asInstanceOf[String] == "INSUFICIENTE"
+      val acwr = acwrEstado("acwr").asInstanceOf[Double]
 
       // BLOQUE B3: el partido de referencia para "dias desde el ultimo partido" debe ser de la temporada activa
       val rsUltimo = conn.createStatement().executeQuery(
@@ -2949,7 +2952,8 @@ $analisisConcatenados"""
       val animoScore = animoW * 2.0
 
       val acwrScore: Double =
-        if (acwr <= 0.0) 7.0
+        if (acwrInsuficiente) 7.0
+        else if (acwr <= 0.0) 7.0
         else if (acwr < 0.8) 6.0
         else if (acwr <= 1.0) 10.0
         else if (acwr <= 1.2) 8.0
@@ -3059,11 +3063,12 @@ $analisisConcatenados"""
   def calcularRiesgoLesion(): Map[String, Any] = {
     val conn = getConnection()
     try {
-      // ACWR factor
-      val acute = getWorkloads(7); val chronic = getWorkloads(28)
-      val acwr = StatsCalculator.calculateACWR(acute, chronic)
+      // ACWR factor — FIX 2: sin penalizar cuando el historico es insuficiente (<3 semanas con datos)
+      val acwrEstadoRiesgo = calcularACWRConEstado()
+      val acwrInsuficienteRiesgo = acwrEstadoRiesgo("status").asInstanceOf[String] == "INSUFICIENTE"
+      val acwr = acwrEstadoRiesgo("acwr").asInstanceOf[Double]
       val (acwrFactor, hayAcwr) =
-        if (acute.isEmpty && chronic.isEmpty) (1.0, false)
+        if (acwrInsuficienteRiesgo) (0.0, false)
         else if (acwr < 0.8) (1.0, true)
         else if (acwr <= 1.2) (0.0, true)
         else if (acwr <= 1.5) (3.0, true)
@@ -5897,6 +5902,50 @@ Responde en espanol, tono positivo y motivador para un nino."""
     Some(s"Motivación declarada por Héctor (sus propias palabras): $ultimoValor/5 este mes, tendencia $flecha respecto al trimestre anterior.")
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FIX 2 — ACWR CON ESTADO (evita el 4.00 por historico insuficiente)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SQL puro. Para UI que debe distinguir "sin datos suficientes" de un ACWR real.
+  def calcularACWRConEstado(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      // Semanas (de las ultimas 4) con al menos una sesion registrada (partido o entreno)
+      val rsSemanas = conn.createStatement().executeQuery("""
+        SELECT COUNT(DISTINCT TO_CHAR(fecha, 'IYYY-IW')) as semanas
+        FROM (
+          (SELECT fecha FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - 28)
+          UNION ALL
+          (SELECT fecha FROM trainings WHERE fecha >= CURRENT_DATE - 28)
+        ) t
+      """)
+      val semanasConDatos = if (rsSemanas.next()) rsSemanas.getInt("semanas") else 0
+
+      val acute = getWorkloads(7)
+      val chronic = getWorkloads(28)
+      val cargaAguda = if (acute.nonEmpty) acute.sum / 7.0 else 0.0
+      val cargaCronica = if (chronic.nonEmpty) chronic.sum / 28.0 else 0.0
+
+      if (semanasConDatos < 3) {
+        Map(
+          "acwr"    -> 0.0,
+          "status"  -> "INSUFICIENTE",
+          "mensaje" -> "Se necesitan al menos 3 semanas de datos para calcular el ACWR con precisión",
+          "aguda"   -> cargaAguda,
+          "cronica" -> cargaCronica,
+          "semanasConDatos" -> semanasConDatos
+        )
+      } else {
+        // Floor minimo para evitar divisiones por casi cero
+        val cargaCronicaMin = Math.max(cargaCronica, cargaAguda * 0.3)
+        val acwr = if (cargaCronicaMin > 0) cargaAguda / cargaCronicaMin else 0.0
+        Map(
+          "acwr" -> acwr, "status" -> "OK", "mensaje" -> "",
+          "aguda" -> cargaAguda, "cronica" -> cargaCronica, "semanasConDatos" -> semanasConDatos
+        )
+      }
+    } finally { conn.close() }
+  }
+
   // BLOQUE B (autoeval padre): cruza conducta_padre con la nota del partido. NUNCA usar en
   // /hector ni en el informe de captacion — es un dato privado del padre, no del jugador.
   def getConductaPadreAnalysis(): Map[String, Any] = {
@@ -8463,7 +8512,11 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       if (rsCheck.next() && Option(rsCheck.getDate("fecha_fin")).isEmpty)
         return Left(s"Cierra primero la temporada '${rsCheck.getString("nombre")}' antes de crear una nueva.")
 
-      val inicio = if (fechaInicio.nonEmpty) fechaInicio else java.time.LocalDate.now().toString
+      // FIX 4B: valida que fechaInicio tenga formato yyyy-MM-dd antes de usarla para calcular
+      // el nombre de temporada. Un valor malformado (ej. llegado sin pasar por el input type=date
+      // del navegador) puede producir años corruptos como "20206" en nombreTemporada.
+      val fechaValida = fechaInicio.nonEmpty && fechaInicio.matches("""\d{4}-\d{2}-\d{2}""")
+      val inicio = if (fechaValida) fechaInicio else java.time.LocalDate.now().toString
       val anioInicio = java.time.LocalDate.parse(inicio).getYear
       val nombreTemporada = s"$anioInicio-${(anioInicio + 1).toString.takeRight(2)}"
 
@@ -9325,12 +9378,12 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     // Ejemplo: Logica para detectar bajada en blocaje
     val blocajes = reviews.map(_.blocaje)
     if (blocajes.last < blocajes.head) {
-      alerts = alerts :+ "[!] Tendencia a la baja en BLOCAJE. Se recomienda sesion tecnica analitica."
+      alerts = alerts :+ "⚠️ Tendencia a la baja en BLOCAJE. Se recomienda sesion tecnica analitica."
     }
 
     // Ejemplo: Logica para detectar valentia baja
     if (reviews.last.valentia < 5) {
-      alerts = alerts :+ "[fire] Alerta de VALENTIA: Hector necesita refuerzo en salidas 1v1."
+      alerts = alerts :+ "🔥 Alerta de VALENTIA: Hector necesita refuerzo en salidas 1v1."
     }
 
     alerts
@@ -9733,11 +9786,11 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
 
       val baseMsg = if (avgAcad > 0 && avgAtt > 0) {
         if (avgAcad < 6.0 && avgAtt < 7.0)
-          "[IA] **ALERTA COGNITIVA**: Baja concentracion detectada en ambos entornos. Posible fatiga mental general."
+          "🧠 **ALERTA COGNITIVA**: Baja concentracion detectada en ambos entornos. Posible fatiga mental general."
         else if (avgAcad > 8.0 && avgAtt < 6.0)
-          "[futbol] **DESCONEXION**: Alto rendimiento academico pero baja atencion en campo. ?Falta de motivacion deportiva?"
+          "⚽ **DESCONEXION**: Alto rendimiento academico pero baja atencion en campo. ¿Falta de motivacion deportiva?"
         else
-          "[OK] **SINERGIA OPTIMA**: Equilibrio detectado entre estudios y deporte."
+          "✅ **SINERGIA OPTIMA**: Equilibrio detectado entre estudios y deporte."
       } else "Faltan datos para analisis cognitivo."
 
       // Footbar: contexto de carga fisica de los ultimos 5 partidos (senal de fatiga)

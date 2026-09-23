@@ -899,13 +899,16 @@ object BioController extends cask.Routes {
   def cargaPage(request: cask.Request) = withAuth(request) {
     val weekly   = DatabaseManager.getWeeklyLoad(12)
     val rpeHist  = DatabaseManager.getRPEHistory(60)
-    val acute    = DatabaseManager.getWorkloads(7)
-    val chronic  = DatabaseManager.getWorkloads(28)
-    val acwr     = StatsCalculator.calculateACWR(acute, chronic)
-    val (acwrColor, acwrLabel) = if (acwr > 2.0) ("danger","RIESGO ALTO")
-    else if (acwr > 1.5) ("warning","SOBRECARGA")
-    else if (acwr < 0.8) ("info","BAJA CARGA")
-    else ("success","OPTIMO")
+    // FIX 2: evita mostrar un ratio disparado (ej. 4.00) cuando el historico es insuficiente
+    val acwrEstado = DatabaseManager.calcularACWRConEstado()
+    val acwrInsuficiente = acwrEstado("status").asInstanceOf[String] == "INSUFICIENTE"
+    val acwr     = acwrEstado("acwr").asInstanceOf[Double]
+    val (acwrColor, acwrLabel) =
+      if (acwrInsuficiente) ("secondary", "ACUMULANDO DATOS")
+      else if (acwr > 2.0) ("danger","RIESGO ALTO")
+      else if (acwr > 1.5) ("warning","SOBRECARGA")
+      else if (acwr < 0.8) ("info","BAJA CARGA")
+      else ("success","OPTIMO")
 
     val semanasJs  = weekly.map(s => s""""${s._1}"""").mkString("[",",","]")
     val cargasJs   = weekly.map(_._2.toString).mkString("[",",","]")
@@ -935,8 +938,8 @@ object BioController extends cask.Routes {
           div(cls := "row g-2 mb-4",
             div(cls := "col-3",
               div(cls := s"card bg-dark border-$acwrColor text-center py-3",
-                div(cls := s"text-$acwrColor fw-bold", style := "font-size:28px;", f"$acwr%.2f"),
-                div(cls := "xx-small text-muted mt-1", "ACWR"),
+                div(cls := s"text-$acwrColor fw-bold", style := "font-size:28px;", if (acwrInsuficiente) "📊" else f"$acwr%.2f"),
+                div(cls := "xx-small text-muted mt-1", if (acwrInsuficiente) "ACWR: Acumulando datos (mín. 3 semanas)" else "ACWR"),
                 div(cls := s"badge bg-$acwrColor mt-1", acwrLabel)
               )
             ),

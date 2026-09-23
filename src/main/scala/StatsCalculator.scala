@@ -87,7 +87,10 @@ object StatsCalculator {
   }
   def calculateACWR(acuteLoads: Seq[Double], chronicLoads: Seq[Double]): Double = {
     val acuteAvg = if (acuteLoads.nonEmpty) acuteLoads.sum / 7.0 else 0.0
-    val chronicAvg = if (chronicLoads.nonEmpty) chronicLoads.sum / 28.0 else 1.0
+    val chronicAvgRaw = if (chronicLoads.nonEmpty) chronicLoads.sum / 28.0 else 1.0
+    // FIX 2: floor de carga cronica — evita que el ratio explote (ej. 4.00+) cuando hay pocas
+    // semanas de historico y la carga cronica es casi cero comparada con la aguda.
+    val chronicAvg = Math.max(chronicAvgRaw, acuteAvg * 0.3)
 
     if (chronicAvg > 0) acuteAvg / chronicAvg else 0.0
   }
