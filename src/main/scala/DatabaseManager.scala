@@ -799,8 +799,11 @@ object DatabaseManager {
       // UNIQUE sobre una expresion (mes de la fecha) no es un constraint de tabla valido en
       // Postgres — se implementa como indice unico sobre la expresion, y sirve igualmente
       // como target de ON CONFLICT para el upsert "un registro por mes".
+      // OJO: DATE_TRUNC('month', fecha) sobre un DATE resuelve a la variante timestamptz, que es
+      // STABLE (depende de la zona horaria) y Postgres la rechaza en un indice. El cast a
+      // ::timestamp usa la variante IMMUTABLE. saveVozPortero() debe usar la misma expresion.
       stmt.executeUpdate(
-        "CREATE UNIQUE INDEX IF NOT EXISTS voz_portero_mes_idx ON voz_portero (DATE_TRUNC('month', fecha))")
+        "CREATE UNIQUE INDEX IF NOT EXISTS voz_portero_mes_idx ON voz_portero (DATE_TRUNC('month', fecha::timestamp))")
 
       // ── ARQUETIPO DE PORTERO — historico mensual (SQL puro, sin Gemini) ──────
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS arquetipo_history (
@@ -5804,7 +5807,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val ps = conn.prepareStatement("""
         INSERT INTO voz_portero (fecha, motivacion_carita, respuesta_error, respuesta_aprendizaje)
         VALUES (CURRENT_DATE, ?, ?, ?)
-        ON CONFLICT (DATE_TRUNC('month', fecha)) DO UPDATE SET
+        ON CONFLICT (DATE_TRUNC('month', fecha::timestamp)) DO UPDATE SET
           motivacion_carita = EXCLUDED.motivacion_carita,
           respuesta_error = EXCLUDED.respuesta_error,
           respuesta_aprendizaje = EXCLUDED.respuesta_aprendizaje,
