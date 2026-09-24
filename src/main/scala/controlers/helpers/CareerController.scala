@@ -2429,6 +2429,30 @@ object CareerController extends cask.Routes {
         )
       }
 
+    // BLOQUE B: indice de consistencia (desviacion tipica de las notas) — SQL puro, minimo 8 partidos
+    val vol = DatabaseManager.getVolatilityIndex(efectivo)
+    val volatilitySection: Modifier =
+      if (!vol("suficiente").asInstanceOf[Boolean])
+        div(cls := "card bg-dark border-secondary shadow mb-3 p-3 text-center text-muted small",
+          s"📊 Índice de consistencia: necesita al menos 8 partidos con nota (hay ${vol("partidos")}).")
+      else {
+        val sd = vol("desviacion").asInstanceOf[Double]
+        val badgeCls = vol("nivel").asInstanceOf[String] match {
+          case "MUY_CONSISTENTE" => "bg-success"; case "CONSISTENTE" => "bg-warning text-dark"
+          case "IRREGULAR" => "bg-orange text-dark"; case _ => "bg-danger"
+        }
+        div(cls := "card bg-dark border-info shadow mb-3",
+          div(cls := "card-header text-info fw-bold small", "📊 ÍNDICE DE CONSISTENCIA"),
+          div(cls := "card-body p-3 text-center",
+            span(cls := s"badge $badgeCls fs-6", style := (if (badgeCls.contains("orange")) "background:#fd7e14;" else ""),
+              s"${vol("emoji")} ${vol("etiqueta")}"),
+            div(cls := "small text-white mt-2",
+              f"σ = $sd%.2f · media ${vol("media").asInstanceOf[Double]}%.1f · rango ${vol("minima").asInstanceOf[Double]}%.1f–${vol("maxima").asInstanceOf[Double]}%.1f · ${vol("partidos")} partidos"),
+            div(cls := "xx-small text-muted mt-1", "Desviación típica de las notas: cuanto más baja, más regular es su rendimiento de un partido a otro.")
+          )
+        )
+      }
+
     val content = basePage("benchmark",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
@@ -2440,6 +2464,7 @@ object CareerController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/benchmark"),
           rffmSection,
+          volatilitySection,
           condicionesPicoSection,
           if (sinDatos)
             div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")

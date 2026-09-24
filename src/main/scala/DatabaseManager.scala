@@ -12125,4 +12125,38 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     } finally { conn.close() }
   }
 
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE B — INDICE DE CONSISTENCIA (Volatility Index) — SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  /** Desviacion tipica de las notas. nota = 0 es el DEFAULT de matches (sin nota), no una nota real. */
+  def getVolatilityIndex(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT AVG(nota) as media, STDDEV(nota) as desviacion,
+          COUNT(*) as partidos, MIN(nota) as minima, MAX(nota) as maxima
+        FROM matches
+        WHERE status = 'PLAYED' AND nota IS NOT NULL AND nota > 0 ${seasonFilter(seasonId)}""")
+      rs.next()
+      val partidos = rs.getInt("partidos")
+      val desviacion = rs.getDouble("desviacion")
+      val (nivel, emoji, etiqueta) =
+        if (desviacion < 0.8) ("MUY_CONSISTENTE", "🟢", "Muy consistente")
+        else if (desviacion <= 1.2) ("CONSISTENTE", "🟡", "Consistente")
+        else if (desviacion <= 1.8) ("IRREGULAR", "🟠", "Irregular")
+        else ("MUY_IRREGULAR", "🔴", "Muy irregular")
+      Map(
+        "suficiente" -> (partidos >= 8),
+        "partidos"   -> partidos,
+        "media"      -> rs.getDouble("media"),
+        "desviacion" -> desviacion,
+        "minima"     -> rs.getDouble("minima"),
+        "maxima"     -> rs.getDouble("maxima"),
+        "nivel"      -> nivel,
+        "emoji"      -> emoji,
+        "etiqueta"   -> etiqueta
+      )
+    } finally { conn.close() }
+  }
+
 }

@@ -6056,6 +6056,13 @@ object HistoryController extends cask.Routes {
       case None => ""
     }
 
+    // BLOQUE B: indice de consistencia (temporada activa, minimo 8 partidos)
+    val consistenciaHtml = {
+      val vol = DatabaseManager.getVolatilityIndex(DatabaseManager.getTemporadaActivaId())
+      if (!vol("suficiente").asInstanceOf[Boolean]) ""
+      else s"""<div class="narrative" style="font-size:12px;">📊 Índice de Consistencia: ${vol("emoji")} ${vol("etiqueta")} (σ=${f"${vol("desviacion").asInstanceOf[Double]}%.2f"})</div>"""
+    }
+
     // BLOQUE F: correccion del paso negativo, cuando hay datos suficientes
     val pasoNegativoHtml = {
       val pn = DatabaseManager.getPasoNegativoTrend()
@@ -6274,6 +6281,7 @@ object HistoryController extends cask.Routes {
 <div class="narrative">${DatabaseManager.escHtml(analisisIA)}</div>
 $goalCoverageHtml
 $markovHtml
+$consistenciaHtml
 $pasoNegativoHtml
 $arquetipoHtml
 $vozPorteroHtml
