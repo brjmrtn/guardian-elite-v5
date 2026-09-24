@@ -74,14 +74,28 @@ object SharedLayout {
   }
 
   // BLOQUE B6: readOnly oculta el lapiz de edicion cuando se ve una temporada archivada (cerrada)
-  def renderMatchRow(m: MatchLog, zScoreOpt: Option[Double] = None, readOnly: Boolean = false) = {
+  /** Cuerpo application/x-www-form-urlencoded -> Map. Para endpoints nuevos (@cask.post con request). */
+  def parseFormBody(request: cask.Request): Map[String, String] =
+    new String(request.data.readAllBytes(), "UTF-8").split("&").filter(_.nonEmpty).map { p =>
+      val kv = p.split("=", 2)
+      java.net.URLDecoder.decode(kv(0), "UTF-8") -> (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
+    }.toMap
+
+  def renderMatchRow(m: MatchLog, zScoreOpt: Option[Double] = None, readOnly: Boolean = false,
+                     sourceBadge: Option[String] = None) = {
     val notaCls = if (m.nota >= 7) "table-success" else if (m.nota >= 5) "table-warning" else "table-danger"
     val audioIcon = if (m.analisisVoz.nonEmpty) span(style := "color:#8b5cf6;", "🎙️") else span("🎤")
     // BLOQUE C: badge si el partido coincidio con un periodo de examenes escolares
     val examenesBadge: Modifier =
       if (DatabaseManager.esFechaDeExamenes(m.fecha)) span(cls := "badge bg-secondary xx-small d-block mt-1", "📚 Semana de exámenes") else frag()
+    // BLOQUE D/S: registro minimo pendiente de completar / partido importado por CSV
+    val origenBadge: Modifier = sourceBadge match {
+      case Some("QUICK_PENDIENTE") => span(cls := "badge bg-warning text-dark xx-small d-block mt-1", "⚡ Datos pendientes")
+      case Some("IMPORTADO")       => span(cls := "badge bg-info text-dark xx-small d-block mt-1", "📥 Importado")
+      case _                       => frag()
+    }
     tr(cls := notaCls,
-      td(div(fixEncoding(m.rival)), div(cls := "xx-small text-muted", m.fecha.take(10)), examenesBadge),
+      td(div(fixEncoding(m.rival)), div(cls := "xx-small text-muted", m.fecha.take(10)), examenesBadge, origenBadge),
       td(m.resultado),
       td(cls := "text-center fw-bold", m.nota.toString,
         m.cpi.map(c => span(cls := "xx-small text-info d-block", attr("title") := "El CPI ajusta la nota por la dificultad real del contexto: rival, condiciones físicas, clima y si jugó en casa o fuera.", f"CPI: $c%.1f")).getOrElse(frag()),

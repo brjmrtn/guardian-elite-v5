@@ -985,6 +985,9 @@ object DatabaseManager {
       // ─────────────────────────────────────────────────────────────────────────────
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS tipo_ausencia TEXT DEFAULT NULL")
 
+      // BLOQUE D/S: origen del registro del partido — NULL (formulario completo), 'quick' (registro minimo), 'importado' (CSV historico)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS source TEXT DEFAULT NULL")
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -12186,6 +12189,52 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       val res = Map[String, Any]("actualizados" -> actualizados, "fallidos" -> (pendientes.size - actualizados), "total" -> pendientes.size)
       println(s"[CLIMA] Relleno historico: $res")
       res
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE D — QUICK REGISTER: partido con solo rival, resultado y nota
+  // ═════════════════════════════════════════════════════════════════════════════
+  /** Guarda un partido jugado hoy con los datos minimos; el resto queda con los DEFAULT de la tabla. */
+  def quickSaveMatch(rival: String, gf: Int, gc: Int, nota: Double): Int = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO matches (season_id, fecha, rival, goles_favor, goles_contra, nota, status, source)
+        VALUES (COALESCE((SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1), (SELECT MAX(id) FROM seasons)),
+                CURRENT_DATE, ?, ?, ?, ?, 'PLAYED', 'quick')
+        RETURNING id""")
+      ps.setString(1, fixEncoding(rival)); ps.setInt(2, gf); ps.setInt(3, gc); ps.setDouble(4, nota)
+      val rs = ps.executeQuery()
+      if (rs.next()) rs.getInt("id") else -1
+    } finally { conn.close() }
+  }
+
+  /** Badges de origen para el historial: QUICK_PENDIENTE (registro minimo sin rubrica completa) e IMPORTADO. */
+  def getMatchSourceBadges(seasonId: Int = 0): Map[Int, String] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT id, CASE WHEN source = 'importado' THEN 'IMPORTADO' ELSE 'QUICK_PENDIENTE' END as badge
+        FROM matches
+        WHERE status = 'PLAYED' ${seasonFilter(seasonId)}
+          AND (source = 'importado'
+               OR (source = 'quick' AND (rubrica_posicion IS NULL OR rubrica_decisiones IS NULL OR rubrica_pies IS NULL
+                                         OR rubrica_comunicacion IS NULL OR rubrica_actitud IS NULL)))""")
+      Iterator.continually(rs).takeWhile(_.next()).map(r => r.getInt("id") -> r.getString("badge")).toMap
+    } finally { conn.close() }
+  }
+
+  /** Actualiza solo los 5 campos de rubrica (1-5). Usado por la edicion de partido y por el bot de Telegram. */
+  def updateRubricaMatch(matchId: Int, posicion: Int, decisiones: Int, pies: Int, comunicacion: Int, actitud: Int): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        UPDATE matches SET rubrica_posicion = ?, rubrica_decisiones = ?, rubrica_pies = ?,
+          rubrica_comunicacion = ?, rubrica_actitud = ? WHERE id = ?""")
+      Seq(posicion, decisiones, pies, comunicacion, actitud).zipWithIndex.foreach { case (v, i) => ps.setInt(i + 1, v) }
+      ps.setInt(6, matchId)
+      ps.executeUpdate()
     } finally { conn.close() }
   }
 

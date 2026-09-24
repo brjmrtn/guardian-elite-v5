@@ -182,7 +182,7 @@ object HistoryController extends cask.Routes {
   }
 
   @cask.get("/history")
-  def historyPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+  def historyPage(request: cask.Request, temporadaId: Int = 0, msg: String = "") = withAuth(request) {
     val temporadas = DatabaseManager.getTodasTemporadas()
     val activaId = DatabaseManager.getTemporadaActivaId()
     val efectivo = if (temporadaId > 0) temporadaId else activaId
@@ -232,7 +232,8 @@ object HistoryController extends cask.Routes {
     val tableRows = if (matches.isEmpty) {
       Seq(tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")))
     } else {
-      matches.map(m => renderMatchRow(m, zScoresByMatchId.get(m.id), readOnly = esArchivada))
+      val sourceBadges = DatabaseManager.getMatchSourceBadges(efectivo)
+      matches.map(m => renderMatchRow(m, zScoresByMatchId.get(m.id), readOnly = esArchivada, sourceBadge = sourceBadges.get(m.id)))
     }
 
     // 2. Definimos el contenido central (SIN llamar a basePage aqui)
@@ -242,6 +243,7 @@ object HistoryController extends cask.Routes {
           h2(cls := "text-warning mb-0", "HISTORIAL"),
           a(href := "/mapa-goles", cls := "btn btn-outline-danger btn-sm fw-bold", "MAPA DE GOLES")
         ),
+        if (msg.nonEmpty) div(cls := "alert alert-warning small p-2 mb-3", msg) else frag(),
         seasonSelector(temporadas, efectivo, "/history"),
         archivadaBanner,
         resumenArchivada,

@@ -104,6 +104,9 @@ object MatchController extends cask.Routes {
           div(cls := "card bg-dark text-white border-warning shadow",
             div(cls := "card-header bg-warning text-dark fw-bold text-center", "MATCH TRACKER PRO"),
             div(cls := "card-body p-3",
+              // BLOQUE D: formulario independiente del registro minimo — sus campos viven dentro del
+              // formulario principal (no se pueden anidar forms) y se asocian con el atributo form=
+              form(id := "quickRegisterForm", action := "/match-center/quick-save", method := "post", attr("accept-charset") := "UTF-8"),
               form(action := "/match-center/save", method := "post", attr("accept-charset") := "UTF-8",
 
                 // ── BLOQUE A: REGISTRO RAPIDO POR VOZ O TEXTO (NLP con Gemini) ──
@@ -124,6 +127,30 @@ object MatchController extends cask.Routes {
                     div(id:="nlpStatus", cls:="xx-small text-muted mt-2"),
                     div(id:="nlpConfianzaWarning", cls:="xx-small text-danger mt-1", style:="display:none;",
                       "⚠️ Algunos campos pueden no ser correctos — revísalos antes de guardar")
+                  )
+                ),
+
+                // ── BLOQUE D: REGISTRO MINIMO EN 30 SEGUNDOS (rival, resultado, nota) ──
+                div(cls:="mb-4 p-3 border border-info rounded", style:="background:rgba(13,202,240,0.05);",
+                  div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;",
+                    onclick:="var p=document.getElementById('quickPanel');var c=document.getElementById('quickChevron');var o=p.style.display!=='none';p.style.display=o?'none':'block';c.textContent=o?'▼':'▲';",
+                    label(cls:="text-info fw-bold small mb-0", style:="cursor:pointer;", "⚡ REGISTRO MÍNIMO"),
+                    span(id:="quickChevron", cls:="text-info small", "▼")
+                  ),
+                  div(id:="quickPanel", style:="display:none;",
+                    div(cls:="xx-small text-muted mt-2 mb-2", "Solo rival, resultado y nota. Podrás completar el resto después con ✏️ Editar."),
+                    input(tpe:="text", name:="rival", attr("form"):="quickRegisterForm", required:=true,
+                      cls:="form-control form-control-sm bg-dark text-white border-info fw-bold mb-2", placeholder:="Rival"),
+                    div(cls:="d-flex gap-2 align-items-center mb-2",
+                      input(tpe:="number", name:="goles_favor", attr("form"):="quickRegisterForm", required:=true, attr("min"):="0", attr("max"):="99",
+                        cls:="form-control form-control-sm bg-dark text-white border-info text-center fw-bold", placeholder:="GF"),
+                      span(cls:="text-white fw-bold", "-"),
+                      input(tpe:="number", name:="goles_contra", attr("form"):="quickRegisterForm", required:=true, attr("min"):="0", attr("max"):="99",
+                        cls:="form-control form-control-sm bg-dark text-white border-info text-center fw-bold", placeholder:="GC"),
+                      input(tpe:="number", name:="nota", attr("form"):="quickRegisterForm", required:=true, attr("min"):="0", attr("max"):="10", attr("step"):="0.5",
+                        cls:="form-control form-control-sm bg-dark text-white border-info text-center fw-bold", placeholder:="Nota")
+                    ),
+                    button(tpe:="submit", attr("form"):="quickRegisterForm", cls:="btn btn-sm btn-info fw-bold w-100", "Guardar registro mínimo")
                   )
                 ),
 
@@ -1038,6 +1065,25 @@ object MatchController extends cask.Routes {
       headers = Seq("Location" -> s"/match-center/saved?antes=$mediaAntes&despues=$mediaDespues&msg=${java.net.URLEncoder.encode(msg, "UTF-8")}")
     )
   }
+  // BLOQUE D: registro minimo — status PLAYED, source 'quick', resto con los DEFAULT de la tabla
+  @cask.post("/match-center/quick-save")
+  def quickSaveMatch(request: cask.Request) = withAuth(request) {
+    val p = parseFormBody(request)
+    val rival = fixEncoding(p.getOrElse("rival", "")).trim
+    val gf = p.getOrElse("goles_favor", "").toIntOption
+    val gc = p.getOrElse("goles_contra", "").toIntOption
+    val nota = p.getOrElse("nota", "").replace(",", ".").toDoubleOption.filter(n => n >= 0 && n <= 10)
+    val msg = (gf, gc, nota) match {
+      case (Some(f), Some(c), Some(n)) if rival.nonEmpty && f >= 0 && c >= 0 =>
+        DatabaseManager.quickSaveMatch(rival, f, c, n)
+        new Thread(() => DatabaseManager.detectarHitos()).start()
+        "⚡ Partido guardado en modo rápido — pulsa ✏️ Editar para completar los datos."
+      case _ => "⚠️ Registro mínimo no guardado: faltan el rival, el resultado o una nota válida (0-10)."
+    }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/history?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"))
+  }
+
   @cask.get("/match-center/saved")
   def matchSavedPage(request: cask.Request, antes: Int = 0, despues: Int = 0, msg: String = "") = withAuth(request) {
     val diff = despues - antes
@@ -1331,6 +1377,30 @@ object MatchController extends cask.Routes {
                     label(cls := "form-label small text-muted fw-bold", "REACCIÓN / GOLES ENCAJADOS"),
                     textarea(name := "reaccion", cls := "form-control bg-dark text-white border-secondary",
                       rows := "3", matchData.reaccion)),
+
+                  // BLOQUE D: rubrica editable — completa los partidos guardados con el registro minimo
+                  {
+                    val rub = DatabaseManager.getRubricaMatch(matchId).getOrElse(Map.empty[String, Int])
+                    div(cls := "mb-3",
+                      label(cls := "form-label small text-muted fw-bold", "RÚBRICA (1-5)"),
+                      div(cls := "row g-1",
+                        frag(Seq(("rubricaPosicion", "posicion", "Posición"), ("rubricaDecisiones", "decisiones", "Decisiones"),
+                            ("rubricaPies", "pies", "Pies"), ("rubricaComunicacion", "comunicacion", "Comunic."),
+                            ("rubricaActitud", "actitud", "Actitud")).map { case (campo, clave, etiqueta) =>
+                          div(cls := "col",
+                            div(cls := "xx-small text-muted text-center", etiqueta),
+                            select(name := campo, cls := "form-select form-select-sm bg-dark text-white border-secondary px-1",
+                              option(value := "", "—"),
+                              frag((1 to 5).map { v =>
+                                if (rub.get(clave).contains(v)) option(value := v.toString, attr("selected") := "selected", v.toString)
+                                else option(value := v.toString, v.toString)
+                              })
+                            )
+                          )
+                        })
+                      )
+                    )
+                  },
 
                   // Video
                   div(cls := "mb-4",
@@ -1837,8 +1907,14 @@ object MatchController extends cask.Routes {
                         nota: Double, minutos: String = "60", tipo: String = "LIGA",
                         clima: String = "Sol", estadio: String = "",
                         esLocal: String = "", notas: String = "",
-                        video: String = "", reaccion: String = "", fecha: String) = withAuth(request) {
+                        video: String = "", reaccion: String = "", fecha: String,
+                        rubricaPosicion: String = "", rubricaDecisiones: String = "", rubricaPies: String = "",
+                        rubricaComunicacion: String = "", rubricaActitud: String = "") = withAuth(request) {
     val min = try minutos.toInt catch { case _: Exception => 60 }
+    // BLOQUE D: la rubrica solo se guarda si vienen las 5 dimensiones con valor 1-5
+    val rubrica = Seq(rubricaPosicion, rubricaDecisiones, rubricaPies, rubricaComunicacion, rubricaActitud)
+      .flatMap(_.toIntOption.filter(v => v >= 1 && v <= 5))
+    if (rubrica.size == 5) DatabaseManager.updateRubricaMatch(id, rubrica(0), rubrica(1), rubrica(2), rubrica(3), rubrica(4))
     DatabaseManager.updateMatch(id, fixEncoding(rival), gf, gc, min, nota,
       clima, fixEncoding(estadio), 20, fixEncoding(notas), video, fixEncoding(reaccion), fecha)
     // Update es_local and tipo separately if columns exist
