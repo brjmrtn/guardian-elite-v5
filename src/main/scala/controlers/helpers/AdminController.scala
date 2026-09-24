@@ -446,7 +446,7 @@ object AdminController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
   }
 
-  @cask.get("/settings") def settingsPage(backupMsg: String = "", rffmMsg: String = "") = {
+  @cask.get("/settings") def settingsPage(request: cask.Request, backupMsg: String = "", rffmMsg: String = "") = withAuth(request) {
     val card = DatabaseManager.getLatestCardData()
     val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Configuracion General"),
       form(action := "/settings/save_base64", method := "post",
@@ -490,7 +490,7 @@ object AdminController extends cask.Routes {
   }
 
   @cask.post("/settings/weekly-structure/save")
-  def saveWeeklyStructure(request: cask.Request) = {
+  def saveWeeklyStructure(request: cask.Request) = withAuth(request) {
     val p = parseBody(request)
     val id = p.getOrElse("id", "0").toIntOption.getOrElse(0)
     val diaSemana = p.getOrElse("diaSemana", "1").toIntOption.getOrElse(1)
@@ -500,7 +500,7 @@ object AdminController extends cask.Routes {
   }
 
   @cask.post("/settings/perfil_publico/save")
-  def savePerfilPublico(request: cask.Request) = {
+  def savePerfilPublico(request: cask.Request) = withAuth(request) {
     val p = parseBody(request)
     DatabaseManager.updatePerfilPublicoConfig(
       activo = p.contains("activo"),
@@ -606,9 +606,9 @@ object AdminController extends cask.Routes {
   }
 
   @cask.postForm("/settings/save_base64")
-  def saveSettingsBase64(fotoBase64: String, clubBase64: String, nombreClub: String,
+  def saveSettingsBase64(request: cask.Request, fotoBase64: String, clubBase64: String, nombreClub: String,
                          fechaNac: String, rffmUrl: String, rffmName: String,
-                         posicion: String = "GK", pieDominante: String = "Derecho") = {
+                         posicion: String = "GK", pieDominante: String = "Derecho") = withAuth(request) {
     val fechaFinal = if (fechaNac != null && fechaNac.nonEmpty) fechaNac else "2020-06-19"
     DatabaseManager.updateRFFMSettings(
       if (rffmUrl   != null) rffmUrl   else "",
@@ -634,7 +634,7 @@ object AdminController extends cask.Routes {
   }
 
   @cask.get("/admin")
-  def adminPage(msg: String = "") = {
+  def adminPage(request: cask.Request, msg: String = "") = withAuth(request) {
     val objs = DatabaseManager.getSeasonObjectives()
     val content = basePage("settings",
       div(cls := "row justify-content-center",
@@ -730,17 +730,17 @@ object AdminController extends cask.Routes {
   }
 
   @cask.get("/admin/init_legends")
-  def initLegendsAction() = {
+  def initLegendsAction(request: cask.Request) = withAuth(request) {
     val msg = DatabaseManager.initLegendsTable()
     cask.Response(msg.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/plain"))
   }
   @cask.postForm("/admin/update_obj")
-  def updateObj(id: Int, meta: Int) = {
+  def updateObj(request: cask.Request, id: Int, meta: Int) = withAuth(request) {
     DatabaseManager.updateObjective(id, meta)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/admin"))
   }
   @cask.get("/admin/download_csv")
-  def downloadCsv() = {
+  def downloadCsv(request: cask.Request) = withAuth(request) {
     cask.Response(DatabaseManager.getBackupCSV().getBytes("UTF-8"),
       headers = Seq(
         "Content-Type"        -> "text/csv; charset=utf-8",
@@ -750,7 +750,7 @@ object AdminController extends cask.Routes {
   }
   // BLOQUE H: exportacion completa — un CSV por tabla principal, empaquetados en ZIP
   @cask.get("/admin/download_full_csv")
-  def downloadFullCsv() = {
+  def downloadFullCsv(request: cask.Request) = withAuth(request) {
     val csvMap = DatabaseManager.getFullExportCSV()
     val baos = new java.io.ByteArrayOutputStream()
     val zos = new java.util.zip.ZipOutputStream(baos)
@@ -767,7 +767,7 @@ object AdminController extends cask.Routes {
       ))
   }
   @cask.get("/admin/print_report")
-  def printReport() = {
+  def printReport(request: cask.Request) = withAuth(request) {
     val card    = DatabaseManager.getLatestCardData()
     val matches = DatabaseManager.getMatchesList()
     val evolution = DatabaseManager.getSeasonEvolution()
@@ -912,7 +912,7 @@ object AdminController extends cask.Routes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.get("/admin/importer")
-  def importerPage() = {
+  def importerPage(request: cask.Request) = withAuth(request) {
     val content = basePage("settings",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8",
@@ -955,7 +955,7 @@ object AdminController extends cask.Routes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/admin/upload_calendar")
-  def uploadCalendar(csvContent: String) = {
+  def uploadCalendar(request: cask.Request, csvContent: String) = withAuth(request) {
     val res     = DatabaseManager.importCalendarCSV(fixEncoding(csvContent))
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
@@ -967,7 +967,7 @@ object AdminController extends cask.Routes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/admin/upload_matches")
-  def uploadMatches(csvContent: String) = {
+  def uploadMatches(request: cask.Request, csvContent: String) = withAuth(request) {
     val res     = DatabaseManager.importMatchesCSV(fixEncoding(csvContent))
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
@@ -979,7 +979,7 @@ object AdminController extends cask.Routes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/admin/upload_wellness")
-  def uploadWellness(csvContent: String) = {
+  def uploadWellness(request: cask.Request, csvContent: String) = withAuth(request) {
     val res     = DatabaseManager.importWellnessCSV(fixEncoding(csvContent))
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
@@ -991,7 +991,7 @@ object AdminController extends cask.Routes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/admin/sync_rffm")
-  def syncRffmAction() = {
+  def syncRffmAction(request: cask.Request) = withAuth(request) {
     val log     = DatabaseManager.syncRFFMCalendar()
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
