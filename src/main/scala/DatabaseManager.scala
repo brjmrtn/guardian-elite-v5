@@ -8536,8 +8536,29 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
 
       val rsPrev = conn.createStatement().executeQuery(
         "SELECT * FROM seasons ORDER BY id DESC LIMIT 1")
+      val hayPrev = rsPrev.next()
+
+      // A1: la BD de produccion tiene columnas NOT NULL sin DEFAULT que no declara initDB (ej. "tipo").
+      // Se descubren en information_schema y se heredan de la temporada anterior; "tipo" cae a 'PORTERO'.
+      val columnasFijas = Set("id", "nombre", "categoria", "nombre_club", "foto_jugador_url", "club_escudo_url",
+        "media", "stat_div", "stat_han", "stat_kic", "stat_ref", "stat_spd", "stat_pos",
+        "fecha_inicio", "fecha_nacimiento", "judo_belt")
+      val rsCols = conn.createStatement().executeQuery("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'seasons'
+          AND is_nullable = 'NO' AND column_default IS NULL""")
+      val columnasExtra = Iterator.continually(rsCols).takeWhile(_.next()).map(_.getString(1))
+        .filterNot(columnasFijas.contains).toList
+      val valoresExtra: List[(String, AnyRef)] = columnasExtra.map { col =>
+        val heredado = if (hayPrev) Option(rsPrev.getObject(col)) else None
+        col -> heredado.orElse(if (col == "tipo") Some("PORTERO") else None).orNull
+      }
+      valoresExtra.find(_._2 == null).foreach { case (col, _) =>
+        return Left(s"La columna obligatoria '$col' de seasons no tiene valor que heredar de la temporada anterior.")
+      }
+
       val (club, foto, escudo, div, han, kic, ref, spd, pos, cinturon, fechaNac) =
-        if (rsPrev.next()) (
+        if (hayPrev) (
           if (nombreClub.nonEmpty) nombreClub else Option(rsPrev.getString("nombre_club")).getOrElse(""),
           Option(rsPrev.getString("foto_jugador_url")).getOrElse(""),
           Option(rsPrev.getString("club_escudo_url")).getOrElse(""),
@@ -8547,18 +8568,21 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
           Option(rsPrev.getDate("fecha_nacimiento")).map(_.toString).getOrElse("2020-06-19")
         ) else (nombreClub, "", "", 62.0, 60.0, 55.0, 60.0, 62.0, 58.0, "Blanco", "2020-06-19")
 
-      val ps = conn.prepareStatement("""
+      val colsExtraSql = valoresExtra.map(c => s", ${c._1}").mkString
+      val paramsExtraSql = valoresExtra.map(_ => ",?").mkString
+      val ps = conn.prepareStatement(s"""
         INSERT INTO seasons
           (nombre, categoria, nombre_club, foto_jugador_url, club_escudo_url,
            media, stat_div, stat_han, stat_kic, stat_ref, stat_spd, stat_pos,
-           fecha_inicio, fecha_nacimiento, judo_belt)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?::date,?::date,?)""")
+           fecha_inicio, fecha_nacimiento, judo_belt$colsExtraSql)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?::date,?::date,?$paramsExtraSql)""")
       ps.setString(1, nombreTemporada); ps.setString(2, fixEncoding(categoria))
       ps.setString(3, fixEncoding(club)); ps.setString(4, foto); ps.setString(5, escudo)
       ps.setDouble(6, (div+han+kic+ref+spd+pos)/6.0)
       ps.setDouble(7, div); ps.setDouble(8, han); ps.setDouble(9, kic)
       ps.setDouble(10, ref); ps.setDouble(11, spd); ps.setDouble(12, pos)
       ps.setString(13, inicio); ps.setString(14, fechaNac); ps.setString(15, cinturon)
+      valoresExtra.zipWithIndex.foreach { case ((_, v), i) => ps.setObject(16 + i, v) }
       ps.executeUpdate()
 
       conn.createStatement().executeUpdate("DELETE FROM ai_cache")
