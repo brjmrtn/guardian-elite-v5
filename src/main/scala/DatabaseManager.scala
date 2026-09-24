@@ -3221,7 +3221,11 @@ $analisisConcatenados"""
   // ─────────────────────────────────────────────────────────────────────────────
   def getClimaParaFecha(fecha: String, lat: Double = 40.4168, lon: Double = -3.7038): String = {
     try {
-      val url = s"https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&daily=precipitation_sum,weathercode,temperature_2m_max,windspeed_10m_max&start_date=$fecha&end_date=$fecha&timezone=Europe/Madrid"
+      // El endpoint forecast solo cubre ~3 meses hacia atras; para fechas antiguas (BLOQUE C, relleno
+      // historico) se usa el archivo historico, que acepta los mismos parametros daily.
+      val antigua = scala.util.Try(LocalDate.parse(fecha).isBefore(LocalDate.now().minusDays(60))).getOrElse(false)
+      val base = if (antigua) "https://archive-api.open-meteo.com/v1/archive" else "https://api.open-meteo.com/v1/forecast"
+      val url = s"$base?latitude=$lat&longitude=$lon&daily=precipitation_sum,weathercode,temperature_2m_max,windspeed_10m_max&start_date=$fecha&end_date=$fecha&timezone=Europe/Madrid"
       val r = requests.get(url, readTimeout = 3000, connectTimeout = 3000)
       if (r.statusCode != 200) return ""
       val json = ujson.read(r.text())
@@ -12156,6 +12160,32 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
         "emoji"      -> emoji,
         "etiqueta"   -> etiqueta
       )
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE C — RELLENO RETROACTIVO DEL CLIMA (Open-Meteo) — sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  /** Recorre los partidos jugados sin clima y lo rellena. Un fallo en un partido no detiene el resto. */
+  def rellenarClimaHistorico(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, fecha FROM matches WHERE status = 'PLAYED' AND fecha IS NOT NULL AND fecha <= CURRENT_DATE AND (clima IS NULL OR clima = '') ORDER BY fecha")
+      val pendientes = Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getInt("id"), r.getDate("fecha").toString)).toList
+      val up = conn.prepareStatement("UPDATE matches SET clima = ? WHERE id = ?")
+      var actualizados = 0
+      pendientes.foreach { case (id, fecha) =>
+        val clima = getClimaParaFecha(fecha)
+        if (clima.nonEmpty) {
+          up.setString(1, clima); up.setInt(2, id); up.executeUpdate()
+          actualizados += 1
+        }
+        Thread.sleep(200) // no saturar la API gratuita de Open-Meteo
+      }
+      val res = Map[String, Any]("actualizados" -> actualizados, "fallidos" -> (pendientes.size - actualizados), "total" -> pendientes.size)
+      println(s"[CLIMA] Relleno historico: $res")
+      res
     } finally { conn.close() }
   }
 

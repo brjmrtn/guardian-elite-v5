@@ -666,6 +666,12 @@ object AdminController extends cask.Routes {
                 "🎭 Dossier Captacion Anonimo")
             )
           ),
+          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
+            h5(cls := "text-white", "Mantenimiento de datos"),
+            p(cls := "small text-muted fw-bold", "Completa el clima de los partidos antiguos que no lo tienen (Open-Meteo)."),
+            form(action := "/admin/weather/fill-historical", method := "post", cls := "d-grid",
+              button(tpe := "submit", cls := "btn btn-outline-info w-100 fw-bold", "🌐 Rellenar clima histórico"))
+          ),
           div(cls := "card bg-dark border-info shadow p-3",
             h5(cls := "text-info", "Gestionar Objetivos"),
             if (objs.isEmpty) div("Sin objetivos.")
@@ -1276,6 +1282,19 @@ object AdminController extends cask.Routes {
       case Right(m) => m
       case Left(e) => e
     }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq(
+      "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+    ))
+  }
+
+  // BLOQUE C: relleno del clima historico en background — responde al instante
+  @cask.post("/admin/weather/fill-historical")
+  def rellenarClimaHistorico(request: cask.Request) = withAuth(request) {
+    new Thread(() => {
+      try DatabaseManager.rellenarClimaHistorico()
+      catch { case e: Exception => println(s"[CLIMA] Error en relleno historico: ${e.getMessage}") }
+    }).start()
+    val msg = "⏳ Rellenando clima histórico en segundo plano."
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
       "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
     ))
