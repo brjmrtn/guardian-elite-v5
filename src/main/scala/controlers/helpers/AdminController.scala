@@ -208,7 +208,7 @@ object AdminController extends cask.Routes {
         )
       )
 
-    div(cls := "card bg-dark border-warning shadow mb-4 p-3",
+    div(id := "temporadas", cls := "card bg-dark border-warning shadow mb-4 p-3",
       h5(cls := "text-warning", "📅 GESTIÓN DE TEMPORADAS"),
       msgBox,
       panelActiva,
@@ -1268,7 +1268,10 @@ object AdminController extends cask.Routes {
   }
 
   @cask.postForm("/admin/season-action/new")
-  def nuevaTemporada(request: cask.Request, categoria: String, nombreClub: String = "", fechaInicio: String = "") = withAuth(request) {
+  // confirmar: checkbox obligatorio del formulario (validado en el cliente); se declara para que cask
+  // no rechace el POST por un campo desconocido
+  def nuevaTemporada(request: cask.Request, categoria: String, nombreClub: String = "", fechaInicio: String = "",
+                     confirmar: String = "") = withAuth(request) {
     val msg = DatabaseManager.startNewSeason(fixEncoding(categoria), fixEncoding(nombreClub), fechaInicio) match {
       case Right(m) => m
       case Left(e) => e

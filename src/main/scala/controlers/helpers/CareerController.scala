@@ -427,16 +427,10 @@ object CareerController extends cask.Routes {
           presionWidget(),
           horasPracticaWidget(),
           raw(DatabaseManager.getLegendComparison()),
+          // La creacion de temporadas vive solo en /admin (formulario completo: club, fecha, confirmacion)
           div(cls := "card bg-secondary p-2 w-100 mt-3",
-            form(action := "/career/new-season", method := "post", cls := "d-flex flex-column gap-2",
-              div(
-                label(cls := "form-label text-white small m-0 fw-bold", "Nueva Categoria:"),
-                input(tpe := "text", name := "categoria", cls := "form-control form-control-sm fw-bold",
-                  placeholder := "Ej: Benjamin A", required := true)
-              ),
-              button(tpe := "submit", cls := "btn btn-danger btn-sm fw-bold",
-                onclick := "return confirm('Seguro?');", "Cerrar & Empezar")
-            )
+            a(href := "/admin#temporadas", cls := "btn btn-primary btn-sm fw-bold", "➕ Nueva temporada — ir a Admin"),
+            div(cls := "xx-small text-white-50 mt-1", "La gestión de temporadas se hace desde la sección de Administración.")
           )
         ),
         div(cls := "card shadow-sm border-0",
@@ -450,25 +444,6 @@ object CareerController extends cask.Routes {
       )
     )
     renderHtml(basePage("career", content))
-  }
-
-  @cask.postForm("/career/new-season")
-  def newSeasonAction(categoria: String) = {
-    val (titulo, msg) = DatabaseManager.startNewSeason(categoria) match {
-      case Right(m) => ("OK", m)
-      case Left(err) => ("AVISO", err)
-    }
-    val htmlStr = doctype("html")(html(
-      head(meta(charset := "utf-8"), tags2.title("Nueva Temp"), tags2.style(raw(getCss()))),
-      body(style := "background: #1a1a1a; color: white; text-align: center; padding-top: 50px; font-family: 'Oswald';",
-        h1(titulo), h2(msg),
-        p(s"Etapa iniciada: $categoria"),
-        div(style := "margin-top: 20px;",
-          a(href := "/", cls := "btn btn-warning fw-bold", "Ir a Inicio")
-        )
-      )
-    )).render
-    cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
   @cask.get("/penalties")
