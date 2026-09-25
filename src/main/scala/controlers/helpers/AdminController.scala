@@ -203,7 +203,8 @@ object AdminController extends cask.Routes {
               td(c("porteriasCero").asInstanceOf[Int].toString),
               td(if (c("tieneInforme").asInstanceOf[Boolean])
                 a(href := s"/admin/season-report/${c("id")}", target := "_blank", cls := "text-info small", "Ver informe")
-                else span(cls := "text-muted xx-small", "—"))
+                else span(cls := "text-muted xx-small", "—"),
+                a(href := s"/admin/wrapped/${c("id")}", target := "_blank", cls := "text-warning small ms-2 text-nowrap", s"🎉 Guardian Wrapped ${c("nombre")}"))
             )
           }: _*)
         )
@@ -1508,6 +1509,58 @@ object AdminController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
       "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
     ))
+  }
+
+  // Guardian Wrapped: tarjeta vertical 540x960 para captura de pantalla y compartir con la familia
+  @cask.get("/admin/wrapped/:seasonId")
+  def guardianWrapped(request: cask.Request, seasonId: Int) = withAuth(request) {
+    DatabaseManager.getWrappedTemporada(seasonId) match {
+      case None => renderRedirect("/admin")
+      case Some(w) =>
+        val arq = w("arquetipo").asInstanceOf[Option[Map[String, String]]]
+        val evo = w("evolucion").asInstanceOf[Option[(Double, Double)]]
+        val tarjetas: Seq[(String, String, String)] = Seq(
+          ("🎮", w("partidos").toString, "partidos jugados"),
+          ("🧤", s"${w("pctPorteriaCero")}%", "porterías a cero"),
+          ("⭐", w("mejorNota").asInstanceOf[Option[Double]].map(n => f"$n%.1f").getOrElse("—"),
+            w("mejorRival").asInstanceOf[Option[String]].map(r => s"mejor nota · vs $r").getOrElse("mejor nota")),
+          ("🎭", arq.map(a => s"${a.getOrElse("emoji", "")}").getOrElse("—"), arq.map(a => s"arquetipo · ${a.getOrElse("nombre", "")}").getOrElse("arquetipo")),
+          ("🏆", w("hitos").toString, "hitos conseguidos"),
+          // solo datos positivos: si la nota no subio, se muestra la nota media de la temporada
+          evo.filter { case (a, b) => b >= a } match {
+            case Some((a, b)) => ("📈", f"$a%.1f → $b%.1f", "evolución de la nota")
+            case None => ("📊", w("notaMedia").asInstanceOf[Option[Double]].map(n => f"$n%.1f").getOrElse("—"), "nota media")
+          })
+        val pagina = "<!DOCTYPE html>" + html(lang := "es",
+          head(meta(charset := "utf-8"), meta(name := "viewport", content := "width=device-width, initial-scale=1"),
+            tags2.title(s"Guardian Wrapped ${w("nombre")}"),
+            link(rel := "stylesheet", href := "https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap"),
+            tags2.style(raw("""
+              body { margin:0; background:#05070d; display:flex; justify-content:center; font-family:'Oswald',sans-serif; }
+              .w { width:540px; height:960px; max-width:100vw; box-sizing:border-box; padding:48px 38px; color:#fff; overflow:hidden;
+                   background: radial-gradient(circle at 15% 0%, #3b2a06 0%, transparent 45%), radial-gradient(circle at 100% 100%, #1e3a8a 0%, transparent 50%), linear-gradient(160deg,#0f172a,#020617);
+                   display:flex; flex-direction:column; }
+              .logo { letter-spacing:6px; font-size:16px; color:#d4af37; }
+              .temp { font-size:58px; font-weight:700; line-height:1; margin:18px 0 6px; text-transform:uppercase; }
+              .sub { color:#94a3b8; letter-spacing:3px; font-size:14px; margin-bottom:26px; }
+              .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:1; align-content:start; }
+              .t { background:rgba(255,255,255,0.06); border:1px solid rgba(212,175,55,0.35); border-radius:18px; padding:18px 14px; }
+              .ic { font-size:26px; } .v { font-size:36px; font-weight:700; color:#facc15; line-height:1.1; margin-top:4px; word-break:break-word; }
+              .l { font-size:13px; color:#cbd5e1; letter-spacing:1px; margin-top:4px; }
+              .pie { text-align:center; margin-top:18px; font-size:18px; letter-spacing:2px; }
+              .url { text-align:center; font-size:10px; color:#475569; margin-top:6px; letter-spacing:1px; }
+            """))),
+          body(div(cls := "w",
+            div(cls := "logo", "🛡️ GUARDIAN ELITE · WRAPPED"),
+            div(cls := "temp", s"TEMPORADA ${w("nombre")}"),
+            div(cls := "sub", "EL AÑO DE HÉCTOR EN LA PORTERÍA"),
+            div(cls := "grid", frag(tarjetas.map { case (ic, v, l) =>
+              div(cls := "t", div(cls := "ic", ic), div(cls := "v", v), div(cls := "l", l))
+            }: _*)),
+            div(cls := "pie", s"${w("nombreJugador").toString.capitalize} · ${w("edad")} años${if (w("categoria").toString.nonEmpty) s" · ${w("categoria")}" else ""}"),
+            div(cls := "url", TelegramService.baseUrl.replaceFirst("^https?://", ""))))).render
+        cask.Response(pagina.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+    }
   }
 
   @cask.get("/admin/season-report/:id")

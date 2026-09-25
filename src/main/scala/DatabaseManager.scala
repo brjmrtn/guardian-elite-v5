@@ -12854,6 +12854,58 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // GUARDIAN WRAPPED — resumen compartible de una temporada. Solo datos positivos y publicos
+  // (sin datos medicos, sin rubrica detallada ni analisis privados). SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  def getWrappedTemporada(seasonId: Int): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT COALESCE(nombre, categoria, 'Temporada') as nombre, categoria, fecha_inicio, fecha_fin FROM seasons WHERE id = ?")
+      ps.setInt(1, seasonId)
+      val rs = ps.executeQuery()
+      if (!rs.next()) return None
+      val nombre = fixEncoding(rs.getString("nombre")); val categoria = fixEncoding(Option(rs.getString("categoria")).getOrElse(""))
+      val inicio = Option(rs.getDate("fecha_inicio")).map(_.toLocalDate); val fin = Option(rs.getDate("fecha_fin")).map(_.toLocalDate)
+
+      val psM = conn.prepareStatement(
+        "SELECT fecha, rival, goles_contra, nota FROM matches WHERE status = 'PLAYED' AND season_id = ? ORDER BY fecha")
+      psM.setInt(1, seasonId)
+      val rsM = psM.executeQuery()
+      val partidos = Iterator.continually(rsM).takeWhile(_.next()).map(r =>
+        (fixEncoding(Option(r.getString("rival")).getOrElse("")), Option(r.getObject("goles_contra")).map(_ => r.getInt("goles_contra")), r.getDouble("nota"))).toList
+      if (partidos.isEmpty) return None
+      val conNota = partidos.filter(_._3 > 0)
+      val mejor = conNota.sortBy(-_._3).headOption
+      val pctCero = partidos.count(_._2.contains(0)) * 100 / partidos.size
+      // evolucion: media de los 5 primeros vs los 5 ultimos partidos con nota
+      val evolucion = if (conNota.size >= 6) {
+        val n = math.min(5, conNota.size / 2)
+        Some((conNota.take(n).map(_._3).sum / n, conNota.takeRight(n).map(_._3).sum / n))
+      } else None
+      val hitos = inicio.map { i =>
+        val psH = conn.prepareStatement("SELECT COUNT(*) FROM hitos_conseguidos WHERE fecha >= ? AND fecha <= ?")
+        psH.setDate(1, java.sql.Date.valueOf(i)); psH.setDate(2, java.sql.Date.valueOf(fin.getOrElse(LocalDate.now())))
+        val r = psH.executeQuery(); r.next(); r.getInt(1)
+      }.getOrElse(0)
+      // arquetipo: ultimo calculo guardado de esa temporada (no se recalcula)
+      val arquetipo = {
+        val psA = conn.prepareStatement("SELECT arquetipo_dominante FROM arquetipo_history WHERE season_id = ? ORDER BY fecha_calculo DESC, id DESC LIMIT 1")
+        psA.setInt(1, seasonId)
+        val ra = psA.executeQuery()
+        (if (ra.next()) Option(ra.getString("arquetipo_dominante")) else None).filter(_.nonEmpty).map(arquetipoDescripcion)
+      }
+      val card = getLatestCardData()
+      // edad al final de esa temporada (no la actual)
+      val edadTemporada = scala.util.Try(java.time.Period.between(LocalDate.parse(card.fechaNacimiento), fin.getOrElse(LocalDate.now())).getYears)
+        .getOrElse(calcularEdadExacta(card.fechaNacimiento))
+      val notaMedia = if (conNota.nonEmpty) Some(conNota.map(_._3).sum / conNota.size) else None
+      Some(Map("nombre" -> nombre, "categoria" -> categoria, "partidos" -> partidos.size, "pctPorteriaCero" -> pctCero, "notaMedia" -> notaMedia,
+        "mejorNota" -> mejor.map(_._3), "mejorRival" -> mejor.map(_._1), "hitos" -> hitos, "evolucion" -> evolucion,
+        "arquetipo" -> arquetipo, "edad" -> edadTemporada, "nombreJugador" -> card.nombre))
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // CALENDARIO VISUAL DE TEMPORADA — una fila por semana (lunes). SQL puro, sin Gemini
   // ═════════════════════════════════════════════════════════════════════════════
   /**
