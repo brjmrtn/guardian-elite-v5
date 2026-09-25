@@ -2392,6 +2392,80 @@ object CareerController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
   }
 
+  // Calendario visual de la temporada: una celda por semana, color segun el ACWR de esa semana
+  @cask.get("/career/calendario")
+  def calendarioPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
+    val temporadas = DatabaseManager.getTodasTemporadas()
+    val efectivo = if (temporadaId > 0) temporadaId else DatabaseManager.getTemporadaActivaId()
+    val semanas = DatabaseManager.getCalendarioTemporada(efectivo)
+    val fmt = java.time.format.DateTimeFormatter.ofPattern("d MMM", new java.util.Locale("es", "ES"))
+    def colorFondo(s: Map[String, Any]): String =
+      if (s("futura").asInstanceOf[Boolean]) "#2a2f36"
+      else s.get("nivelAcwr").flatMap(_.asInstanceOf[Option[String]]) match {
+        case Some("OPTIMO") => "#14532d"; case Some("PRECAUCION") => "#713f12"; case Some("RIESGO") => "#9a3412"
+        case Some("CRITICO") => "#7f1d1d"; case Some("BAJA") => "#1e3a5f"; case _ => "#1f2937"
+      }
+    val celdas = semanas.zipWithIndex.map { case (s, i) =>
+      val lunes = java.time.LocalDate.parse(s("semana").toString)
+      val futura = s("futura").asInstanceOf[Boolean]
+      val partidos = s("partidos").asInstanceOf[Int]; val entrenos = s("entrenos").asInstanceOf[Int]
+      val nota = s.get("notaMedia").flatMap(_.asInstanceOf[Option[Double]])
+      val cero = s.get("porteriaCero").exists(_.asInstanceOf[Boolean])
+      val hitos = s.getOrElse("hitos", Nil).asInstanceOf[List[String]]
+      val lesiones = s.getOrElse("lesiones", Nil).asInstanceOf[List[String]]
+      val acwr = s.get("acwr").flatMap(_.asInstanceOf[Option[Double]])
+      val detalle = (List(s"Semana del ${lunes.format(fmt)}${if (futura) " (prevista)" else ""}") ++
+        acwr.map(a => f"ACWR $a%.2f").toList ++
+        s.getOrElse("detallePartidos", Nil).asInstanceOf[List[String]].map("⚽ " + _) ++
+        s.getOrElse("detalleEntrenos", Nil).asInstanceOf[List[String]].map("🏋️ " + _) ++
+        hitos.map("🏆 " + _) ++ lesiones.map("🩹 " + _)).mkString("\n")
+      div(cls := "cal-celda", style := s"background:${colorFondo(s)};${if (futura) " opacity:0.6; border-style:dashed;" else ""}",
+        attr("title") := detalle, attr("data-detalle") := detalle, onclick := "calDetalle(this)",
+        div(cls := "cal-fecha", lunes.format(fmt)),
+        div(cls := "cal-iconos",
+          if (partidos > 0) span("⚽") else frag(),
+          if (entrenos > 0) span(s"🏋️$entrenos") else frag(),
+          if (cero) span("🧤") else frag(),
+          if (hitos.nonEmpty) span("🏆") else frag(),
+          if (lesiones.nonEmpty) span("🩹") else frag()),
+        nota.map(n => div(cls := "cal-nota", f"$n%.1f")).getOrElse(frag()))
+    }
+    val leyenda = div(cls := "d-flex flex-wrap gap-2 xx-small text-muted mb-3",
+      frag(Seq("#14532d" -> "Óptimo", "#713f12" -> "Precaución", "#9a3412" -> "Sobrecarga", "#7f1d1d" -> "Riesgo alto",
+        "#1e3a5f" -> "Carga baja", "#1f2937" -> "Sin datos de ACWR", "#2a2f36" -> "Semana futura (prevista)").map { case (c, t) =>
+        span(span(style := s"display:inline-block; width:12px; height:12px; border-radius:3px; background:$c; margin-right:4px; vertical-align:middle;"), t)
+      }: _*),
+      span("· ⚽ partido · 🏋️ entrenos · 🧤 portería a cero · 🏆 hito · 🩹 lesión"))
+    val content = basePage("calendario",
+      tags2.style(raw("""
+        .cal-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(84px, 1fr)); gap:6px; }
+        .cal-celda { border:1px solid #374151; border-radius:8px; padding:6px; min-height:74px; cursor:pointer; color:#f3f4f6; }
+        .cal-celda:hover { outline:2px solid #d4af37; }
+        .cal-fecha { font-size:10px; color:#cbd5e1; }
+        .cal-iconos { font-size:12px; line-height:1.4; margin-top:2px; }
+        .cal-nota { font-size:16px; font-weight:700; color:#facc15; }
+      """)),
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-10 col-12",
+          div(cls := "d-flex justify-content-between align-items-center mb-2",
+            h2(cls := "text-warning mb-0", "📅 Calendario de temporada"),
+            a(href := "/career/timeline", cls := "btn btn-sm btn-outline-secondary fw-bold", "📊 Ver como lista")),
+          seasonSelector(temporadas, efectivo, "/career/calendario"),
+          leyenda,
+          if (semanas.isEmpty) div(cls := "alert alert-secondary", "Sin semanas que mostrar.")
+          else div(cls := "cal-grid", frag(celdas: _*)),
+          div(id := "calDetalle", cls := "card bg-dark border-secondary p-3 mt-3 small", style := "display:none; white-space:pre-line;"),
+          script(raw("""
+            function calDetalle(el){
+              var d = document.getElementById('calDetalle');
+              d.textContent = el.getAttribute('data-detalle');
+              d.style.display = 'block';
+              d.scrollIntoView({behavior:'smooth', block:'nearest'});
+            }
+          """)))))
+    renderHtml(content)
+  }
+
   // BLOQUE E: timeline cronologico — "Ver más" amplia el limite en bloques de 50
   @cask.get("/career/timeline")
   def careerTimelinePage(request: cask.Request, tipo: String = "TODOS", pagina: Int = 1) = withAuth(request) {

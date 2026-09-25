@@ -12854,6 +12854,91 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // CALENDARIO VISUAL DE TEMPORADA — una fila por semana (lunes). SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  /**
+   * Semanas desde el inicio de la temporada hasta hoy (con partidos, entrenos, nota, porteria a cero,
+   * hitos, lesiones y ACWR del ultimo dia con datos de la semana) + 6 semanas futuras con las sesiones
+   * previstas por weekly_structure.
+   */
+  def getCalendarioTemporada(seasonId: Int = 0): List[Map[String, Any]] = {
+    val sid = if (seasonId > 0) seasonId else getTemporadaActivaId()
+    val conn = getConnection()
+    try {
+      val hoy = LocalDate.now()
+      val (inicioTemp, finTemp) = {
+        val ps = conn.prepareStatement("SELECT fecha_inicio, fecha_fin FROM seasons WHERE id = ?")
+        ps.setInt(1, sid)
+        val rs = ps.executeQuery()
+        if (rs.next()) (Option(rs.getDate("fecha_inicio")).map(_.toLocalDate), Option(rs.getDate("fecha_fin")).map(_.toLocalDate))
+        else (None, None)
+      }
+      // sin fecha de inicio: primera fecha con partido de la temporada (o hace 12 semanas)
+      val inicio = inicioTemp.orElse {
+        val rs = conn.createStatement().executeQuery(s"SELECT MIN(fecha) as f FROM matches WHERE status = 'PLAYED' ${seasonFilter(sid)}")
+        if (rs.next()) Option(rs.getDate("f")).map(_.toLocalDate) else None
+      }.getOrElse(hoy.minusWeeks(12))
+      val finReal = finTemp.filter(_.isBefore(hoy)).getOrElse(hoy)
+      def lunes(d: LocalDate) = d.`with`(java.time.DayOfWeek.MONDAY)
+
+      val desde = java.sql.Date.valueOf(lunes(inicio)); val hasta = java.sql.Date.valueOf(finReal)
+
+      val psM = conn.prepareStatement(
+        "SELECT fecha, rival, goles_favor, goles_contra, nota FROM matches WHERE status = 'PLAYED' AND fecha >= ? AND fecha <= ? ORDER BY fecha")
+      psM.setDate(1, desde); psM.setDate(2, hasta)
+      val rsM = psM.executeQuery()
+      val partidos = Iterator.continually(rsM).takeWhile(_.next()).map { r =>
+        (r.getDate("fecha").toLocalDate, fixEncoding(Option(r.getString("rival")).getOrElse("")),
+          Option(r.getObject("goles_favor")).map(_ => r.getInt("goles_favor")), Option(r.getObject("goles_contra")).map(_ => r.getInt("goles_contra")), r.getDouble("nota"))
+      }.toList.groupBy(p => lunes(p._1))
+
+      def fechasDe(sql: String): Map[LocalDate, List[(LocalDate, String)]] = {
+        val ps = conn.prepareStatement(sql); ps.setDate(1, desde); ps.setDate(2, hasta)
+        val rs = ps.executeQuery()
+        Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getDate(1).toLocalDate, fixEncoding(Option(r.getString(2)).getOrElse("")))).toList.groupBy(x => lunes(x._1))
+      }
+      val entrenos = fechasDe("SELECT fecha, tipo FROM trainings WHERE tipo_ausencia IS NULL AND fecha >= ? AND fecha <= ?")
+      val hitos = fechasDe("SELECT fecha, descripcion FROM hitos_conseguidos WHERE fecha >= ? AND fecha <= ?")
+      val lesiones = fechasDe("SELECT fecha_inicio, COALESCE(NULLIF(tipo, ''), 'Lesión') || COALESCE(' ' || zona, '') FROM injuries WHERE fecha_inicio >= ? AND fecha_inicio <= ?")
+
+      // ACWR diario (misma serie que el explorador de correlaciones): valor del ultimo dia con datos de cada semana
+      val acwrSemana: Map[LocalDate, Double] = variablesCorrelacion.find(_._1 == "acwr").map { case (_, _, q) =>
+        val ps = conn.prepareStatement(s"SELECT d, v FROM ($q) x WHERE v IS NOT NULL AND d >= ? AND d <= ? ORDER BY d")
+        ps.setDate(1, desde); ps.setDate(2, hasta)
+        val rs = ps.executeQuery()
+        Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getDate("d").toLocalDate, r.getDouble("v"))).toList
+          .groupBy(x => lunes(x._1)).map { case (s, l) => s -> l.maxBy(_._1.toEpochDay)._2 }
+      }.getOrElse(Map.empty)
+
+      val u = umbralesACWR()
+      val pasadas = Iterator.iterate(lunes(inicio))(_.plusWeeks(1)).takeWhile(!_.isAfter(finReal)).map { s =>
+        val ps = partidos.getOrElse(s, Nil)
+        Map[String, Any](
+          "semana" -> s.toString, "futura" -> false,
+          "partidos" -> ps.size, "entrenos" -> entrenos.getOrElse(s, Nil).size,
+          "notaMedia" -> (if (ps.exists(_._5 > 0)) Some(ps.filter(_._5 > 0).map(_._5).sum / ps.count(_._5 > 0)) else None),
+          "porteriaCero" -> ps.exists(_._4.contains(0)),
+          "hitos" -> hitos.getOrElse(s, Nil).map(_._2), "lesiones" -> lesiones.getOrElse(s, Nil).map(_._2),
+          "acwr" -> acwrSemana.get(s), "nivelAcwr" -> acwrSemana.get(s).map(a => nivelACWR(a, u)._1),
+          "detallePartidos" -> ps.map { case (f, rival, gf, gc, nota) =>
+            s"${f.getDayOfMonth}/${f.getMonthValue} vs $rival ${gf.map(_.toString).getOrElse("?")}-${gc.map(_.toString).getOrElse("?")}" + (if (nota > 0) f" · nota $nota%.1f" else "") },
+          "detalleEntrenos" -> entrenos.getOrElse(s, Nil).map(_._2).groupBy(identity).map { case (k, v) => s"$k ×${v.size}" }.toList)
+      }.toList
+
+      // Semanas futuras (si la temporada sigue abierta): sesiones previstas
+      val estructura = getWeeklyStructure().filter(_("activo").asInstanceOf[Boolean]).map(_("tipoSesion").toString)
+      val futuras = if (finTemp.exists(!_.isAfter(hoy))) Nil
+        else (1 to 6).map(i => lunes(hoy).plusWeeks(i)).filter(s => finTemp.forall(!s.isAfter(_))).map { s =>
+          Map[String, Any]("semana" -> s.toString, "futura" -> true,
+            "partidos" -> estructura.count(t => t == "PARTIDO" || t == "TORNEO"),
+            "entrenos" -> estructura.count(t => t != "PARTIDO" && t != "TORNEO"),
+            "detalleEntrenos" -> estructura.groupBy(identity).map { case (k, v) => s"$k ×${v.size} (previsto)" }.toList)
+        }.toList
+      pasadas ++ futuras
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // PROTOCOLO DE RECUPERACION (Gemini en tarea programada o al pulsar el boton; nunca en el render)
   // Cache en ai_cache con clave recuperacion_<temporada>_<semana ISO>; se regenera si el ACWR cambia > 0.2.
   // ═════════════════════════════════════════════════════════════════════════════

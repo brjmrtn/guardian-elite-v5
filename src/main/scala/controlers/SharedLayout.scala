@@ -178,7 +178,7 @@ object SharedLayout {
       "PSxG" -> "/psxg-delta", "Biomecánica" -> "/biomecanica", "Arquetipo" -> "/arquetipo", "Voz del Portero" -> "/voz-portero",
       "Influencia" -> "/gk-influence", "Scanning" -> "/scanning-rate", "Evolución" -> "/temporal", "Simulador" -> "/simulate",
       "Moneyball" -> "/moneyball", "Efecto mariposa" -> "/efecto-mariposa")),
-    ("🏆", "CARRERA", Seq("IDP / Objetivos" -> "/idp", "Legado / Hitos" -> "/career/legacy", "📖 Diario" -> "/diary", "Trayectoria" -> "/career",
+    ("🏆", "CARRERA", Seq("IDP / Objetivos" -> "/idp", "Legado / Hitos" -> "/career/legacy", "📖 Diario" -> "/diary", "📅 Calendario" -> "/career/calendario", "Trayectoria" -> "/career",
       "Digital Twin" -> "/digital-twin", "Visibilidad" -> "/visibility", "Contactos" -> "/contacts",
       "Informe captación" -> "/scouting-report", "Oportunidades" -> "/opportunities", "Pathway" -> "/pathway",
       "Techo" -> "/techo", "Mercado" -> "/market-estimator")),
