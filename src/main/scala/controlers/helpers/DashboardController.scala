@@ -220,6 +220,26 @@ object DashboardController extends cask.Routes {
         )
     }
 
+    // ── BLOQUE G: FORMA PROYECTADA PARA EL SABADO (miercoles/jueves, SQL puro) ──
+    val formaProyectadaWidget: Modifier = DatabaseManager.diasHastaPartidoSabado() match {
+      case Some(dias) =>
+        val pred = DatabaseManager.predecirFormaPartido(dias)
+        if (!pred("disponible").asInstanceOf[Boolean]) div()
+        else {
+          val ind = pred("indice").asInstanceOf[Double]
+          val sem = pred("semaforo").asInstanceOf[String]
+          div(cls := "card bg-dark border-secondary shadow-sm mb-3 p-2",
+            div(cls := "xx-small", style := "color:#e2e8f0;",
+              f"📊 Forma proyectada para el sábado: $sem $ind%.1f ",
+              span(cls := "text-muted", "(si el sueño y la carga son normales estos días)")),
+            if (sem == "🔴") div(cls := "xx-small fw-bold mt-1", style := "color:#fca5a5;",
+              "⚠️ Si el sueño no mejora estos días, Héctor llegará al partido con Índice de Forma en rojo.")
+            else frag()
+          )
+        }
+      case None => div()
+    }
+
     // ── BLOQUE A6 (RFMF): RESULTADOS DETECTADOS PENDIENTES DE CONFIRMAR ──────
     val rfmfPendientes = DatabaseManager.getPartidosRFMFPendientes()
     val rfmfPendientesWidget: Modifier =
@@ -877,6 +897,7 @@ object DashboardController extends cask.Routes {
 
         // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
         formaWidget,
+        formaProyectadaWidget,
         vozPorteroWidget,
         arquetipoWidget,
         deudaSuenoWidget,

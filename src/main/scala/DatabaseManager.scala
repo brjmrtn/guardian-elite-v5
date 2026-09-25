@@ -2958,42 +2958,12 @@ $analisisConcatenados"""
 
       val faseBio = try getBioBandingData().getOrElse("faseBio", "").toString catch { case _: Exception => "" }
 
-      val suenoScore: Double = suenoProfundoMin match {
-        case Some(m) if m > 90 => 10.0
-        case Some(m) if m >= 60 => 7.0
-        case Some(m) if m > 0 => 4.0
-        case _ =>
-          if (horasSueno >= 9) 9.0
-          else if (horasSueno >= 7) 7.0
-          else if (horasSueno > 0) 4.0
-          else 7.0
-      }
-
+      val suenoScore = formaSuenoScore(suenoProfundoMin, horasSueno)
       val energiaScore = energiaW * 2.0
       val animoScore = animoW * 2.0
-
-      val acwrScore: Double =
-        if (acwrInsuficiente) 7.0
-        else if (acwr <= 0.0) 7.0
-        else if (acwr < 0.8) 6.0
-        else if (acwr <= 1.0) 10.0
-        else if (acwr <= 1.2) 8.0
-        else if (acwr <= 1.5) 5.0
-        else 2.0
-
-      val descansoScore: Double = diasDesdePartido match {
-        case Some(1) => 4.0
-        case Some(2) => 7.0
-        case Some(d) if d >= 3 && d <= 4 => 10.0
-        case Some(d) if d >= 5 => 8.0
-        case _ => 8.0
-      }
-
-      val phvScore: Double =
-        if (faseBio.contains("PICO ACTIVO")) 6.0
-        else if (faseBio.contains("POST")) 9.0
-        else if (faseBio.nonEmpty) 9.0
-        else 8.0
+      val acwrScore = formaAcwrScore(acwr, acwrInsuficiente)
+      val descansoScore = formaDescansoScore(diasDesdePartido)
+      val phvScore = formaPhvScore(faseBio)
 
       // BLOQUE A — FC REPOSO: solo se incorpora al indice si hay >=10 registros historicos
       val rsFcCount = conn.createStatement().executeQuery(
@@ -3022,14 +2992,7 @@ $analisisConcatenados"""
 
       // BLOQUE A: deuda de sueno acumulada como factor negativo del indice de forma
       val deuda = calcularDeudaSueno()
-      val deudaDias = deuda("diasConDatos").asInstanceOf[Int]
-      val deudaHorasVal = deuda("deudaHoras").asInstanceOf[Double]
-      val deudaScore: Double =
-        if (deudaDias < 3) 0.0
-        else if (deudaHorasVal < 2) 0.0
-        else if (deudaHorasVal < 5) -0.5
-        else if (deudaHorasVal < 8) -1.5
-        else -2.5
+      val deudaScore = formaDeudaScore(deuda)
       // BLOQUE C: carga cognitiva escolar (examenes/fin de trimestre) como factor negativo adicional
       val periodoEscolarHoy = periodoEscolarEnFecha(conn, LocalDate.now().toString)
       val cognitivoScore: Double = periodoEscolarHoy match {
@@ -3058,6 +3021,136 @@ $analisisConcatenados"""
         "fcScore" -> fcScore, "tieneFcHoy" -> fcReposoHoy.isDefined, "somnolenciaScore" -> somnolenciaScore,
         "deudaSueno" -> deuda
       )
+    } finally { conn.close() }
+  }
+
+  // Componentes del Indice de Forma (0-10) — compartidos por calcularFormaHoy y predecirFormaPartido
+  private def formaSuenoScore(profundoMin: Option[Int], horas: Double): Double = profundoMin match {
+    case Some(m) if m > 90 => 10.0
+    case Some(m) if m >= 60 => 7.0
+    case Some(m) if m > 0 => 4.0
+    case _ =>
+      if (horas >= 9) 9.0
+      else if (horas >= 7) 7.0
+      else if (horas > 0) 4.0
+      else 7.0
+  }
+
+  private def formaAcwrScore(acwr: Double, insuficiente: Boolean): Double =
+    if (insuficiente) 7.0
+    else if (acwr <= 0.0) 7.0
+    else if (acwr < 0.8) 6.0
+    else if (acwr <= 1.0) 10.0
+    else if (acwr <= 1.2) 8.0
+    else if (acwr <= 1.5) 5.0
+    else 2.0
+
+  private def formaDescansoScore(diasDesdePartido: Option[Int]): Double = diasDesdePartido match {
+    case Some(1) => 4.0
+    case Some(2) => 7.0
+    case Some(d) if d >= 3 && d <= 4 => 10.0
+    case Some(d) if d >= 5 => 8.0
+    case _ => 8.0
+  }
+
+  private def formaPhvScore(faseBio: String): Double =
+    if (faseBio.contains("PICO ACTIVO")) 6.0
+    else if (faseBio.contains("POST")) 9.0
+    else if (faseBio.nonEmpty) 9.0
+    else 8.0
+
+  private def formaDeudaScore(deuda: Map[String, Any]): Double = {
+    val deudaDias = deuda("diasConDatos").asInstanceOf[Int]
+    val deudaHorasVal = deuda("deudaHoras").asInstanceOf[Double]
+    if (deudaDias < 3) 0.0
+    else if (deudaHorasVal < 2) 0.0
+    else if (deudaHorasVal < 5) -0.5
+    else if (deudaHorasVal < 8) -1.5
+    else -2.5
+  }
+
+  def formaSemaforo(indice: Double): String = if (indice >= 7.5) "🟢" else if (indice >= 5.0) "🟡" else "🔴"
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE G — PREDICCION DEL INDICE DE FORMA PARA EL DIA DE PARTIDO (SQL/matematicas, sin Gemini)
+  // ─────────────────────────────────────────────────────────────────────────────
+  /**
+   * ACWR proyectado al final del dia hoy+`diasAdelante`, asumiendo que se hacen todas las sesiones
+   * de weekly_structure (incluidas las de hoy aun no registradas). Reutiliza proyectarACWR.
+   * None si el historico es insuficiente para un ACWR fiable.
+   */
+  def acwrProyectadoHasta(diasAdelante: Int): Option[Double] = {
+    val estado = calcularACWRConEstado()
+    if (estado("status").asInstanceOf[String] == "INSUFICIENTE") return None
+    if (diasAdelante <= 0) return Some(estado("acwr").asInstanceOf[Double])
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT dia_semana, tipo_sesion FROM weekly_structure WHERE activo = TRUE")
+      var estructura = List[(Int, String)]()
+      while (rs.next()) estructura = estructura :+ (rs.getInt("dia_semana"), rs.getString("tipo_sesion"))
+      val hoy = LocalDate.now()
+      def sesionesDe(d: LocalDate): List[String] = estructura.filter(_._1 == d.getDayOfWeek.getValue).map(_._2)
+      // proyectarACWR admite una sesion por dia: se elige la de mas carga
+      def principal(d: LocalDate): String = sesionesDe(d).sortBy(t => -cargaEstimadaSesion(t)).headOption.getOrElse("DESCANSO")
+      val cargaHoyPendiente = sesionesDe(hoy).filterNot(t => sesionRegistrada(conn, hoy, t)).map(cargaEstimadaSesion).sum
+      // proyectarACWR indexa los dias +1..+7 por nombre LUNES..DOMINGO en orden: el dia +k va en la posicion k-1
+      val nombres = Seq("LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO")
+      val k = math.min(diasAdelante, 7)
+      val sesiones = (1 to k).map(i => nombres(i - 1) -> principal(hoy.plusDays(i))).toMap
+      val proy = proyectarACWR(sesiones, cargaHoyPendiente)
+      proy("dias").asInstanceOf[List[Map[String, Any]]].lift(k - 1).map(_("acwr").asInstanceOf[Double])
+    } finally { conn.close() }
+  }
+
+  /** Indice de Forma estimado para dentro de `diasHastaPartido` dias: sueno/energia/animo = media de los 3 ultimos dias. */
+  def predecirFormaPartido(diasHastaPartido: Int = 3): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT AVG(horas_sueno) FILTER (WHERE horas_sueno > 0) as horas,
+               AVG(sueno_profundo_min) FILTER (WHERE sueno_profundo_min > 0) as profundo,
+               AVG(energia) as energia, AVG(animo) as animo, COUNT(*) as n
+        FROM wellness WHERE fecha > CURRENT_DATE - 3""")
+      rs.next()
+      val n = rs.getInt("n")
+      if (n == 0) return Map("disponible" -> false)
+      val horas = rs.getDouble("horas")
+      val profundo = Option(rs.getObject("profundo")).map(_ => math.round(rs.getDouble("profundo")).toInt)
+      val energia = Option(rs.getObject("energia")).map(_ => rs.getDouble("energia")).getOrElse(3.0)
+      val animo = Option(rs.getObject("animo")).map(_ => rs.getDouble("animo")).getOrElse(3.0)
+
+      val fechaPartido = LocalDate.now().plusDays(diasHastaPartido)
+      // Carga con la que se llega a la manana del partido: sesiones hasta el dia anterior
+      val acwrProy = acwrProyectadoHasta(diasHastaPartido - 1)
+      val rsUltimo = conn.createStatement().executeQuery(
+        s"SELECT MAX(fecha) as f FROM matches WHERE status='PLAYED' ${seasonFilter(getTemporadaActivaId())}")
+      val diasDescanso = if (rsUltimo.next() && rsUltimo.getDate("f") != null)
+        Some(java.time.temporal.ChronoUnit.DAYS.between(rsUltimo.getDate("f").toLocalDate, fechaPartido).toInt) else None
+      val faseBio = try getBioBandingData().getOrElse("faseBio", "").toString catch { case _: Exception => "" }
+
+      val base = formaSuenoScore(profundo, horas) * 0.25 + energia * 2.0 * 0.20 + animo * 2.0 * 0.15 +
+        formaAcwrScore(acwrProy.getOrElse(0.0), acwrProy.isEmpty) * 0.25 + formaDescansoScore(diasDescanso) * 0.10 +
+        formaPhvScore(faseBio) * 0.05
+      val indice = math.max(0.0, base + formaDeudaScore(calcularDeudaSueno()))
+      Map("disponible" -> true, "indice" -> indice, "semaforo" -> formaSemaforo(indice),
+        "acwrProyectado" -> acwrProy, "fechaPartido" -> fechaPartido.toString)
+    } finally { conn.close() }
+  }
+
+  /** Dias hasta el sabado si hoy es miercoles o jueves y hay partido ese sabado (programado o en weekly_structure). */
+  def diasHastaPartidoSabado(): Option[Int] = {
+    val hoy = LocalDate.now()
+    val dow = hoy.getDayOfWeek.getValue
+    if (dow != 3 && dow != 4) return None
+    val sabado = hoy.plusDays(6 - dow)
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT (SELECT COUNT(*) FROM matches WHERE status='SCHEDULED' AND fecha::date = ?::date)
+             + (SELECT COUNT(*) FROM weekly_structure WHERE activo = TRUE AND dia_semana = 6 AND tipo_sesion IN ('PARTIDO','TORNEO')) as c""")
+      ps.setString(1, sabado.toString)
+      val rs = ps.executeQuery()
+      if (rs.next() && rs.getInt("c") > 0) Some(6 - dow) else None
     } finally { conn.close() }
   }
 
@@ -6287,9 +6380,10 @@ Responde en espanol, tono positivo y motivador para un nino."""
    * semanas; la aguda combina los dias reales que aun quedan en la ventana movil de 7 dias con
    * las sesiones proyectadas.
    */
-  def proyectarACWR(sesionesProximas: Map[String, String]): Map[String, Any] = {
+  def proyectarACWR(sesionesProximas: Map[String, String], cargaHoyPendiente: Double = 0.0): Map[String, Any] = {
     val diasSemana = Seq("LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO")
-    val real7 = cargasDiariasRecientes(7) // 7 valores, mas antiguo -> hoy
+    // cargaHoyPendiente: sesion prevista hoy que aun no se ha registrado (p.ej. Judo a las 21:00)
+    val real7 = cargasDiariasRecientes(7) match { case l if l.nonEmpty => l.init :+ (l.last + cargaHoyPendiente); case l => l }
     val proyectado = diasSemana.map(d => cargaEstimadaSesion(sesionesProximas.getOrElse(d, "DESCANSO"))).toList
     val combinado = real7 ++ proyectado // 14 valores: dias -6..0 (reales) + dias +1..+7 (proyectados)
 
