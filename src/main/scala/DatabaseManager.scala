@@ -8573,7 +8573,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     val sb = new StringBuilder()
     sb.append((1 to n).map(meta.getColumnName).mkString(",")).append("\n")
     def csvSafe(v: String): String = {
-      val trunc = if (v.length > 500) v.take(500) + "..." else v
+      val trunc = if (v.length > 2000) v.take(2000) + "..." else v
       trunc.replace("\r", " ").replace("\n", " ").replace(",", ";")
     }
     while (rs.next()) {
@@ -8597,7 +8597,10 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         "psicologico.csv"     -> tableToCSV(conn, "SELECT * FROM psych_records ORDER BY id ASC"),
         "lesiones.csv"        -> tableToCSV(conn, "SELECT * FROM injuries ORDER BY id ASC"),
         "contactos.csv"       -> tableToCSV(conn, "SELECT * FROM contacts ORDER BY id ASC"),
-        "oportunidades.csv"   -> tableToCSV(conn, "SELECT * FROM opportunities ORDER BY id ASC")
+        "oportunidades.csv"   -> tableToCSV(conn, "SELECT * FROM opportunities ORDER BY id ASC"),
+        "voz_portero.csv"     -> tableToCSV(conn, "SELECT * FROM voz_portero ORDER BY fecha ASC, id ASC"),
+        "arquetipo_history.csv" -> tableToCSV(conn, "SELECT * FROM arquetipo_history ORDER BY id ASC"),
+        "hitos_conseguidos.csv" -> tableToCSV(conn, "SELECT * FROM hitos_conseguidos ORDER BY fecha ASC, id ASC")
       )
     } finally { conn.close() }
   }
