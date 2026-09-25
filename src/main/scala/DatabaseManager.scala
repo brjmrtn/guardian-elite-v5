@@ -4029,6 +4029,12 @@ $analisisConcatenados"""
         """<p style="color:#fd7e14;"><strong>📚 Semana de carga escolar alta</strong> — reduce expectativas de rendimiento deportivo.</p>"""
       else ""
 
+      // Alertas positivas de la ultima semana, al principio del email
+      val positivasHtml = {
+        val pos = alertasPositivasRecientes(7).map(_._2)
+        if (pos.isEmpty) "" else s"""<h3>🌟 LO MEJOR DE LA SEMANA</h3><ul>${pos.map(p => s"<li>${escHtml(p)}</li>").mkString}</ul>"""
+      }
+
       // Diario narrativo: el primer lunes de mes, aviso con la primera frase del relato del mes anterior
       val diarioHtml = if (!incluirDiario) "" else asegurarDiarioMesAnterior().map { case (mes, contenido) =>
         val primeraFrase = contenido.split("(?<=[.!?])\\s+").headOption.getOrElse(contenido).take(220)
@@ -4057,6 +4063,7 @@ $analisisConcatenados"""
       s"""
       <html><body style="font-family:sans-serif; color:#222;">
         <h2>Guardian Elite — Resumen semana del $hoy</h2>
+        $positivasHtml
         $diarioHtml
         $alertaHtml
         $alertaCargaHtml
@@ -12865,6 +12872,148 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // ALERTAS POSITIVAS — patrones que celebrar. SQL puro, sin Gemini
+  // Cada alerta lleva una clave con lo que la provoca (partido, semana, racha...) para registrarla una vez.
+  // ═════════════════════════════════════════════════════════════════════════════
+  private case class AlertaPositiva(tipo: String, clave: String, texto: String)
+
+  private def detectarAlertasPositivasConClave(): List[AlertaPositiva] = {
+    val conn = getConnection()
+    val alertas = scala.collection.mutable.ListBuffer[AlertaPositiva]()
+    try {
+      def filas[T](sql: String)(f: java.sql.ResultSet => T): List[T] = {
+        val rs = conn.createStatement().executeQuery(sql); Iterator.continually(rs).takeWhile(_.next()).map(f).toList
+      }
+      val sf = seasonFilterActual()
+      // Partidos de la temporada actual con nota, del mas reciente al mas antiguo
+      val partidos = filas(s"""SELECT id, rival, nota, goles_contra, scanning_rate, scanning_efectivo,
+          rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud
+          FROM matches WHERE status = 'PLAYED' AND nota > 0 $sf ORDER BY fecha DESC, id DESC""") { r =>
+        def oi(c: String) = Option(r.getObject(c)).map(_ => r.getInt(c))
+        (r.getInt("id"), fixEncoding(Option(r.getString("rival")).getOrElse("")), r.getDouble("nota"), oi("goles_contra"),
+          r.getInt("scanning_rate"), r.getInt("scanning_efectivo"),
+          List("rubrica_posicion", "rubrica_decisiones", "rubrica_pies", "rubrica_comunicacion", "rubrica_actitud").map(oi))
+      }
+      partidos.headOption.foreach { case (idUlt, rivalUlt, notaUlt, gcUlt, scanUlt, scanEfUlt, _) =>
+        // 1. Racha de notas subiendo (ultimas 4-5, sin bajar)
+        val ultimas = partidos.take(5).map(_._3).reverse
+        val subiendo = ultimas.reverse.zip(ultimas.reverse.drop(1)).takeWhile { case (nueva, previa) => nueva >= previa }.size + 1
+        if (subiendo >= 4 && ultimas.takeRight(subiendo).distinct.size > 1)
+          alertas += AlertaPositiva("NOTAS_SUBEN", s"NOTAS_SUBEN_$idUlt", s"📈 Las últimas $subiendo notas de Héctor han subido consecutivamente — mejor racha de la temporada")
+        // 4. Scanning efectivo alto y mejor de la temporada
+        if (scanUlt > 0) {
+          val pct = scanEfUlt * 100 / scanUlt
+          val mejorPrevio = partidos.drop(1).filter(_._5 > 0).map(p => p._6 * 100 / p._5).maxOption.getOrElse(0)
+          if (pct >= 70 && pct > mejorPrevio)
+            alertas += AlertaPositiva("SCANNING", s"SCANNING_$idUlt", s"👁️ Scanning efectivo del $pct% en el último partido — el mejor dato de la temporada")
+        }
+        // 5. Primera porteria a cero de la temporada
+        if (gcUlt.contains(0) && !partidos.drop(1).exists(_._4.contains(0)))
+          alertas += AlertaPositiva("PRIMERA_CERO", s"PRIMERA_CERO_$idUlt", "🧤 Primera portería a cero de la temporada — hito registrado en el Legado")
+        // 7. Nota mas alta de la temporada (con al menos 3 partidos antes)
+        if (partidos.size >= 4 && notaUlt > partidos.drop(1).map(_._3).max)
+          alertas += AlertaPositiva("NOTA_MAX", s"NOTA_MAX_$idUlt", f"⭐ Nueva nota más alta de la temporada: $notaUlt%.1f/10 vs $rivalUlt")
+        // 8. Rubrica completa en los ultimos N partidos (>= 5)
+        val conRubrica = partidos.takeWhile(_._7.forall(_.isDefined)).size
+        if (conRubrica >= 5)
+          alertas += AlertaPositiva("RUBRICA", s"RUBRICA_${conRubrica}_$idUlt", s"📊 $conRubrica partidos seguidos con rúbrica completa — datos de calidad excelente")
+        // 9. Comunicacion >= 4 en los ultimos N partidos (>= 3)
+        val comunicacion = partidos.takeWhile(_._7(3).exists(_ >= 4)).size
+        if (comunicacion >= 3)
+          alertas += AlertaPositiva("COMUNICACION", s"COMUNICACION_$idUlt", s"🗣️ Comunicación ≥4 en los últimos $comunicacion partidos — Héctor está liderando la defensa")
+      }
+
+      // 2. Mejor semana de sueno del ano (semana ISO actual, >= 5 noches, frente a las anteriores del ano)
+      val semanas = filas("""SELECT TO_CHAR(fecha, 'IYYY-IW') as s, AVG(horas_sueno) as h, AVG(sueno_profundo_min) FILTER (WHERE sueno_profundo_min > 0) as p, COUNT(*) as n
+          FROM wellness WHERE horas_sueno > 0 AND EXTRACT(YEAR FROM fecha) = EXTRACT(YEAR FROM CURRENT_DATE)
+          GROUP BY 1 HAVING COUNT(*) >= 5""") { r => (r.getString("s"), r.getDouble("h"), Option(r.getObject("p")).map(_ => r.getDouble("p"))) }
+      val semanaActual = LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("YYYY-ww", java.util.Locale.forLanguageTag("es-ES")))
+      semanas.find(_._1 == semanaActual).foreach { case (s, h, p) =>
+        val previas = semanas.filter(_._1 != s)
+        if (previas.size >= 2 && h > previas.map(_._2).max)
+          alertas += AlertaPositiva("SUENO_SEMANA", s"SUENO_SEMANA_$s",
+            f"💤 Mejor semana de sueño del año — $h%.1fh de media" + p.map(x => f" con $x%.0fmin de sueño profundo").getOrElse(""))
+      }
+
+      // 3. ACWR en zona optima N semanas seguidas (valor del ultimo dia con datos de cada semana)
+      val u = umbralesACWR()
+      variablesCorrelacion.find(_._1 == "acwr").foreach { case (_, _, q) =>
+        val serie = filas(s"SELECT d, v FROM ($q) x WHERE v IS NOT NULL AND d >= CURRENT_DATE - 120 ORDER BY d") { r => (r.getDate("d").toLocalDate, r.getDouble("v")) }
+        val porSemana = serie.groupBy(x => x._1.`with`(java.time.DayOfWeek.MONDAY)).toList.sortBy(-_._1.toEpochDay)
+          .map { case (s, l) => (s, l.maxBy(_._1.toEpochDay)._2) }
+        val optimas = porSemana.takeWhile { case (_, v) => nivelACWR(v, u)._1 == "OPTIMO" }.size
+        if (optimas >= 4)
+          alertas += AlertaPositiva("ACWR_OPTIMO", s"ACWR_OPTIMO_${porSemana.head._1}", s"⚖️ $optimas semanas seguidas con ACWR en zona óptima — mejor período de carga de la temporada")
+      }
+
+      // 6. Indice de Forma en verde N dias seguidos (>= 10)
+      val formas = filas("SELECT fecha, indice_forma FROM forma_diaria WHERE fecha <= CURRENT_DATE ORDER BY fecha DESC LIMIT 120") { r => (r.getDate("fecha").toLocalDate, r.getDouble("indice_forma")) }
+      val verdes = formas.zipWithIndex.takeWhile { case ((f, v), i) => v >= 7.5 && f == LocalDate.now().minusDays(i) }.size
+      if (verdes >= 10)
+        alertas += AlertaPositiva("FORMA_VERDE", s"FORMA_VERDE_${LocalDate.now().minusDays(verdes - 1)}_$verdes", s"🟢 $verdes días seguidos con Índice de Forma en verde — mejor racha física del año")
+    } finally { conn.close() }
+
+    // 10. Racha de registro de sueno (multiplos de 7)
+    val streak = getStreakRegistro()("streakSueno").asInstanceOf[Int]
+    if (streak > 0 && streak % 7 == 0)
+      alertas += AlertaPositiva("STREAK", s"STREAK_${streak}_${LocalDate.now().minusDays(streak)}", s"🔥 $streak días seguidos registrando el sueño de Héctor — récord personal")
+    alertas.toList
+  }
+
+  def detectarAlertasPositivas(): List[String] = detectarAlertasPositivasConClave().map(_.texto)
+
+  /**
+   * Tarea programada: registra cada alerta nueva una sola vez (feature_cache) y, si es la primera de su
+   * tipo, la anade al Legado (hitos_conseguidos).
+   */
+  def registrarAlertasPositivas(): Unit = {
+    val nuevas = detectarAlertasPositivasConClave()
+    if (nuevas.isEmpty) return
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO NOTHING")
+      val hito = conn.prepareStatement(
+        "INSERT INTO hitos_conseguidos (tipo, descripcion, fecha, contexto) VALUES (?, ?, CURRENT_DATE, 'Alerta positiva') ON CONFLICT (tipo) DO NOTHING")
+      nuevas.foreach { a =>
+        ps.setString(1, s"alerta_pos_${a.clave}")
+        ps.setString(2, ujson.write(ujson.Obj("texto" -> a.texto, "enviada" -> false)))
+        if (ps.executeUpdate() > 0) {
+          hito.setString(1, s"POSITIVA_${a.tipo}"); hito.setString(2, a.texto); hito.executeUpdate()
+        }
+      }
+    } finally { conn.close() }
+  }
+
+  /** Alertas registradas en los ultimos `dias` dias: (clave, texto, enviada). */
+  private def alertasPositivasRecientes(dias: Int): List[(String, String, Boolean)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT cache_key, payload FROM feature_cache WHERE cache_key LIKE 'alerta_pos_%' AND updated_at >= NOW() - (? * INTERVAL '1 day') ORDER BY updated_at ASC")
+      ps.setInt(1, dias)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).flatMap { r =>
+        scala.util.Try(ujson.read(r.getString("payload"))).toOption.map(j => (r.getString("cache_key"), j("texto").str, j("enviada").bool))
+      }.toList
+    } finally { conn.close() }
+  }
+
+  /** Telegram: como mucho una alerta positiva al dia (la mas antigua sin enviar de los ultimos 3 dias). */
+  def siguienteAlertaPositivaTelegram(): Option[String] =
+    alertasPositivasRecientes(3).find(!_._3).flatMap { case (clave, texto, _) =>
+      if (!tgMarcarRecordatorio("POSITIVA")) None
+      else {
+        val conn = getConnection()
+        try {
+          val ps = conn.prepareStatement("UPDATE feature_cache SET payload = ? WHERE cache_key = ?")
+          ps.setString(1, ujson.write(ujson.Obj("texto" -> texto, "enviada" -> true))); ps.setString(2, clave); ps.executeUpdate()
+        } finally { conn.close() }
+        Some(texto)
+      }
+    }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // RETOS DE HECTOR — un reto semanal para el nino (Gemini solo en la tarea programada o con el boton)
   // ═════════════════════════════════════════════════════════════════════════════
   private def lunesDe(d: LocalDate): LocalDate = d.`with`(java.time.DayOfWeek.MONDAY)
@@ -14432,6 +14581,8 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
         if (esLunes && cuenta("SELECT COUNT(*) FROM physical_growth WHERE peso > 0 AND fecha > CURRENT_DATE - 7") == 0 && tgMarcarRecordatorio("PESO"))
           msgs += "⚖️ Sin registro de peso esta semana.\nPESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
       }
+      // Alertas positivas: como mucho una al dia
+      if (hora >= 9 && hora < 21) siguienteAlertaPositivaTelegram().foreach(msgs += _)
       // Retos de Hector: se asegura el de la semana (desde el lunes a las 7:00) y se avisa una vez por semana
       if (hora >= 7 && hora < 22) {
         val semana = hoy.`with`(java.time.DayOfWeek.MONDAY).toString

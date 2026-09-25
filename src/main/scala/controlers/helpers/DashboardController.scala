@@ -87,6 +87,15 @@ object DashboardController extends cask.Routes {
       case None => div()
     }
 
+    // ── ALERTAS POSITIVAS (verde suave; riesgo = rojo, recordatorios = amarillo) ──
+    val alertasPositivasWidget: Modifier = {
+      val pos = DatabaseManager.detectarAlertasPositivas()
+      if (pos.isEmpty) frag()
+      else div(cls := "mb-3",
+        frag(pos.map(p => div(cls := "small p-2 mb-2 rounded fw-bold",
+          style := "background:rgba(34,197,94,0.12); border-left:5px solid #22c55e; color:#bbf7d0;", p)): _*))
+    }
+
     // ── BLOQUE O: ENFERMEDAD INCIPIENTE (FC sube + energia y animo bajan, SQL puro) ──
     val enfermedadWidget: Modifier = DatabaseManager.detectarEnfermedadIncipiente() match {
       case Some(msg) => div(cls := "alert alert-warning small p-2 mb-3", style := "border-left:6px solid #facc15;", msg)
@@ -934,6 +943,7 @@ object DashboardController extends cask.Routes {
         riesgoCriticoAlert,
         desgasteWidget,
         enfermedadWidget,
+        alertasPositivasWidget,
         div(cls := "text-center mb-3", style := "background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%); border-radius:16px; padding:22px; border:1px solid #334155;",
           div(style := "font-size:12px; color:#94a3b8; letter-spacing:2px;", "ÍNDICE DE FORMA HOY"),
           div(style := s"font-size:64px; font-weight:900; color:$colorForma; line-height:1.1;", f"$semaforo $indice%.1f")),
@@ -984,6 +994,7 @@ object DashboardController extends cask.Routes {
         // ── BLOQUE 5.6: DESGASTE SILENCIOSO (prioridad maxima sobre todo lo demas) ─
         desgasteWidget,
         enfermedadWidget,
+        alertasPositivasWidget,
 
         // ── BLOQUE C: MODO DIA DE PARTIDO ───────────────────────────────────
         diaPartidoBanner,
