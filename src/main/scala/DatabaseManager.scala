@@ -191,6 +191,8 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS sueno_ligero_min INT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS sueno_despierto_min INT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS fc_reposo INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS somnolencia INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE wellness ADD COLUMN IF NOT EXISTS dolor_muscular INT DEFAULT NULL")
       // Import FC por captura: exige una fila unica por fecha. logWellness ya guardaba
       // una fila nueva en cada guardado (sin upsert), asi que antes de forzar la
       // unicidad fusionamos duplicados historicos conservando la fila mas reciente.
@@ -2929,8 +2931,10 @@ $analisisConcatenados"""
     val conn = getConnection()
     try {
       val rsW = conn.createStatement().executeQuery(
-        "SELECT horas_sueno, sueno_profundo_min, energia, animo, fc_reposo FROM wellness WHERE fecha >= CURRENT_DATE - 1 ORDER BY fecha DESC LIMIT 1")
+        "SELECT horas_sueno, sueno_profundo_min, energia, animo, fc_reposo, somnolencia FROM wellness WHERE fecha >= CURRENT_DATE - 1 ORDER BY fecha DESC LIMIT 1")
+      var somnolenciaHoy: Option[Int] = None
       val (horasSueno, suenoProfundoMin, energiaW, animoW, fcReposoHoy) = if (rsW.next()) {
+        somnolenciaHoy = Option(rsW.getObject("somnolencia")).map(_ => rsW.getInt("somnolencia"))
         val spObj = rsW.getObject("sueno_profundo_min")
         val sp = if (spObj == null) None else Some(rsW.getInt("sueno_profundo_min"))
         val fcObj = rsW.getObject("fc_reposo")
@@ -3032,7 +3036,9 @@ $analisisConcatenados"""
         case Some("EXAMENES") | Some("TRIMESTRE_FIN") => -0.5
         case _ => 0.0
       }
-      val forma = Math.max(0.0, formaBase + deudaScore + cognitivoScore)
+      // BLOQUE F: somnolencia diurna (0-3) — sueno poco reparador aunque las horas cuadren
+      val somnolenciaScore: Double = if (somnolenciaHoy.exists(_ >= 2)) -0.5 else 0.0
+      val forma = Math.max(0.0, formaBase + deudaScore + cognitivoScore + somnolenciaScore)
 
       val upsert = conn.prepareStatement("""
         INSERT INTO forma_diaria (fecha, indice_forma, sueno_score, energia_score, animo_score, acwr_score, descanso_score, phv_score)
@@ -3049,7 +3055,7 @@ $analisisConcatenados"""
         "indiceForma" -> forma,
         "suenoScore" -> suenoScore, "energiaScore" -> energiaScore, "animoScore" -> animoScore,
         "acwrScore" -> acwrScore, "descansoScore" -> descansoScore, "phvScore" -> phvScore,
-        "fcScore" -> fcScore, "tieneFcHoy" -> fcReposoHoy.isDefined,
+        "fcScore" -> fcScore, "tieneFcHoy" -> fcReposoHoy.isDefined, "somnolenciaScore" -> somnolenciaScore,
         "deudaSueno" -> deuda
       )
     } finally { conn.close() }
@@ -3136,7 +3142,13 @@ $analisisConcatenados"""
         else if (energiaMedia > 0 && energiaMedia < 3.5) 0.5
         else 0.0
 
-      val riesgo = math.min(10.0, acwrFactor + phvFactor + descansoFactor + fcFactor + fatigaFactor)
+      // BLOQUE F: dolor muscular / agujetas de hoy (0-3)
+      val rsDm = conn.createStatement().executeQuery(
+        "SELECT dolor_muscular FROM wellness WHERE fecha >= CURRENT_DATE - 1 AND dolor_muscular IS NOT NULL ORDER BY fecha DESC LIMIT 1")
+      val dolorMuscular = if (rsDm.next()) rsDm.getInt("dolor_muscular") else 0
+      val dolorMuscularFactor = if (dolorMuscular >= 3) 1.5 else if (dolorMuscular >= 2) 0.5 else 0.0
+
+      val riesgo = math.min(10.0, acwrFactor + phvFactor + descansoFactor + fcFactor + fatigaFactor + dolorMuscularFactor)
       val (clasificacion, semaforo) =
         if (riesgo < 2.0) ("BAJO", "🟢")
         else if (riesgo < 4.0) ("MEDIO", "🟡")
@@ -3149,11 +3161,12 @@ $analisisConcatenados"""
       if (descansoFactor > 0) factoresActivos += s"$diasConsecutivos días seguidos sin descanso"
       if (fcFactor > 0) factoresActivos += "FC en reposo elevada"
       if (fatigaFactor > 0) factoresActivos += "Energía baja en los últimos días"
+      if (dolorMuscularFactor > 0) factoresActivos += (if (dolorMuscular >= 3) "Dolor muscular fuerte" else "Dolor muscular moderado")
 
       Map(
         "riesgo" -> riesgo, "clasificacion" -> clasificacion, "semaforo" -> semaforo,
         "acwrFactor" -> acwrFactor, "phvFactor" -> phvFactor, "descansoFactor" -> descansoFactor,
-        "fcFactor" -> fcFactor, "fatigaFactor" -> fatigaFactor, "factoresActivos" -> factoresActivos.toList
+        "fcFactor" -> fcFactor, "fatigaFactor" -> fatigaFactor, "dolorMuscularFactor" -> dolorMuscularFactor, "factoresActivos" -> factoresActivos.toList
       )
     } finally { conn.close() }
   }
@@ -9100,7 +9113,8 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                    suenoProfundoMin: Option[Int] = None, suenoLigeroMin: Option[Int] = None, suenoDespiertoMin: Option[Int] = None,
                    tallaSentadoCm: Option[Double] = None, longitudPiernaCm: Option[Double] = None,
                    kgMusculo: Option[Double] = None, kgMasaOsea: Option[Double] = None,
-                   fcReposo: Option[Int] = None): Unit = {
+                   fcReposo: Option[Int] = None,
+                   somnolencia: Option[Int] = None, dolorMuscular: Option[Int] = None): Unit = {
     val conn=getConnection()
     try {
       // Upsert por fecha: wellness.fecha es unica (ver initDB), asi que guardar dos
@@ -9108,20 +9122,21 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       // fc_reposo se conserva si esta llamada no trae uno nuevo, para no borrar
       // una medicion ya importada desde la captura del smartwatch.
       val s=conn.prepareStatement("""
-        INSERT INTO wellness (fecha, sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min, fc_reposo)
-        VALUES (CURRENT_DATE, ?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO wellness (fecha, sueno, horas_sueno, energia, dolor, zona_dolor, altura, peso, animo, notas_conducta, estado_fisico, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min, fc_reposo, somnolencia, dolor_muscular)
+        VALUES (CURRENT_DATE, ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (fecha) DO UPDATE SET
           sueno = EXCLUDED.sueno, horas_sueno = EXCLUDED.horas_sueno, energia = EXCLUDED.energia, dolor = EXCLUDED.dolor,
           zona_dolor = EXCLUDED.zona_dolor, altura = EXCLUDED.altura, peso = EXCLUDED.peso, animo = EXCLUDED.animo,
           notas_conducta = EXCLUDED.notas_conducta, estado_fisico = EXCLUDED.estado_fisico,
           sueno_profundo_min = EXCLUDED.sueno_profundo_min, sueno_ligero_min = EXCLUDED.sueno_ligero_min,
           sueno_despierto_min = EXCLUDED.sueno_despierto_min,
-          fc_reposo = COALESCE(EXCLUDED.fc_reposo, wellness.fc_reposo)
+          fc_reposo = COALESCE(EXCLUDED.fc_reposo, wellness.fc_reposo),
+          somnolencia = EXCLUDED.somnolencia, dolor_muscular = EXCLUDED.dolor_muscular
       """)
       s.setInt(1,sueno); s.setDouble(2, horas); s.setInt(3,energia); s.setInt(4,dolor); s.setString(5,fixEncoding(zona)); s.setInt(6, altura); s.setDouble(7, peso); s.setInt(8, animo); s.setString(9, fixEncoding(notas)); s.setString(10, estadoFisico)
       def setOptInt(idx: Int, v: Option[Int]): Unit = v match { case Some(x) => s.setInt(idx, x); case None => s.setNull(idx, java.sql.Types.INTEGER) }
       setOptInt(11, suenoProfundoMin); setOptInt(12, suenoLigeroMin); setOptInt(13, suenoDespiertoMin)
-      setOptInt(14, fcReposo)
+      setOptInt(14, fcReposo); setOptInt(15, somnolencia); setOptInt(16, dolorMuscular)
       s.executeUpdate()
       if(altura > 0 && peso > 0) logGrowth(altura.toDouble, peso, tallaSentadoCm, longitudPiernaCm, kgMusculo, kgMasaOsea)
     } finally { conn.close() }
