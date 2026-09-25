@@ -4645,7 +4645,8 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
       val (pj, pcs, avgNota) = if (rsR.next()) (rsR.getInt("pj"), rsR.getInt("pcs"), rsR.getDouble("avg_nota")) else (0, 0, 0.0)
 
       // Forma reciente (ultimos 5 partidos)
-      val rsF = conn.createStatement().executeQuery("SELECT AVG(nota) as avg, SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END) as pcs, COUNT(*) as pj FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 5")
+      // (agregar sobre una subconsulta: AVG(...) con ORDER BY fecha LIMIT 5 en la misma consulta es SQL invalido)
+      val rsF = conn.createStatement().executeQuery("SELECT AVG(nota) as avg, SUM(CASE WHEN goles_contra=0 THEN 1 ELSE 0 END) as pcs, COUNT(*) as pj FROM (SELECT nota, goles_contra FROM matches WHERE status='PLAYED' ORDER BY fecha DESC LIMIT 5) ultimos")
       val (formaAvg, formaPcs, formaPj) = if (rsF.next()) (rsF.getDouble("avg"), rsF.getInt("pcs"), rsF.getInt("pj")) else (0.0, 0, 5)
 
       // Sueno ultima noche
