@@ -124,7 +124,9 @@ object GuardianServer extends cask.Main {
             BackupService.enviarResumenEmail(emailDest, html)
           }
           // BLOQUE G3: mismo contenido del resumen, en texto plano, por Telegram
-          val textoPlano = html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim
+          // (sin la alerta de carga: el bot ya la manda como mensaje propio a las 8:00, BLOQUE R)
+          val textoPlano = DatabaseManager.generarResumenSemanal(incluirAlertaCarga = false)
+            .replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim
           TelegramService.enviar(textoPlano)
         } catch { case e: Exception =>
           println(s"[Resumen Email] ERROR: ${e.getMessage.take(200)}")

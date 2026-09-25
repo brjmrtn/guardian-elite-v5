@@ -3153,6 +3153,21 @@ $analisisConcatenados"""
     } finally { conn.close() }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE R — PREDICCION DE SOBRECARGA PROACTIVA (se usa el lunes: email y Telegram)
+  // ─────────────────────────────────────────────────────────────────────────────
+  /**
+   * ACWR proyectado al final del sabado si Hector completa TODAS las sesiones de weekly_structure
+   * de aqui al sabado (incluidas las de hoy y el partido). Alerta si supera 1.5.
+   */
+  def predecirSobrecargaSemana(): Option[String] = {
+    val dow = LocalDate.now().getDayOfWeek.getValue
+    if (dow > 5) return None
+    acwrProyectadoHasta(6 - dow).filter(_ > 1.5).map { acwr =>
+      f"⚠️ ALERTA DE CARGA: Si Héctor completa todas las sesiones previstas esta semana, llegará al partido del sábado con ACWR proyectado de $acwr%.2f (zona de riesgo). Considera reducir la intensidad del jueves o hablar con el entrenador."
+    }
+  }
+
   /** Dias hasta el sabado si hoy es miercoles o jueves y hay partido ese sabado (programado o en weekly_structure). */
   def diasHastaPartidoSabado(): Option[Int] = {
     val hoy = LocalDate.now()
@@ -3842,7 +3857,7 @@ $analisisConcatenados"""
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE G — RESUMEN SEMANAL POR EMAIL (SQL puro, sin Gemini)
   // ─────────────────────────────────────────────────────────────────────────────
-  def generarResumenSemanal(): String = {
+  def generarResumenSemanal(incluirAlertaCarga: Boolean = true): String = {
     val conn = getConnection()
     try {
       val hoy = LocalDate.now()
@@ -3941,10 +3956,15 @@ $analisisConcatenados"""
         """<p style="color:#fd7e14;"><strong>📚 Semana de carga escolar alta</strong> — reduce expectativas de rendimiento deportivo.</p>"""
       else ""
 
+      // BLOQUE R: ACWR proyectado al sabado si se hacen todas las sesiones previstas
+      val alertaCargaHtml = if (!incluirAlertaCarga) "" else
+        predecirSobrecargaSemana().map(a => s"""<p style="color:#dc3545;"><strong>${escHtml(a)}</strong></p>""").getOrElse("")
+
       s"""
       <html><body style="font-family:sans-serif; color:#222;">
         <h2>Guardian Elite — Resumen semana del $hoy</h2>
         $alertaHtml
+        $alertaCargaHtml
         $cargaEscolarHtml
         <h3>⚽ Partidos ($numPartidos)</h3>
         <ul>$partidosHtml</ul>
@@ -13256,6 +13276,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
         if (cuenta("SELECT COUNT(*) FROM wellness WHERE fc_reposo IS NOT NULL AND fecha > CURRENT_DATE - 3") == 0 && tgMarcarRecordatorio("FC", 3))
           msgs += "❤️ Sin datos de FC esta semana.\nFC [bpm]\nEjemplo: FC 58"
         detectarEnfermedadIncipiente().foreach { m => if (tgMarcarRecordatorio("ENFERMEDAD")) msgs += m }
+        if (esLunes) predecirSobrecargaSemana().foreach { m => if (tgMarcarRecordatorio("SOBRECARGA")) msgs += m }
         if (esLunes && cuenta("SELECT COUNT(*) FROM physical_growth WHERE peso > 0 AND fecha > CURRENT_DATE - 7") == 0 && tgMarcarRecordatorio("PESO"))
           msgs += "⚖️ Sin registro de peso esta semana.\nPESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
       }
