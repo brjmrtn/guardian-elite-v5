@@ -12861,7 +12861,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     case "RUBRICA" => "Rúbrica (posición/decisiones/pies/comunicación/actitud, 1-5 cada una):\nRUBRICA 4 3 3 4 5\n(SALTAR para dejarlo para la app)"
     case "GOL" =>
       val n = s.golesRegistrados + 1
-      (if (n == 1) s"Encajaste ${s.golesPendientes} goles. GOL 1:\n" else s"GOL $n de ${s.golesPendientes}:\n") +
+      (if (n == 1) s"Encajaste ${s.golesPendientes} ${if (s.golesPendientes == 1) "gol" else "goles"}. GOL 1:\n" else s"GOL $n de ${s.golesPendientes}:\n") +
         "GOL [zona] [situación] [posición] [cuarto]\n" +
         "Zonas: ALTO_DER/ALTO_IZQ/ALTO_CEN/BAJO_DER/BAJO_IZQ/BAJO_CEN\n" +
         "Situaciones: REMATE/CABEZA/FALLO/1V1/PENALTI/FALTA\n" +
