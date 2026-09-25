@@ -2402,6 +2402,84 @@ object CareerController extends cask.Routes {
     renderHtml(content)
   }
 
+  // BLOQUE I: explorador de correlaciones — SQL puro (CORR), el calculo solo se hace al pulsar el boton
+  @cask.get("/correlaciones")
+  def correlacionesPage(request: cask.Request, x: String = "", y: String = "", temporadaId: Int = 0) = withAuth(request) {
+    val vars = DatabaseManager.variablesCorrelacion
+    val etiqueta = vars.map(v => v._1 -> v._2).toMap
+    val temporadas = DatabaseManager.getTodasTemporadas()
+    val xSel = if (etiqueta.contains(x)) x else "sueno_profundo"
+    val ySel = if (etiqueta.contains(y)) y else "nota"
+
+    def selector(nombre: String, sel: String): Modifier =
+      select(name := nombre, cls := "form-select form-select-sm bg-dark text-white border-secondary",
+        frag(vars.map { case (k, et, _) => if (k == sel) option(value := k, selected, et) else option(value := k, et) }: _*))
+
+    val formulario = form(action := "/correlaciones", method := "get", cls := "row g-2 align-items-end mb-3",
+      div(cls := "col-6 col-md-4", label(cls := "xx-small text-muted fw-bold", "Variable X"), selector("x", xSel)),
+      div(cls := "col-6 col-md-4", label(cls := "xx-small text-muted fw-bold", "Variable Y"), selector("y", ySel)),
+      div(cls := "col-12 col-md-4", label(cls := "xx-small text-muted fw-bold", "Temporada"),
+        select(name := "temporadaId", cls := "form-select form-select-sm bg-dark text-white border-secondary",
+          option(value := "0", "Todas"),
+          frag(temporadas.map { t =>
+            val id = t("id").asInstanceOf[Int]
+            if (id == temporadaId) option(value := id.toString, selected, t("nombre").toString) else option(value := id.toString, t("nombre").toString)
+          }: _*))),
+      div(cls := "col-12 d-grid", button(tpe := "submit", cls := "btn btn-warning fw-bold", "📊 Ver correlación")))
+
+    val resultado: Modifier =
+      if (x.isEmpty || y.isEmpty) div(cls := "text-muted small text-center py-3", "Elige dos variables y pulsa «Ver correlación».")
+      else if (x == y) div(cls := "alert alert-warning small", "Elige dos variables distintas.")
+      else {
+        val r = DatabaseManager.getCorrelacionPersonalizada(xSel, ySel, temporadaId)
+        val puntos = r("puntos").asInstanceOf[Int]
+        if (!r("suficiente").asInstanceOf[Boolean])
+          div(cls := "alert alert-secondary small", s"Solo hay $puntos días con ambos datos registrados. Se necesitan al menos 10 para una correlación fiable.")
+        else {
+          val corr = r("correlacion").asInstanceOf[Option[Double]].get
+          val pares = r("pares").asInstanceOf[List[(Double, Double, String)]]
+          val pendiente = r("pendiente").asInstanceOf[Option[Double]].getOrElse(0.0)
+          val ordenada = r("ordenada").asInstanceOf[Option[Double]].getOrElse(0.0)
+          val color = if (math.abs(corr) >= 0.4) (if (corr > 0) "#20c997" else "#ef4444") else "#94a3b8"
+          val xs = pares.map(_._1)
+          val (xMin, xMax) = (xs.min, xs.max)
+          val puntosJs = pares.map { case (a, b, d) => s"{x:$a,y:$b,d:'$d'}" }.mkString("[", ",", "]")
+          val lineaJs = s"[{x:$xMin,y:${pendiente * xMin + ordenada}},{x:$xMax,y:${pendiente * xMax + ordenada}}]"
+          frag(
+            div(cls := "card bg-dark border-secondary p-3 mb-3 text-center",
+              div(cls := "xx-small text-muted", s"${etiqueta(xSel)} vs ${etiqueta(ySel)} · $puntos días"),
+              div(style := s"font-size:40px; font-weight:900; color:$color;", f"r = $corr%.2f"),
+              div(cls := "small text-white", r("interpretacion").asInstanceOf[String]),
+              div(cls := "xx-small text-muted mt-1", "Correlación no implica causalidad: indica que ambas variables se mueven juntas.")),
+            div(cls := "card bg-dark border-secondary p-2 mb-3", div(style := "height:320px;", canvas(id := "corrChart"))),
+            script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+            script(raw(s"""
+              new Chart(document.getElementById('corrChart'), {
+                type: 'scatter',
+                data: { datasets: [
+                  { label: 'Días', data: $puntosJs, backgroundColor: 'rgba(212,175,55,0.75)', pointRadius: 5 },
+                  { type: 'line', label: 'Tendencia', data: $lineaJs, borderColor: '$color', borderWidth: 2, pointRadius: 0, fill: false }
+                ]},
+                options: { maintainAspectRatio: false,
+                  plugins: { legend: { labels: { color: '#cbd5e1' } },
+                    tooltip: { callbacks: { label: function(c){ var p=c.raw; return (p.d ? p.d + ': ' : '') + p.x.toFixed(2) + ' / ' + p.y.toFixed(2); } } } },
+                  scales: {
+                    x: { title: { display: true, text: ${ujson.Str(etiqueta(xSel)).render()}, color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                    y: { title: { display: true, text: ${ujson.Str(etiqueta(ySel)).render()}, color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } } } }
+              });
+            """)))
+        }
+      }
+
+    val content = basePage("correlaciones",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-warning mb-3", "🔬 Explorador de correlaciones"),
+          formulario,
+          resultado)))
+    renderHtml(content)
+  }
+
   // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
   @cask.get("/benchmark")
   def benchmarkPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {

@@ -12376,6 +12376,81 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE I — EXPLORADOR DE CORRELACIONES — Pearson con CORR() de PostgreSQL, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  /** Variable -> (etiqueta, subconsulta que devuelve una fila por fecha con columnas d y v). */
+  val variablesCorrelacion: Seq[(String, String, String)] = Seq(
+    ("nota", "⭐ Nota del partido",
+      "SELECT fecha::date as d, AVG(nota) as v FROM matches WHERE status='PLAYED' AND nota > 0 GROUP BY fecha::date"),
+    ("sueno_profundo", "😴 Sueño profundo (min)",
+      "SELECT fecha as d, AVG(sueno_profundo_min)::float as v FROM wellness WHERE sueno_profundo_min > 0 GROUP BY fecha"),
+    ("energia", "⚡ Energía (1-5)",
+      "SELECT fecha as d, AVG(energia)::float as v FROM wellness WHERE energia IS NOT NULL GROUP BY fecha"),
+    ("animo", "🙂 Ánimo (1-5)",
+      "SELECT fecha as d, AVG(animo)::float as v FROM wellness WHERE animo IS NOT NULL GROUP BY fecha"),
+    ("fc_reposo", "❤️ FC en reposo",
+      "SELECT fecha as d, AVG(fc_reposo)::float as v FROM wellness WHERE fc_reposo IS NOT NULL GROUP BY fecha"),
+    // ACWR del dia (aguda 7d / cronica 28d) con la misma formula de carga que getWorkloads
+    ("acwr", "📈 ACWR",
+      """WITH cargas AS (
+           SELECT fecha::date as f, minutos * 4.0 as l FROM matches WHERE status='PLAYED' AND fecha IS NOT NULL
+           UNION ALL
+           SELECT fecha::date, 60.0 * COALESCE(rpe, 0) * (1 + COALESCE(fb_distancia, 0) * 0.05) FROM trainings WHERE fecha IS NOT NULL
+         ), dias AS (SELECT DISTINCT f FROM cargas)
+         SELECT dias.f as d,
+           ((SELECT SUM(c.l) FROM cargas c WHERE c.f BETWEEN (dias.f - INTERVAL '6 days')::date AND dias.f) / 7.0) /
+           NULLIF((SELECT SUM(c.l) FROM cargas c WHERE c.f BETWEEN (dias.f - INTERVAL '27 days')::date AND dias.f) / 28.0, 0) as v
+         FROM dias WHERE dias.f >= (SELECT MIN(f) FROM cargas) + 21"""),
+    ("paradas", "🧤 Paradas",
+      "SELECT fecha::date as d, AVG(paradas)::float as v FROM matches WHERE status='PLAYED' GROUP BY fecha::date"),
+    ("cpi", "🎯 CPI",
+      "SELECT fecha::date as d, AVG(cpi) as v FROM matches WHERE status='PLAYED' AND cpi IS NOT NULL GROUP BY fecha::date"),
+    ("scanning_rate", "👁️ Scanning rate",
+      "SELECT fecha::date as d, AVG(scanning_rate)::float as v FROM matches WHERE status='PLAYED' AND scanning_rate > 0 GROUP BY fecha::date"),
+    ("temperatura", "🌡️ Temperatura",
+      "SELECT fecha::date as d, AVG(temperatura)::float as v FROM matches WHERE status='PLAYED' AND temperatura IS NOT NULL GROUP BY fecha::date")
+  )
+
+  def getCorrelacionPersonalizada(varX: String, varY: String, seasonId: Int = 0): Map[String, Any] = {
+    val qx = variablesCorrelacion.find(_._1 == varX).map(_._3)
+    val qy = variablesCorrelacion.find(_._1 == varY).map(_._3)
+    if (qx.isEmpty || qy.isEmpty || varX == varY) return Map("valido" -> false, "puntos" -> 0)
+    val conn = getConnection()
+    try {
+      // Temporada: se filtra por su rango de fechas para que aplique igual a partidos y a wellness
+      val filtroTemporada = if (seasonId > 0)
+        """AND x.d >= COALESCE((SELECT fecha_inicio FROM seasons WHERE id = ?), DATE '1900-01-01')
+           AND x.d <= COALESCE((SELECT fecha_fin FROM seasons WHERE id = ?), CURRENT_DATE)""" else ""
+      def bindTemporada(ps: java.sql.PreparedStatement): Unit =
+        if (seasonId > 0) { ps.setInt(1, seasonId); ps.setInt(2, seasonId) }
+      val base = s"FROM (${qx.get}) x JOIN (${qy.get}) y ON y.d = x.d WHERE x.v IS NOT NULL AND y.v IS NOT NULL $filtroTemporada"
+
+      val psAgg = conn.prepareStatement(s"SELECT CORR(x.v, y.v) as correlacion, COUNT(*) as puntos, REGR_SLOPE(y.v, x.v) as pendiente, REGR_INTERCEPT(y.v, x.v) as ordenada $base")
+      bindTemporada(psAgg)
+      val rs = psAgg.executeQuery(); rs.next()
+      val puntos = rs.getInt("puntos")
+      def optD(c: String) = Option(rs.getObject(c)).map(_ => rs.getDouble(c))
+      val corr = optD("correlacion"); val pendiente = optD("pendiente"); val ordenada = optD("ordenada")
+
+      val psPts = conn.prepareStatement(s"SELECT x.d, x.v as xv, y.v as yv $base ORDER BY x.d")
+      bindTemporada(psPts)
+      val rp = psPts.executeQuery()
+      val pares = Iterator.continually(rp).takeWhile(_.next()).map(r => (r.getDouble("xv"), r.getDouble("yv"), r.getDate("d").toString)).toList
+
+      val interpretacion = corr match {
+        case Some(r) =>
+          val a = math.abs(r)
+          val fuerza = if (a >= 0.7) "fuerte" else if (a >= 0.4) "moderada" else if (a >= 0.2) "débil" else "prácticamente nula"
+          val sentido = if (a < 0.2) "" else if (r > 0) " positiva (cuando una sube, la otra tiende a subir)" else " negativa (cuando una sube, la otra tiende a bajar)"
+          s"Relación $fuerza$sentido."
+        case None => "Sin variación suficiente para calcular la correlación."
+      }
+      Map("valido" -> true, "correlacion" -> corr, "puntos" -> puntos, "pendiente" -> pendiente, "ordenada" -> ordenada,
+        "pares" -> pares, "interpretacion" -> interpretacion, "suficiente" -> (puntos >= 10 && corr.isDefined))
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE E — TIMELINE CRONOLOGICO DE LA CARRERA — SQL puro, sin Gemini
   // ═════════════════════════════════════════════════════════════════════════════
   /** Eventos de todas las fuentes ordenados por fecha. tipo: TODOS | PARTIDO | HITO | LESION | CRECIMIENTO | VOZ_PORTERO. */
