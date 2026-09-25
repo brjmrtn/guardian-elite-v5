@@ -875,6 +875,32 @@ object DashboardController extends cask.Routes {
       )
     }
 
+    // ── BLOQUE F: FASE DE GUARDIAN (SQL puro) — modal propio, sin JS de Bootstrap ──
+    val faseGuardian = DatabaseManager.getFaseGuardian()
+    val faseGuardianModal: Modifier = {
+      val siguiente = faseGuardian("siguiente").asInstanceOf[Option[Map[String, Any]]]
+      val faltan = faseGuardian("faltan").asInstanceOf[List[String]]
+      div(id := "faseGuardianModal", onclick := "if(event.target===this)this.style.display='none'",
+        style := "display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:2000; padding:16px; overflow:auto;",
+        div(style := "max-width:460px; margin:60px auto; background:#0f172a; border:1px solid #334155; border-radius:14px; padding:18px; color:#e2e8f0;",
+          div(cls := "d-flex justify-content-between align-items-start mb-2",
+            div(cls := "fw-bold", s"${faseGuardian("emoji")} Fase ${faseGuardian("numero")} — ${faseGuardian("nombre")}"),
+            span(style := "cursor:pointer; color:#94a3b8;", onclick := "document.getElementById('faseGuardianModal').style.display='none'", "✕")),
+          div(cls := "small mb-2", faseGuardian("descripcion").toString),
+          div(cls := "xx-small text-muted fw-bold", "MÓDULOS ACTIVOS"),
+          ul(cls := "small mb-2", frag(faseGuardian("modulosActivos").asInstanceOf[List[String]].map(li(_)): _*)),
+          siguiente match {
+            case Some(sig) => frag(
+              div(cls := "xx-small text-muted fw-bold", s"SIGUIENTE: ${sig("emoji")} FASE ${sig("numero")} — ${sig("nombre")}"),
+              div(cls := "small mb-1", s"Se activará: ${sig("modulosActivos").asInstanceOf[List[String]].mkString(", ")}."),
+              if (faltan.nonEmpty) div(cls := "xx-small", style := "color:#facc15;", s"Faltan: ${faltan.mkString(" · ")}.") else frag())
+            case None => div(cls := "small text-success", "Fase máxima alcanzada.")
+          },
+          div(cls := "xx-small text-muted mt-2",
+            s"Datos: ${faseGuardian("totalPartidos")} partidos · ${faseGuardian("totalSemanasSueno")} semanas con sueño · ${faseGuardian("totalTemporadas")} temporadas.")),
+        script(raw("function abrirFaseGuardian(){ document.getElementById('faseGuardianModal').style.display='block'; }")))
+    }
+
     // ── BLOQUE M: PESTANA "HOY" — solo lo accionable del dia (el resto sigue en COMPLETO) ──
     val hoyTab: Modifier = {
       val indice = formaHoy("indiceForma").asInstanceOf[Double]
@@ -899,6 +925,7 @@ object DashboardController extends cask.Routes {
       button(tpe := "button", id := "tabBtnCompleto", cls := "btn btn-outline-secondary fw-bold flex-fill", onclick := "mostrarTabDashboard('completo')", "📊 COMPLETO"))
 
     val content = basePage("home",
+      faseGuardianModal,
       tabsNav,
       div(id := "tabHoy", hoyTab),
       div(id := "tabCompleto", style := "display:none;",
@@ -996,6 +1023,9 @@ object DashboardController extends cask.Routes {
                 div(style := "display:inline-block; margin-bottom:8px; font-size:9px; color:#94a3b8; background:#1e293b; border:1px solid #334155; border-radius:6px; padding:2px 8px;",
                   s"📅 $temporadaActivaNombre")
               ),
+              // BLOQUE F: fase actual de Guardian — al pulsar abre el detalle
+              div(style := "font-size:9px; color:#94a3b8; margin:-4px 0 8px; cursor:pointer;", onclick := "abrirFaseGuardian()",
+                s"${faseGuardian("emoji")} Guardian — Fase ${faseGuardian("numero")}: ${faseGuardian("nombre").toString.toLowerCase.capitalize} ⓘ"),
               // KPIs rápidos
               div(cls := "row g-2",
                 frag(Seq(

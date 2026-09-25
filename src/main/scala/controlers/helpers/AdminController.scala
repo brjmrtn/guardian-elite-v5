@@ -662,8 +662,21 @@ object AdminController extends cask.Routes {
       case None if cruce.size >= 3 => div(cls := "small text-success mb-2", s"✅ Tu rúbrica coincide con el análisis de vídeo de la IA (${cruce.size} partidos comparados).")
       case None => frag()
     }
+    // BLOQUE F: fase de Guardian y progreso hacia la siguiente
+    val fase = DatabaseManager.getFaseGuardian()
+    val faltan = fase("faltan").asInstanceOf[List[String]]
+    val siguiente = fase("siguiente").asInstanceOf[Option[Map[String, Any]]]
+    val faseWidget: Modifier = div(cls := "mb-3",
+      div(cls := "fw-bold small text-white", s"${fase("emoji")} Guardian — Fase ${fase("numero")}: ${fase("nombre")}"),
+      div(cls := "xx-small text-muted", fase("descripcion").toString),
+      siguiente match {
+        case Some(sig) if faltan.nonEmpty =>
+          div(cls := "xx-small mt-1", style := "color:#facc15;", s"Faltan ${faltan.mkString(" y ")} para entrar en Fase ${sig("numero")}.")
+        case _ => frag()
+      })
     div(cls := "card bg-dark border-info shadow mb-4 p-3", id := "calidadDatos",
       h5(cls := "text-info", "🔍 CALIDAD DE DATOS"),
+      faseWidget,
       div(cls := "xx-small text-muted fw-bold mb-2", "SESGO EN LA RÚBRICA"),
       sesgoWidget, cruceWidget,
       if (!sesgo("suficiente").asInstanceOf[Boolean] && cruce.size < 3)

@@ -12714,6 +12714,74 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE F — FASES DE GUARDIAN (transparencia sobre cuantos datos hay). SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  private val fasesGuardian: Seq[Map[String, Any]] = Seq(
+    Map("numero" -> 1, "nombre" -> "CONSTRUCCIÓN", "emoji" -> "🏗️",
+      "descripcion" -> "Guardian está acumulando datos. Los análisis avanzados se activarán progresivamente.",
+      "modulosActivos" -> List("Sueño", "ACWR básico", "Rúbrica", "La Voz del Portero", "Índice de Forma")),
+    Map("numero" -> 2, "nombre" -> "APRENDIZAJE", "emoji" -> "🌱",
+      "descripcion" -> "Los primeros patrones están emergiendo. Resultados orientativos.",
+      "modulosActivos" -> List("Arquetipo (orientativo)", "Z-Score (orientativo)", "Firma de fatiga (básica)")),
+    Map("numero" -> 3, "nombre" -> "ANÁLISIS", "emoji" -> "📊",
+      "descripcion" -> "Base de datos sólida. Los análisis son estadísticamente fiables.",
+      "modulosActivos" -> List("Simulador What-if", "Correlaciones robustas", "CPI fiable", "Firma de fatiga consolidada")),
+    Map("numero" -> 4, "nombre" -> "HISTÓRICO", "emoji" -> "🔬",
+      "descripcion" -> "Guardian tiene suficiente historia para análisis longitudinal completo.",
+      "modulosActivos" -> List("Markov Career Pathing", "Comparativa longitudinal", "Predicciones")))
+
+  /** seasonId = 0: todos los datos (la fase es del sistema, no de una temporada). */
+  def getFaseGuardian(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    val (totalPartidos, totalSemanasSueno, totalTemporadas) = try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT
+          (SELECT COUNT(*) FROM matches WHERE status = 'PLAYED' ${seasonFilter(seasonId)}) as partidos,
+          (SELECT COUNT(DISTINCT TO_CHAR(fecha, 'IYYY-IW')) FROM wellness WHERE horas_sueno > 0) as semanas_sueno,
+          (SELECT COUNT(DISTINCT season_id) FROM matches WHERE status = 'PLAYED' AND season_id IS NOT NULL) as temporadas""")
+      rs.next()
+      (rs.getInt("partidos"), rs.getInt("semanas_sueno"), rs.getInt("temporadas"))
+    } finally { conn.close() }
+    val numero =
+      if (totalPartidos < 5 || totalSemanasSueno < 3) 1
+      else if (totalPartidos < 25 || totalSemanasSueno < 12) 2
+      else if (totalPartidos < 60 || totalTemporadas < 2) 3
+      else 4
+    // Requisitos para la siguiente fase: (partidos, semanas con sueno, temporadas)
+    val siguienteReq: Option[(Int, Int, Int)] = numero match {
+      case 1 => Some((5, 3, 0)); case 2 => Some((25, 12, 0)); case 3 => Some((60, 0, 2)); case _ => None
+    }
+    val faltan: List[String] = siguienteReq.toList.flatMap { case (p, s, t) =>
+      List(
+        if (totalPartidos < p) Some(s"${p - totalPartidos} partidos con datos") else None,
+        if (totalSemanasSueno < s) Some(s"${s - totalSemanasSueno} semanas con sueño registrado") else None,
+        if (totalTemporadas < t) Some(s"${t - totalTemporadas} temporada(s) más") else None).flatten
+    }
+    fasesGuardian(numero - 1) ++ Map(
+      "totalPartidos" -> totalPartidos, "totalSemanasSueno" -> totalSemanasSueno, "totalTemporadas" -> totalTemporadas,
+      "siguiente" -> fasesGuardian.lift(numero), "faltan" -> faltan)
+  }
+
+  /** Mensaje de Telegram si la fase ha subido desde la ultima comprobacion (la primera vez solo se guarda). */
+  def comprobarCambioFaseGuardian(): Option[String] = {
+    val fase = getFaseGuardian()
+    val numero = fase("numero").asInstanceOf[Int]
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT payload FROM feature_cache WHERE cache_key = 'fase_guardian'")
+      val anterior = if (rs.next()) rs.getString("payload").toIntOption else None
+      if (!anterior.contains(numero)) {
+        val ps = conn.prepareStatement(
+          "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('fase_guardian', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
+        ps.setString(1, numero.toString); ps.executeUpdate()
+      }
+      anterior.filter(_ < numero).map { _ =>
+        s"📊 Guardian entra en Fase $numero — ${fase("descripcion")} Nuevos módulos activos: ${fase("modulosActivos").asInstanceOf[List[String]].mkString(", ")}."
+      }
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE E — RPE FUNCIONAL DE HECTOR (SQL puro, sin Gemini)
   // ═════════════════════════════════════════════════════════════════════════════
   val etiquetasRpeHector: Seq[String] = Seq("Fresco", "Normal", "Algo cansado", "Muy cansado", "Agotado")
@@ -13633,6 +13701,8 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       }
       if (hora == 20 && pendiente("ACADEMIA") && tgMarcarRecordatorio("ACADEMIA"))
         msgs += "🎓 ¿Cómo fue la academia de porteros?\nACADEMIA [duración min] [RPE 1-10] [atención 1-5] [calidad 1-5]\nEjemplo: ACADEMIA 60 6 5 4\nO si no fue: ACADEMIA NO [motivo]"
+      // BLOQUE F: aviso de cambio de fase de Guardian (se comprueba en cada pasada, se envia una vez)
+      if (hora >= 8 && hora < 22) comprobarCambioFaseGuardian().foreach(msgs += _)
       // BLOQUE E2: pregunta del RPE de Hector (nunca de noche: entre 22:00 y 8:00 espera a la manana)
       if (hora >= 8 && hora < 22) tgPreguntaRpePendiente(TelegramService.chatIdConfigurado).foreach(msgs += _)
       if (hora == 21) {
