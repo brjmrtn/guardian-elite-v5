@@ -2256,5 +2256,73 @@ object MatchController extends cask.Routes {
     renderHtml(content)
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE H — SHAREABLE MATCH CARD (540px, pensada para captura de pantalla)
+  // Solo datos publicos: nada de rubrica, analisis IA ni datos medicos.
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.get("/match-center/:matchId/card")
+  def matchShareCard(request: cask.Request, matchId: Int) = withAuth(request) {
+    DatabaseManager.getMatchCardData(matchId) match {
+      case None => renderRedirect("/history")
+      case Some(m) =>
+        val card = DatabaseManager.getLatestCardData()
+        val gf = m("golesFavor").asInstanceOf[Option[Int]]
+        val gc = m("golesContra").asInstanceOf[Option[Int]]
+        val nota = m("nota").asInstanceOf[Double]
+        val resultado = (gf, gc) match { case (Some(f), Some(c)) => s"$f - $c"; case _ => "—" }
+        val (resColor, resLabel) = (gf, gc) match {
+          case (Some(f), Some(c)) if f > c => ("#20c997", "VICTORIA")
+          case (Some(f), Some(c)) if f == c => ("#facc15", "EMPATE")
+          case (Some(_), Some(_)) => ("#ef4444", "DERROTA")
+          case _ => ("#94a3b8", "")
+        }
+        val porteriaCero = gc.contains(0)
+        val fecha = scala.util.Try(java.time.LocalDate.parse(m("fecha").asInstanceOf[String]))
+          .map(_.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", new java.util.Locale("es", "ES")))).getOrElse("")
+        val competicion = if (m("torneoNombre").asInstanceOf[String].nonEmpty) m("torneoNombre").asInstanceOf[String] else m("tipoPartido").asInstanceOf[String]
+        val notaColor = if (nota >= 7) "#20c997" else if (nota >= 5) "#facc15" else "#ef4444"
+
+        val miniCarta = div(style := "width:120px; height:170px; background:linear-gradient(160deg,#f5d77a,#d4af37 55%,#a8841f); border-radius:14px; color:#2f2f2f; position:relative; box-shadow:0 8px 20px rgba(0,0,0,.5); overflow:hidden; flex-shrink:0;",
+          div(style := "position:absolute; top:8px; left:10px; line-height:1; text-align:center;",
+            div(style := "font-size:30px; font-weight:700;", card.media.toString),
+            div(style := "font-size:12px; font-weight:700;", card.posicion)),
+          if (card.fotoUrl.nonEmpty) img(src := card.fotoUrl, style := "position:absolute; right:4px; top:10px; width:80px; height:95px; object-fit:cover; border-radius:8px;") else frag(),
+          div(style := "position:absolute; bottom:28px; width:100%; text-align:center; font-size:15px; font-weight:700; letter-spacing:1px;", card.nombre),
+          div(style := "position:absolute; bottom:8px; width:100%; display:flex; justify-content:space-around; font-size:9px; font-weight:700;",
+            span(s"DIV ${card.div}"), span(s"REF ${card.ref}"), span(s"POS ${card.pos}")))
+
+        val pagina = doctype("html")(html(
+          head(
+            meta(charset := "utf-8"),
+            meta(name := "viewport", content := "width=device-width, initial-scale=1"),
+            link(rel := "stylesheet", href := "https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap"),
+            tags2.title(s"Héctor vs ${m("rival")}")
+          ),
+          body(style := "margin:0; background:#0b0f19; font-family:'Oswald',sans-serif; display:flex; justify-content:center; padding:20px 0;",
+            div(style := "width:540px; max-width:100vw; box-sizing:border-box; background:radial-gradient(circle at 20% 0%, #1e293b 0%, #0f172a 55%, #020617 100%); border:1px solid #d4af37; border-radius:22px; padding:26px; color:#fff; text-transform:uppercase;",
+              div(style := "display:flex; justify-content:space-between; align-items:center; font-size:12px; letter-spacing:2px; color:#d4af37;",
+                span("🛡️ GUARDIAN ELITE"), span(style := "color:#94a3b8;", m("temporada").asInstanceOf[String])),
+              div(style := "display:flex; gap:22px; align-items:center; margin-top:22px;",
+                miniCarta,
+                div(style := "flex:1; min-width:0;",
+                  div(style := "font-size:12px; color:#94a3b8; letter-spacing:2px;", "VS"),
+                  div(style := "font-size:28px; font-weight:700; line-height:1.1; word-wrap:break-word;", m("rival").asInstanceOf[String]),
+                  div(style := s"font-size:46px; font-weight:700; color:$resColor; line-height:1.1; margin-top:6px;", resultado),
+                  if (resLabel.nonEmpty) div(style := s"font-size:12px; letter-spacing:3px; color:$resColor;", resLabel) else frag())),
+              div(style := "display:flex; gap:12px; margin-top:22px;",
+                div(style := "flex:1; background:rgba(255,255,255,.05); border-radius:12px; padding:12px; text-align:center;",
+                  div(style := "font-size:11px; color:#94a3b8; letter-spacing:2px;", "NOTA"),
+                  div(style := s"font-size:34px; font-weight:700; color:$notaColor;", f"$nota%.1f")),
+                if (porteriaCero) div(style := "flex:1.4; background:rgba(32,201,151,.12); border:1px solid #20c997; border-radius:12px; padding:12px; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:700; color:#20c997; letter-spacing:1px;",
+                  "🧤 PORTERÍA A CERO") else frag()),
+              div(style := "display:flex; justify-content:space-between; margin-top:20px; font-size:12px; color:#94a3b8; letter-spacing:1px;",
+                span(fecha), span(competicion))
+            )
+          )
+        ))
+        cask.Response(pagina.render.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+    }
+  }
+
   initialize()
 }

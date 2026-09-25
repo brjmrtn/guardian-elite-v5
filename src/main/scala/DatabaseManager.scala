@@ -12348,6 +12348,34 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE H — SHAREABLE MATCH CARD: solo datos publicos (sin rubrica, analisis ni datos medicos)
+  // ═════════════════════════════════════════════════════════════════════════════
+  def getMatchCardData(matchId: Int): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT m.rival, m.goles_favor, m.goles_contra, m.nota, m.fecha, m.tipo_partido, m.torneo_nombre,
+               COALESCE(s.nombre, s.categoria, '') as temporada
+        FROM matches m LEFT JOIN seasons s ON s.id = m.season_id
+        WHERE m.id = ? AND m.status = 'PLAYED'""")
+      ps.setInt(1, matchId)
+      val rs = ps.executeQuery()
+      if (!rs.next()) None
+      else {
+        def optInt(c: String) = Option(rs.getObject(c)).map(_ => rs.getInt(c))
+        Some(Map(
+          "rival" -> fixEncoding(Option(rs.getString("rival")).getOrElse("")),
+          "golesFavor" -> optInt("goles_favor"), "golesContra" -> optInt("goles_contra"),
+          "nota" -> rs.getDouble("nota"),
+          "fecha" -> Option(rs.getDate("fecha")).map(_.toString).getOrElse(""),
+          "tipoPartido" -> Option(rs.getString("tipo_partido")).getOrElse(""),
+          "torneoNombre" -> fixEncoding(Option(rs.getString("torneo_nombre")).getOrElse("")),
+          "temporada" -> fixEncoding(rs.getString("temporada"))))
+      }
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE E — TIMELINE CRONOLOGICO DE LA CARRERA — SQL puro, sin Gemini
   // ═════════════════════════════════════════════════════════════════════════════
   /** Eventos de todas las fuentes ordenados por fecha. tipo: TODOS | PARTIDO | HITO | LESION | CRECIMIENTO | VOZ_PORTERO. */
