@@ -700,10 +700,6 @@ object DatabaseManager {
         created_at               TIMESTAMP DEFAULT NOW()
       )""")
 
-      // ── PHV Mirwald: antropometria adicional para maturity offset ───────────
-      stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS talla_sentado_cm DOUBLE PRECISION DEFAULT NULL")
-      stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS longitud_pierna_cm DOUBLE PRECISION DEFAULT NULL")
-
       // ─────────────────────────────────────────────────────────────────────────────
       // BLOQUE B1 — IDP: PLAN DE DESARROLLO INDIVIDUAL
       // ─────────────────────────────────────────────────────────────────────────────
@@ -868,6 +864,10 @@ object DatabaseManager {
         peso                DOUBLE PRECISION,
         velocidad_crecimiento DOUBLE PRECISION DEFAULT 0
       )""")
+      // PHV Mirwald: antropometria adicional para maturity offset (antes iba antes del CREATE
+      // y en una base de datos nueva initDB fallaba con "relation physical_growth does not exist")
+      stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS talla_sentado_cm DOUBLE PRECISION DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS longitud_pierna_cm DOUBLE PRECISION DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS kg_musculo DOUBLE PRECISION DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE physical_growth ADD COLUMN IF NOT EXISTS kg_masa_osea DOUBLE PRECISION DEFAULT NULL")
 
