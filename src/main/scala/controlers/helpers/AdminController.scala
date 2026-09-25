@@ -701,6 +701,29 @@ object AdminController extends cask.Routes {
     renderHtml(content)
   }
   // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE N — WEBHOOK DEL BOT DE TELEGRAM (sin withAuth: lo llama Telegram)
+  // Doble control: cabecera secreta registrada en setWebhook + chat_id == TELEGRAM_CHAT_ID.
+  // Si no coincide se ignora sin responder. Siempre 200 para que Telegram no reintente.
+  // ─────────────────────────────────────────────────────────────────────────────
+  @cask.post("/telegram/webhook")
+  def telegramWebhook(request: cask.Request) = {
+    val ok = cask.Response("ok".getBytes("UTF-8"))
+    val secreto = request.headers.get("x-telegram-bot-api-secret-token").flatMap(_.headOption).getOrElse("")
+    if (TelegramService.secretoWebhook.nonEmpty && secreto == TelegramService.secretoWebhook) {
+      try {
+        val update = ujson.read(new String(request.data.readAllBytes(), "UTF-8"))
+        update.obj.get("message").foreach { m =>
+          val chatId = m("chat")("id") match { case n: ujson.Num => n.num.toLong.toString; case v => v.toString }
+          val texto = m.obj.get("text").collect { case s: ujson.Str => s.str }.getOrElse("")
+          if (chatId == TelegramService.chatIdConfigurado && texto.trim.nonEmpty)
+            TelegramService.enviarA(chatId, DatabaseManager.parseTelegramMessage(texto, chatId))
+        }
+      } catch { case e: Exception => println(s"[Telegram webhook] ERROR: ${e.getMessage.take(200)}") }
+    }
+    ok
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE H4 — FIX DE ENCODING EN REGISTROS HISTORICOS (mantenimiento, solo auth)
   // ─────────────────────────────────────────────────────────────────────────────
   @cask.get("/admin/fix-encoding")

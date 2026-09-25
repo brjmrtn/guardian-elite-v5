@@ -164,6 +164,27 @@ object GuardianServer extends cask.Main {
     java.util.concurrent.TimeUnit.MILLISECONDS
   )
 
+  // ── TELEGRAM BOT BIDIRECCIONAL (BLOQUE N) ──────────────────────────────────
+  // Registra el webhook una vez al arrancar y revisa cada 10 min si toca algun recordatorio
+  // (la hora se evalua en Europe/Madrid y cada aviso se envia como mucho una vez al dia).
+  new Thread(() => TelegramService.registrarWebhook(), "telegram-webhook-register").start()
+  val telegramExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r => {
+    val t = new Thread(r, "telegram-recordatorios")
+    t.setDaemon(true)
+    t
+  })
+  telegramExecutor.scheduleAtFixedRate(
+    new Runnable {
+      def run(): Unit = {
+        try DatabaseManager.tgRecordatoriosPendientes().foreach(TelegramService.enviar)
+        catch { case e: Exception => println(s"[Telegram recordatorios] ERROR: ${e.getMessage.take(200)}") }
+      }
+    },
+    60 * 1000L,
+    10 * 60 * 1000L,
+    java.util.concurrent.TimeUnit.MILLISECONDS
+  )
+
   override def host: String = "0.0.0.0"
   override def port: Int    = sys.env.getOrElse("PORT", "8081").toInt
 

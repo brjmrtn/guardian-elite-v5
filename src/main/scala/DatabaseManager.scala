@@ -310,6 +310,19 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS fb_tiempo_activo INT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS fb_aceleraciones INT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS fb_desaceleraciones INT DEFAULT NULL")
+      // BLOQUE N: duracion real de la sesion (la registra el bot de Telegram; la carga sigue usando 60*rpe)
+      stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS duracion_min INT DEFAULT NULL")
+      // BLOQUE N: estado de la conversacion con el bot de Telegram (un registro por chat)
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS telegram_session (
+        chat_id           TEXT PRIMARY KEY,
+        flujo             TEXT DEFAULT NULL,
+        paso              TEXT DEFAULT NULL,
+        match_id_temp     INT DEFAULT NULL,
+        training_id_temp  INT DEFAULT NULL,
+        goles_pendientes  INT DEFAULT 0,
+        goles_registrados INT DEFAULT 0,
+        updated_at        TIMESTAMP DEFAULT NOW()
+      )""")
       // BLOQUE D: Vídeo IA en entrenamientos
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS video_analisis_ia TEXT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS video_analisis_fecha TIMESTAMP DEFAULT NULL")
@@ -2939,7 +2952,10 @@ $analisisConcatenados"""
         val sp = if (spObj == null) None else Some(rsW.getInt("sueno_profundo_min"))
         val fcObj = rsW.getObject("fc_reposo")
         val fc = if (fcObj == null) None else Some(rsW.getInt("fc_reposo"))
-        (rsW.getDouble("horas_sueno"), sp, rsW.getInt("energia"), rsW.getInt("animo"), fc)
+        // NULL (fila creada solo con sueno o FC, p.ej. desde Telegram) cuenta como neutro, no como 0
+        val energiaOpt = Option(rsW.getObject("energia")).map(_ => rsW.getInt("energia")).getOrElse(3)
+        val animoOpt = Option(rsW.getObject("animo")).map(_ => rsW.getInt("animo")).getOrElse(3)
+        (rsW.getDouble("horas_sueno"), sp, energiaOpt, animoOpt, fc)
       } else (0.0, None: Option[Int], 3, 3, None: Option[Int])
 
       // FIX 2: si el historico es insuficiente (<3 semanas con datos), acwr_score neutro en vez de penalizar
@@ -9308,10 +9324,10 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                    fbDistancia: Option[Double] = None, fbAltaIntensidad: Option[Int] = None, fbSprintMax: Option[Double] = None,
                    fbPctActividad: Option[Int] = None, fbTiempoActivo: Option[Int] = None,
                    fbAceleraciones: Option[Int] = None, fbDesaceleraciones: Option[Int] = None,
-                   fecha: String = "", tipoAusencia: Option[String] = None): Unit = {
+                   fecha: String = "", tipoAusencia: Option[String] = None, duracionMin: Option[Int] = None): Int = {
     val conn=getConnection()
     try {
-      val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle, feedback_entrenador, fb_distancia, fb_alta_intensidad, fb_sprint_max, fb_pct_actividad, fb_tiempo_activo, fb_aceleraciones, fb_desaceleraciones, fecha, tipo_ausencia) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::date,?)")
+      val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle, feedback_entrenador, fb_distancia, fb_alta_intensidad, fb_sprint_max, fb_pct_actividad, fb_tiempo_activo, fb_aceleraciones, fb_desaceleraciones, fecha, tipo_ausencia, duracion_min) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::date,?,?) RETURNING id")
       s.setString(1,tipo); s.setString(2,fixEncoding(foco)); s.setInt(3,rpe); s.setInt(4,calidad); s.setInt(5, atencion); s.setString(6,fixEncoding(rutina))
       if (feedbackEntrenador.nonEmpty) s.setString(7, fixEncoding(feedbackEntrenador)) else s.setNull(7, java.sql.Types.VARCHAR)
       def setOptDouble(idx: Int, v: Option[Double]): Unit = v match { case Some(x) => s.setDouble(idx, x); case None => s.setNull(idx, java.sql.Types.DOUBLE) }
@@ -9329,9 +9345,12 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         case Some(t) if t.nonEmpty => s.setString(16, t)
         case _ => s.setNull(16, java.sql.Types.VARCHAR)
       }
-      s.executeUpdate()
+      setOptInt(17, duracionMin)
+      val rsId = s.executeQuery()
+      val id = if (rsId.next()) rsId.getInt("id") else -1
       conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE")
       if (tipo.contains("Papa")) progressDrills()
+      id
     } finally { conn.close() }
   }
 
@@ -12536,6 +12555,670 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       val rs = ps.executeQuery()
       Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("rival")).trim).toList.distinct
     } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE N — TELEGRAM BOT BIDIRECCIONAL (sin Gemini: solo parseo de texto y SQL)
+  // Solo tablas Elite. La sesion guarda en que paso de cada flujo esta la conversacion.
+  // ═════════════════════════════════════════════════════════════════════════════
+  private case class TgSesion(flujo: Option[String] = None, paso: Option[String] = None,
+                              matchId: Option[Int] = None, trainingId: Option[Int] = None,
+                              golesPendientes: Int = 0, golesRegistrados: Int = 0)
+
+  /** Sesion activa del chat. Una conversacion abandonada caduca a las 6 horas. */
+  private def tgSesion(chatId: String): TgSesion = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT * FROM telegram_session WHERE chat_id = ? AND updated_at > NOW() - INTERVAL '6 hours'")
+      ps.setString(1, chatId)
+      val rs = ps.executeQuery()
+      if (!rs.next()) TgSesion()
+      else {
+        def optInt(c: String) = Option(rs.getObject(c)).map(_ => rs.getInt(c))
+        TgSesion(Option(rs.getString("flujo")), Option(rs.getString("paso")), optInt("match_id_temp"), optInt("training_id_temp"),
+          rs.getInt("goles_pendientes"), rs.getInt("goles_registrados"))
+      }
+    } finally { conn.close() }
+  }
+
+  private def tgGuardarSesion(chatId: String, s: TgSesion): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        INSERT INTO telegram_session (chat_id, flujo, paso, match_id_temp, training_id_temp, goles_pendientes, goles_registrados, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+        ON CONFLICT (chat_id) DO UPDATE SET flujo = EXCLUDED.flujo, paso = EXCLUDED.paso, match_id_temp = EXCLUDED.match_id_temp,
+          training_id_temp = EXCLUDED.training_id_temp, goles_pendientes = EXCLUDED.goles_pendientes,
+          goles_registrados = EXCLUDED.goles_registrados, updated_at = NOW()""")
+      ps.setString(1, chatId)
+      s.flujo match { case Some(v) => ps.setString(2, v); case None => ps.setNull(2, java.sql.Types.VARCHAR) }
+      s.paso match { case Some(v) => ps.setString(3, v); case None => ps.setNull(3, java.sql.Types.VARCHAR) }
+      s.matchId match { case Some(v) => ps.setInt(4, v); case None => ps.setNull(4, java.sql.Types.INTEGER) }
+      s.trainingId match { case Some(v) => ps.setInt(5, v); case None => ps.setNull(5, java.sql.Types.INTEGER) }
+      ps.setInt(6, s.golesPendientes); ps.setInt(7, s.golesRegistrados)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  private def tgLimpiarSesion(chatId: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("DELETE FROM telegram_session WHERE chat_id = ?")
+      ps.setString(1, chatId); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** UPDATE parcial de un partido. Los nombres de columna son constantes internas, nunca texto del usuario. */
+  private def tgActualizarPartido(matchId: Int, campos: Seq[(String, Any)]): Unit = {
+    if (campos.isEmpty) return
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(s"UPDATE matches SET ${campos.map(c => s"${c._1} = ?").mkString(", ")} WHERE id = ?")
+      campos.zipWithIndex.foreach { case ((_, v), i) =>
+        v match {
+          case x: Int => ps.setInt(i + 1, x)
+          case x: Double => ps.setDouble(i + 1, x)
+          case x: Boolean => ps.setBoolean(i + 1, x)
+          case x: String => ps.setString(i + 1, x)
+          case _ => ps.setNull(i + 1, java.sql.Types.NULL)
+        }
+      }
+      ps.setInt(campos.size + 1, matchId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  private def tgNum(s: String): Option[Double] = s.replace(",", ".").toDoubleOption
+  private def tgInt(s: String): Option[Int] = s.toIntOption
+  private def tgEnRango(v: Option[Int], min: Int, max: Int): Option[Int] = v.filter(x => x >= min && x <= max)
+
+  // Zonas del bot -> codigos de zona_gol que usa el formulario web (T/M/B = alto/medio/bajo, L/C/R)
+  private val tgZonas: Map[String, String] = Map(
+    "ALTO_IZQ" -> "TL", "ALTO_CEN" -> "TC", "ALTO_DER" -> "TR",
+    "BAJO_IZQ" -> "BL", "BAJO_CEN" -> "BC", "BAJO_DER" -> "BR")
+  private val tgSituaciones: Map[String, (String, String)] = Map( // codigo -> (origen, situacion) como en el formulario web
+    "REMATE" -> ("Otro", "Remate"), "CABEZA" -> ("Otro", "Remate cabeza"), "FALLO" -> ("Error defensivo", "Otro"),
+    "1V1" -> ("Otro", "1 vs 1"), "PENALTI" -> ("Penalti", "Penalti"), "FALTA" -> ("Falta directa", "Otro"))
+  private val tgPosiciones = Set("BIEN_PLANTADO", "PASO_NEGATIVO", "DESPLAZAMIENTO_TARDIO", "IMPARABLE")
+  // Minuto representativo de cada cuarto, coherente con los cortes de saveMinutoGoles (12/25/37)
+  private val tgCuartos: Map[String, Int] = Map("Q1" -> 6, "Q2" -> 19, "Q3" -> 31, "Q4" -> 44)
+  private val tgRegulaciones = Set("HABLA_SOLO", "RESPIRA", "ENFADO", "NEUTRAL", "REORGANIZA", "DECAIDO")
+  private val tgComandos = Set("SUEÑO", "SUENO", "FC", "PARTIDO", "RUBRICA", "GOL", "PARADAS", "CONTEXTO", "EXTRAS", "1V1",
+    "JUDO", "CLUB", "ACADEMIA", "PESO", "APP", "SALTAR", "LISTO", "SI", "NO", "NINGUNO", "ESTADO", "AYUDA")
+
+  def parseTelegramMessage(texto: String, chatId: String): String = {
+    try {
+      val upper = texto.trim.toUpperCase
+      // Pasos de texto libre (factor externo / feedback del entrenador): cualquier cosa que no sea un comando
+      val primera = upper.split("\\s+").headOption.getOrElse("")
+      val ses = tgSesion(chatId)
+      if (!tgComandos.contains(primera) && ses.paso.contains("FACTOR")) return handleFactor(texto.trim, chatId, ses)
+      if (!tgComandos.contains(primera) && ses.paso.contains("FEEDBACK")) return handleFeedback(texto.trim, chatId, ses)
+
+      if (upper.startsWith("SUEÑO") || upper.startsWith("SUENO")) handleSueno(texto, chatId)
+      else if (upper.startsWith("FC "))        handleFC(texto, chatId)
+      else if (upper.startsWith("PARTIDO "))   handlePartidoStep1(texto, chatId)
+      else if (upper.startsWith("RUBRICA "))   handleRubrica(texto, chatId)
+      else if (upper.startsWith("GOL "))       handleGol(texto, chatId)
+      else if (upper.startsWith("PARADAS "))   handleParadas(texto, chatId)
+      else if (upper.startsWith("CONTEXTO "))  handleContexto(texto, chatId)
+      else if (upper.startsWith("EXTRAS "))    handleExtras(texto, chatId)
+      else if (upper.startsWith("1V1 "))       handle1v1(texto, chatId)
+      else if (upper.startsWith("JUDO "))      handleJudo(texto, chatId)
+      else if (upper.startsWith("CLUB "))      handleClub(texto, chatId)
+      else if (upper.startsWith("ACADEMIA "))  handleAcademia(texto, chatId)
+      else if (upper.startsWith("PESO "))      handlePeso(texto, chatId)
+      else if (upper == "APP")                 handleApp(chatId)
+      else if (upper == "SALTAR")              handleSaltar(chatId)
+      else if (upper == "LISTO")               handleListo(chatId)
+      else if (upper == "SI" || upper == "SÍ" || upper == "NO") handleSiNo(if (upper == "NO") "NO" else "SI", chatId)
+      else if (upper == "NINGUNO")             handleNinguno(chatId)
+      else if (upper == "ESTADO")              handleEstado(chatId)
+      else if (upper == "AYUDA")               handleAyuda(chatId)
+      else handleDesconocido(chatId)
+    } catch { case e: Exception =>
+      println(s"[Telegram bot] ERROR: ${e.getMessage.take(200)}")
+      "⚠️ No he podido guardar ese dato. Revisa el formato (AYUDA) o regístralo en la app."
+    }
+  }
+
+  private def tgArgs(texto: String): List[String] = texto.trim.split("\\s+").toList.drop(1)
+
+  // ── SUEÑO ─────────────────────────────────────────────────────────────────
+  private def handleSueno(texto: String, chatId: String): String = {
+    val a = tgArgs(texto)
+    val horas = a.headOption.flatMap(tgNum).filter(h => h > 0 && h <= 16)
+    if (horas.isEmpty) return "Formato: SUEÑO [horas] [profundo min] [ligero min] [despierto min] [energía 1-5] [ánimo 1-5]\nEjemplo: SUEÑO 9 95 180 10 4 5\nO simplemente: SUEÑO 9"
+    val profundo = a.lift(1).flatMap(tgInt).filter(_ >= 0)
+    val ligero = a.lift(2).flatMap(tgInt).filter(_ >= 0)
+    val despierto = a.lift(3).flatMap(tgInt).filter(_ >= 0)
+    val energia = tgEnRango(a.lift(4).flatMap(tgInt), 1, 5)
+    val animo = tgEnRango(a.lift(5).flatMap(tgInt), 1, 5)
+    val conn = getConnection()
+    try {
+      // Upsert que no pisa lo ya registrado hoy desde la app (FC, dolor, notas...)
+      val ps = conn.prepareStatement("""
+        INSERT INTO wellness (fecha, horas_sueno, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min, energia, animo)
+        VALUES (CURRENT_DATE, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (fecha) DO UPDATE SET horas_sueno = EXCLUDED.horas_sueno,
+          sueno_profundo_min = COALESCE(EXCLUDED.sueno_profundo_min, wellness.sueno_profundo_min),
+          sueno_ligero_min = COALESCE(EXCLUDED.sueno_ligero_min, wellness.sueno_ligero_min),
+          sueno_despierto_min = COALESCE(EXCLUDED.sueno_despierto_min, wellness.sueno_despierto_min),
+          energia = COALESCE(EXCLUDED.energia, wellness.energia),
+          animo = COALESCE(EXCLUDED.animo, wellness.animo)""")
+      ps.setDouble(1, horas.get)
+      Seq(profundo, ligero, despierto, energia, animo).zipWithIndex.foreach { case (v, i) =>
+        v match { case Some(x) => ps.setInt(i + 2, x); case None => ps.setNull(i + 2, java.sql.Types.INTEGER) }
+      }
+      ps.executeUpdate()
+    } finally { conn.close() }
+    val forma = calcularFormaHoy()("indiceForma").asInstanceOf[Double]
+    val horasTxt = if (horas.get % 1 == 0) f"${horas.get}%.0fh" else f"${horas.get}%.1fh"
+    s"✅ Sueño registrado: $horasTxt" + profundo.map(p => s" · ${p}min profundo").getOrElse("") +
+      f" · Índice de Forma: $forma%.1f ${formaSemaforo(forma)}"
+  }
+
+  // ── FC ────────────────────────────────────────────────────────────────────
+  private def handleFC(texto: String, chatId: String): String = {
+    val bpm = tgEnRango(tgArgs(texto).headOption.flatMap(tgInt), 30, 200)
+    if (bpm.isEmpty) return "Formato: FC [bpm]\nEjemplo: FC 58"
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO wellness (fecha, fc_reposo) VALUES (CURRENT_DATE, ?) ON CONFLICT (fecha) DO UPDATE SET fc_reposo = EXCLUDED.fc_reposo")
+      ps.setInt(1, bpm.get); ps.executeUpdate()
+      val rs = conn.createStatement().executeQuery("SELECT AVG(fc_reposo) as m FROM wellness WHERE fc_reposo IS NOT NULL")
+      val media = if (rs.next()) rs.getDouble("m") else 0.0
+      f"✅ FC registrada: ${bpm.get} BPM · Media histórica: $media%.0f BPM"
+    } finally { conn.close() }
+  }
+
+  // ── PARTIDO (flujo por pasos) ─────────────────────────────────────────────
+  private val tgPasosPartido = List("RUBRICA", "GOL", "PARADAS", "CONTEXTO", "EXTRAS", "1V1", "FACTOR")
+
+  private def tgPrompt(paso: String, s: TgSesion): String = paso match {
+    case "RUBRICA" => "Rúbrica (posición/decisiones/pies/comunicación/actitud, 1-5 cada una):\nRUBRICA 4 3 3 4 5\n(SALTAR para dejarlo para la app)"
+    case "GOL" =>
+      val n = s.golesRegistrados + 1
+      (if (n == 1) s"Encajaste ${s.golesPendientes} goles. GOL 1:\n" else s"GOL $n de ${s.golesPendientes}:\n") +
+        "GOL [zona] [situación] [posición] [cuarto]\n" +
+        "Zonas: ALTO_DER/ALTO_IZQ/ALTO_CEN/BAJO_DER/BAJO_IZQ/BAJO_CEN\n" +
+        "Situaciones: REMATE/CABEZA/FALLO/1V1/PENALTI/FALTA\n" +
+        "Posición: BIEN_PLANTADO/PASO_NEGATIVO/DESPLAZAMIENTO_TARDIO/IMPARABLE\n" +
+        "Cuartos: Q1/Q2/Q3/Q4\nEjemplo: GOL BAJO_DER 1V1 PASO_NEGATIVO Q2"
+    case "PARADAS" => "Paradas y cantera:\nPARADAS [total] [1v1] [aéreas] [con el pie] [scanning efectivo] [córners dominados] [córners cedidos]\nEjemplo: PARADAS 4 2 1 3 2 3 1"
+    case "CONTEXTO" => "Contexto:\nCONTEXTO [CASA/FUERA] [min calentamiento] [NAT/ART/TIERRA/INTERIOR] [INM/NORM/LENTO] [economía 1-5] [calidad decisión 0-100]\nEjemplo: CONTEXTO FUERA 12 ART NORM 4 75"
+    case "EXTRAS" => "Extras:\nEXTRAS [autopercepción Héctor 1-5] [conducta padre 1-5] [rutina: SI/NO] [regulación: HABLA_SOLO/RESPIRA/ENFADO/NEUTRAL/REORGANIZA/DECAIDO]\nEjemplo: EXTRAS 4 4 SI RESPIRA"
+    case "1V1" => "Ángulo en 1v1 (SALTAR si no lo recuerdas):\n1V1 [central paradas] [central goles] [izq paradas] [izq goles] [der paradas] [der goles]\nEjemplo: 1V1 2 0 0 1 0 0"
+    case "FACTOR" => "¿Algún factor externo relevante hoy? (texto libre o NINGUNO)"
+    case _ => ""
+  }
+
+  /** Pasa al siguiente paso del flujo de partido (saltando GOL si no quedan goles) o lo cierra si no hay mas. */
+  private def tgSiguientePaso(chatId: String, s: TgSesion, desde: String, prefijo: String): String = {
+    val restantes = tgPasosPartido.dropWhile(_ != desde).drop(1)
+    restantes.find(p => p != "GOL" || s.golesRegistrados < s.golesPendientes) match {
+      case Some(p) =>
+        val nueva = s.copy(paso = Some(p))
+        tgGuardarSesion(chatId, nueva)
+        prefijo + tgPrompt(p, nueva)
+      case None => tgFinalizarPartido(chatId, s)
+    }
+  }
+
+  private def tgPartidoEnCurso(s: TgSesion): Option[Int] = if (s.flujo.contains("PARTIDO")) s.matchId else None
+  private val tgSinPartido = "No hay ningún partido en curso. Empieza con:\nPARTIDO [rival] [GF]-[GC] [nota]\nEjemplo: PARTIDO Rivas 2-1 7.5"
+
+  private def handlePartidoStep1(texto: String, chatId: String): String = {
+    val patron = """(?i)^PARTIDO\s+(.+?)\s+(\d{1,2})\s*-\s*(\d{1,2})\s+(\d{1,2}(?:[.,]\d+)?)\s*$""".r
+    texto.trim match {
+      case patron(rivalRaw, gfS, gcS, notaS) =>
+        val nota = tgNum(notaS).filter(n => n >= 0 && n <= 10)
+        if (nota.isEmpty) return "La nota debe estar entre 0 y 10.\nEjemplo: PARTIDO Rivas 2-1 7.5"
+        val rival = fixEncoding(rivalRaw.trim)
+        val (gf, gc) = (gfS.toInt, gcS.toInt)
+        val matchId = quickSaveMatch(rival, gf, gc, nota.get)
+        if (matchId <= 0) return "⚠️ No se pudo crear el partido. ¿Hay alguna temporada creada?"
+        val s = TgSesion(flujo = Some("PARTIDO"), paso = Some("RUBRICA"), matchId = Some(matchId), golesPendientes = gc)
+        tgGuardarSesion(chatId, s)
+        f"✅ $rival $gf-$gc · Nota ${nota.get}%.1f\n" + tgPrompt("RUBRICA", s)
+      case _ => "Formato: PARTIDO [rival] [GF]-[GC] [nota]\nEjemplo: PARTIDO Rivas 2-1 7.5"
+    }
+  }
+
+  private def handleRubrica(texto: String, chatId: String): String = {
+    val s = tgSesion(chatId)
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    val v = tgArgs(texto).map(x => tgEnRango(tgInt(x), 1, 5))
+    if (v.size != 5 || v.exists(_.isEmpty)) return "Necesito 5 valores del 1 al 5 (posición, decisiones, pies, comunicación, actitud).\nEjemplo: RUBRICA 4 3 3 4 5"
+    val r = v.flatten
+    updateRubricaMatch(matchId, r(0), r(1), r(2), r(3), r(4))
+    tgSiguientePaso(chatId, s, "RUBRICA", "✅ Rúbrica guardada\n")
+  }
+
+  private def handleGol(texto: String, chatId: String): String = {
+    val s = tgSesion(chatId)
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    if (s.golesRegistrados >= s.golesPendientes) return "Ya están registrados todos los goles de este partido."
+    val a = tgArgs(texto).map(_.toUpperCase)
+    val zona = a.headOption.flatMap(tgZonas.get)
+    if (zona.isEmpty) return tgPrompt("GOL", s)
+    val situacion = a.lift(1).flatMap(tgSituaciones.get)
+    val posicion = a.lift(2).filter(tgPosiciones.contains)
+    val minuto = a.lift(3).flatMap(tgCuartos.get).getOrElse(0)
+    val (origen, sit) = situacion.getOrElse(("Otro", "Otro"))
+    val responsabilidad = posicion match { case Some("IMPARABLE") | Some("BIEN_PLANTADO") => "Ninguna"; case Some(_) => "Media"; case None => "Media" }
+    val parable = if (posicion.contains("IMPARABLE")) "No" else "Dudoso"
+    saveMatchGoal(matchId, minuto, origen, sit, responsabilidad, parable, zona.get, posicion.map(p => s"POS:$p").getOrElse("Telegram"))
+
+    val conn = getConnection()
+    try {
+      // Cuartos (solo goles con minuto) y posicion mas repetida en los goles del partido
+      val psMin = conn.prepareStatement("SELECT minuto FROM match_goals WHERE match_id = ? AND minuto > 0")
+      psMin.setInt(1, matchId)
+      val rsMin = psMin.executeQuery()
+      val minutos = Iterator.continually(rsMin).takeWhile(_.next()).map(_.getInt("minuto")).toList
+      if (minutos.nonEmpty) saveMinutoGoles(matchId, minutos)
+      val psPos = conn.prepareStatement("""
+        SELECT SUBSTRING(notas FROM 'POS:([A-Z_]+)') as p, COUNT(*) as n FROM match_goals
+        WHERE match_id = ? AND notas LIKE 'POS:%' GROUP BY 1 ORDER BY n DESC LIMIT 1""")
+      psPos.setInt(1, matchId)
+      val rsPos = psPos.executeQuery()
+      if (rsPos.next()) tgActualizarPartido(matchId, Seq("posicion_set" -> rsPos.getString("p")))
+    } finally { conn.close() }
+
+    val nueva = s.copy(golesRegistrados = s.golesRegistrados + 1)
+    tgGuardarSesion(chatId, nueva)
+    if (nueva.golesRegistrados < nueva.golesPendientes) s"✅ Gol ${nueva.golesRegistrados} guardado\n" + tgPrompt("GOL", nueva)
+    else tgSiguientePaso(chatId, nueva, "GOL", "✅ Goles registrados\n")
+  }
+
+  private def handleParadas(texto: String, chatId: String): String = {
+    val s = tgSesion(chatId)
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    val v = tgArgs(texto).map(x => tgInt(x).filter(_ >= 0))
+    if (v.isEmpty || v.exists(_.isEmpty) || v.size > 7) return tgPrompt("PARADAS", s)
+    val columnas = List("paradas", "paradas_1v1", "paradas_aereas", "acciones_pie", "scanning_efectivo", "corners_dominados", "corners_cedidos")
+    tgActualizarPartido(matchId, columnas.zip(v.flatten))
+    tgSiguientePaso(chatId, s, "PARADAS", "✅ Paradas guardadas\n")
+  }
+
+  private def handleContexto(texto: String, chatId: String): String = {
+    val s = tgSesion(chatId)
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    val a = tgArgs(texto).map(_.toUpperCase)
+    val local = a.headOption.collect { case "CASA" => true; case "FUERA" => false }
+    val calentamiento = a.lift(1).flatMap(tgInt).filter(m => m >= 0 && m <= 120)
+    val superficie = a.lift(2).collect { case "NAT" | "NATURAL" => "NATURAL"; case "ART" | "ARTIFICIAL" => "ARTIFICIAL"; case "TIERRA" => "TIERRA"; case "INTERIOR" => "INTERIOR" }
+    val velocidad = a.lift(3).collect { case "INM" | "INMEDIATO" => "INMEDIATO"; case "NORM" | "NORMAL" => "NORMAL"; case "LENTO" => "LENTO" }
+    val economia = tgEnRango(a.lift(4).flatMap(tgInt), 1, 5)
+    val calidad = tgEnRango(a.lift(5).flatMap(tgInt), 0, 100)
+    val esperados = Seq(local, calentamiento, superficie, velocidad, economia, calidad).take(a.size)
+    if (a.isEmpty || esperados.exists(_.isEmpty)) return "No entendí algún valor.\n" + tgPrompt("CONTEXTO", s)
+    tgActualizarPartido(matchId, Seq(
+      local.map("es_local" -> _), calentamiento.map("calentamiento_min" -> _), superficie.map("superficie" -> _),
+      velocidad.map("velocidad_distribucion" -> _), economia.map("economia_movimiento" -> _), calidad.map("calidad_decision_pct" -> _)).flatten)
+    tgSiguientePaso(chatId, s, "CONTEXTO", "✅ Contexto guardado\n")
+  }
+
+  private def handleExtras(texto: String, chatId: String): String = {
+    val s = tgSesion(chatId)
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    val a = tgArgs(texto).map(_.toUpperCase)
+    val autop = tgEnRango(a.headOption.flatMap(tgInt), 1, 5)
+    val padre = tgEnRango(a.lift(1).flatMap(tgInt), 1, 5)
+    val rutina = a.lift(2).collect { case "SI" | "SÍ" => "SI"; case "NO" => "NO"; case "SIN_RUTINA" => "SIN_RUTINA" }
+    val regulacion = a.lift(3).filter(tgRegulaciones.contains)
+    val esperados = Seq(autop, padre, rutina, regulacion).take(a.size)
+    if (a.isEmpty || esperados.exists(_.isEmpty)) return "No entendí algún valor.\n" + tgPrompt("EXTRAS", s)
+    tgActualizarPartido(matchId, Seq(
+      autop.map("autopercepcion_prepartido" -> _), padre.map("conducta_padre" -> _),
+      rutina.map("rutina_prepartido" -> _), regulacion.map("regulacion_emocional" -> _)).flatten)
+    tgSiguientePaso(chatId, s, "EXTRAS", "✅ Extras guardados\n")
+  }
+
+  private def handle1v1(texto: String, chatId: String): String = {
+    val s = tgSesion(chatId)
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    val v = tgArgs(texto).map(x => tgInt(x).filter(_ >= 0))
+    if (v.size != 6 || v.exists(_.isEmpty)) return tgPrompt("1V1", s)
+    // Mismo JSON que genera el formulario web (adjustAngulo1v1)
+    val claves = List("central_ok", "central_gc", "izq_ok", "izq_gc", "der_ok", "der_gc")
+    val json = ujson.write(ujson.Obj.from(claves.zip(v.flatten).map { case (k, n) => k -> ujson.Num(n) }))
+    tgActualizarPartido(matchId, Seq("angulo_1v1_data" -> json))
+    tgSiguientePaso(chatId, s, "1V1", "✅ 1v1 guardado\n")
+  }
+
+  private def handleFactor(texto: String, chatId: String, s: TgSesion): String = {
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    tgActualizarPartido(matchId, Seq("factores_externos" -> fixEncoding(texto.take(500))))
+    tgFinalizarPartido(chatId, s)
+  }
+
+  private def tgFinalizarPartido(chatId: String, s: TgSesion): String = {
+    val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
+    tgLimpiarSesion(chatId)
+    val cpi = try { val c = calcularCPI(matchId); tgActualizarPartido(matchId, Seq("cpi" -> c)); Some(c) } catch { case _: Exception => None }
+    new Thread(() => detectarHitos()).start()
+    generarGuiaConversacion(matchId)
+
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT * FROM matches WHERE id = ?")
+      ps.setInt(1, matchId)
+      val r = ps.executeQuery()
+      if (!r.next()) return "✅ Partido guardado."
+      def optInt(c: String) = Option(r.getObject(c)).map(_ => r.getInt(c))
+      def txt(c: String) = Option(r.getString(c)).filter(_.nonEmpty)
+      val lugar = Option(r.getObject("es_local")).map(_ => if (r.getBoolean("es_local")) "CASA" else "FUERA").getOrElse("—")
+      val rubrica = Seq("Pos" -> "rubrica_posicion", "Dec" -> "rubrica_decisiones", "Pie" -> "rubrica_pies",
+        "Com" -> "rubrica_comunicacion", "Act" -> "rubrica_actitud").map { case (e, c) => e + optInt(c).map(_.toString).getOrElse("—") }.mkString(" ")
+      val resumen = List(
+        "✅ PARTIDO COMPLETO GUARDADO 🏆", "",
+        s"⚽ ${fixEncoding(r.getString("rival"))} | ${r.getInt("goles_favor")}-${r.getInt("goles_contra")} | $lugar",
+        f"⭐ Nota: ${r.getDouble("nota")}%.1f | CPI: ${cpi.map(c => f"$c%.1f").getOrElse("—")}",
+        s"🧤 Paradas: ${r.getInt("paradas")} (${r.getInt("paradas_1v1")} en 1v1, ${r.getInt("paradas_aereas")} aéreas)")
+      val tail = List(
+        s"📊 $rubrica",
+        s"🔄 Rutina: ${txt("rutina_prepartido").getOrElse("—")} · Regulación: ${txt("regulacion_emocional").getOrElse("—")}",
+        s"${TelegramService.baseUrl.replaceFirst("^https?://", "")}/history")
+
+      val psG = conn.prepareStatement("SELECT zona_gol, minuto FROM match_goals WHERE match_id = ? ORDER BY id")
+      psG.setInt(1, matchId)
+      val rg = psG.executeQuery()
+      val zonaNombre = tgZonas.map(_.swap)
+      val goles = Iterator.continually(rg).takeWhile(_.next()).map { g =>
+        val z = Option(g.getString("zona_gol")).flatMap(zonaNombre.get).getOrElse("?")
+        val m = g.getInt("minuto")
+        val q = if (m <= 0) "" else if (m <= 12) " Q1" else if (m <= 25) " Q2" else if (m <= 37) " Q3" else " Q4"
+        z + q
+      }.toList
+      val golesLinea = if (r.getInt("goles_contra") == 0) List("⬛ Goles: ninguno 🧤") else List(s"⬛ Goles: ${if (goles.isEmpty) "sin detalle" else goles.mkString(", ")}")
+      (resumen ++ golesLinea ++ tail).mkString("\n")
+    } finally { conn.close() }
+  }
+
+  // ── JUDO / CLUB / ACADEMIA ────────────────────────────────────────────────
+  private def tgAcwrTexto(): String = {
+    val e = calcularACWRConEstado()
+    if (e("status").asInstanceOf[String] == "INSUFICIENTE") "acumulando datos" else f"${e("acwr").asInstanceOf[Double]}%.2f"
+  }
+
+  private def tgAusencia(tipo: String, motivoRaw: Option[String]): String = {
+    val motivo = motivoRaw.map(_.toUpperCase).filter(m => Set("ENFERMEDAD", "FAMILIAR", "DESCANSO", "LESION", "OTRO").contains(m)).getOrElse("OTRO")
+    logTraining(tipo, "", 0, 0, 0, "", tipoAusencia = Some(motivo))
+    s"✅ Ausencia de $tipo registrada ($motivo)"
+  }
+
+  private def handleJudo(texto: String, chatId: String): String = {
+    val a = tgArgs(texto)
+    if (a.headOption.exists(_.equalsIgnoreCase("NO"))) return tgAusencia("Judo", a.lift(1))
+    val minutos = a.headOption.flatMap(tgInt).filter(m => m > 0 && m <= 300)
+    val rpe = tgEnRango(a.lift(1).flatMap(tgInt), 1, 10)
+    if (minutos.isEmpty || rpe.isEmpty) return "Formato: JUDO [duración min] [RPE 1-10]\nEjemplo: JUDO 60 6\nO si no fue: JUDO NO [ENFERMEDAD/FAMILIAR/DESCANSO/OTRO]"
+    // calidad/atencion fijas como en el formulario web: el padre no las observa en judo
+    logTraining("Judo", "", rpe.get, 3, 3, "", duracionMin = minutos)
+    new Thread(() => detectarHitos()).start()
+    s"✅ Judo registrado: ${minutos.get}min · RPE ${rpe.get} · ACWR: ${tgAcwrTexto()}"
+  }
+
+  private def handleClub(texto: String, chatId: String): String = tgEntrenoConFeedback("Club", "CLUB", texto, chatId)
+  private def handleAcademia(texto: String, chatId: String): String = tgEntrenoConFeedback("Academia", "ACADEMIA", texto, chatId)
+
+  private def tgEntrenoConFeedback(tipo: String, flujo: String, texto: String, chatId: String): String = {
+    val a = tgArgs(texto)
+    if (a.headOption.exists(_.equalsIgnoreCase("NO"))) { tgLimpiarSesion(chatId); return tgAusencia(tipo, a.lift(1)) }
+    val minutos = a.headOption.flatMap(tgInt).filter(m => m > 0 && m <= 300)
+    val rpe = tgEnRango(a.lift(1).flatMap(tgInt), 1, 10)
+    val atencion = tgEnRango(a.lift(2).flatMap(tgInt), 1, 5)
+    val calidad = tgEnRango(a.lift(3).flatMap(tgInt), 1, 5)
+    if (minutos.isEmpty || rpe.isEmpty || (a.size > 2 && atencion.isEmpty) || (a.size > 3 && calidad.isEmpty))
+      return s"Formato: $flujo [duración min] [RPE 1-10] [atención 1-5] [calidad 1-5]\nEjemplo: $flujo ${if (flujo == "CLUB") "75 7 4 4" else "60 6 5 4"}\nO si no fue: $flujo NO [motivo]"
+    // La app guarda calidad/atencion en escala 1-10: el 1-5 del bot se duplica
+    val id = logTraining(tipo, "", rpe.get, calidad.getOrElse(3) * 2, atencion.getOrElse(3) * 2, "", duracionMin = minutos)
+    new Thread(() => detectarHitos()).start()
+    tgGuardarSesion(chatId, TgSesion(flujo = Some(flujo), paso = Some("FEEDBACK"), trainingId = Some(id)))
+    s"✅ $tipo guardado. ¿Feedback del entrenador? (texto libre o NINGUNO)"
+  }
+
+  private def handleFeedback(texto: String, chatId: String, s: TgSesion): String = {
+    val trainingId = s.trainingId.getOrElse { tgLimpiarSesion(chatId); return "No hay ningún entreno en curso." }
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE trainings SET feedback_entrenador = ? WHERE id = ?")
+      ps.setString(1, fixEncoding(texto.take(2000))); ps.setInt(2, trainingId); ps.executeUpdate()
+    } finally { conn.close() }
+
+    val detectadas = detectarSkillsEnFeedback(texto)
+    val antes = getSugerenciasSkillPendientes().map(_("skillId").asInstanceOf[Int]).toSet
+    guardarSugerenciasSkillDesdeFeedback(texto)
+    val nuevas = getSugerenciasSkillPendientes().filterNot(x => antes.contains(x("skillId").asInstanceOf[Int]))
+    val idp = if (s.flujo.contains("ACADEMIA")) tgRelacionIdp(detectadas) else None
+
+    if (nuevas.nonEmpty) {
+      tgGuardarSesion(chatId, s.copy(paso = Some("SKILLS:" + nuevas.map(_("skillId")).mkString(","))))
+      s"Guardian detectó: ${nuevas.map(_("habilidad")).mkString(", ")}\n¿Actualizar checklist? SI/NO" + idp.map(i => s"\n💡 Relacionado con IDP: $i").getOrElse("")
+    } else {
+      tgLimpiarSesion(chatId)
+      tgResumenEntreno(trainingId) + idp.map(i => s"\n💡 Relacionado con IDP: $i").getOrElse("")
+    }
+  }
+
+  /** Objetivo del IDP activo que menciona alguna de las skills detectadas en el feedback. */
+  private def tgRelacionIdp(detectadas: List[String]): Option[String] = {
+    if (detectadas.isEmpty) return None
+    val palabras = detectadas.flatMap(d => skillFeedbackKeywords.getOrElse(d, Nil)).map(_.toLowerCase)
+    getActiveIdpTemporada().flatMap { t =>
+      getIdpObjetivos(t("id").asInstanceOf[Int]).find { o =>
+        val txt = (o("objetivo").toString + " " + o("dimension").toString + " " + o("metrica").toString).toLowerCase
+        palabras.exists(txt.contains)
+      }.map(_("objetivo").toString)
+    }
+  }
+
+  private def tgResumenEntreno(trainingId: Int): String = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT tipo, rpe, calidad, atencion, duracion_min, feedback_entrenador FROM trainings WHERE id = ?")
+      ps.setInt(1, trainingId)
+      val r = ps.executeQuery()
+      if (!r.next()) return "✅ Entreno guardado."
+      val dur = Option(r.getObject("duracion_min")).map(_ => s"${r.getInt("duracion_min")}min · ").getOrElse("")
+      val fb = Option(r.getString("feedback_entrenador")).filter(_.nonEmpty).map(f => s"\n📝 Feedback: ${f.take(300)}").getOrElse("")
+      s"✅ ${r.getString("tipo")} registrado: ${dur}RPE ${r.getInt("rpe")} · Atención ${r.getInt("atencion") / 2}/5 · Calidad ${r.getInt("calidad") / 2}/5$fb\n📈 ACWR: ${tgAcwrTexto()}"
+    } finally { conn.close() }
+  }
+
+  // ── PESO ──────────────────────────────────────────────────────────────────
+  private def handlePeso(texto: String, chatId: String): String = {
+    val a = tgArgs(texto)
+    val kg = a.headOption.flatMap(tgNum).filter(k => k >= 10 && k <= 150)
+    if (kg.isEmpty) return "Formato: PESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
+    val musculo = a.lift(1).flatMap(tgNum).filter(_ > 0)
+    val osea = a.lift(2).flatMap(tgNum).filter(_ > 0)
+    val conn = getConnection()
+    try {
+      val rsAnt = conn.createStatement().executeQuery(
+        "SELECT peso, fecha FROM physical_growth WHERE peso > 0 ORDER BY fecha DESC, id DESC LIMIT 1")
+      val anterior = if (rsAnt.next()) Some((rsAnt.getDouble("peso"), rsAnt.getDate("fecha").toLocalDate)) else None
+      // La fila de crecimiento necesita altura: se arrastra la ultima medida (sin velocidad de crecimiento nueva)
+      val rsAlt = conn.createStatement().executeQuery(
+        "SELECT altura FROM physical_growth WHERE altura > 0 ORDER BY fecha DESC, id DESC LIMIT 1")
+      val altura = if (rsAlt.next()) Some(rsAlt.getDouble("altura")) else None
+      val ps = conn.prepareStatement(
+        "INSERT INTO physical_growth (fecha, altura, peso, velocidad_crecimiento, kg_musculo, kg_masa_osea) VALUES (CURRENT_DATE, ?, ?, 0, ?, ?)")
+      altura match { case Some(h) => ps.setDouble(1, h); case None => ps.setNull(1, java.sql.Types.DOUBLE) }
+      ps.setDouble(2, kg.get)
+      musculo match { case Some(v) => ps.setDouble(3, v); case None => ps.setNull(3, java.sql.Types.DOUBLE) }
+      osea match { case Some(v) => ps.setDouble(4, v); case None => ps.setNull(4, java.sql.Types.DOUBLE) }
+      ps.executeUpdate()
+      anterior match {
+        case Some((p, f)) =>
+          val dias = java.time.temporal.ChronoUnit.DAYS.between(f, LocalDate.now())
+          val diff = kg.get - p
+          f"✅ Peso: ${kg.get}%.1fkg · Anterior: $p%.1fkg (${if (diff >= 0) "+" else ""}$diff%.1fkg en $dias días)"
+        case None => f"✅ Peso: ${kg.get}%.1fkg (primer registro)"
+      }
+    } finally { conn.close() }
+  }
+
+  // ── COMANDOS GLOBALES ─────────────────────────────────────────────────────
+  private def handleApp(chatId: String): String = {
+    tgLimpiarSesion(chatId)
+    s"📱 ${TelegramService.baseUrl}"
+  }
+
+  private def handleSaltar(chatId: String): String = {
+    val s = tgSesion(chatId)
+    s.paso match {
+      case Some(p) if s.flujo.contains("PARTIDO") => tgSiguientePaso(chatId, s, p, "⏭️ Saltado\n")
+      case Some(p) if p == "FEEDBACK" || p.startsWith("SKILLS:") => handleNinguno(chatId)
+      case _ => "No hay ningún registro en curso."
+    }
+  }
+
+  private def handleListo(chatId: String): String = {
+    val s = tgSesion(chatId)
+    s.flujo match {
+      case Some("PARTIDO") => tgFinalizarPartido(chatId, s)
+      case Some(_) => s.trainingId.map { id => tgLimpiarSesion(chatId); tgResumenEntreno(id) }.getOrElse { tgLimpiarSesion(chatId); "✅ Listo." }
+      case None => "No hay ningún registro en curso."
+    }
+  }
+
+  private def handleSiNo(respuesta: String, chatId: String): String = {
+    val s = tgSesion(chatId)
+    s.paso.filter(_.startsWith("SKILLS:")) match {
+      case Some(p) =>
+        val ids = p.stripPrefix("SKILLS:").split(",").flatMap(_.toIntOption)
+        if (respuesta == "SI") ids.foreach(confirmarSkillDesdeSugerencia) else ids.foreach(descartarSugerenciaSkill)
+        tgLimpiarSesion(chatId)
+        (if (respuesta == "SI") "✅ Checklist actualizado\n" else "👌 Checklist sin cambios\n") + s.trainingId.map(tgResumenEntreno).getOrElse("")
+      case None => "No hay ninguna pregunta pendiente."
+    }
+  }
+
+  private def handleNinguno(chatId: String): String = {
+    val s = tgSesion(chatId)
+    s.paso match {
+      case Some("FACTOR") => tgFinalizarPartido(chatId, s)
+      case Some(p) if p == "FEEDBACK" || p.startsWith("SKILLS:") =>
+        tgLimpiarSesion(chatId)
+        s.trainingId.map(tgResumenEntreno).getOrElse("✅ Listo.")
+      case _ => "No hay ningún campo opcional pendiente."
+    }
+  }
+
+  private def handleEstado(chatId: String): String = {
+    val conn = getConnection()
+    try {
+      val w = conn.createStatement().executeQuery(
+        "SELECT horas_sueno, sueno_profundo_min, fc_reposo FROM wellness WHERE fecha = CURRENT_DATE")
+      val (sueno, fc) = if (w.next()) {
+        val h = w.getDouble("horas_sueno")
+        val prof = Option(w.getObject("sueno_profundo_min")).map(_ => s" (${w.getInt("sueno_profundo_min")} min profundo)").getOrElse("")
+        (if (h > 0) f"$h%.1fh$prof" else "—", Option(w.getObject("fc_reposo")).map(_ => s"${w.getInt("fc_reposo")} BPM").getOrElse("—"))
+      } else ("—", "—")
+      val t = conn.createStatement().executeQuery(
+        "SELECT tipo, rpe, duracion_min, tipo_ausencia FROM trainings WHERE fecha = CURRENT_DATE ORDER BY id")
+      val entrenos = Iterator.continually(t).takeWhile(_.next()).map { r =>
+        Option(r.getString("tipo_ausencia")).map(m => s"${r.getString("tipo")} (no fue: $m)")
+          .getOrElse(s"${r.getString("tipo")}${Option(r.getObject("duracion_min")).map(_ => s" ${r.getInt("duracion_min")}min").getOrElse("")} RPE ${r.getInt("rpe")}")
+      }.toList
+      val m = conn.createStatement().executeQuery(
+        "SELECT rival, goles_favor, goles_contra, nota FROM matches WHERE status = 'PLAYED' AND fecha = CURRENT_DATE ORDER BY id DESC LIMIT 1")
+      val partido = if (m.next()) f"${fixEncoding(m.getString("rival"))} ${m.getInt("goles_favor")}-${m.getInt("goles_contra")} (${m.getDouble("nota")}%.1f)" else "—"
+      val p = conn.createStatement().executeQuery("SELECT peso FROM physical_growth WHERE fecha = CURRENT_DATE AND peso > 0 ORDER BY id DESC LIMIT 1")
+      val peso = if (p.next()) f"${p.getDouble("peso")}%.1fkg" else "—"
+      val forma = calcularFormaHoy()("indiceForma").asInstanceOf[Double]
+      val enCurso = tgSesion(chatId).flujo.map(f => s"\n⏳ Registro en curso: $f (LISTO para cerrarlo)").getOrElse("")
+      s"📋 Registros de hoy (${LocalDate.now()}):\n💤 Sueño: $sueno\n❤️ FC: $fc\n🏃 Entrenos: ${if (entrenos.isEmpty) "—" else entrenos.mkString(", ")}\n🏟️ Partido: $partido\n⚖️ Peso: $peso\n" +
+        f"📊 Índice de Forma: $forma%.1f ${formaSemaforo(forma)}" + enCurso
+    } finally { conn.close() }
+  }
+
+  private def handleAyuda(chatId: String): String =
+    """Comandos disponibles:
+      |
+      |💤 SUEÑO 9 95 180 10 4 5
+      |❤️ FC 58
+      |🏟️ PARTIDO Rivas 2-1 7.5
+      |🥋 JUDO 60 6
+      |⚽ CLUB 75 7 4 4
+      |🎓 ACADEMIA 60 6 5 4
+      |⚖️ PESO 27.3
+      |
+      |APP → ir a la app web
+      |ESTADO → registros de hoy
+      |AYUDA → este mensaje""".stripMargin
+
+  private def handleDesconocido(chatId: String): String = "🤔 No he entendido el mensaje. Escribe AYUDA para ver los comandos."
+
+  // ── RECORDATORIOS PROGRAMADOS ─────────────────────────────────────────────
+  /** true (y lo marca) si el recordatorio `clave` no se ha enviado en los ultimos `dias` dias (1 = hoy). */
+  private def tgMarcarRecordatorio(clave: String, dias: Int = 1): Boolean = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT COUNT(*) as c FROM feature_cache WHERE cache_key = ? AND updated_at::date > CURRENT_DATE - (?::int)")
+      ps.setString(1, s"tg_rec_$clave"); ps.setInt(2, dias)
+      val rs = ps.executeQuery()
+      if (rs.next() && rs.getInt("c") > 0) false
+      else {
+        val up = conn.prepareStatement(
+          "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, '1', NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = '1', updated_at = NOW()")
+        up.setString(1, s"tg_rec_$clave"); up.executeUpdate()
+        true
+      }
+    } finally { conn.close() }
+  }
+
+  /**
+   * Mensajes que tocan ahora (hora de Madrid). Se llama cada pocos minutos desde GuardianServer;
+   * cada recordatorio se envia como mucho una vez por dia (FC: cada 3 dias).
+   * Las sesiones esperadas salen de weekly_structure, nunca de dias fijos.
+   */
+  def tgRecordatoriosPendientes(): List[String] = {
+    if (!TelegramService.configurado) return Nil
+    val ahora = java.time.ZonedDateTime.now(java.time.ZoneId.of(sys.env.getOrElse("GUARDIAN_TZ", "Europe/Madrid")))
+    val hora = ahora.getHour
+    val hoy = ahora.toLocalDate
+    val esLunes = hoy.getDayOfWeek == java.time.DayOfWeek.MONDAY
+    val msgs = scala.collection.mutable.ListBuffer[String]()
+    val conn = getConnection()
+    try {
+      def cuenta(sql: String): Int = { val rs = conn.createStatement().executeQuery(sql); if (rs.next()) rs.getInt(1) else 0 }
+      val psE = conn.prepareStatement("SELECT tipo_sesion FROM weekly_structure WHERE activo = TRUE AND dia_semana = ?")
+      psE.setInt(1, hoy.getDayOfWeek.getValue)
+      val rsE = psE.executeQuery()
+      val sesionesHoy = Iterator.continually(rsE).takeWhile(_.next()).map(_.getString("tipo_sesion")).toSet
+      def pendiente(tipo: String) = sesionesHoy.contains(tipo) && !sesionRegistrada(conn, hoy, tipo)
+
+      if (hora == 8) {
+        if (cuenta("SELECT COUNT(*) FROM wellness WHERE fecha = CURRENT_DATE AND horas_sueno > 0") == 0 && tgMarcarRecordatorio("SUENO"))
+          msgs += "Buenos días ☀️ ¿Cómo durmió Héctor anoche?\nSUEÑO [horas] [profundo min] [ligero min] [despierto min] [energía 1-5] [ánimo 1-5]\nEjemplo: SUEÑO 9 95 180 10 4 5\nO simplemente: SUEÑO 9"
+        if (cuenta("SELECT COUNT(*) FROM wellness WHERE fc_reposo IS NOT NULL AND fecha > CURRENT_DATE - 3") == 0 && tgMarcarRecordatorio("FC", 3))
+          msgs += "❤️ Sin datos de FC esta semana.\nFC [bpm]\nEjemplo: FC 58"
+        if (esLunes && cuenta("SELECT COUNT(*) FROM physical_growth WHERE peso > 0 AND fecha > CURRENT_DATE - 7") == 0 && tgMarcarRecordatorio("PESO"))
+          msgs += "⚖️ Sin registro de peso esta semana.\nPESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
+      }
+      if (hora == 15) {
+        val hayPartido = sesionesHoy.contains("PARTIDO") ||
+          cuenta("SELECT COUNT(*) FROM matches WHERE status = 'SCHEDULED' AND fecha = CURRENT_DATE") > 0
+        if (hayPartido && !sesionRegistrada(conn, hoy, "PARTIDO") && tgMarcarRecordatorio("PARTIDO"))
+          msgs += "🏟️ ¿Cómo fue el partido de hoy?\nPARTIDO [rival] [GF]-[GC] [nota]\nEjemplo: PARTIDO Rivas 2-1 7.5"
+      }
+      if (hora == 20 && pendiente("ACADEMIA") && tgMarcarRecordatorio("ACADEMIA"))
+        msgs += "🎓 ¿Cómo fue la academia de porteros?\nACADEMIA [duración min] [RPE 1-10] [atención 1-5] [calidad 1-5]\nEjemplo: ACADEMIA 60 6 5 4\nO si no fue: ACADEMIA NO [motivo]"
+      if (hora == 21) {
+        if (pendiente("JUDO") && tgMarcarRecordatorio("JUDO"))
+          msgs += "🥋 ¿Fue Héctor a Judo hoy?\nJUDO [duración min] [RPE 1-10]\nEjemplo: JUDO 60 6\nO si no fue: JUDO NO [ENFERMEDAD/FAMILIAR/DESCANSO/OTRO]"
+        if (pendiente("EQUIPO") && tgMarcarRecordatorio("CLUB"))
+          msgs += "⚽ ¿Cómo fue el entrenamiento de equipo?\nCLUB [duración min] [RPE 1-10] [atención 1-5] [calidad 1-5]\nEjemplo: CLUB 75 7 4 4\nO si no fue: CLUB NO [motivo]"
+      }
+    } finally { conn.close() }
+    msgs.toList
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
