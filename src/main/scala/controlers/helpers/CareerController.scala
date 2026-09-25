@@ -662,7 +662,7 @@ object CareerController extends cask.Routes {
   }
 
   @cask.get("/career/legacy")
-  def legacyPage() = {
+  def legacyPage(request: cask.Request) = withAuth(request) {
     val rpg = DatabaseManager.getRPGStatus()
     val percent = if(rpg.nextLevelXp > 0) (rpg.xp.toDouble / rpg.nextLevelXp.toDouble * 100).toInt else 100
 
