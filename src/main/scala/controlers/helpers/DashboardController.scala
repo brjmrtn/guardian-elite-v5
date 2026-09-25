@@ -114,7 +114,8 @@ object DashboardController extends cask.Routes {
 
     // ── BLOQUE 5.4: FOCO DE ESTA SEMANA (micro-objetivo) ──────────────────────
     val microObjetivo = DatabaseManager.getMicroObjetivoSemana()
-    val microObjetivoWidget: Modifier = {
+    // sufijo: el widget aparece en las dos pestanas y los id del checkbox no pueden repetirse
+    def microObjetivoCard(sufijo: String): Modifier = {
       val completado = microObjetivo("completado").asInstanceOf[Boolean]
       div(cls := "card bg-dark text-white border-info shadow-sm mb-3 p-3",
         div(cls := "d-flex justify-content-between align-items-start",
@@ -125,9 +126,9 @@ object DashboardController extends cask.Routes {
         ),
         form(action := "/micro-objetivo/completar", method := "post", cls := "mt-2",
           div(cls := "form-check mb-2",
-            input(cls := "form-check-input", tpe := "checkbox", name := "completado", id := "microCompletado",
+            input(cls := "form-check-input", tpe := "checkbox", name := "completado", id := s"microCompletado$sufijo",
               if (completado) attr("checked") := "checked" else frag()),
-            label(`for` := "microCompletado", cls := "form-check-label xx-small", "Completado")
+            label(`for` := s"microCompletado$sufijo", cls := "form-check-label xx-small", "Completado")
           ),
           input(tpe := "text", name := "resultado", cls := "form-control form-control-sm mb-2",
             placeholder := "Observación (opcional)", value := microObjetivo("resultado").asInstanceOf[String]),
@@ -135,6 +136,8 @@ object DashboardController extends cask.Routes {
         )
       )
     }
+
+    val microObjetivoWidget: Modifier = microObjetivoCard("")
 
     // ── BLOQUE 5.5: PREPARACION SEMANAL (solo lectura de cache, nunca Gemini aqui) ─
     val preparacionWidget: Modifier = DatabaseManager.getPreparacionSemanalCache() match {
@@ -863,7 +866,32 @@ object DashboardController extends cask.Routes {
       )
     }
 
+    // ── BLOQUE M: PESTANA "HOY" — solo lo accionable del dia (el resto sigue en COMPLETO) ──
+    val hoyTab: Modifier = {
+      val indice = formaHoy("indiceForma").asInstanceOf[Double]
+      val semaforo = DatabaseManager.formaSemaforo(indice)
+      val colorForma = if (indice >= 7.5) "#20c997" else if (indice >= 5.0) "#facc15" else "#ef4444"
+      div(
+        riesgoCriticoAlert,
+        desgasteWidget,
+        div(cls := "text-center mb-3", style := "background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%); border-radius:16px; padding:22px; border:1px solid #334155;",
+          div(style := "font-size:12px; color:#94a3b8; letter-spacing:2px;", "ÍNDICE DE FORMA HOY"),
+          div(style := s"font-size:64px; font-weight:900; color:$colorForma; line-height:1.1;", f"$semaforo $indice%.1f")),
+        if (riesgoEsAltoOCritico) riesgoLesionWidget else frag(),
+        microObjetivoCard("Hoy"),
+        div(cls := "d-grid gap-2 mb-3",
+          a(href := "/bio", cls := "btn btn-lg btn-info fw-bold py-3", "💤 Registrar sueño"),
+          if (esDiaDePartido) a(href := "/match-center", cls := "btn btn-lg btn-warning fw-bold py-3", "⚽ Registrar partido") else frag())
+      )
+    }
+    val tabsNav: Modifier = div(cls := "d-flex gap-2 mb-3",
+      button(tpe := "button", id := "tabBtnHoy", cls := "btn btn-warning fw-bold flex-fill", onclick := "mostrarTabDashboard('hoy')", "☀️ HOY"),
+      button(tpe := "button", id := "tabBtnCompleto", cls := "btn btn-outline-secondary fw-bold flex-fill", onclick := "mostrarTabDashboard('completo')", "📊 COMPLETO"))
+
     val content = basePage("home",
+      tabsNav,
+      div(id := "tabHoy", hoyTab),
+      div(id := "tabCompleto", style := "display:none;",
       div(
         // ── BLOQUE F2: RIESGO DE LESION CRITICO (maxima prioridad, por encima del desgaste) ─
         riesgoCriticoAlert,
@@ -1180,8 +1208,22 @@ object DashboardController extends cask.Routes {
             )
           )
         )
-      ),
+      )),
       script(raw("""
+        function mostrarTabDashboard(t){
+          var hoy = t !== 'completo';
+          document.getElementById('tabHoy').style.display = hoy ? '' : 'none';
+          document.getElementById('tabCompleto').style.display = hoy ? 'none' : '';
+          document.getElementById('tabBtnHoy').className = 'btn fw-bold flex-fill ' + (hoy ? 'btn-warning' : 'btn-outline-secondary');
+          document.getElementById('tabBtnCompleto').className = 'btn fw-bold flex-fill ' + (hoy ? 'btn-outline-secondary' : 'btn-warning');
+          try { localStorage.setItem('guardian_dashboard_tab', hoy ? 'hoy' : 'completo'); } catch(e) {}
+          if (!hoy) window.dispatchEvent(new Event('resize'));
+        }
+        (function(){
+          var t = 'hoy';
+          try { t = localStorage.getItem('guardian_dashboard_tab') || 'hoy'; } catch(e) {}
+          mostrarTabDashboard(t);
+        })();
         function registrarAutopercepcionDashboard(v){
           fetch('/match/autopercepcion', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'valor='+v })
             .then(function(){
