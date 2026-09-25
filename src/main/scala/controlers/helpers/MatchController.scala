@@ -224,6 +224,36 @@ object MatchController extends cask.Routes {
                   """))
                 ),
 
+                // ── BLOQUE 4.1: RUBRICA DE VALORACION — va ANTES del marcador (modo ciego: evaluar sin ver el resultado) ─
+                div(cls := "mb-3 p-2 border border-warning rounded bg-warning bg-opacity-10",
+                  div(cls := "d-flex justify-content-between align-items-center", style := "cursor:pointer;", onclick := "toggleRubrica()",
+                    label(cls := "text-warning fw-bold small mb-0", style := "cursor:pointer;", "📋 RÚBRICA DE VALORACIÓN (opcional pero recomendado)"),
+                    span(id := "rubricaChevron", cls := "text-warning small", "▲")
+                  ),
+                  div(id := "rubricaPanel",
+                    div(cls := "xx-small text-info mt-2", "💡 Evalúa el proceso, no el resultado — intenta recordar cómo jugó Héctor independientemente del marcador final."),
+                    div(cls := "xx-small text-muted mt-1 mb-2", "Puntúa 1-5 cada dimensión. Se sugerirá una nota automática que podrás editar."),
+                    Seq(
+                      ("rubricaPosicion", "Posición y movimientos", "1=siempre fuera de lugar / 5=anticipa siempre el juego"),
+                      ("rubricaDecisiones", "Decisiones bajo presión", "1=duda siempre, sale tarde / 5=decisiones rápidas en 1v1"),
+                      ("rubricaPies", "Juego con los pies", "1=evita el balón / 5=distribuye con intención bajo presión"),
+                      ("rubricaComunicacion", "Comunicación", "1=no habla / 5=dirige activamente la defensa"),
+                      ("rubricaActitud", "Actitud y concentración", "1=se desconecta tras errores / 5=líder todo el partido")
+                    ).map { case (fieldName, label_, hint) =>
+                      div(cls := "mb-2",
+                        label(cls := "xx-small text-white fw-bold d-block", label_),
+                        div(cls := "xx-small text-muted mb-1", hint),
+                        select(name := fieldName, id := fieldName, cls := "form-select form-select-sm bg-dark text-white border-warning", onchange := "calcNotaSugerida()",
+                          option(value := "", "— Sin puntuar —"),
+                          option(value := "1", "1"), option(value := "2", "2"), option(value := "3", "3"),
+                          option(value := "4", "4"), option(value := "5", "5")
+                        )
+                      )
+                    },
+                    div(id := "notaSugeridaBox", cls := "xx-small text-warning fw-bold text-center mt-2", "")
+                  )
+                ),
+
                 // 2. MARCADOR Y PARADAS
                 div(cls := "row mb-3 bg-secondary bg-opacity-25 p-2 rounded mx-0",
                   div(cls := "col-4 text-center", label(cls := "small fw-bold", "GOLES (GC)"), input(tpe := "number", name := "gc", id:="gcInput", cls := "form-control text-center bg-danger text-white border-0 fw-bold fs-4", value := "0", readonly:=true)),
@@ -373,35 +403,6 @@ object MatchController extends cask.Routes {
                 div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white fw-bold", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
                 input(tpe:="hidden", name:="reaccion", value:=""),  // campo legacy mantenido para DB
                 div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
-
-                // ── BLOQUE 4.1: RUBRICA DE VALORACION (opcional pero recomendado) ─
-                div(cls := "mb-3 p-2 border border-warning rounded bg-warning bg-opacity-10",
-                  div(cls := "d-flex justify-content-between align-items-center", style := "cursor:pointer;", onclick := "toggleRubrica()",
-                    label(cls := "text-warning fw-bold small mb-0", style := "cursor:pointer;", "📋 RÚBRICA DE VALORACIÓN (opcional pero recomendado)"),
-                    span(id := "rubricaChevron", cls := "text-warning small", "▼")
-                  ),
-                  div(id := "rubricaPanel", style := "display:none;",
-                    div(cls := "xx-small text-muted mt-2 mb-2", "Puntúa 1-5 cada dimensión. Se sugerirá una nota automática que podrás editar."),
-                    Seq(
-                      ("rubricaPosicion", "Posición y movimientos", "1=siempre fuera de lugar / 5=anticipa siempre el juego"),
-                      ("rubricaDecisiones", "Decisiones bajo presión", "1=duda siempre, sale tarde / 5=decisiones rápidas en 1v1"),
-                      ("rubricaPies", "Juego con los pies", "1=evita el balón / 5=distribuye con intención bajo presión"),
-                      ("rubricaComunicacion", "Comunicación", "1=no habla / 5=dirige activamente la defensa"),
-                      ("rubricaActitud", "Actitud y concentración", "1=se desconecta tras errores / 5=líder todo el partido")
-                    ).map { case (fieldName, label_, hint) =>
-                      div(cls := "mb-2",
-                        label(cls := "xx-small text-white fw-bold d-block", label_),
-                        div(cls := "xx-small text-muted mb-1", hint),
-                        select(name := fieldName, id := fieldName, cls := "form-select form-select-sm bg-dark text-white border-warning", onchange := "calcNotaSugerida()",
-                          option(value := "", "— Sin puntuar —"),
-                          option(value := "1", "1"), option(value := "2", "2"), option(value := "3", "3"),
-                          option(value := "4", "4"), option(value := "5", "5")
-                        )
-                      )
-                    },
-                    div(id := "notaSugeridaBox", cls := "xx-small text-warning fw-bold text-center mt-2", "")
-                  )
-                ),
 
                 div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", id := "notaInput", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
 

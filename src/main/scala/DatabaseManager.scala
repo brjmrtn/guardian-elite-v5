@@ -2337,7 +2337,7 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
     val card = getLatestCardData()
     val edad = calcularEdadExacta(card.fechaNacimiento)
 
-    val prompt = s"""Eres el analista técnico de porteros más experto del mundo, especializado en fútbol base. Analiza el vídeo de Héctor, portero de $edad años en Fútbol 7 prebenjamín. Analiza ÚNICAMENTE las acciones de Héctor como portero. Para cada intervención detectada evalúa: posición de manos (¿palmas hacia el balón, pulgares juntos?), posición de pies (¿rodillas flexionadas, posición de salida?), salidas al balón (¿sale con decisión o duda?), posicionamiento en portería, juego con los pies y comunicación con la defensa. Devuelve en texto plano con estas secciones exactas: ACCIONES DETECTADAS (lista de intervenciones vistas), PUNTOS FUERTES (máximo 3 aspectos técnicos que hace bien con timestamp si puedes), PUNTOS A MEJORAR (máximo 3 errores técnicos con descripción concreta de qué hace mal y cómo debería hacerlo), EJERCICIO RECOMENDADO (un ejercicio concreto para el próximo entrenamiento de academia basado en el error más frecuente), NOTA TÉCNICA GLOBAL (nota del 1 al 10 con justificación en una frase). Si no puedes identificar claramente al portero o la calidad no permite análisis preciso, indícalo."""
+    val prompt = s"""Eres el analista técnico de porteros más experto del mundo, especializado en fútbol base. Analiza el vídeo de Héctor, portero de $edad años en Fútbol 7 prebenjamín. Analiza ÚNICAMENTE las acciones de Héctor como portero. Para cada intervención detectada evalúa: posición de manos (¿palmas hacia el balón, pulgares juntos?), posición de pies (¿rodillas flexionadas, posición de salida?), salidas al balón (¿sale con decisión o duda?), posicionamiento en portería, juego con los pies y comunicación con la defensa. Devuelve en texto plano con estas secciones exactas: ACCIONES DETECTADAS (lista de intervenciones vistas), PUNTOS FUERTES (máximo 3 aspectos técnicos que hace bien con timestamp si puedes), PUNTOS A MEJORAR (máximo 3 errores técnicos con descripción concreta de qué hace mal y cómo debería hacerlo), EJERCICIO RECOMENDADO (un ejercicio concreto para el próximo entrenamiento de academia basado en el error más frecuente), NOTA TÉCNICA GLOBAL (nota del 1 al 10 con justificación en una frase). Si no puedes identificar claramente al portero o la calidad no permite análisis preciso, indícalo. Al final añade UNA última línea exactamente con este formato, puntuando de 1 (muy débil) a 5 (excelente) las mismas cinco dimensiones que usa la rúbrica del padre: RUBRICA_IA: posicion=N; decisiones=N; pies=N; comunicacion=N; actitud=N"""
 
     val res = AIProvider.ask(prompt, Some((mimeType, videoBase64)), bypassCache = true)
     val conn = getConnection()
@@ -2386,10 +2386,24 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
         val nextIdx = videoAnalysisSecciones.drop(idx + 1)
           .flatMap(s => { val i = upper.indexOf(s, contentStart); if (i >= 0) Some(i) else None })
           .headOption.getOrElse(texto.length)
-        sec -> texto.substring(contentStart, nextIdx).trim.stripPrefix(":").trim
+        // la linea RUBRICA_IA es para el cruce con la rubrica del padre, no para mostrarla
+        sec -> texto.substring(contentStart, nextIdx).linesIterator.filterNot(_.toUpperCase.contains("RUBRICA_IA")).mkString("\n").trim.stripPrefix(":").trim
       }
     }.toMap
   }
+
+  // BLOQUE B3: puntuacion 1-5 de la IA en las dimensiones de la rubrica (linea RUBRICA_IA del analisis)
+  val dimensionesRubrica: Seq[(String, String, String)] = Seq( // clave IA, columna, etiqueta
+    ("posicion", "rubrica_posicion", "Posición"), ("decisiones", "rubrica_decisiones", "Decisiones bajo presión"),
+    ("pies", "rubrica_pies", "Juego con los pies"), ("comunicacion", "rubrica_comunicacion", "Comunicación"),
+    ("actitud", "rubrica_actitud", "Actitud y concentración"))
+
+  def extractRubricaIA(texto: String): Option[Map[String, Int]] =
+    texto.linesIterator.find(_.toUpperCase.contains("RUBRICA_IA")).flatMap { linea =>
+      val valores = """(?i)(posicion|decisiones|pies|comunicacion|actitud)\s*=\s*([1-5])""".r
+        .findAllMatchIn(linea).map(m => m.group(1).toLowerCase -> m.group(2).toInt).toMap
+      if (valores.size == 5) Some(valores) else None
+    }
 
   def extractNotaTecnica(texto: String): Option[Double] = {
     val seccion = parseVideoAnalysisSections(texto).getOrElse("NOTA TÉCNICA GLOBAL", "")
@@ -4265,6 +4279,13 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         case None => ""
       }
 
+      // BLOQUE B: sesgo de valoracion por resultado del padre, como aviso metodologico
+      val sesgoLine = {
+        val sg = calcularSesgoPorResultado(getTemporadaActivaId())
+        if (!sg("sesgo").asInstanceOf[Boolean]) ""
+        else f"\nAVISO: El padre muestra sesgo de valoración por resultado (r=${sg("correlacion").asInstanceOf[Option[Double]].get}%.2f). Las notas pueden estar infladas en victorias y defladas en derrotas. Tenerlo en cuenta al interpretar la evolución de la nota.\n"
+      }
+
       // Cambio aqui: Llamamos a AIProvider.ask
       val prompt = s"""Eres un analista de rendimiento de porteros de élite. Fecha de hoy: $fechaHoy. Temporada en curso: $temporadaActual. Analiza ÚNICAMENTE los datos de esta temporada.
 
@@ -4272,7 +4293,7 @@ CONTEXTO FOOTBAR — PORTERO: Héctor es portero. Los porteros recorren estructu
 
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$vozPorteroLine$cpiLine
+${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$vozPorteroLine$cpiLine$sesgoLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -12655,6 +12676,81 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       val rs = ps.executeQuery()
       Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("rival")).trim).toList.distinct
     } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE B (calidad de datos) — SESGO DE LA RUBRICA / NOTA POR RESULTADO. SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  /** Correlacion resultado (victoria 1 / empate 0.5 / derrota 0) vs nota. Sesgo si r > 0.6 con >=10 partidos. */
+  def calcularSesgoPorResultado(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT
+          AVG(CASE WHEN goles_favor > goles_contra THEN nota END) as nota_victoria,
+          AVG(CASE WHEN goles_favor < goles_contra THEN nota END) as nota_derrota,
+          AVG(CASE WHEN goles_favor = goles_contra THEN nota END) as nota_empate,
+          CORR(
+            CASE WHEN goles_favor > goles_contra THEN 1.0
+                 WHEN goles_favor = goles_contra THEN 0.5
+                 ELSE 0.0 END,
+            nota
+          ) as correlacion_resultado_nota,
+          COUNT(*) as partidos
+        FROM matches
+        WHERE status = 'PLAYED' AND nota IS NOT NULL AND nota > 0
+          AND goles_favor IS NOT NULL AND goles_contra IS NOT NULL
+          ${seasonFilter(seasonId)}""")
+      rs.next()
+      def opt(c: String) = Option(rs.getObject(c)).map(_ => rs.getDouble(c))
+      val n = rs.getInt("partidos")
+      val r = opt("correlacion_resultado_nota")
+      Map("partidos" -> n, "suficiente" -> (n >= 10 && r.isDefined), "correlacion" -> r,
+        "notaVictoria" -> opt("nota_victoria"), "notaDerrota" -> opt("nota_derrota"), "notaEmpate" -> opt("nota_empate"),
+        "sesgo" -> (n >= 10 && r.exists(_ > 0.6)))
+    } finally { conn.close() }
+  }
+
+  /**
+   * Partidos con rubrica completa del padre y RUBRICA_IA en el analisis de video. Para cada uno, la
+   * dimension que la IA ve mas debil y la diferencia padre - IA en esa dimension.
+   */
+  def getCruceRubricaVideo(seasonId: Int = 0): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT id, fecha, rival, video_analisis_ia, rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud
+        FROM matches
+        WHERE status = 'PLAYED' AND video_analisis_ia IS NOT NULL AND video_analisis_ia <> ''
+          AND rubrica_posicion IS NOT NULL AND rubrica_decisiones IS NOT NULL AND rubrica_pies IS NOT NULL
+          AND rubrica_comunicacion IS NOT NULL AND rubrica_actitud IS NOT NULL ${seasonFilter(seasonId)}
+        ORDER BY fecha DESC""")
+      Iterator.continually(rs).takeWhile(_.next()).flatMap { r =>
+        extractRubricaIA(r.getString("video_analisis_ia")).map { ia =>
+          val (clave, columna, etiqueta) = dimensionesRubrica.minBy { case (k, _, _) => ia(k) }
+          val padre = r.getInt(columna)
+          Map[String, Any]("matchId" -> r.getInt("id"), "fecha" -> r.getDate("fecha").toString,
+            "rival" -> fixEncoding(Option(r.getString("rival")).getOrElse("")),
+            "dimension" -> clave, "etiqueta" -> etiqueta, "notaIA" -> ia(clave), "notaPadre" -> padre,
+            "diferencia" -> (padre - ia(clave)).toDouble)
+        }
+      }.toList
+    } finally { conn.close() }
+  }
+
+  /** Patron: en 3+ partidos la diferencia supera 1.5 puntos en la misma direccion. */
+  def mensajeCruceRubricaVideo(cruce: List[Map[String, Any]]): Option[String] = {
+    if (cruce.size < 3) return None
+    val grandes = cruce.filter(c => math.abs(c("diferencia").asInstanceOf[Double]) > 1.5)
+    val (generoso, critico) = grandes.partition(_("diferencia").asInstanceOf[Double] > 0)
+    val grupo = if (generoso.size >= critico.size) generoso else critico
+    if (grupo.size < 3) return None
+    val etiqueta = grupo.groupBy(_("etiqueta").toString).maxBy(_._2.size)._1
+    val media = grupo.map(c => math.abs(c("diferencia").asInstanceOf[Double])).sum / grupo.size
+    val padreMasAlto = grupo.head("diferencia").asInstanceOf[Double] > 0
+    Some(f"En los últimos ${cruce.size} partidos con vídeo, la IA valora ${etiqueta.toLowerCase} $media%.1f puntos " +
+      s"${if (padreMasAlto) "más bajo" else "más alto"} que tú consistentemente. ¿Estás siendo " +
+      s"${if (padreMasAlto) "demasiado generoso" else "demasiado crítico"} con esa dimensión?")
   }
 
   // ═════════════════════════════════════════════════════════════════════════════

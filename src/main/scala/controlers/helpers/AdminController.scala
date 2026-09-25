@@ -634,6 +634,44 @@ object AdminController extends cask.Routes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CALIDAD DE DATOS (/admin) — solo SQL, sin Gemini en el render
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def calidadDatosPanel(): Modifier = {
+    val temporada = DatabaseManager.getTemporadaActivaId()
+    // BLOQUE B1: sesgo de la nota por resultado (solo con >=10 partidos)
+    val sesgo = DatabaseManager.calcularSesgoPorResultado(temporada)
+    val sesgoWidget: Modifier =
+      if (!sesgo("suficiente").asInstanceOf[Boolean]) frag()
+      else {
+        val r = sesgo("correlacion").asInstanceOf[Option[Double]].get
+        if (sesgo("sesgo").asInstanceOf[Boolean]) {
+          val v = sesgo("notaVictoria").asInstanceOf[Option[Double]]; val d = sesgo("notaDerrota").asInstanceOf[Option[Double]]
+          val detalle = (v, d) match {
+            case (Some(nv), Some(nd)) => f" La nota media en victorias es $nv%.1f y en derrotas es $nd%.1f — una diferencia de ${nv - nd}%.1f puntos."
+            case _ => ""
+          }
+          div(cls := "alert alert-warning small p-2 mb-2",
+            f"⚠️ Tus valoraciones tienen una correlación alta con el resultado del partido (r=$r%.2f).$detalle Intenta evaluar a Héctor independientemente del marcador.")
+        } else div(cls := "small text-success mb-2", f"✅ Tus valoraciones no muestran sesgo significativo por resultado (r=$r%.2f).")
+      }
+    // BLOQUE B3: rubrica del padre vs rubrica IA del analisis de video (3+ partidos)
+    val cruce = DatabaseManager.getCruceRubricaVideo(temporada)
+    val cruceWidget: Modifier = DatabaseManager.mensajeCruceRubricaVideo(cruce) match {
+      case Some(m) => div(cls := "alert alert-info small p-2 mb-2", s"🎬 $m")
+      case None if cruce.size >= 3 => div(cls := "small text-success mb-2", s"✅ Tu rúbrica coincide con el análisis de vídeo de la IA (${cruce.size} partidos comparados).")
+      case None => frag()
+    }
+    div(cls := "card bg-dark border-info shadow mb-4 p-3", id := "calidadDatos",
+      h5(cls := "text-info", "🔍 CALIDAD DE DATOS"),
+      div(cls := "xx-small text-muted fw-bold mb-2", "SESGO EN LA RÚBRICA"),
+      sesgoWidget, cruceWidget,
+      if (!sesgo("suficiente").asInstanceOf[Boolean] && cruce.size < 3)
+        div(cls := "xx-small text-muted", s"Se necesitan al menos 10 partidos con nota y resultado para detectar sesgos (hay ${sesgo("partidos")}).")
+      else frag()
+    )
+  }
+
   @cask.get("/admin")
   def adminPage(request: cask.Request, msg: String = "") = withAuth(request) {
     val objs = DatabaseManager.getSeasonObjectives()
@@ -643,6 +681,7 @@ object AdminController extends cask.Routes {
           h2(cls := "text-danger text-center mb-4", "ADMINISTRACION"),
           if (msg.nonEmpty) div(cls := "alert alert-success small p-2 mb-3", msg) else div(),
           temporadasPanel(""),
+          calidadDatosPanel(),
           div(cls := "card bg-dark border-warning shadow mb-4 p-3",
             h5(cls := "text-warning", "Base de Datos Leyendas"),
             p(cls := "small text-muted fw-bold", "Si no ves la comparacion en Trayectoria, pulsa aqui."),
