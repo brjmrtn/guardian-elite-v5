@@ -502,17 +502,36 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
-                // ── NUTRICION PRE-PARTIDO ─────────────────────────────────
+                // ── NUTRICION E HIDRATACION PRE-PARTIDO ───────────────────
                 div(cls := "mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
-                  label(cls := "form-label text-success small fw-bold w-100 text-center", "🍽️ COMIDA LAS 3H ANTES DEL PARTIDO (opcional)"),
-                  select(name := "nutricionPrepartido", cls := "form-select form-select-sm bg-dark text-white fw-bold",
+                  label(cls := "form-label text-success small fw-bold w-100 text-center", "🍽️ NUTRICIÓN PRE-PARTIDO (opcional)"),
+                  div(cls := "xx-small text-muted mb-1", "Comida de las 3h antes del partido"),
+                  select(name := "nutricionPrepartido", cls := "form-select form-select-sm bg-dark text-white fw-bold mb-2",
                     option(value := "", "— Sin especificar —"),
                     option(value := "completa", "Comida completa (pasta, arroz, proteína)"),
                     option(value := "ligera", "Comida ligera (bocadillo, fruta)"),
                     option(value := "snack", "Solo snack (galletas, barrita)"),
                     option(value := "sin_comer", "Sin comer o muy poco"),
                     option(value := "no_adecuada", "Comida no adecuada (rápida, pesada)")
-                  )
+                  ),
+                  div(cls := "xx-small text-muted mb-1", "Horas desde la última comida"),
+                  select(name := "horasUltimaComida", cls := "form-select form-select-sm bg-dark text-white fw-bold mb-2",
+                    option(value := "", "— Sin especificar —"),
+                    option(value := "0", "Menos de 1h"), option(value := "1", "1-2h"),
+                    option(value := "2", "2-3h"), option(value := "3", "Más de 3h")),
+                  div(cls := "xx-small text-muted mb-1", "Hidratación antes del partido"),
+                  div(cls := "btn-group w-100 mb-2", attr("role") := "group",
+                    frag(DatabaseManager.etiquetasHidratacion.toSeq.sortBy { case (k, _) => Seq("BIEN", "NORMAL", "POCO").indexOf(k) }.map { case (k, et) =>
+                      frag(
+                        input(tpe := "radio", cls := "btn-check", name := "hidratacion", id := s"hidra_$k", value := k),
+                        label(cls := "btn btn-outline-success btn-sm", `for` := s"hidra_$k", et))
+                    }: _*)),
+                  div(cls := "xx-small text-muted mb-1", "¿Desayunó bien?"),
+                  div(cls := "btn-group w-100", attr("role") := "group",
+                    input(tpe := "radio", cls := "btn-check", name := "desayuno", id := "desayuno_si", value := "true"),
+                    label(cls := "btn btn-outline-success btn-sm", `for` := "desayuno_si", "✅ Sí"),
+                    input(tpe := "radio", cls := "btn-check", name := "desayuno", id := "desayuno_no", value := "false"),
+                    label(cls := "btn btn-outline-success btn-sm", `for` := "desayuno_no", "❌ No o poco"))
                 ),
 
                 // ── BLOQUE 4.3: METRICAS DE CANTERA (opcional) ────────────
@@ -1047,6 +1066,12 @@ object MatchController extends cask.Routes {
 
     // BLOQUE H: calcula el CPI del partido en background, sin bloquear la respuesta
     DatabaseManager.actualizarCPI(savedMatchId)
+
+    // Nutricion e hidratacion pre-partido (opcional)
+    DatabaseManager.guardarNutricionPrepartido(savedMatchId,
+      getOptInt("horasUltimaComida").filter(h => h >= 0 && h <= 3),
+      Option(getStr("hidratacion")).filter(DatabaseManager.etiquetasHidratacion.contains),
+      getStr("desayuno") match { case "true" => Some(true); case "false" => Some(false); case _ => None })
 
     // BLOQUE E: detecta hitos de carrera tras guardar el partido — en background, nunca bloquea la respuesta
     new Thread(new Runnable {

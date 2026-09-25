@@ -435,6 +435,11 @@ object DashboardController extends cask.Routes {
       }
 
       // BLOQUE E: coincidencia con las condiciones de rendimiento pico historicas — SQL puro
+      val hidratacionLinea: Modifier = DatabaseManager.recordatorioHidratacion() match {
+        case Some(m) => div(cls := "xx-small mt-2 fw-bold", style := "color:#7dd3fc;", m)
+        case None => frag()
+      }
+
       val condicionesPicoLinea: Modifier = DatabaseManager.getCoincidenciaConCondicionesPico() match {
         case Some(pct) => div(cls := "xx-small mt-2", style := "color:#cbd5e1;", s"🎯 Coincidencia con condiciones pico: $pct%")
         case None => div()
@@ -482,6 +487,7 @@ object DashboardController extends cask.Routes {
         div(cls := "row g-2 mt-2", tarjetas),
         microObjetivoLinea,
         condicionesPicoLinea,
+        hidratacionLinea,
         botonRegistrar
       )
     }

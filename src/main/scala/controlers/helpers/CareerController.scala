@@ -2623,6 +2623,33 @@ object CareerController extends cask.Routes {
 
     // BLOQUE B: indice de consistencia (desviacion tipica de las notas) — SQL puro, minimo 8 partidos
     val vol = DatabaseManager.getVolatilityIndex(efectivo)
+    // Nutricion y rendimiento: con >=10 partidos con datos de nutricion
+    val nutri = DatabaseManager.getNutricionAnalysis(efectivo)
+    val nutricionSection: Modifier =
+      if (!nutri("suficiente").asInstanceOf[Boolean]) frag()
+      else {
+        val hid = nutri("hidratacion").asInstanceOf[Map[String, (Double, Int)]]
+        def linea(k: String, texto: String): Modifier = hid.get(k) match {
+          case Some((nota, n)) => div(cls := "small text-white", f"$texto: nota media $nota%.1f ($n partidos)")
+          case None => frag()
+        }
+        div(cls := "card bg-dark border-success shadow mb-3",
+          div(cls := "card-header text-success fw-bold small", "🍽️ NUTRICIÓN Y RENDIMIENTO"),
+          div(cls := "card-body p-3",
+            linea("BIEN", "Cuando llega bien hidratado"),
+            linea("NORMAL", "Con hidratación normal"),
+            linea("POCO", "Cuando llega poco hidratado"),
+            nutri("diferenciaHidratacion").asInstanceOf[Option[Double]].filter(_ > 0.7).map(d =>
+              div(cls := "alert alert-warning small p-2 mt-2 mb-0", f"⚠️ La hidratación parece afectar al rendimiento de Héctor. Diferencia de $d%.1f puntos entre bien hidratado y poco hidratado.")).getOrElse(frag()),
+            {
+              val des = nutri("desayuno").asInstanceOf[Map[Boolean, (Double, Int)]]
+              (des.get(true), des.get(false)) match {
+                case (Some((si, ns)), Some((no, nn))) => div(cls := "xx-small text-muted mt-2", f"Desayuno completo: $si%.1f ($ns) · sin desayunar bien: $no%.1f ($nn)")
+                case _ => frag()
+              }
+            }))
+      }
+
     val volatilitySection: Modifier =
       if (!vol("suficiente").asInstanceOf[Boolean])
         div(cls := "card bg-dark border-secondary shadow mb-3 p-3 text-center text-muted small",
@@ -2657,6 +2684,7 @@ object CareerController extends cask.Routes {
           seasonSelector(temporadasDb, efectivo, "/benchmark"),
           rffmSection,
           conConfianza("volatility_index", vol("partidos").asInstanceOf[Int], vol("suficiente").asInstanceOf[Boolean])(volatilitySection),
+          nutricionSection,
           condicionesPicoSection,
           if (sinDatos)
             div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")

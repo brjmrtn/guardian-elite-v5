@@ -471,6 +471,10 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS es_local BOOLEAN DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS comportamiento_presion TEXT")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS nutricion_prepartido TEXT DEFAULT NULL")
+      // Nutricion e hidratacion pre-partido (horas: 0=<1h, 1=1-2h, 2=2-3h, 3=>3h; hidratacion: BIEN/NORMAL/POCO)
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS horas_ultima_comida INT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS hidratacion_prepartido TEXT DEFAULT NULL")
+      stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS desayuno_completo BOOLEAN DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS video_analisis_ia TEXT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS video_analisis_fecha TIMESTAMP DEFAULT NULL")
 
@@ -4341,6 +4345,15 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         else f"\nAVISO: El padre muestra sesgo de valoración por resultado (r=${sg("correlacion").asInstanceOf[Option[Double]].get}%.2f). Las notas pueden estar infladas en victorias y defladas en derrotas. Tenerlo en cuenta al interpretar la evolución de la nota.\n"
       }
 
+      // Nutricion e hidratacion pre-partido, cuando hay datos (al menos 5 partidos)
+      val nutricionLine = {
+        val nu = getNutricionAnalysis(getTemporadaActivaId())
+        val hid = nu("hidratacion").asInstanceOf[Map[String, (Double, Int)]]
+        if (nu("partidos").asInstanceOf[Int] < 5 || hid.isEmpty) ""
+        else "\nNutrición pre-partido — nota media por hidratación: " +
+          hid.map { case (k, (nota, n)) => f"${etiquetasHidratacion.getOrElse(k, k).drop(2).trim} $nota%.1f ($n partidos)" }.mkString(", ") + ".\n"
+      }
+
       // BLOQUE J: calibracion del padre como observador (solo si hay desviacion)
       val calibracionLine = getUltimaCalibracion().filter(_("desviacion").asInstanceOf[Double] != 0).map { c =>
         val d = c("desviacion").asInstanceOf[Double]
@@ -4355,7 +4368,7 @@ CONTEXTO FOOTBAR — PORTERO: Héctor es portero. Los porteros recorren estructu
 
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$vozPorteroLine$cpiLine$sesgoLine$calibracionLine
+${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$vozPorteroLine$cpiLine$sesgoLine$calibracionLine$nutricionLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -12824,6 +12837,70 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       ps.setInt(1, limit)
       val rs = ps.executeQuery()
       Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("rival")).trim).toList.distinct
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // NUTRICION E HIDRATACION PRE-PARTIDO. SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  def guardarNutricionPrepartido(matchId: Int, horasUltimaComida: Option[Int], hidratacion: Option[String], desayuno: Option[Boolean]): Unit = {
+    if (matchId <= 0 || (horasUltimaComida.isEmpty && hidratacion.isEmpty && desayuno.isEmpty)) return
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE matches SET horas_ultima_comida = ?, hidratacion_prepartido = ?, desayuno_completo = ? WHERE id = ?")
+      horasUltimaComida match { case Some(h) => ps.setInt(1, h); case None => ps.setNull(1, java.sql.Types.INTEGER) }
+      hidratacion match { case Some(h) => ps.setString(2, h); case None => ps.setNull(2, java.sql.Types.VARCHAR) }
+      desayuno match { case Some(d) => ps.setBoolean(3, d); case None => ps.setNull(3, java.sql.Types.BOOLEAN) }
+      ps.setInt(4, matchId)
+      ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  val etiquetasHidratacion: Map[String, String] = Map("BIEN" -> "💧 Bien hidratado", "NORMAL" -> "🫗 Normal", "POCO" -> "😰 Poco hidratado")
+
+  /** Nota media por nivel de hidratacion (y por desayuno). suficiente: >=10 partidos con datos de nutricion. */
+  def getNutricionAnalysis(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT hidratacion_prepartido, AVG(nota) as nota_media, COUNT(*) as partidos
+        FROM matches
+        WHERE status = 'PLAYED' AND nota > 0 AND hidratacion_prepartido IS NOT NULL
+          ${seasonFilter(seasonId)}
+        GROUP BY hidratacion_prepartido""")
+      val grupos = Iterator.continually(rs).takeWhile(_.next())
+        .map(r => r.getString("hidratacion_prepartido") -> (r.getDouble("nota_media"), r.getInt("partidos"))).toMap
+      val rsD = conn.createStatement().executeQuery(s"""
+        SELECT desayuno_completo, AVG(nota) as nota_media, COUNT(*) as partidos FROM matches
+        WHERE status = 'PLAYED' AND nota > 0 AND desayuno_completo IS NOT NULL ${seasonFilter(seasonId)}
+        GROUP BY desayuno_completo""")
+      val desayuno = Iterator.continually(rsD).takeWhile(_.next())
+        .map(r => r.getBoolean("desayuno_completo") -> (r.getDouble("nota_media"), r.getInt("partidos"))).toMap
+      val rsN = conn.createStatement().executeQuery(s"""
+        SELECT COUNT(*) FROM matches WHERE status = 'PLAYED' ${seasonFilter(seasonId)}
+          AND (hidratacion_prepartido IS NOT NULL OR horas_ultima_comida IS NOT NULL OR desayuno_completo IS NOT NULL)""")
+      rsN.next()
+      val n = rsN.getInt(1)
+      val diferencia = for { b <- grupos.get("BIEN"); p <- grupos.get("POCO") } yield b._1 - p._1
+      Map("partidos" -> n, "suficiente" -> (n >= 10), "hidratacion" -> grupos, "desayuno" -> desayuno,
+        "diferenciaHidratacion" -> diferencia, "afecta" -> diferencia.exists(_ > 0.7))
+    } finally { conn.close() }
+  }
+
+  /** Dia de partido: recordatorio si los 3 ultimos partidos con nota baja coincidieron con poca hidratacion. */
+  def recordatorioHidratacion(): Option[String] = {
+    val conn = getConnection()
+    try {
+      // nota baja = por debajo de la media de la temporada actual
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT hidratacion_prepartido FROM matches
+        WHERE status = 'PLAYED' AND nota > 0 ${seasonFilterActual()}
+          AND nota < (SELECT AVG(nota) FROM matches WHERE status = 'PLAYED' AND nota > 0 ${seasonFilterActual()})
+        ORDER BY fecha DESC LIMIT 3""")
+      val ultimas = Iterator.continually(rs).takeWhile(_.next()).map(r => Option(r.getString("hidratacion_prepartido"))).toList
+      if (ultimas.size == 3 && ultimas.forall(_.contains("POCO")))
+        Some("💧 Recuerda que Héctor rinde mejor bien hidratado — asegúrate de que beba suficiente esta mañana.")
+      else None
     } finally { conn.close() }
   }
 
