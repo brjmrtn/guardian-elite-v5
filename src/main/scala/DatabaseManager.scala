@@ -12558,6 +12558,36 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE O — DETECTOR DE ENFERMEDAD INCIPIENTE (SQL puro, sin Gemini)
+  // FC en reposo > media+5 con energia y animo bajos a la vez. Requiere >=10 registros de FC.
+  // ═════════════════════════════════════════════════════════════════════════════
+  val mensajeEnfermedadIncipiente =
+    "🤒 Posible enfermedad incipiente — la FC en reposo subió y la energía y el ánimo bajaron simultáneamente. Vigila cómo se encuentra Héctor hoy."
+
+  def detectarEnfermedadIncipiente(): Option[String] = {
+    val conn = getConnection()
+    try {
+      val rsN = conn.createStatement().executeQuery("SELECT COUNT(*) as n FROM wellness WHERE fc_reposo IS NOT NULL")
+      if (!rsN.next() || rsN.getInt("n") < 10) return None
+      // fc_hoy: la medicion mas reciente, pero solo si es de hoy o ayer (una FC antigua no dice nada de hoy)
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          AVG(fc_reposo) FILTER (WHERE fecha >= CURRENT_DATE - 30) as fc_media,
+          (SELECT fc_reposo FROM wellness WHERE fc_reposo IS NOT NULL AND fecha >= CURRENT_DATE - 1 ORDER BY fecha DESC LIMIT 1) as fc_hoy,
+          AVG(energia) FILTER (WHERE fecha >= CURRENT_DATE - 3) as energia_reciente,
+          AVG(animo) FILTER (WHERE fecha >= CURRENT_DATE - 3) as animo_reciente
+        FROM wellness WHERE fecha >= CURRENT_DATE - 30""")
+      if (!rs.next()) return None
+      def opt(c: String) = Option(rs.getObject(c)).map(_ => rs.getDouble(c))
+      (opt("fc_media"), opt("fc_hoy"), opt("energia_reciente"), opt("animo_reciente")) match {
+        case (Some(media), Some(hoy), Some(energia), Some(animo)) if hoy > media + 5 && energia < 3.0 && animo < 3.0 =>
+          Some(mensajeEnfermedadIncipiente)
+        case _ => None
+      }
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE N — TELEGRAM BOT BIDIRECCIONAL (sin Gemini: solo parseo de texto y SQL)
   // Solo tablas Elite. La sesion guarda en que paso de cada flujo esta la conversacion.
   // ═════════════════════════════════════════════════════════════════════════════
@@ -13200,6 +13230,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
           msgs += "Buenos días ☀️ ¿Cómo durmió Héctor anoche?\nSUEÑO [horas] [profundo min] [ligero min] [despierto min] [energía 1-5] [ánimo 1-5]\nEjemplo: SUEÑO 9 95 180 10 4 5\nO simplemente: SUEÑO 9"
         if (cuenta("SELECT COUNT(*) FROM wellness WHERE fc_reposo IS NOT NULL AND fecha > CURRENT_DATE - 3") == 0 && tgMarcarRecordatorio("FC", 3))
           msgs += "❤️ Sin datos de FC esta semana.\nFC [bpm]\nEjemplo: FC 58"
+        detectarEnfermedadIncipiente().foreach { m => if (tgMarcarRecordatorio("ENFERMEDAD")) msgs += m }
         if (esLunes && cuenta("SELECT COUNT(*) FROM physical_growth WHERE peso > 0 AND fecha > CURRENT_DATE - 7") == 0 && tgMarcarRecordatorio("PESO"))
           msgs += "⚖️ Sin registro de peso esta semana.\nPESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
       }

@@ -68,6 +68,12 @@ object DashboardController extends cask.Routes {
       case None => div()
     }
 
+    // ── BLOQUE O: ENFERMEDAD INCIPIENTE (FC sube + energia y animo bajan, SQL puro) ──
+    val enfermedadWidget: Modifier = DatabaseManager.detectarEnfermedadIncipiente() match {
+      case Some(msg) => div(cls := "alert alert-warning small p-2 mb-3", style := "border-left:6px solid #facc15;", msg)
+      case None => div()
+    }
+
     // ── BLOQUE B2: PENDIENTE DE REGISTRAR (estructura semanal, SQL puro) ──────
     val pendienteWidget: Modifier = {
       val pendientes = DatabaseManager.getSemanaIncompleta()
@@ -874,6 +880,7 @@ object DashboardController extends cask.Routes {
       div(
         riesgoCriticoAlert,
         desgasteWidget,
+        enfermedadWidget,
         div(cls := "text-center mb-3", style := "background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%); border-radius:16px; padding:22px; border:1px solid #334155;",
           div(style := "font-size:12px; color:#94a3b8; letter-spacing:2px;", "ÍNDICE DE FORMA HOY"),
           div(style := s"font-size:64px; font-weight:900; color:$colorForma; line-height:1.1;", f"$semaforo $indice%.1f")),
@@ -898,6 +905,7 @@ object DashboardController extends cask.Routes {
 
         // ── BLOQUE 5.6: DESGASTE SILENCIOSO (prioridad maxima sobre todo lo demas) ─
         desgasteWidget,
+        enfermedadWidget,
 
         // ── BLOQUE C: MODO DIA DE PARTIDO ───────────────────────────────────
         diaPartidoBanner,
