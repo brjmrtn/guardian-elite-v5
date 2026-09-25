@@ -12718,6 +12718,59 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE H — STREAK DE REGISTRO (SQL puro, sin Gemini)
+  // ═════════════════════════════════════════════════════════════════════════════
+  /**
+   * streakSueno: dias consecutivos con sueno registrado hasta hoy (si hoy aun no hay registro cuenta
+   * desde ayer: la racha no se rompe por la manana). mejorStreak: la racha mas larga de la historia.
+   */
+  def getStreakRegistro(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT DISTINCT fecha FROM wellness WHERE horas_sueno > 0 AND fecha <= CURRENT_DATE ORDER BY fecha DESC")
+      val fechas = Iterator.continually(rs).takeWhile(_.next()).map(_.getDate("fecha").toLocalDate).toList
+      val conjunto = fechas.toSet
+      val hoy = LocalDate.now()
+      val desde = if (conjunto.contains(hoy)) hoy else hoy.minusDays(1)
+      val streak = Iterator.iterate(desde)(_.minusDays(1)).takeWhile(conjunto.contains).size
+      // racha mas larga: recorrido cronologico
+      var mejor = 0; var actual = 0; var previa: Option[LocalDate] = None
+      fechas.reverse.foreach { f =>
+        actual = if (previa.contains(f.minusDays(1))) actual + 1 else 1
+        mejor = math.max(mejor, actual); previa = Some(f)
+      }
+      val semana = fechas.count(f => !f.isBefore(hoy.minusDays(6)))
+      val rsR = conn.createStatement().executeQuery(s"""
+        SELECT COUNT(*) as total,
+          COUNT(*) FILTER (WHERE rubrica_posicion IS NOT NULL AND rubrica_decisiones IS NOT NULL AND rubrica_pies IS NOT NULL
+                             AND rubrica_comunicacion IS NOT NULL AND rubrica_actitud IS NOT NULL) as con_rubrica
+        FROM matches WHERE status = 'PLAYED' ${seasonFilterActual()}""")
+      rsR.next()
+      Map("streakSueno" -> streak, "mejorStreak" -> mejor, "diasSemana" -> semana,
+        "partidos" -> rsR.getInt("total"), "partidosConRubrica" -> rsR.getInt("con_rubrica"))
+    } finally { conn.close() }
+  }
+
+  /** Telegram cuando la racha actual supera el mejor record guardado (la primera vez solo se guarda). */
+  def comprobarRecordStreak(): Option[String] = {
+    val s = getStreakRegistro()
+    val streak = s("streakSueno").asInstanceOf[Int]
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT payload FROM feature_cache WHERE cache_key = 'record_streak_sueno'")
+      val guardado = if (rs.next()) rs.getString("payload").toIntOption else None
+      val record = guardado.getOrElse(s("mejorStreak").asInstanceOf[Int])
+      if (guardado.isEmpty || streak > record) {
+        val ps = conn.prepareStatement(
+          "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('record_streak_sueno', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
+        ps.setString(1, math.max(streak, record).toString); ps.executeUpdate()
+      }
+      if (guardado.isDefined && streak > record) Some(s"🔥 Nuevo récord de streak de sueño: $streak días consecutivos.") else None
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE G — DATA QUALITY SCORE (0-100). SQL puro, sin Gemini
   // ═════════════════════════════════════════════════════════════════════════════
   /**
@@ -13807,6 +13860,8 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       }
       if (hora == 20 && pendiente("ACADEMIA") && tgMarcarRecordatorio("ACADEMIA"))
         msgs += "🎓 ¿Cómo fue la academia de porteros?\nACADEMIA [duración min] [RPE 1-10] [atención 1-5] [calidad 1-5]\nEjemplo: ACADEMIA 60 6 5 4\nO si no fue: ACADEMIA NO [motivo]"
+      // BLOQUE H: nuevo record de racha de sueno
+      if (hora >= 8 && hora < 22) comprobarRecordStreak().foreach(msgs += _)
       // BLOQUE F: aviso de cambio de fase de Guardian (se comprueba en cada pasada, se envia una vez)
       if (hora >= 8 && hora < 22) comprobarCambioFaseGuardian().foreach(msgs += _)
       // BLOQUE E2: pregunta del RPE de Hector (nunca de noche: entre 22:00 y 8:00 espera a la manana)

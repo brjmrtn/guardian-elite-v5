@@ -915,6 +915,15 @@ object DashboardController extends cask.Routes {
           div(style := s"font-size:64px; font-weight:900; color:$colorForma; line-height:1.1;", f"$semaforo $indice%.1f")),
         if (riesgoEsAltoOCritico) riesgoLesionWidget else frag(),
         microObjetivoCard("Hoy"),
+        // BLOQUE H: rachas de registro — discreto, sin alarma si se rompe
+        {
+          val st = DatabaseManager.getStreakRegistro()
+          val racha = st("streakSueno").asInstanceOf[Int]
+          div(cls := "mb-3 xx-small", style := "color:#94a3b8; line-height:1.7;",
+            div(s"🔥 Sueño: $racha ${if (racha == 1) "día seguido" else "días seguidos"}"),
+            if (st("partidos").asInstanceOf[Int] > 0) div(s"⚽ Partidos: ${st("partidosConRubrica")}/${st("partidos")} con rúbrica completa esta temporada") else frag(),
+            div(s"💤 Esta semana: ${st("diasSemana")}/7 días registrados"))
+        },
         div(cls := "d-grid gap-2 mb-3",
           a(href := "/bio", cls := "btn btn-lg btn-info fw-bold py-3", "💤 Registrar sueño"),
           if (esDiaDePartido) a(href := "/match-center", cls := "btn btn-lg btn-warning fw-bold py-3", "⚽ Registrar partido") else frag())
