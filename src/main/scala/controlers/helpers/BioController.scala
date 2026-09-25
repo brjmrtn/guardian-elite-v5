@@ -571,7 +571,7 @@ object BioController extends cask.Routes {
   }
 
   @cask.postForm("/bio/save_academic")
-  def saveAcademic(asignatura: String, nota: Double, tipo: String, comentarios: String = "") = {
+  def saveAcademic(request: cask.Request, asignatura: String, nota: Double, tipo: String, comentarios: String = "") = withAuth(request) {
     DatabaseManager.saveAcademicNote(asignatura, nota, tipo, comentarios)
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
   }
@@ -688,32 +688,32 @@ object BioController extends cask.Routes {
     cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/bio/update_belt")
-  def updateBelt(belt: String) = {
+  def updateBelt(request: cask.Request, belt: String) = withAuth(request) {
     DatabaseManager.updateJudoBelt(belt)
-    cask.Response("", statusCode=302, headers=Seq("Location" -> "/bio"))
+    cask.Response(Array.emptyByteArray, statusCode=302, headers=Seq("Location" -> "/bio"))
   }
   @cask.postForm("/bio/save_eval")
-  def saveEval(blocaje: Int, pies: Int, aereo: Int, valentia: Int,
-               concentracion: Int, coordinacion: Int, notas: String) = {
+  def saveEval(request: cask.Request, blocaje: Int, pies: Int, aereo: Int, valentia: Int,
+               concentracion: Int, coordinacion: Int, notas: String) = withAuth(request) {
     DatabaseManager.saveTechnicalReview(blocaje, pies, aereo, valentia, concentracion, coordinacion, notas)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
   }
   @cask.get("/bio/ai_gen")
-  def aiGenDrill(focus: String, mode: String) = {
-    cask.Response(DatabaseManager.generateTrainingSession(mode, focus))
+  def aiGenDrill(request: cask.Request, focus: String, mode: String) = withAuth(request) {
+    cask.Response(DatabaseManager.generateTrainingSession(mode, focus).getBytes("UTF-8"))
   }
   @cask.postForm("/bio/add_drill")
-  def addDrill(nombre: String) = {
+  def addDrill(request: cask.Request, nombre: String) = withAuth(request) {
     DatabaseManager.addNewDrill(fixEncoding(nombre), "")
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
   }
 
 
   @cask.postForm("/bio/medical/upload")
-  def uploadMedical(fecha: String,
+  def uploadMedical(request: cask.Request, fecha: String,
                     tipo: String,
                     esPrevio: String = "false",
-                    archivo: cask.FormFile) = {
+                    archivo: cask.FormFile) = withAuth(request) {
     val isPrevio = esPrevio == "on"
     // cask 0.9.2: FormFile guarda el archivo en disco. toString = FormFile(name, /tmp/path, headers)
     // Los campos son: fileName (String) y path (java.nio.file.Path o String)
@@ -904,7 +904,7 @@ object BioController extends cask.Routes {
   }
 
   @cask.get("/bio/document-vault/download/:id")
-  def downloadDocumentVault(id: Int) = {
+  def downloadDocumentVault(request: cask.Request, id: Int) = withAuth(request) {
     DatabaseManager.getDocumentVaultFile(id) match {
       case Some((nombre, archivoB64)) =>
         val bytes = java.util.Base64.getDecoder.decode(archivoB64)

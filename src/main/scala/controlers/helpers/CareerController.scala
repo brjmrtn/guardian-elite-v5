@@ -640,7 +640,7 @@ object CareerController extends cask.Routes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/penalties/save")
-  def savePenalty(rival: String, zTiro: String, zSalto: String, esGol: Boolean) = {
+  def savePenalty(request: cask.Request, rival: String, zTiro: String, zSalto: String, esGol: Boolean) = withAuth(request) {
     DatabaseManager.logPenalty(rival, zTiro, zSalto, esGol)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/penalties"))
   }
@@ -656,7 +656,7 @@ object CareerController extends cask.Routes {
 
   // /distribution -> moneyball (version Fase 6.5 completa)
   @cask.get("/distribution")
-  def distributionPage() = {
+  def distributionPage(request: cask.Request) = withAuth(request) {
     cask.Response("".getBytes("UTF-8"), statusCode = 302,
       headers = Seq("Location" -> "/moneyball"))
   }
@@ -2395,13 +2395,13 @@ object CareerController extends cask.Routes {
   }
 
   @cask.postForm("/opportunities/resultado")
-  def updateOpportunityResultado(id: Int, resultado: String) = {
+  def updateOpportunityResultado(request: cask.Request, id: Int, resultado: String) = withAuth(request) {
     DatabaseManager.updateOpportunityResultado(id, resultado)
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
   }
 
   @cask.postForm("/opportunities/complete")
-  def completeOpportunitySeguimiento(id: Int) = {
+  def completeOpportunitySeguimiento(request: cask.Request, id: Int) = withAuth(request) {
     DatabaseManager.completeSeguimiento(id)
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
   }
@@ -2945,13 +2945,13 @@ object CareerController extends cask.Routes {
   }
 
   @cask.postForm("/periodization/save")
-  def savePeriodizationBlock(nombre: String, fechaInicio: String, fechaFin: String, tipo: String, notas: String = "") = {
+  def savePeriodizationBlock(request: cask.Request, nombre: String, fechaInicio: String, fechaFin: String, tipo: String, notas: String = "") = withAuth(request) {
     DatabaseManager.savePeriodization(nombre, fechaInicio, fechaFin, tipo, notas)
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/periodization"))
   }
 
   @cask.postForm("/periodization/generate")
-  def generatePeriodizationAI() = {
+  def generatePeriodizationAI(request: cask.Request) = withAuth(request) {
     val plan = DatabaseManager.generatePeriodizationPlan()
     val content = basePage("periodization",
       div(cls := "row justify-content-center",
@@ -4762,7 +4762,7 @@ object CareerController extends cask.Routes {
 
   // Lectura desde BD unicamente — nunca llama a Gemini
   @cask.get("/idp/status")
-  def idpStatusAction() = {
+  def idpStatusAction(request: cask.Request) = withAuth(request) {
     val ready = DatabaseManager.getActiveIdpTemporada().isDefined
     val json = ujson.Obj("ready" -> ready)
     cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))

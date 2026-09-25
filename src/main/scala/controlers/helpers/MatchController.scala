@@ -39,7 +39,7 @@ object MatchController extends cask.Routes {
 
   // BLOQUE D: clima automatico (Open-Meteo) — solo lectura, nunca Gemini
   @cask.get("/match-center/clima")
-  def matchCenterClima(fecha: String) = {
+  def matchCenterClima(request: cask.Request, fecha: String) = withAuth(request) {
     val clima = DatabaseManager.getClimaParaFecha(fecha)
     val json = ujson.Obj("clima" -> clima)
     cask.Response(json.render().getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json"))
@@ -1170,7 +1170,7 @@ object MatchController extends cask.Routes {
   }
 
   @cask.get("/tournament/new")
-  def newTournamentPage() = {
+  def newTournamentPage(request: cask.Request) = withAuth(request) {
     val content = basePage("match-center",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8",
@@ -1206,7 +1206,7 @@ object MatchController extends cask.Routes {
     cask.Response(content.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
   @cask.postForm("/tournament/create")
-  def createTournamentAction(nombre: String, estructura: String) = {
+  def createTournamentAction(request: cask.Request, nombre: String, estructura: String) = withAuth(request) {
     val res = DatabaseManager.createTournament(nombre, estructura)
     val htmlStr = doctype("html")(html(
       head(meta(charset := "utf-8"), tags2.style(raw(getCss()))),
@@ -1222,7 +1222,7 @@ object MatchController extends cask.Routes {
   }
 
   @cask.get("/match/delete/:id")
-  def deleteMatchAction(id: Int) = {
+  def deleteMatchAction(request: cask.Request, id: Int) = withAuth(request) {
     DatabaseManager.deleteMatch(id)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/history"))
   }
@@ -1646,7 +1646,7 @@ object MatchController extends cask.Routes {
     }
   }
   @cask.postForm("/match/analyze_audio")
-  def analyzeAudioAction(matchId: Int, audioData: String) = {
+  def analyzeAudioAction(request: cask.Request, matchId: Int, audioData: String) = withAuth(request) {
     // La logica de IA y la actualizacion de la DB ahora ocurren dentro de analyzeAudioLog
     // audioData ya viene como Base64 desde el script del navegador
     DatabaseManager.analyzeAudioLog(matchId, audioData)
@@ -1926,7 +1926,7 @@ object MatchController extends cask.Routes {
   }
 
   @cask.postForm("/audio-diary/analyze")
-  def audioDiaryAnalyze(tipo: String, id: Int, audioData: String) = {
+  def audioDiaryAnalyze(request: cask.Request, tipo: String, id: Int, audioData: String) = withAuth(request) {
     // Fire-and-forget en background thread: la nota queda sin referencias tras terminar
     // (nunca se escribe en disco) y no bloquea la navegacion del padre.
     val dataSnapshot = audioData
@@ -1943,12 +1943,12 @@ object MatchController extends cask.Routes {
   }
 
   @cask.postForm("/video/add_tag")
-  def addVideoTag(matchId: Int, min: Int, sec: Int, tipo: String) = {
+  def addVideoTag(request: cask.Request, matchId: Int, min: Int, sec: Int, tipo: String) = withAuth(request) {
     DatabaseManager.addVideoTag(matchId, min, sec, tipo, "")
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> s"/match/edit/$matchId"))
   }
   @cask.get("/video/delete_tag/:id/:matchId")
-  def deleteVideoTag(id: Int, matchId: Int) = {
+  def deleteVideoTag(request: cask.Request, id: Int, matchId: Int) = withAuth(request) {
     DatabaseManager.deleteVideoTag(id)
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> s"/match/edit/$matchId"))
   }

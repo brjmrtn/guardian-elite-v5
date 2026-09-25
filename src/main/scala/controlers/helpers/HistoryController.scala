@@ -176,7 +176,7 @@ object HistoryController extends cask.Routes {
     renderHtml(content)
   }
   @cask.postForm("/scouting/save_rival")
-  def saveRivalInfo(nombre: String, estilo: String, claves: String, notas: String) = {
+  def saveRivalInfo(request: cask.Request, nombre: String, estilo: String, claves: String, notas: String) = withAuth(request) {
     DatabaseManager.saveRivalInfo(fixEncoding(nombre), estilo, fixEncoding(claves), fixEncoding(notas))
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> s"/scouting?query=$nombre"))
   }
@@ -5793,7 +5793,7 @@ object HistoryController extends cask.Routes {
 
   // Lectura desde BD unicamente — nunca llama a Gemini
   @cask.get("/video/analyze-status/:matchId")
-  def videoAnalyzeStatusAction(matchId: Int) = {
+  def videoAnalyzeStatusAction(request: cask.Request, matchId: Int) = withAuth(request) {
     val status = DatabaseManager.getVideoAnalysisStatus(matchId)
     val json = status.get("status") match {
       case Some("done") => ujson.Obj(
@@ -5850,7 +5850,7 @@ object HistoryController extends cask.Routes {
 
   // Lectura desde BD unicamente — nunca llama a Gemini
   @cask.get("/video/training-status/:trainingId")
-  def videoTrainingStatusAction(trainingId: Int) = {
+  def videoTrainingStatusAction(request: cask.Request, trainingId: Int) = withAuth(request) {
     val status = DatabaseManager.getVideoAnalysisStatusTraining(trainingId)
     val json = status.get("status") match {
       case Some("done") => ujson.Obj(
