@@ -415,6 +415,8 @@ object BioController extends cask.Routes {
         academicForm, // Entrada de datos escolares
 
 
+        // BLOQUE E3: FC de esta manana vs RPE registrado ayer
+        frag(DatabaseManager.avisosRPEconFCHoy().map(a => div(cls := "alert alert-warning small p-2 mb-2", a)): _*),
         // WELLNESS
         div(cls := "card bg-dark text-white border-info shadow mb-3", div(cls := "card-header bg-info text-dark fw-bold text-center", "DIARIO DE CARGA Y SUENO"), div(cls := "card-body p-3", form(action := "/bio/save_wellness", method := "post", div(cls:="mb-3", label(cls:="small text-danger fw-bold", "Estado Fisico"), select(name:="estadoFisico", cls:="form-select bg-dark text-white border-secondary fw-bold", option(value:="DISPONIBLE", "✅ Disponible"), option(value:="MOLESTIAS", "⚠ Molestias"), option(value:="LESION", "X Lesionado"), option(value:="ENFERMO", "🤒 Enfermo"))), div(cls:="row mb-3 align-items-end", div(cls:="col-6 text-center", label(cls:="small fw-bold", "Calidad Sueno (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="sueno")), div(cls:="col-6", label(cls:="small text-warning fw-bold", "Horas Dormidas"), input(tpe:="number", step:="0.5", name:="horas", cls:="form-control text-center bg-dark text-white border-warning fw-bold", value:="9.0"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📱 Datos del smartwatch (opcional)"), div(cls:="row g-2", div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño profundo (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoProfundoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Sueño ligero (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoLigeroMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-4", label(cls:="xx-small text-muted", "Despierto (min)"), input(tpe:="number", step:="1", min:="0", name:="suenoDespiertoMin", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-danger fw-bold d-block mb-1", "❤️ Frecuencia cardíaca en reposo (BPM, opcional)"), input(tpe:="number", step:="1", min:="0", name:="fcReposo", cls:="form-control form-control-sm bg-dark text-white border-danger"), div(cls:="xx-small text-muted mt-1", "Mídela por la mañana antes de que Héctor se levante, 30 segundos con el reloj puesto.")), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;", onclick:="toggleFcImportPanel()", label(cls:="text-info fw-bold small mb-0", style:="cursor:pointer;", "📱 IMPORTAR FC DESDE CAPTURA DE PANTALLA"), span(id:="fcImportChevron", cls:="text-info small", "▼")), div(id:="fcImportPanel", style:="display:none;", div(cls:="xx-small text-muted mt-2 mb-2", "Sube una captura de la app del reloj con el historial de mediciones. Guardian extraerá las fechas y los valores de BPM e importará solo los días que no estén ya registrados."), input(tpe:="file", id:="fcImportFile", accept:="image/png,image/jpeg,image/webp", cls:="form-control form-control-sm bg-dark text-white border-secondary mb-2"), div(cls:="d-grid", button(tpe:="button", cls:="btn btn-sm btn-info fw-bold", onclick:="importarFcReposo()", "🧠 Importar mediciones")), div(id:="fcImportSpinner", style:="display:none;", cls:="text-center text-info small mt-2", "Analizando imagen con IA..."), div(id:="fcImportResultado", cls:="mt-2"))), div(cls:="mb-3 border-top pt-2", label(cls:="small fw-bold", "Energia (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="energia")), div(cls:="mb-3", label(cls:="small text-info fw-bold", "Estado Animico (1-5)"), input(tpe:="range", cls:="form-range", min:="1", max:="5", name:="animo"), div(cls:="d-flex justify-content-between xx-small text-muted fw-bold", span("Crisis"), span("Top"))), escala0a3("somnolencia", "☀️ Somnolencia diurna", Seq("No", "Algo", "Bastante", "Mucho")), escala0a3("dolorMuscular", "💪 Dolor muscular / agujetas", Seq("Ninguno", "Leve", "Moderado", "Fuerte")), div(cls:="mb-2", label(cls:="small text-muted fw-bold", "Notas conducta"), input(tpe:="text", name:="notas_conducta", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="... ")), div(cls:="mb-3 row", div(cls:="col-6", select(name:="dolor", cls:="form-select fw-bold", option(value:="1","Nada"), option(value:="2","Molestia"), option(value:="3","Dolor"), option(value:="5","Lesion"))), div(cls:="col-6", input(tpe:="text", name:="zona", cls:="form-control fw-bold", placeholder:="Zona?"))), div(cls:="row mb-3 border-top pt-3", div(cls:="col-6", label(cls:="small text-info fw-bold", "Altura (cm)"), input(tpe:="number", name:="altura", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar")), div(cls:="col-6", label(cls:="small text-info fw-bold", "Peso (kg)"), input(tpe:="number", step:="0.1", name:="peso", cls:="form-control bg-dark text-white fw-bold", placeholder:="Actualizar"))), div(cls:="row mb-3", div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Talla sentado (cm)"), input(tpe:="number", step:="0.1", name:="tallaSentado", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)")), div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Long. pierna (cm)"), input(tpe:="number", step:="0.1", name:="longitudPierna", cls:="form-control form-control-sm bg-dark text-white border-secondary", placeholder:="Opcional (PHV)"))), div(cls:="mb-3 p-2 border border-secondary rounded bg-secondary bg-opacity-10", label(cls:="small text-muted fw-bold d-block mb-2", "📊 De la báscula inteligente y medidas (opcional)"), div(cls:="row g-2", div(cls:="col-6", label(cls:="xx-small text-muted", "Músculo (kg)"), input(tpe:="number", step:="0.1", min:="0", name:="kgMusculo", cls:="form-control form-control-sm bg-dark text-white border-secondary")), div(cls:="col-6", label(cls:="xx-small text-muted", "Masa ósea (kg)"), input(tpe:="number", step:="0.1", min:="0", name:="kgMasaOsea", cls:="form-control form-control-sm bg-dark text-white border-secondary")))), div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-info fw-bold", "Guardar Bio"))))),
 
@@ -458,6 +460,15 @@ object BioController extends cask.Routes {
             )
           ),
           input(tpe:="hidden", name:="tipoAusencia", id:="hiddenTipoAusencia", value:=""),
+          // BLOQUE E1: RPE percibido por Hector (opcional)
+          div(cls := "mb-3",
+            label(cls := "small fw-bold d-block mb-1", "😴 ¿Cómo llegó Héctor a casa? (pregúntale)"),
+            div(cls := "btn-group w-100 flex-wrap", role := "group",
+              frag(DatabaseManager.etiquetasRpeHector.zipWithIndex.map { case (et, i) =>
+                frag(
+                  input(tpe := "radio", cls := "btn-check", name := "rpeHector", id := s"rpeHector-${i + 1}", value := (i + 1).toString, autocomplete := "off"),
+                  label(cls := "btn btn-sm btn-outline-success", `for` := s"rpeHector-${i + 1}", et))
+              }: _*))),
           div(cls:="d-grid", button(tpe:="submit", cls:="btn btn-outline-success fw-bold", "Guardar Sesion")),
           div(cls:="text-center mt-2",
             button(tpe:="button", id:="btnNoAsistio", cls:="btn btn-sm btn-outline-danger fw-bold", onclick:="toggleAusenciaPanel()", "❌ No asistió a esta sesión")
@@ -641,9 +652,10 @@ object BioController extends cask.Routes {
     val fbTiempoActivo     = params.getOrElse("fbTiempoActivo", "").toIntOption
     val fbAceleraciones    = params.getOrElse("fbAceleraciones", "").toIntOption
     val fbDesaceleraciones = params.getOrElse("fbDesaceleraciones", "").toIntOption
+    val rpeHector = if (esAusencia) None else params.getOrElse("rpeHector", "").toIntOption
     DatabaseManager.logTraining(tipo, foco, rpe, calidad, att, rutina, feedbackEntrenador,
       fbDistancia, fbAltaIntensidad, fbSprintMax, fbPctActividad, fbTiempoActivo, fbAceleraciones, fbDesaceleraciones,
-      fecha, if (esAusencia) Some(tipoAusencia) else None)
+      fecha, if (esAusencia) Some(tipoAusencia) else None, rpeHector = rpeHector)
 
     // BLOQUE I: detecta skills trabajadas en el feedback del entrenador de academia — sin Gemini
     if (tipo == "Academia" && feedbackEntrenador.nonEmpty) DatabaseManager.guardarSugerenciasSkillDesdeFeedback(feedbackEntrenador)
@@ -945,6 +957,16 @@ object BioController extends cask.Routes {
           div(cls := "d-grid mb-3",
             a(href := "/career/acwr-proyeccion", cls := "btn btn-outline-warning btn-sm fw-bold", "📅 Planificar próxima semana")
           ),
+
+          // BLOQUE E4: percepcion del esfuerzo padre vs Hector (>=5 entrenos con ambos datos)
+          {
+            val div4 = DatabaseManager.getDivergenciaRPE(DatabaseManager.getTemporadaActivaId())
+            if (!div4("suficiente").asInstanceOf[Boolean]) frag()
+            else div(cls := s"card bg-dark shadow mb-3 p-3 border-${if (div4("divergente").asInstanceOf[Boolean]) "warning" else "secondary"}",
+              div(cls := "fw-bold small text-white mb-1", "🔄 PERCEPCIÓN DEL ESFUERZO — Padre vs Héctor"),
+              div(cls := "small", div4("mensaje").toString),
+              div(cls := "xx-small text-muted mt-1", s"${div4("n")} entrenos con ambos datos. El RPE de Héctor (1-5) se compara ×2 en la escala 1-10."))
+          },
 
           // ACWR + KPIs (BLOQUE D: aviso de umbrales adaptados a la edad)
           div(cls := "xx-small mb-1", style := "color:#64748b;", DatabaseManager.disclaimerACWR),

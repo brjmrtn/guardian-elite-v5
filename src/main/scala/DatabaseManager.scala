@@ -312,6 +312,8 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS fb_desaceleraciones INT DEFAULT NULL")
       // BLOQUE N: duracion real de la sesion (la registra el bot de Telegram; la carga sigue usando 60*rpe)
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS duracion_min INT DEFAULT NULL")
+      // BLOQUE E: RPE percibido por Hector al llegar a casa (1=Fresco ... 5=Agotado)
+      stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS rpe_hector INT DEFAULT NULL")
       // BLOQUE N: estado de la conversacion con el bot de Telegram (un registro por chat)
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS telegram_session (
         chat_id           TEXT PRIMARY KEY,
@@ -9424,10 +9426,11 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                    fbDistancia: Option[Double] = None, fbAltaIntensidad: Option[Int] = None, fbSprintMax: Option[Double] = None,
                    fbPctActividad: Option[Int] = None, fbTiempoActivo: Option[Int] = None,
                    fbAceleraciones: Option[Int] = None, fbDesaceleraciones: Option[Int] = None,
-                   fecha: String = "", tipoAusencia: Option[String] = None, duracionMin: Option[Int] = None): Int = {
+                   fecha: String = "", tipoAusencia: Option[String] = None, duracionMin: Option[Int] = None,
+                   rpeHector: Option[Int] = None): Int = {
     val conn=getConnection()
     try {
-      val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle, feedback_entrenador, fb_distancia, fb_alta_intensidad, fb_sprint_max, fb_pct_actividad, fb_tiempo_activo, fb_aceleraciones, fb_desaceleraciones, fecha, tipo_ausencia, duracion_min) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::date,?,?) RETURNING id")
+      val s=conn.prepareStatement("INSERT INTO trainings (tipo, foco, rpe, calidad, atencion, rutina_detalle, feedback_entrenador, fb_distancia, fb_alta_intensidad, fb_sprint_max, fb_pct_actividad, fb_tiempo_activo, fb_aceleraciones, fb_desaceleraciones, fecha, tipo_ausencia, duracion_min, rpe_hector) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::date,?,?,?) RETURNING id")
       s.setString(1,tipo); s.setString(2,fixEncoding(foco)); s.setInt(3,rpe); s.setInt(4,calidad); s.setInt(5, atencion); s.setString(6,fixEncoding(rutina))
       if (feedbackEntrenador.nonEmpty) s.setString(7, fixEncoding(feedbackEntrenador)) else s.setNull(7, java.sql.Types.VARCHAR)
       def setOptDouble(idx: Int, v: Option[Double]): Unit = v match { case Some(x) => s.setDouble(idx, x); case None => s.setNull(idx, java.sql.Types.DOUBLE) }
@@ -9445,7 +9448,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         case Some(t) if t.nonEmpty => s.setString(16, t)
         case _ => s.setNull(16, java.sql.Types.VARCHAR)
       }
-      setOptInt(17, duracionMin)
+      setOptInt(17, duracionMin); setOptInt(18, rpeHector.filter(v => v >= 1 && v <= 5))
       val rsId = s.executeQuery()
       val id = if (rsId.next()) rsId.getInt("id") else -1
       conn.createStatement().executeUpdate("UPDATE gear SET usos_actuales = usos_actuales + 1 WHERE activo = TRUE")
@@ -12711,6 +12714,69 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE E — RPE FUNCIONAL DE HECTOR (SQL puro, sin Gemini)
+  // ═════════════════════════════════════════════════════════════════════════════
+  val etiquetasRpeHector: Seq[String] = Seq("Fresco", "Normal", "Algo cansado", "Muy cansado", "Agotado")
+
+  /** E3: FC en reposo de la manana siguiente al entreno > media historica + 5 => el RPE registrado puede quedarse corto. */
+  def validarRPEconFC(trainingId: Int): Option[String] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT t.rpe,
+          (SELECT fc_reposo FROM wellness WHERE fecha = t.fecha + 1 AND fc_reposo IS NOT NULL) as fc_siguiente,
+          (SELECT AVG(fc_reposo) FROM wellness WHERE fc_reposo IS NOT NULL AND fecha < t.fecha + 1 AND fecha >= t.fecha - 30) as fc_media,
+          (SELECT COUNT(*) FROM wellness WHERE fc_reposo IS NOT NULL) as n_fc
+        FROM trainings t WHERE t.id = ? AND t.tipo_ausencia IS NULL AND t.rpe > 0""")
+      ps.setInt(1, trainingId)
+      val rs = ps.executeQuery()
+      if (!rs.next() || rs.getInt("n_fc") < 10) return None
+      val fc = Option(rs.getObject("fc_siguiente")).map(_ => rs.getInt("fc_siguiente"))
+      val media = Option(rs.getObject("fc_media")).map(_ => rs.getDouble("fc_media"))
+      (fc, media) match {
+        case (Some(f), Some(m)) if f > m + 5 =>
+          Some(f"⚠️ La FC de esta mañana ($f BPM, +${f - m}%.0f sobre la media) sugiere que el entrenamiento de ayer fue más intenso de lo registrado (RPE=${rs.getInt("rpe")}). El ACWR puede estar subestimado.")
+        case _ => None
+      }
+    } finally { conn.close() }
+  }
+
+  /** Avisos E3 de los entrenos de ayer (se muestran junto al registro de sueno de hoy). */
+  def avisosRPEconFCHoy(): List[String] = {
+    val conn = getConnection()
+    val ids = try {
+      val rs = conn.createStatement().executeQuery("SELECT id FROM trainings WHERE fecha = CURRENT_DATE - 1 AND tipo_ausencia IS NULL AND rpe > 0")
+      Iterator.continually(rs).takeWhile(_.next()).map(_.getInt("id")).toList
+    } finally { conn.close() }
+    ids.flatMap(validarRPEconFC).distinct
+  }
+
+  /** E4: RPE del padre (1-10) vs RPE de Hector (1-5, se compara x2) en los entrenos con ambos datos. */
+  def getDivergenciaRPE(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val filtro = if (seasonId > 0)
+        s"""AND fecha >= COALESCE((SELECT fecha_inicio FROM seasons WHERE id = $seasonId), DATE '1900-01-01')
+            AND fecha <= COALESCE((SELECT fecha_fin FROM seasons WHERE id = $seasonId), CURRENT_DATE)""" else ""
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT COUNT(*) as n, AVG(rpe) as media_padre, AVG(rpe_hector * 2.0) as media_hector,
+          SUM(CASE WHEN rpe_hector * 2 > rpe THEN 1 ELSE 0 END) as hector_mas_alto
+        FROM trainings
+        WHERE rpe_hector IS NOT NULL AND rpe > 0 AND tipo_ausencia IS NULL $filtro""")
+      rs.next()
+      val n = rs.getInt("n")
+      if (n < 5) return Map("suficiente" -> false, "n" -> n)
+      val mp = rs.getDouble("media_padre"); val mh = rs.getDouble("media_hector")
+      // sistematico: Hector por encima de media en >= 1 punto y en la mayoria de sesiones
+      val divergente = mh - mp >= 1.0 && rs.getInt("hector_mas_alto") * 2 > n
+      val mensaje =
+        if (divergente) f"📊 Divergencia de percepción: Héctor percibe los entrenamientos como más intensos de lo que tú registras (media padre: $mp%.1f, media Héctor: $mh%.1f). El ACWR real puede ser más alto de lo que muestra Guardian."
+        else f"✅ Percepciones alineadas: media padre $mp%.1f · media Héctor $mh%.1f (escala 1-10)."
+      Map("suficiente" -> true, "n" -> n, "mediaPadre" -> mp, "mediaHector" -> mh, "divergente" -> divergente, "mensaje" -> mensaje)
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE C — INDICADORES DE CONFIANZA ESTADISTICA (sin SQL: solo el numero de observaciones)
   // ═════════════════════════════════════════════════════════════════════════════
   def getConfianzaModulo(tipo: String, n: Int): Map[String, String] = {
@@ -12951,6 +13017,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       val ses = tgSesion(chatId)
       if (!tgComandos.contains(primera) && ses.paso.contains("FACTOR")) return handleFactor(texto.trim, chatId, ses)
       if (!tgComandos.contains(primera) && ses.paso.contains("FEEDBACK")) return handleFeedback(texto.trim, chatId, ses)
+      if (ses.paso.contains("RPE_HECTOR") && upper.matches("[1-5]")) return handleRpeHector(upper.toInt, chatId, ses)
 
       if (upper.startsWith("SUEÑO") || upper.startsWith("SUENO")) handleSueno(texto, chatId)
       else if (upper.startsWith("FC "))        handleFC(texto, chatId)
@@ -13026,7 +13093,8 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       ps.setInt(1, bpm.get); ps.executeUpdate()
       val rs = conn.createStatement().executeQuery("SELECT AVG(fc_reposo) as m FROM wellness WHERE fc_reposo IS NOT NULL")
       val media = if (rs.next()) rs.getDouble("m") else 0.0
-      f"✅ FC registrada: ${bpm.get} BPM · Media histórica: $media%.0f BPM"
+      f"✅ FC registrada: ${bpm.get} BPM · Media histórica: $media%.0f BPM" +
+        avisosRPEconFCHoy().map("\n" + _).mkString
     } finally { conn.close() }
   }
 
@@ -13261,7 +13329,8 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     val rpe = tgEnRango(a.lift(1).flatMap(tgInt), 1, 10)
     if (minutos.isEmpty || rpe.isEmpty) return "Formato: JUDO [duración min] [RPE 1-10]\nEjemplo: JUDO 60 6\nO si no fue: JUDO NO [ENFERMEDAD/FAMILIAR/DESCANSO/OTRO]"
     // calidad/atencion fijas como en el formulario web: el padre no las observa en judo
-    logTraining("Judo", "", rpe.get, 3, 3, "", duracionMin = minutos)
+    val idJudo = logTraining("Judo", "", rpe.get, 3, 3, "", duracionMin = minutos)
+    tgProgramarPreguntaRpe(idJudo)
     new Thread(() => detectarHitos()).start()
     s"✅ Judo registrado: ${minutos.get}min · RPE ${rpe.get} · ACWR: ${tgAcwrTexto()}"
   }
@@ -13280,6 +13349,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       return s"Formato: $flujo [duración min] [RPE 1-10] [atención 1-5] [calidad 1-5]\nEjemplo: $flujo ${if (flujo == "CLUB") "75 7 4 4" else "60 6 5 4"}\nO si no fue: $flujo NO [motivo]"
     // La app guarda calidad/atencion en escala 1-10: el 1-5 del bot se duplica
     val id = logTraining(tipo, "", rpe.get, calidad.getOrElse(3) * 2, atencion.getOrElse(3) * 2, "", duracionMin = minutos)
+    tgProgramarPreguntaRpe(id)
     new Thread(() => detectarHitos()).start()
     tgGuardarSesion(chatId, TgSesion(flujo = Some(flujo), paso = Some("FEEDBACK"), trainingId = Some(id)))
     s"✅ $tipo guardado. ¿Feedback del entrenador? (texto libre o NINGUNO)"
@@ -13375,6 +13445,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   private def handleSaltar(chatId: String): String = {
     val s = tgSesion(chatId)
     s.paso match {
+      case Some("RPE_HECTOR") => tgLimpiarSesion(chatId); "⏭️ Sin RPE de Héctor para este entreno."
       case Some(p) if s.flujo.contains("PARTIDO") => tgSiguientePaso(chatId, s, p, "⏭️ Saltado\n")
       case Some(p) if p == "FEEDBACK" || p.startsWith("SKILLS:") => handleNinguno(chatId)
       case _ => "No hay ningún registro en curso."
@@ -13458,6 +13529,52 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
 
   private def handleDesconocido(chatId: String): String = "🤔 No he entendido el mensaje. Escribe AYUDA para ver los comandos."
 
+  // ── BLOQUE E2: RPE DE HECTOR 2 HORAS DESPUES DEL ENTRENO ─────────────────
+  private def tgProgramarPreguntaRpe(trainingId: Int): Unit = {
+    if (trainingId <= 0) return
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO NOTHING")
+      ps.setString(1, s"tg_rpe_pend_$trainingId"); ps.setString(2, trainingId.toString); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Pregunta pendiente cuyo entreno se registro hace >= 2h. Solo si el chat no esta en mitad de otro flujo. */
+  private def tgPreguntaRpePendiente(chatId: String): Option[String] = {
+    if (tgSesion(chatId).flujo.isDefined) return None
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT f.cache_key, t.id, t.tipo FROM feature_cache f
+        JOIN trainings t ON t.id = CAST(f.payload AS INT)
+        WHERE f.cache_key LIKE 'tg_rpe_pend_%' AND f.updated_at <= NOW() - INTERVAL '2 hours'
+        ORDER BY f.updated_at ASC LIMIT 1""")
+      if (!rs.next()) return None
+      val (clave, id, tipo) = (rs.getString("cache_key"), rs.getInt("id"), rs.getString("tipo"))
+      val del = conn.prepareStatement("DELETE FROM feature_cache WHERE cache_key = ?")
+      del.setString(1, clave); del.executeUpdate()
+      // entrenos de hace mas de un dia: la pregunta ya no tiene sentido
+      val psF = conn.prepareStatement("SELECT fecha >= CURRENT_DATE - 1 as reciente FROM trainings WHERE id = ?")
+      psF.setInt(1, id)
+      val rf = psF.executeQuery()
+      if (!rf.next() || !rf.getBoolean("reciente")) return None
+      tgGuardarSesion(chatId, TgSesion(flujo = Some("RPE"), paso = Some("RPE_HECTOR"), trainingId = Some(id)))
+      Some(s"😴 ¿Cómo llegó Héctor a casa del $tipo?\n1=Fresco · 2=Normal · 3=Algo cansado · 4=Muy cansado · 5=Agotado\nResponde solo el número o SALTAR")
+    } finally { conn.close() }
+  }
+
+  private def handleRpeHector(valor: Int, chatId: String, s: TgSesion): String = {
+    val id = s.trainingId.getOrElse { tgLimpiarSesion(chatId); return "No hay ningún entreno pendiente." }
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE trainings SET rpe_hector = ? WHERE id = ?")
+      ps.setInt(1, valor); ps.setInt(2, id); ps.executeUpdate()
+    } finally { conn.close() }
+    tgLimpiarSesion(chatId)
+    s"✅ Registrado: Héctor llegó ${etiquetasRpeHector(valor - 1).toLowerCase} ($valor/5)"
+  }
+
   // ── RECORDATORIOS PROGRAMADOS ─────────────────────────────────────────────
   /** true (y lo marca) si el recordatorio `clave` no se ha enviado en los ultimos `dias` dias (1 = hoy). */
   private def tgMarcarRecordatorio(clave: String, dias: Int = 1): Boolean = {
@@ -13516,6 +13633,8 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       }
       if (hora == 20 && pendiente("ACADEMIA") && tgMarcarRecordatorio("ACADEMIA"))
         msgs += "🎓 ¿Cómo fue la academia de porteros?\nACADEMIA [duración min] [RPE 1-10] [atención 1-5] [calidad 1-5]\nEjemplo: ACADEMIA 60 6 5 4\nO si no fue: ACADEMIA NO [motivo]"
+      // BLOQUE E2: pregunta del RPE de Hector (nunca de noche: entre 22:00 y 8:00 espera a la manana)
+      if (hora >= 8 && hora < 22) tgPreguntaRpePendiente(TelegramService.chatIdConfigurado).foreach(msgs += _)
       if (hora == 21) {
         if (pendiente("JUDO") && tgMarcarRecordatorio("JUDO"))
           msgs += "🥋 ¿Fue Héctor a Judo hoy?\nJUDO [duración min] [RPE 1-10]\nEjemplo: JUDO 60 6\nO si no fue: JUDO NO [ENFERMEDAD/FAMILIAR/DESCANSO/OTRO]"
