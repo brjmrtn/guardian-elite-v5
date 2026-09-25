@@ -1246,6 +1246,50 @@ object HistoryController extends cask.Routes {
     val stats = DatabaseManager.getBiomecPosicional(efectivo)
     val setPieceStats = DatabaseManager.getSetPieceStats(efectivo) // BLOQUE C
 
+    // BLOQUE P: mapa de calor de goles encajados en 6 zonas — requiere >=10 goles con zona
+    val heat6 = DatabaseManager.getGoalHeatmap6Zonas(efectivo)
+    val heatmapGolesWidget: Modifier =
+      if (!heat6("suficiente").asInstanceOf[Boolean])
+        div(cls := "card bg-dark border-secondary shadow mb-4 p-3",
+          div(cls := "fw-bold small text-white mb-1", "🥅 MAPA DE CALOR — GOLES ENCAJADOS"),
+          div(cls := "xx-small text-muted", s"Se necesitan al menos 10 goles con zona registrada (hay ${heat6("total")})."))
+      else {
+        val zonas = heat6("zonas").asInstanceOf[Map[String, Int]]
+        val total = heat6("total").asInstanceOf[Int]
+        val maximo = math.max(1, zonas.values.max)
+        val etiqueta = DatabaseManager.zonasPorteria6.toMap
+        // azul (0 goles) -> rojo intenso (maximo), interpolando en RGB
+        def color(n: Int): String = {
+          val t = n.toDouble / maximo
+          val (r, g, b) = ((37 + (220 - 37) * t).toInt, (99 + (38 - 99) * t).toInt, (235 + (38 - 235) * t).toInt)
+          s"rgb($r,$g,$b)"
+        }
+        val (ancho, alto, x0, y0) = (300, 100, 20, 20)
+        val celdas = for {
+          (fila, iFila) <- Seq("ALTO", "BAJO").zipWithIndex
+          (col, iCol) <- Seq("IZQ", "CEN", "DER").zipWithIndex
+        } yield {
+          val z = s"${fila}_$col"; val n = zonas.getOrElse(z, 0)
+          val (x, y) = (x0 + iCol * ancho / 3, y0 + iFila * alto / 2)
+          s"""<rect x="$x" y="$y" width="${ancho / 3}" height="${alto / 2}" fill="${color(n)}" stroke="#0f172a" stroke-width="2"><title>${etiqueta(z)}: $n</title></rect>""" +
+          s"""<text x="${x + ancho / 6}" y="${y + alto / 4 + 7}" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">$n</text>"""
+        }
+        val svg = s"""<svg viewBox="0 0 340 130" width="100%" style="max-width:420px;" role="img" aria-label="Goles encajados por zona de la portería">
+          ${celdas.mkString}
+          <path d="M${x0 - 6} ${y0 + alto + 4} L${x0 - 6} ${y0 - 6} L${x0 + ancho + 6} ${y0 - 6} L${x0 + ancho + 6} ${y0 + alto + 4}" fill="none" stroke="#e2e8f0" stroke-width="6" stroke-linejoin="round"/>
+          <line x1="0" y1="${y0 + alto + 4}" x2="340" y2="${y0 + alto + 4}" stroke="#475569" stroke-width="2"/>
+        </svg>"""
+        val zMax = heat6("zonaMax").asInstanceOf[String]; val zMin = heat6("zonaMin").asInstanceOf[String]
+        div(cls := "card bg-dark border-secondary shadow mb-4 p-3",
+          div(cls := "fw-bold small text-white mb-2", "🥅 MAPA DE CALOR — GOLES ENCAJADOS"),
+          div(cls := "text-center", raw(svg)),
+          div(cls := "d-flex justify-content-between xx-small text-muted mt-1", span("🔵 0 goles"), span(s"🔴 $maximo goles")),
+          div(cls := "small mt-2",
+            div(cls := "text-danger", s"Más goles: ${etiqueta(zMax)} (${zonas(zMax)} de $total)"),
+            div(cls := "text-info", s"Menos goles: ${etiqueta(zMin)} (${zonas(zMin)} de $total)")),
+          div(cls := "xx-small text-muted mt-1", "La media altura cuenta como zona baja."))
+      }
+
     // BLOQUE F: correccion del paso negativo — requiere >=8 goles con posicion_set
     val pasoNegativo = DatabaseManager.getPasoNegativoTrend(efectivo)
     val pasoNegativoWidget: Modifier =
@@ -1629,6 +1673,7 @@ object HistoryController extends cask.Routes {
             },
 
             paradasAnalysisWidget,
+            heatmapGolesWidget,
             pasoNegativoWidget,
             angulo1v1Widget,
             vulnerabilidadWidget,
@@ -6065,6 +6110,17 @@ object HistoryController extends cask.Routes {
       else s"""<div class="narrative" style="font-size:12px;">📊 Índice de Consistencia: ${vol("emoji")} ${vol("etiqueta")} (σ=${f"${vol("desviacion").asInstanceOf[Double]}%.2f"})</div>"""
     }
 
+    // BLOQUE P: zona de la porteria mas castigada (temporada activa, minimo 10 goles con zona)
+    val zonaVulnerableHtml = {
+      val h = DatabaseManager.getGoalHeatmap6Zonas(DatabaseManager.getTemporadaActivaId())
+      if (!h("suficiente").asInstanceOf[Boolean]) ""
+      else {
+        val z = h("zonaMax").asInstanceOf[String]
+        val n = h("zonas").asInstanceOf[Map[String, Int]](z); val total = h("total").asInstanceOf[Int]
+        s"""<div class="narrative" style="font-size:12px;">🥅 Zona más vulnerable: ${DatabaseManager.zonasPorteria6.toMap.apply(z)} ($n goles, ${n * 100 / total}% del total)</div>"""
+      }
+    }
+
     // BLOQUE F: correccion del paso negativo, cuando hay datos suficientes
     val pasoNegativoHtml = {
       val pn = DatabaseManager.getPasoNegativoTrend()
@@ -6284,6 +6340,7 @@ object HistoryController extends cask.Routes {
 $goalCoverageHtml
 $markovHtml
 $consistenciaHtml
+$zonaVulnerableHtml
 $pasoNegativoHtml
 $arquetipoHtml
 $vozPorteroHtml

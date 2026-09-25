@@ -4302,6 +4302,24 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
     counts.toMap
   }
 
+  // BLOQUE P: mapa de calor de 6 zonas sobre el mismo recuento que getGoalHeatmap (9 zonas T/M/B x L/C/R).
+  // La fila de media altura (M*) se suma a BAJO: por debajo de la mitad de la porteria.
+  val zonasPorteria6: Seq[(String, String)] = Seq(
+    "ALTO_IZQ" -> "Alto izquierda", "ALTO_CEN" -> "Alto centro", "ALTO_DER" -> "Alto derecha",
+    "BAJO_IZQ" -> "Bajo izquierda", "BAJO_CEN" -> "Bajo centro", "BAJO_DER" -> "Bajo derecha")
+
+  def getGoalHeatmap6Zonas(seasonId: Int = 0): Map[String, Any] = {
+    val nueve = getGoalHeatmap(seasonId = seasonId)
+    def zona6(codigo: String): String =
+      (if (codigo.startsWith("T")) "ALTO" else "BAJO") + "_" + (codigo.last match { case 'L' => "IZQ"; case 'C' => "CEN"; case _ => "DER" })
+    val zonas = zonasPorteria6.map { case (k, _) => k -> 0 }.toMap ++
+      nueve.toSeq.groupBy { case (c, _) => zona6(c) }.map { case (z, l) => z -> l.map(_._2).sum }
+    val total = zonas.values.sum
+    val orden = zonasPorteria6.map(_._1).map(z => z -> zonas(z))
+    Map("zonas" -> zonas, "total" -> total, "suficiente" -> (total >= 10),
+      "zonaMax" -> orden.maxBy(_._2)._1, "zonaMin" -> orden.minBy(_._2)._1)
+  }
+
   def getGoalHeatmapByRival(rival: String): Map[String, Int] = {
     val zones = Seq("TL","TC","TR","ML","MC","MR","BL","BC","BR")
     val counts = scala.collection.mutable.Map(zones.map(_ -> 0): _*)
@@ -12841,6 +12859,13 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     val responsabilidad = posicion match { case Some("IMPARABLE") | Some("BIEN_PLANTADO") => "Ninguna"; case Some(_) => "Media"; case None => "Media" }
     val parable = if (posicion.contains("IMPARABLE")) "No" else "Dudoso"
     saveMatchGoal(matchId, minuto, origen, sit, responsabilidad, parable, zona.get, posicion.map(p => s"POS:$p").getOrElse("Telegram"))
+    // Los mapas de goles existentes (getGoalHeatmap, biomecanica) leen matches.zona_goles, no match_goals
+    val connZ = getConnection()
+    try {
+      val psZ = connZ.prepareStatement(
+        "UPDATE matches SET zona_goles = CASE WHEN COALESCE(zona_goles, '') = '' THEN ? ELSE zona_goles || ',' || ? END WHERE id = ?")
+      psZ.setString(1, zona.get); psZ.setString(2, zona.get); psZ.setInt(3, matchId); psZ.executeUpdate()
+    } finally { connZ.close() }
 
     val conn = getConnection()
     try {
