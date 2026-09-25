@@ -9629,9 +9629,10 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       val query = """
       SELECT clima, AVG(nota) as media_nota, AVG(goles_contra) as media_gc
       FROM matches
-      WHERE status='PLAYED'
+      WHERE status='PLAYED' AND clima IS NOT NULL AND clima <> ''
       GROUP BY clima
     """
+      // clima NULL (registro rapido, Telegram, CSV importado) daba una clave null que rompia el dashboard
       val rs = conn.createStatement().executeQuery(query)
       while(rs.next()) {
         stats(rs.getString("clima")) = (rs.getDouble("media_nota"), rs.getDouble("media_gc"))
