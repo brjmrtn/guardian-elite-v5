@@ -940,6 +940,20 @@ object DashboardController extends cask.Routes {
         if (riesgoEsAltoOCritico) riesgoLesionWidget else frag(),
         protocoloWidget,
         microObjetivoCard("Hoy"),
+        // Reto semanal PARA Hector (se genera en la tarea programada; si falta, boton)
+        DatabaseManager.getRetoSemana() match {
+          case Some(r) =>
+            div(cls := "card shadow-sm mb-3 p-3", style := "background:linear-gradient(135deg,#7c2d12,#a16207); border:0; border-radius:14px;",
+              div(style := "font-size:11px; color:#fde68a; letter-spacing:1px; font-weight:700;", "🎯 RETO DE HÉCTOR ESTA SEMANA"),
+              div(style := "font-size:22px; font-weight:700; color:#fff; line-height:1.3; margin-top:6px;", r("reto").toString),
+              r("completado").asInstanceOf[Option[String]].map { c =>
+                div(cls := "small mt-1", style := "color:#fef3c7;", c match { case "SI" => "✅ ¡Conseguido!"; case "CASI" => "🔄 Casi"; case _ => "❌ Esta vez no" })
+              }.getOrElse(frag()),
+              div(cls := "xx-small mt-2", style := "color:#fde68a;", "Cuéntaselo de camino al campo — como un juego, sin presión."))
+          case None =>
+            form(action := "/reto-hector/generar", method := "post", cls := "d-grid mb-3",
+              button(tpe := "submit", cls := "btn btn-sm btn-outline-warning fw-bold", "🎯 Generar el reto de Héctor de esta semana"))
+        },
         // BLOQUE H: rachas de registro — discreto, sin alarma si se rompe
         {
           val st = DatabaseManager.getStreakRegistro()
@@ -1350,6 +1364,16 @@ object DashboardController extends cask.Routes {
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE 5.5 — RUTA: GENERAR PREPARACION SEMANAL (solo al pulsar el boton)
   // ─────────────────────────────────────────────────────────────────────────────
+  // Reto de Hector: Gemini solo al pulsar el boton (en segundo plano)
+  @cask.post("/reto-hector/generar")
+  def generarRetoHectorAction(request: cask.Request) = withAuth(request) {
+    new Thread(() => DatabaseManager.generarRetoHector() match {
+      case Left(e) => println(s"[Reto Hector] ${e.take(200)}")
+      case Right(_) =>
+    }).start()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/#hoy"))
+  }
+
   // Protocolo de recuperacion: Gemini solo al pulsar el boton (en segundo plano)
   @cask.post("/recuperacion/actualizar")
   def actualizarProtocoloRecuperacion(request: cask.Request) = withAuth(request) {

@@ -724,6 +724,20 @@ object CareerController extends cask.Routes {
         ),
 
         hitosSection,
+        {
+          val retos = DatabaseManager.getHistorialRetos()
+          if (retos.isEmpty) frag()
+          else div(cls := "card bg-dark text-white border-warning shadow mb-4",
+            div(cls := "card-header text-warning fw-bold small", "🎯 LOS RETOS DE HÉCTOR"),
+            div(cls := "card-body p-3",
+              frag(retos.map { r =>
+                val estado = r("completado").asInstanceOf[Option[String]] match {
+                  case Some("SI") => "✅"; case Some("CASI") => "🔄"; case Some("NO") => "❌"; case _ => "·" }
+                div(cls := "d-flex gap-2 small mb-1",
+                  span(cls := "text-muted", style := "min-width:78px;", r("semana").toString),
+                  span(estado), span(r("reto").toString))
+              }: _*)))
+        },
 
         div(cls:="d-grid gap-2 mt-3",
           a(href:="/career/comparativa", cls:="btn btn-outline-info fw-bold", "📊 Comparativa entre temporadas"),

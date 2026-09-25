@@ -312,6 +312,17 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS fb_desaceleraciones INT DEFAULT NULL")
       // BLOQUE N: duracion real de la sesion (la registra el bot de Telegram; la carga sigue usando 60*rpe)
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS duracion_min INT DEFAULT NULL")
+      // Retos semanales PARA Hector (semana = lunes; un reto por temporada y semana)
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS retos_hector (
+        id           SERIAL PRIMARY KEY,
+        season_id    INT REFERENCES seasons(id),
+        semana       DATE NOT NULL,
+        reto         TEXT NOT NULL,
+        dimension    TEXT DEFAULT NULL,
+        completado   TEXT DEFAULT NULL,
+        created_at   TIMESTAMP DEFAULT NOW(),
+        UNIQUE(season_id, semana)
+      )""")
       // BLOQUE J: calibracion del padre como observador (situaciones generadas por Gemini al pulsar el boton)
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS calibracion_padre (
         id            SERIAL PRIMARY KEY,
@@ -12854,6 +12865,76 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // RETOS DE HECTOR — un reto semanal para el nino (Gemini solo en la tarea programada o con el boton)
+  // ═════════════════════════════════════════════════════════════════════════════
+  private def lunesDe(d: LocalDate): LocalDate = d.`with`(java.time.DayOfWeek.MONDAY)
+
+  /** Reto de la semana de `fecha` (por defecto, la actual) en la temporada actual. */
+  def getRetoSemana(fecha: LocalDate = LocalDate.now()): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(s"SELECT id, semana, reto, dimension, completado FROM retos_hector WHERE semana = ? AND season_id = $temporadaActualSQL")
+      ps.setDate(1, java.sql.Date.valueOf(lunesDe(fecha)))
+      val rs = ps.executeQuery()
+      if (!rs.next()) None
+      else Some(Map("id" -> rs.getInt("id"), "semana" -> rs.getDate("semana").toString, "reto" -> fixEncoding(rs.getString("reto")),
+        "dimension" -> Option(rs.getString("dimension")).getOrElse(""), "completado" -> Option(rs.getString("completado"))))
+    } finally { conn.close() }
+  }
+
+  def getHistorialRetos(): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT semana, reto, completado FROM retos_hector ORDER BY semana ASC")
+      Iterator.continually(rs).takeWhile(_.next()).map(r => Map[String, Any](
+        "semana" -> r.getDate("semana").toString, "reto" -> fixEncoding(r.getString("reto")), "completado" -> Option(r.getString("completado")))).toList
+    } finally { conn.close() }
+  }
+
+  /** Genera el reto de esta semana si no existe (dimension = la mas baja de la rubrica del ultimo partido). */
+  def generarRetoHector(): Either[String, String] = {
+    getRetoSemana() match { case Some(r) => return Right(r("reto").toString); case None => }
+    val conn = getConnection()
+    val dimension: Option[(String, String)] = try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud FROM matches
+        WHERE status = 'PLAYED' AND rubrica_posicion IS NOT NULL AND rubrica_decisiones IS NOT NULL AND rubrica_pies IS NOT NULL
+          AND rubrica_comunicacion IS NOT NULL AND rubrica_actitud IS NOT NULL
+        ORDER BY fecha DESC, id DESC LIMIT 1""")
+      if (!rs.next()) None
+      else Some(dimensionesRubrica.map { case (k, col, et) => (k, et, rs.getInt(col)) }.minBy(_._3)).map(d => (d._1, d._2))
+    } finally { conn.close() }
+    val edad = calcularEdadExacta(getLatestCardData().fechaNacimiento)
+    val tema = dimension.map(_._2.toLowerCase).getOrElse("la actitud y la concentración")
+    // la semana en el prompt hace que ai_cache no devuelva el mismo reto cada semana
+    val prompt = s"""Genera un reto deportivo simple, divertido y concreto para Héctor, un portero de $edad años. El reto debe estar relacionado con $tema. Debe ser algo que el niño pueda entender, recordar y comprobar él mismo durante el partido. Máximo 15 palabras. Empieza con un emoji. Ejemplos: '🗣️ Esta semana grita MIAAA en todos los balones que salgas a por ellos', '👀 Esta semana mira siempre a los pies del delantero antes de que chute'. Tono divertido, sin presión, como un juego. Devuelve solo el reto, sin comillas. Semana del ${lunesDe(LocalDate.now())}."""
+    val reto = AIProvider.ask(prompt).trim.stripPrefix("\"").stripSuffix("\"").linesIterator.find(_.trim.nonEmpty).getOrElse("").trim
+    if (reto.isEmpty || reto.startsWith("Error")) return Left(if (reto.isEmpty) "Respuesta vacía de la IA" else reto)
+    val c2 = getConnection()
+    try {
+      val ps = c2.prepareStatement(s"""INSERT INTO retos_hector (season_id, semana, reto, dimension) VALUES ($temporadaActualSQL, ?, ?, ?)
+        ON CONFLICT (season_id, semana) DO NOTHING RETURNING id""")
+      ps.setDate(1, java.sql.Date.valueOf(lunesDe(LocalDate.now()))); ps.setString(2, reto.take(200))
+      dimension match { case Some((k, _)) => ps.setString(3, k); case None => ps.setNull(3, java.sql.Types.VARCHAR) }
+      ps.executeQuery()
+    } finally { c2.close() }
+    Right(getRetoSemana().map(_("reto").toString).getOrElse(reto))
+  }
+
+  /** Guarda si consiguio el reto de la semana de `fecha` (SI/CASI/NO). Devuelve el reto si pasa a SI. */
+  def registrarRetoCompletado(fecha: LocalDate, completado: String): Option[String] = {
+    if (!Set("SI", "CASI", "NO").contains(completado)) return None
+    getRetoSemana(fecha).flatMap { r =>
+      val conn = getConnection()
+      try {
+        val ps = conn.prepareStatement("UPDATE retos_hector SET completado = ? WHERE id = ?")
+        ps.setString(1, completado); ps.setInt(2, r("id").asInstanceOf[Int]); ps.executeUpdate()
+      } finally { conn.close() }
+      if (completado == "SI" && !r("completado").asInstanceOf[Option[String]].contains("SI")) Some(r("reto").toString) else None
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // GUARDIAN WRAPPED — resumen compartible de una temporada. Solo datos positivos y publicos
   // (sin datos medicos, sin rubrica detallada ni analisis privados). SQL puro, sin Gemini
   // ═════════════════════════════════════════════════════════════════════════════
@@ -14350,6 +14431,20 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
         }
         if (esLunes && cuenta("SELECT COUNT(*) FROM physical_growth WHERE peso > 0 AND fecha > CURRENT_DATE - 7") == 0 && tgMarcarRecordatorio("PESO"))
           msgs += "⚖️ Sin registro de peso esta semana.\nPESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
+      }
+      // Retos de Hector: se asegura el de la semana (desde el lunes a las 7:00) y se avisa una vez por semana
+      if (hora >= 7 && hora < 22) {
+        val semana = hoy.`with`(java.time.DayOfWeek.MONDAY).toString
+        generarRetoHector() match {
+          case Right(reto) =>
+            if (hora >= 8 && tgMarcarRecordatorio(s"RETO_$semana", 7))
+              msgs += s"🎯 RETO DE HÉCTOR ESTA SEMANA: $reto. Cuéntaselo en el coche de camino al entrenamiento."
+            val hayPartidoHoy = sesionesHoy.contains("PARTIDO") ||
+              cuenta("SELECT COUNT(*) FROM matches WHERE status = 'SCHEDULED' AND fecha = CURRENT_DATE") > 0
+            if (hoy.getDayOfWeek == java.time.DayOfWeek.SATURDAY && hora >= 9 && hayPartidoHoy && tgMarcarRecordatorio("RETO_SABADO"))
+              msgs += s"🎯 Recuerda el reto de esta semana: $reto. ¿Lo ha trabajado en los entrenamientos?"
+          case Left(e) => println(s"[Reto Hector] ${e.take(200)}")
+        }
       }
       // Diario narrativo del mes anterior (primer lunes de mes, a partir de las 9:00)
       if (hora >= 9 && hora < 22 && esLunes && hoy.getDayOfMonth <= 7) {

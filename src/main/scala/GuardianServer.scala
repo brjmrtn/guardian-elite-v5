@@ -204,6 +204,14 @@ object GuardianServer extends cask.Main {
         // Protocolo de recuperacion: se genera aqui (nunca en el render del dashboard) si la carga lo requiere
         try DatabaseManager.comprobarProtocoloRecuperacion()
         catch { case e: Exception => println(s"[Recuperacion] ERROR: ${e.getMessage.take(200)}") }
+        // Reto semanal de Hector: se asegura el de la semana en curso (desde el lunes a las 7:00, hora de Madrid)
+        try {
+          val hora = java.time.ZonedDateTime.now(java.time.ZoneId.of(sys.env.getOrElse("GUARDIAN_TZ", "Europe/Madrid"))).getHour
+          if (hora >= 7 && hora < 22) DatabaseManager.generarRetoHector() match {
+            case Left(e) => println(s"[Reto Hector] ${e.take(200)}")
+            case Right(_) =>
+          }
+        } catch { case e: Exception => println(s"[Reto Hector] ERROR: ${e.getMessage.take(200)}") }
       }
     },
     60 * 1000L,

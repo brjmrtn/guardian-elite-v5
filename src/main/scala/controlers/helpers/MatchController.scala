@@ -695,6 +695,20 @@ object MatchController extends cask.Routes {
                     "Autoevaluación — solo visible para ti, nunca en el perfil público.")
                 ),
 
+                // Reto de Hector de esta semana (solo si hay reto)
+                DatabaseManager.getRetoSemana() match {
+                  case Some(r) => div(cls := "mb-4 p-2 border border-warning rounded bg-warning bg-opacity-10",
+                    label(cls := "form-label text-warning small fw-bold w-100 text-center", "🎯 ¿Consiguió Héctor su reto esta semana?"),
+                    div(cls := "xx-small text-muted text-center mb-2", r("reto").toString),
+                    div(cls := "d-flex gap-2",
+                      frag(Seq("SI" -> "✅ Sí, lo consiguió", "CASI" -> "🔄 Casi", "NO" -> "❌ No llegó").map { case (v, t) =>
+                        frag(
+                          input(tpe := "radio", cls := "btn-check", name := "retoCompletado", id := s"reto_$v", value := v),
+                          label(cls := "btn btn-outline-warning fw-bold flex-fill py-3", `for` := s"reto_$v", t))
+                      }: _*)))
+                  case None => frag()
+                },
+
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
             ),
@@ -1066,6 +1080,12 @@ object MatchController extends cask.Routes {
 
     // BLOQUE H: calcula el CPI del partido en background, sin bloquear la respuesta
     DatabaseManager.actualizarCPI(savedMatchId)
+
+    // Reto de Hector de la semana del partido
+    val fechaPartido = scala.util.Try(java.time.LocalDate.parse(fecha)).getOrElse(java.time.LocalDate.now())
+    DatabaseManager.registrarRetoCompletado(fechaPartido, getStr("retoCompletado")).foreach { reto =>
+      new Thread(() => TelegramService.enviar(s"🏆 ¡Héctor consiguió su reto de esta semana! → $reto")).start()
+    }
 
     // Nutricion e hidratacion pre-partido (opcional)
     DatabaseManager.guardarNutricionPrepartido(savedMatchId,
