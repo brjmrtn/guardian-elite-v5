@@ -917,12 +917,10 @@ object BioController extends cask.Routes {
     val acwrEstado = DatabaseManager.calcularACWRConEstado()
     val acwrInsuficiente = acwrEstado("status").asInstanceOf[String] == "INSUFICIENTE"
     val acwr     = acwrEstado("acwr").asInstanceOf[Double]
+    // BLOQUE D: umbrales adaptados a la edad de Hector
     val (acwrColor, acwrLabel) =
       if (acwrInsuficiente) ("secondary", "ACUMULANDO DATOS")
-      else if (acwr > 2.0) ("danger","RIESGO ALTO")
-      else if (acwr > 1.5) ("warning","SOBRECARGA")
-      else if (acwr < 0.8) ("info","BAJA CARGA")
-      else ("success","OPTIMO")
+      else { val (_, color, etiqueta) = DatabaseManager.nivelACWR(acwr); (color, etiqueta) }
 
     val semanasJs  = weekly.map(s => s""""${s._1}"""").mkString("[",",","]")
     val cargasJs   = weekly.map(_._2.toString).mkString("[",",","]")
@@ -948,7 +946,8 @@ object BioController extends cask.Routes {
             a(href := "/career/acwr-proyeccion", cls := "btn btn-outline-warning btn-sm fw-bold", "📅 Planificar próxima semana")
           ),
 
-          // ACWR + KPIs
+          // ACWR + KPIs (BLOQUE D: aviso de umbrales adaptados a la edad)
+          div(cls := "xx-small mb-1", style := "color:#64748b;", DatabaseManager.disclaimerACWR),
           div(cls := "row g-2 mb-4",
             div(cls := "col-3",
               div(cls := s"card bg-dark border-$acwrColor text-center py-3",

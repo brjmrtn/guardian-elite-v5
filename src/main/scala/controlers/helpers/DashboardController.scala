@@ -58,7 +58,8 @@ object DashboardController extends cask.Routes {
           span(style := "font-size:11px; color:#94a3b8;", "🩹 RIESGO DE LESIÓN"),
           span(style := "font-size:16px; font-weight:900; color:#fff;", f"$riesgoSemaforo $riesgoValor%.1f — $riesgoClasificacion")
         ),
-        explicacion
+        explicacion,
+        div(cls := "xx-small mt-1", style := "color:#64748b;", DatabaseManager.disclaimerACWR)
       )
     }
 
@@ -634,11 +635,13 @@ object DashboardController extends cask.Routes {
     val acwrInsuficiente = acwrEstado("status").asInstanceOf[String] == "INSUFICIENTE"
     val acwr = acwrEstado("acwr").asInstanceOf[Double]
     val acwrValStr = if (acwrInsuficiente) "—" else f"$acwr%.2f"
+    // BLOQUE D: umbrales adaptados a la edad de Hector
+    val umbrales = DatabaseManager.umbralesACWR()
     val (acwrColor, acwrText) =
       if (acwrInsuficiente) ("text-muted", "ACUMULANDO DATOS")
-      else if(acwr > 2.0) ("text-danger", "RIESGO ALTO")
-      else if(acwr > 1.5) ("text-warning", "SOBRECARGA")
-      else ("text-success", "OPTIMO")
+      else { val (_, color, etiqueta) = DatabaseManager.nivelACWR(acwr, umbrales); (s"text-$color", etiqueta) }
+    def acwrHex(v: Double): String =
+      if (v > umbrales.riesgo) "#ef4444" else if (v > umbrales.precaucion) "#f59e0b" else "#20c997"
 
     // ACWR GPS (Footbar): carga fisica objetiva medida por el sensor, no estimada
     val acwrGps = DatabaseManager.getFootbarACWR()
@@ -997,7 +1000,7 @@ object DashboardController extends cask.Routes {
               div(cls := "row g-2",
                 frag(Seq(
                   (f"$avgLast5%2.1f", "RACHA 5", if(trendDiff>0)"#20c997" else if(trendDiff<0)"#ef4444" else "#94a3b8"),
-                  (acwrValStr,        "ACWR",    if(acwrInsuficiente)"#94a3b8" else if(acwr>1.5)"#ef4444" else if(acwr>1.2)"#f59e0b" else "#20c997"),
+                  (acwrValStr,        "ACWR",    if(acwrInsuficiente)"#94a3b8" else acwrHex(acwr)),
                   (if(matches.nonEmpty) f"${matches.head.nota}%.1f" else "—", "ÚLTIMO", "#d4af37"),
                   (if(matches.nonEmpty) matches.head.resultado else "—", "RESULT", "#94a3b8")
                 ).map { case (v, lbl, color) =>
@@ -1118,7 +1121,7 @@ object DashboardController extends cask.Routes {
                   ("CLIMA",      weatherStats.headOption.map(w => w._1).getOrElse("—"),        "#0ea5e9"),
                   ("NOTA CLIMA", weatherStats.headOption.map(w => f"${w._2._1}%.1f").getOrElse("—"), "#0ea5e9"),
                   ("INTELIGENCIA", smartInsightsText.take(30) + (if (smartInsightsText.length > 30) "..." else ""), "#8b5cf6"),
-                  ("ACWR HOY",   if (acwrInsuficiente) "Acumulando" else f"$acwr%.2f", if(acwrInsuficiente)"#94a3b8" else if(acwr>1.5)"#ef4444" else "#20c997"),
+                  ("ACWR HOY",   if (acwrInsuficiente) "Acumulando" else f"$acwr%.2f", if(acwrInsuficiente)"#94a3b8" else acwrHex(acwr)),
                   ("ACWR GPS",   acwrGpsStr,                                acwrGpsColor)
                 ).map { case (lbl, v, color) =>
                   div(cls := "col-6",

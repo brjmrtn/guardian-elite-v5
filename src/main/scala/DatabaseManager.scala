@@ -3054,6 +3054,31 @@ $analisisConcatenados"""
     } finally { conn.close() }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE D — UMBRALES DE ACWR SEGUN LA EDAD (los de referencia estan validados en adultos)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // optimoMin-optimoMax: zona optima · > precaucion: vigilar · > riesgo: sobrecarga · > critico: riesgo alto.
+  // Todas las clasificaciones de nivel/riesgo del ACWR pasan por aqui (no los agrupamientos estadisticos).
+  case class UmbralesACWR(optimoMin: Double, optimoMax: Double, precaucion: Double, riesgo: Double, critico: Double)
+
+  def umbralesACWR(): UmbralesACWR = {
+    val edadAnios = try calcularEdadExacta(getLatestCardData().fechaNacimiento) catch { case _: Exception => 8 }
+    if (edadAnios <= 8) UmbralesACWR(0.8, 1.1, 1.1, 1.3, 1.5)        // 6-8 años (mas conservadores)
+    else if (edadAnios <= 12) UmbralesACWR(0.8, 1.2, 1.2, 1.4, 1.6)  // 9-12 años
+    else UmbralesACWR(0.8, 1.3, 1.3, 1.5, 1.8)                       // adultos (referencia original)
+  }
+
+  /** (nivel, color bootstrap, etiqueta) del ACWR con los umbrales de la edad de Hector. */
+  def nivelACWR(acwr: Double, u: UmbralesACWR = umbralesACWR()): (String, String, String) =
+    if (acwr > u.critico) ("CRITICO", "danger", "RIESGO ALTO")
+    else if (acwr > u.riesgo) ("RIESGO", "warning", "SOBRECARGA")
+    else if (acwr > u.precaucion) ("PRECAUCION", "warning", "VIGILAR CARGA")
+    else if (acwr < u.optimoMin) ("BAJA", "info", "BAJA CARGA")
+    else ("OPTIMO", "success", "OPTIMO")
+
+  val disclaimerACWR =
+    "ℹ️ Los umbrales están adaptados para la franja de edad de Héctor. La investigación en menores de 8 años es limitada — usar como orientación, no como diagnóstico."
+
   // Componentes del Indice de Forma (0-10) — compartidos por calcularFormaHoy y predecirFormaPartido
   private def formaSuenoScore(profundoMin: Option[Int], horas: Double): Double = profundoMin match {
     case Some(m) if m > 90 => 10.0
@@ -3066,14 +3091,16 @@ $analisisConcatenados"""
       else 7.0
   }
 
-  private def formaAcwrScore(acwr: Double, insuficiente: Boolean): Double =
+  private def formaAcwrScore(acwr: Double, insuficiente: Boolean): Double = {
+    val u = umbralesACWR()
     if (insuficiente) 7.0
     else if (acwr <= 0.0) 7.0
-    else if (acwr < 0.8) 6.0
-    else if (acwr <= 1.0) 10.0
-    else if (acwr <= 1.2) 8.0
-    else if (acwr <= 1.5) 5.0
+    else if (acwr < u.optimoMin) 6.0
+    else if (acwr <= (u.optimoMin + u.optimoMax) / 2) 10.0
+    else if (acwr <= u.optimoMax) 8.0
+    else if (acwr <= u.riesgo) 5.0
     else 2.0
+  }
 
   private def formaDescansoScore(diasDesdePartido: Option[Int]): Double = diasDesdePartido match {
     case Some(1) => 4.0
@@ -3177,7 +3204,8 @@ $analisisConcatenados"""
   def predecirSobrecargaSemana(): Option[String] = {
     val dow = LocalDate.now().getDayOfWeek.getValue
     if (dow > 5) return None
-    acwrProyectadoHasta(6 - dow).filter(_ > 1.5).map { acwr =>
+    val critico = umbralesACWR().critico
+    acwrProyectadoHasta(6 - dow).filter(_ > critico).map { acwr =>
       f"⚠️ ALERTA DE CARGA: Si Héctor completa todas las sesiones previstas esta semana, llegará al partido del sábado con ACWR proyectado de $acwr%.2f (zona de riesgo). Considera reducir la intensidad del jueves o hablar con el entrenador."
     }
   }
@@ -3228,11 +3256,12 @@ $analisisConcatenados"""
       val acwrEstadoRiesgo = calcularACWRConEstado()
       val acwrInsuficienteRiesgo = acwrEstadoRiesgo("status").asInstanceOf[String] == "INSUFICIENTE"
       val acwr = acwrEstadoRiesgo("acwr").asInstanceOf[Double]
+      val u = umbralesACWR()
       val (acwrFactor, hayAcwr) =
         if (acwrInsuficienteRiesgo) (0.0, false)
-        else if (acwr < 0.8) (1.0, true)
-        else if (acwr <= 1.2) (0.0, true)
-        else if (acwr <= 1.5) (3.0, true)
+        else if (acwr < u.optimoMin) (1.0, true)
+        else if (acwr <= u.optimoMax) (0.0, true)
+        else if (acwr <= u.riesgo) (3.0, true)
         else (5.0, true)
 
       // PHV factor
@@ -6494,11 +6523,12 @@ Responde en espanol, tono positivo y motivador para un nino."""
     val faseBio = try getBioBandingData().getOrElse("faseBio", "").toString catch { case _: Exception => "" }
     val circaPhvActivo = faseBio.contains("PICO ACTIVO")
 
+    val u = umbralesACWR()
     def semaforo(acwr: Double): String =
       if (acwr <= 0.0) "verde"
-      else if (acwr < 0.8) "amarillo"
-      else if (acwr <= 1.3) "verde"
-      else if (acwr <= 1.5) "naranja"
+      else if (acwr < u.optimoMin) "amarillo"
+      else if (acwr <= u.optimoMax) "verde"
+      else if (acwr <= u.riesgo) "naranja"
       else "rojo"
 
     var alertas = List[String]()
@@ -6510,11 +6540,11 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val tipoSesion = sesionesProximas.getOrElse(nombreDia, "DESCANSO")
       val sem = semaforo(acwr)
 
-      if (acwr > 1.5) {
+      if (acwr > u.riesgo) {
         val diaAnterior = if (i > 1) diasSemana(i - 2) else "domingo anterior"
         alertas = alertas :+ s"⚠️ El $nombreDia proyecta sobrecarga (ACWR ${"%.2f".format(acwr)}). Considera reducir la sesión del $diaAnterior."
       }
-      if (circaPhvActivo && acwr > 1.3) {
+      if (circaPhvActivo && acwr > u.optimoMax) {
         alertas = alertas :+ s"🔴 PRIORIDAD MÁXIMA: Héctor está en pico activo de crecimiento (Circa-PHV) y el $nombreDia proyecta ACWR ${"%.2f".format(acwr)}. Riesgo de lesión elevado — considera aligerar esa sesión."
       }
 
@@ -10017,7 +10047,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       val chronicLoad = if (rsC.next()) rsC.getDouble(1) else 0.0
 
       val acwr = if (chronicLoad > 0) (acuteLoad / 7.0) / (chronicLoad / 28.0) else 0.0
-      if (acwr > 1.5) alerts += (("danger", "ACWR ALTO", s"Ratio carga: ${f"$acwr%.2f"} — Riesgo de lesion"))
+      if (acwr > umbralesACWR().riesgo) alerts += (("danger", "ACWR ALTO", s"Ratio carga: ${f"$acwr%.2f"} — Riesgo de lesion"))
 
       // 2. Sin registrar wellness hoy
       val rsW = conn.createStatement().executeQuery("SELECT COUNT(*) FROM wellness WHERE fecha = CURRENT_DATE")
