@@ -703,6 +703,56 @@ object AdminController extends cask.Routes {
     )
   }
 
+  // BLOQUE J: calibracion de valoraciones del padre (Gemini solo al pulsar los botones)
+  private def calibracionPanel(): Modifier = {
+    val ultima = DatabaseManager.getUltimaCalibracion()
+    val pendiente = DatabaseManager.getCalibracionPendiente()
+    div(cls := "card bg-dark border-warning shadow mb-4 p-3", id := "calibracion",
+      h5(cls := "text-warning", "🎯 CALIBRACIÓN DE VALORACIONES"),
+      p(cls := "xx-small text-muted mb-2", "Puntúa 3 situaciones de partido y compara tu criterio con el de un entrenador de referencia. Recomendado una vez por temporada."),
+      ultima.map(u => div(cls := "small mb-2 p-2 rounded", style := "background:rgba(255,255,255,0.05);",
+        div(cls := "xx-small text-muted", s"Última calibración: ${u("fecha")}"), div(u("resultado").toString))).getOrElse(frag()),
+      pendiente match {
+        case Some((id, situaciones)) =>
+          form(action := "/admin/calibracion/guardar", method := "post",
+            input(tpe := "hidden", name := "id", value := id.toString),
+            frag(situaciones.zipWithIndex.map { case ((sit, dim), i) =>
+              val etiqueta = DatabaseManager.dimensionesRubrica.find(_._1 == dim).map(_._3).getOrElse(dim)
+              div(cls := "mb-2",
+                div(cls := "small text-white", s"${i + 1}. $sit"),
+                div(cls := "xx-small text-muted mb-1", s"Dimensión: $etiqueta"),
+                select(name := s"p$i", required := true, cls := "form-select form-select-sm bg-dark text-white border-warning",
+                  option(value := "", "— Tu puntuación (1-5) —"),
+                  frag((1 to 5).map(v => option(value := v.toString, v.toString)): _*)))
+            }: _*),
+            div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-warning fw-bold", "Guardar y comparar")))
+        case None =>
+          form(action := "/admin/calibracion/generar", method := "post", cls := "d-grid",
+            button(tpe := "submit", cls := "btn btn-outline-warning fw-bold", "🎯 Iniciar calibración"))
+      })
+  }
+
+  @cask.post("/admin/calibracion/generar")
+  def generarCalibracionAction(request: cask.Request) = withAuth(request) {
+    val msg = DatabaseManager.generarCalibracion() match {
+      case Right(_) => "🎯 Calibración lista: puntúa las 3 situaciones."
+      case Left(e) => s"⚠️ No se pudo generar la calibración: $e"
+    }
+    renderRedirect(s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}#calibracion")
+  }
+
+  @cask.post("/admin/calibracion/guardar")
+  def guardarCalibracionAction(request: cask.Request) = withAuth(request) {
+    val p = parseFormBody(request)
+    val id = p.getOrElse("id", "").toIntOption.getOrElse(0)
+    val puntuaciones = (0 until 3).flatMap(i => p.get(s"p$i").flatMap(_.toIntOption)).toList
+    val msg = DatabaseManager.guardarCalibracion(id, puntuaciones) match {
+      case Right(r) => s"✅ Calibración guardada: $r"
+      case Left(e) => s"⚠️ $e"
+    }
+    renderRedirect(s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}#calibracion")
+  }
+
   @cask.get("/admin")
   def adminPage(request: cask.Request, msg: String = "") = withAuth(request) {
     val objs = DatabaseManager.getSeasonObjectives()
@@ -713,6 +763,7 @@ object AdminController extends cask.Routes {
           if (msg.nonEmpty) div(cls := "alert alert-success small p-2 mb-3", msg) else div(),
           temporadasPanel(""),
           calidadDatosPanel(),
+          calibracionPanel(),
           div(cls := "card bg-dark border-warning shadow mb-4 p-3",
             h5(cls := "text-warning", "Base de Datos Leyendas"),
             p(cls := "small text-muted fw-bold", "Si no ves la comparacion en Trayectoria, pulsa aqui."),

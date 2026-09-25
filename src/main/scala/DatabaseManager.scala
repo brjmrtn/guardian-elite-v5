@@ -312,6 +312,17 @@ object DatabaseManager {
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS fb_desaceleraciones INT DEFAULT NULL")
       // BLOQUE N: duracion real de la sesion (la registra el bot de Telegram; la carga sigue usando 60*rpe)
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS duracion_min INT DEFAULT NULL")
+      // BLOQUE J: calibracion del padre como observador (situaciones generadas por Gemini al pulsar el boton)
+      stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS calibracion_padre (
+        id            SERIAL PRIMARY KEY,
+        fecha         DATE DEFAULT CURRENT_DATE,
+        situaciones   TEXT NOT NULL,
+        puntuaciones  TEXT DEFAULT NULL,
+        resultado     TEXT DEFAULT NULL,
+        dimension     TEXT DEFAULT NULL,
+        desviacion    DOUBLE PRECISION DEFAULT NULL,
+        created_at    TIMESTAMP DEFAULT NOW()
+      )""")
       // BLOQUE E: RPE percibido por Hector al llegar a casa (1=Fresco ... 5=Agotado)
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS rpe_hector INT DEFAULT NULL")
       // BLOQUE N: estado de la conversacion con el bot de Telegram (un registro por chat)
@@ -4321,6 +4332,13 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
         else f"\nAVISO: El padre muestra sesgo de valoración por resultado (r=${sg("correlacion").asInstanceOf[Option[Double]].get}%.2f). Las notas pueden estar infladas en victorias y defladas en derrotas. Tenerlo en cuenta al interpretar la evolución de la nota.\n"
       }
 
+      // BLOQUE J: calibracion del padre como observador (solo si hay desviacion)
+      val calibracionLine = getUltimaCalibracion().filter(_("desviacion").asInstanceOf[Double] != 0).map { c =>
+        val d = c("desviacion").asInstanceOf[Double]
+        val etiqueta = dimensionesRubrica.find(_._1 == c("dimension").toString).map(_._3).getOrElse(c("dimension").toString)
+        f"\nNota metodológica: el padre tiende a puntuar ${etiqueta.toLowerCase} ${math.abs(d)}%.0f puntos por ${if (d < 0) "debajo" else "encima"} de la referencia según su calibración de ${c("fecha")}.\n"
+      }.getOrElse("")
+
       // Cambio aqui: Llamamos a AIProvider.ask
       val prompt = s"""Eres un analista de rendimiento de porteros de élite. Fecha de hoy: $fechaHoy. Temporada en curso: $temporadaActual. Analiza ÚNICAMENTE los datos de esta temporada.
 
@@ -4328,7 +4346,7 @@ CONTEXTO FOOTBAR — PORTERO: Héctor es portero. Los porteros recorren estructu
 
 Tienes los siguientes partidos de Hector (portero, ${edad} años), con formato fecha|rival|nota|distanciaKm|sprintMaxKmh|pases (los tres ultimos son datos del sensor Footbar; 0 si no se registraron para ese partido):
 
-${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$vozPorteroLine$cpiLine$sesgoLine
+${sb.toString()}$basculaLine$rubricaLine$contextoLine$deudaLine$cargaEscolarLine$automatismoLine$vozPorteroLine$cpiLine$sesgoLine$calibracionLine
 
 Escribe un análisis narrativo en HTML limpio (sin markdown, sin bloques de código). Usa exactamente esta estructura:
 <h4>ANÁLISIS</h4>
@@ -12714,6 +12732,89 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       ps.setInt(1, limit)
       val rs = ps.executeQuery()
       Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("rival")).trim).toList.distinct
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE J — CALIBRACION DEL PADRE COMO OBSERVADOR (Gemini solo al pulsar los botones de /admin)
+  // ═════════════════════════════════════════════════════════════════════════════
+  /** Genera 3 situaciones (con puntuacion de referencia oculta) y crea una calibracion pendiente. Left = error. */
+  def generarCalibracion(): Either[String, Int] = {
+    val claves = dimensionesRubrica.map(_._1).mkString(", ")
+    val edad = calcularEdadExacta(getLatestCardData().fechaNacimiento)
+    // el mes en el prompt hace que ai_cache devuelva situaciones nuevas cada mes, no siempre las mismas
+    val prompt = s"""Eres entrenador de porteros de fútbol base. Escribe 3 situaciones breves y concretas de un partido de un portero de $edad años (Fútbol 7), cada una de 1-2 frases, SIN valorar ni insinuar si lo hizo bien o mal. Cada situación debe evaluar una dimensión distinta de estas: $claves. Para cada una indica la puntuación de referencia de 1 a 5 que le daría un entrenador experto y objetivo (1=muy mal, 3=correcto, 5=excelente), con variedad entre situaciones. Referencia temporal: ${LocalDate.now().toString.take(7)}.
+Devuelve ÚNICAMENTE un JSON válido sin backticks: [{"situacion": "...", "dimension": "<una de: $claves>", "referencia": N}, ...]"""
+    val resp = AIProvider.ask(prompt)
+    if (resp.startsWith("Error")) return Left(resp)
+    val situaciones = try {
+      ujson.read(resp.replace("```json", "").replace("```", "").trim).arr.toList.flatMap { j =>
+        val dim = j("dimension").str.trim.toLowerCase
+        val ref = j("referencia").num.toInt
+        if (dimensionesRubrica.exists(_._1 == dim) && ref >= 1 && ref <= 5)
+          Some(ujson.Obj("situacion" -> j("situacion").str.trim, "dimension" -> dim, "referencia" -> ref)) else None
+      }
+    } catch { case _: Exception => Nil }
+    if (situaciones.size < 3) return Left("La IA no devolvió 3 situaciones válidas. Vuelve a intentarlo.")
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("INSERT INTO calibracion_padre (situaciones) VALUES (?) RETURNING id")
+      ps.setString(1, ujson.write(ujson.Arr(situaciones.take(3): _*)))
+      val rs = ps.executeQuery(); rs.next(); Right(rs.getInt("id"))
+    } finally { conn.close() }
+  }
+
+  /** Calibracion pendiente (generada y aun sin puntuar), con las situaciones SIN la referencia. */
+  def getCalibracionPendiente(): Option[(Int, List[(String, String)])] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT id, situaciones FROM calibracion_padre WHERE puntuaciones IS NULL ORDER BY id DESC LIMIT 1")
+      if (!rs.next()) None
+      else Some(rs.getInt("id") -> ujson.read(rs.getString("situaciones")).arr.toList.map(j => (j("situacion").str, j("dimension").str)))
+    } finally { conn.close() }
+  }
+
+  /** Guarda las puntuaciones del padre, compara con la referencia y pide a Gemini la conclusion. */
+  def guardarCalibracion(id: Int, puntuaciones: List[Int]): Either[String, String] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT situaciones FROM calibracion_padre WHERE id = ? AND puntuaciones IS NULL")
+      ps.setInt(1, id)
+      val rs = ps.executeQuery()
+      if (!rs.next()) return Left("Esa calibración ya no está pendiente.")
+      val sits = ujson.read(rs.getString("situaciones")).arr.toList
+      if (puntuaciones.size != sits.size || puntuaciones.exists(p => p < 1 || p > 5)) return Left("Puntúa las 3 situaciones del 1 al 5.")
+      val filas = sits.zip(puntuaciones).map { case (j, p) => (j("situacion").str, j("dimension").str, j("referencia").num.toInt, p) }
+      // desviacion por dimension (padre - referencia); la de mayor valor absoluto es la conclusion principal
+      val (dimMax, desvMax) = filas.map { case (_, d, r, p) => d -> (p - r).toDouble }.maxBy(x => math.abs(x._2))
+      val etiqueta = dimensionesRubrica.find(_._1 == dimMax).map(_._3).getOrElse(dimMax)
+      val tabla = filas.map { case (s, d, r, p) => s"- [$d] \"$s\" → referencia $r, padre $p" }.mkString("\n")
+      val prompt = s"""Un padre está calibrando cómo puntúa (1-5) a su hijo portero en la rúbrica. Estas son 3 situaciones con la puntuación de referencia de un entrenador experto y la del padre:
+$tabla
+En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exigente o más generoso de lo esperado y en qué tipo de situaciones, y cómo ajustar mentalmente sus valoraciones en esa dimensión cuando registre partidos. Texto plano, sin listas."""
+      val ia = AIProvider.ask(prompt)
+      val resultado =
+        if (!ia.startsWith("Error") && ia.trim.nonEmpty) ia.trim
+        else if (desvMax == 0) "Tus valoraciones coinciden con la referencia en las tres situaciones."
+        else f"Tiendes a ser ${if (desvMax < 0) "más exigente" else "más generoso"} de lo esperado en ${etiqueta.toLowerCase} (${math.abs(desvMax)}%.0f puntos). Ajusta mentalmente tus valoraciones en esa dimensión cuando registres partidos."
+      val up = conn.prepareStatement("UPDATE calibracion_padre SET puntuaciones = ?, resultado = ?, dimension = ?, desviacion = ? WHERE id = ?")
+      up.setString(1, ujson.write(ujson.Arr(puntuaciones.map(ujson.Num(_)): _*))); up.setString(2, resultado)
+      up.setString(3, dimMax); up.setDouble(4, desvMax); up.setInt(5, id)
+      up.executeUpdate()
+      Right(resultado)
+    } finally { conn.close() }
+  }
+
+  /** Ultima calibracion completada: (fecha, resultado, dimension, desviacion). */
+  def getUltimaCalibracion(): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT fecha, resultado, dimension, desviacion FROM calibracion_padre WHERE puntuaciones IS NOT NULL ORDER BY id DESC LIMIT 1")
+      if (!rs.next()) None
+      else Some(Map("fecha" -> rs.getDate("fecha").toString, "resultado" -> rs.getString("resultado"),
+        "dimension" -> rs.getString("dimension"), "desviacion" -> rs.getDouble("desviacion")))
     } finally { conn.close() }
   }
 
