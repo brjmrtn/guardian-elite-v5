@@ -674,9 +674,27 @@ object AdminController extends cask.Routes {
           div(cls := "xx-small mt-1", style := "color:#facc15;", s"Faltan ${faltan.mkString(" y ")} para entrar en Fase ${sig("numero")}.")
         case _ => frag()
       })
+    // BLOQUE G: Data Quality Score de la temporada actual
+    val dq = DatabaseManager.getDataQualityScore()
+    val dqScore = dq("score").asInstanceOf[Int]
+    val dqColor = if (dqScore >= 80) "#16a34a" else if (dqScore >= 60) "#65a30d" else if (dqScore >= 40) "#ca8a04" else "#dc2626"
+    val dqWidget: Modifier = div(cls := "mb-3",
+      div(cls := "fw-bold small text-white mb-1", "📊 Temporada actual: ", span(style := s"color:$dqColor;", s"$dqScore/100 (${dq("nivel")})")),
+      frag(dq("componentes").asInstanceOf[List[Map[String, Any]]].map { c =>
+        val pct = c("pct").asInstanceOf[Option[Int]]
+        div(cls := "xx-small mb-2",
+          div(cls := "d-flex align-items-center gap-2",
+            span(style := "width:130px; flex-shrink:0;", c("etiqueta").toString),
+            div(cls := "progress flex-grow-1", style := "height:8px; background:#334155;",
+              div(cls := "progress-bar", style := s"width:${pct.getOrElse(0)}%; background:$dqColor;")),
+            span(style := "width:34px; text-align:right;", pct.fold("—")(v => v.toString + "%"))),
+          div(cls := "text-muted", style := "margin-left:138px;", c("detalle").toString))
+      }: _*),
+      frag(dq("avisos").asInstanceOf[List[String]].map(a => div(cls := "xx-small mt-1", style := "color:#facc15;", a)): _*))
     div(cls := "card bg-dark border-info shadow mb-4 p-3", id := "calidadDatos",
       h5(cls := "text-info", "🔍 CALIDAD DE DATOS"),
       faseWidget,
+      dqWidget,
       div(cls := "xx-small text-muted fw-bold mb-2", "SESGO EN LA RÚBRICA"),
       sesgoWidget, cruceWidget,
       if (!sesgo("suficiente").asInstanceOf[Boolean] && cruce.size < 3)

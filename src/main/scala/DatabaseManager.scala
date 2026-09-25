@@ -4001,6 +4001,9 @@ $analisisConcatenados"""
         """<p style="color:#fd7e14;"><strong>📚 Semana de carga escolar alta</strong> — reduce expectativas de rendimiento deportivo.</p>"""
       else ""
 
+      // BLOQUE G: aviso si la calidad de datos bajo respecto a la semana anterior
+      val calidadDatosHtml = dataQualityCambioSemanal().map(m => s"""<p style="color:#ca8a04;"><strong>${escHtml(m)}</strong></p>""").getOrElse("")
+
       // BLOQUE R: ACWR proyectado al sabado si se hacen todas las sesiones previstas
       val alertaCargaHtml = if (!incluirAlertaCarga) "" else
         predecirSobrecargaSemana().map(a => s"""<p style="color:#dc3545;"><strong>${escHtml(a)}</strong></p>""").getOrElse("")
@@ -4010,6 +4013,7 @@ $analisisConcatenados"""
         <h2>Guardian Elite — Resumen semana del $hoy</h2>
         $alertaHtml
         $alertaCargaHtml
+        $calidadDatosHtml
         $cargaEscolarHtml
         <h3>⚽ Partidos ($numPartidos)</h3>
         <ul>$partidosHtml</ul>
@@ -12710,6 +12714,108 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       ps.setInt(1, limit)
       val rs = ps.executeQuery()
       Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("rival")).trim).toList.distinct
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE G — DATA QUALITY SCORE (0-100). SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  /**
+   * Componentes (peso): sueno ultimos 30 dias (30%), partidos con rubrica completa (25%), continuidad de
+   * carga = semanas con alguna sesion en las ultimas 12 (20%), meses con La Voz del Portero (15%),
+   * sesiones de academia con feedback (10%). Un componente sin nada que medir (0 partidos, 0 sesiones
+   * de academia...) se excluye y su peso se reparte entre los demas.
+   */
+  def getDataQualityScore(seasonId: Int = 0): Map[String, Any] = {
+    val sid = if (seasonId > 0) seasonId else getTemporadaActivaId()
+    val conn = getConnection()
+    try {
+      // Inicio de la temporada (o hace 30 dias si no hay temporada o no tiene fecha)
+      val inicio: LocalDate = {
+        val ps = conn.prepareStatement("SELECT fecha_inicio FROM seasons WHERE id = ?")
+        ps.setInt(1, sid)
+        val rs = ps.executeQuery()
+        (if (rs.next()) Option(rs.getDate("fecha_inicio")).map(_.toLocalDate) else None).getOrElse(LocalDate.now().minusDays(29))
+      }
+      val hoy = LocalDate.now()
+      def cuenta(sql: String, params: Any*): Int = {
+        val ps = conn.prepareStatement(sql)
+        params.zipWithIndex.foreach { case (p, i) => p match {
+          case d: LocalDate => ps.setDate(i + 1, java.sql.Date.valueOf(d)); case n: Int => ps.setInt(i + 1, n); case o => ps.setString(i + 1, o.toString) } }
+        val rs = ps.executeQuery(); if (rs.next()) rs.getInt(1) else 0
+      }
+      // 1. Sueno: ultimos 30 dias (o desde el inicio de temporada si es mas reciente)
+      val desdeSueno = if (inicio.isAfter(hoy.minusDays(29))) inicio else hoy.minusDays(29)
+      val diasTotales = java.time.temporal.ChronoUnit.DAYS.between(desdeSueno, hoy).toInt + 1
+      val diasConSueno = cuenta("SELECT COUNT(DISTINCT fecha) FROM wellness WHERE horas_sueno > 0 AND fecha >= ? AND fecha <= ?", desdeSueno, hoy)
+      // 2. Rubrica completa
+      val totalPartidos = cuenta(s"SELECT COUNT(*) FROM matches WHERE status = 'PLAYED' ${seasonFilter(sid)}")
+      val conRubrica = cuenta(s"""SELECT COUNT(*) FROM matches WHERE status = 'PLAYED' ${seasonFilter(sid)}
+        AND rubrica_posicion IS NOT NULL AND rubrica_decisiones IS NOT NULL AND rubrica_pies IS NOT NULL
+        AND rubrica_comunicacion IS NOT NULL AND rubrica_actitud IS NOT NULL""")
+      // 3. Continuidad de carga: semanas (ultimas 12 de la temporada) con al menos una sesion
+      val desdeSemanas = { val d = hoy.minusWeeks(11).`with`(java.time.DayOfWeek.MONDAY); if (inicio.isAfter(d)) inicio else d }
+      val semanasTotales = (java.time.temporal.ChronoUnit.WEEKS.between(desdeSemanas.`with`(java.time.DayOfWeek.MONDAY), hoy) + 1).toInt
+      val semanasConCarga = cuenta("""SELECT COUNT(DISTINCT TO_CHAR(f, 'IYYY-IW')) FROM (
+          SELECT fecha as f FROM trainings WHERE fecha >= ? AND fecha <= ? AND tipo_ausencia IS NULL
+          UNION ALL SELECT fecha FROM matches WHERE status = 'PLAYED' AND fecha >= ? AND fecha <= ?) t""", desdeSemanas, hoy, desdeSemanas, hoy)
+      // 4. La Voz del Portero: meses de la temporada con registro
+      val mesesTotales = (java.time.temporal.ChronoUnit.MONTHS.between(inicio.withDayOfMonth(1), hoy.withDayOfMonth(1)) + 1).toInt
+      val mesesConVoz = cuenta("SELECT COUNT(DISTINCT TO_CHAR(fecha, 'YYYY-MM')) FROM voz_portero WHERE fecha >= ? AND fecha <= ?", inicio.withDayOfMonth(1), hoy)
+      // 5. Feedback de academia
+      val sesionesAcademia = cuenta("SELECT COUNT(*) FROM trainings WHERE LOWER(tipo) LIKE '%academia%' AND tipo_ausencia IS NULL AND fecha >= ?", inicio)
+      val conFeedback = cuenta("SELECT COUNT(*) FROM trainings WHERE LOWER(tipo) LIKE '%academia%' AND tipo_ausencia IS NULL AND fecha >= ? AND feedback_entrenador IS NOT NULL AND TRIM(feedback_entrenador) <> ''", inicio)
+
+      // (clave, etiqueta, peso, numerador, denominador, detalle)
+      val componentes = List(
+        ("sueno", "💤 Sueño", 0.30, diasConSueno, diasTotales, s"$diasConSueno/$diasTotales días"),
+        ("rubrica", "📊 Rúbrica completa", 0.25, conRubrica, totalPartidos, s"$conRubrica/$totalPartidos partidos"),
+        ("continuidad", "📈 Continuidad ACWR", 0.20, semanasConCarga, semanasTotales, s"$semanasConCarga/$semanasTotales semanas con sesiones"),
+        ("voz", "🎤 Voz del Portero", 0.15, mesesConVoz, mesesTotales, s"$mesesConVoz/$mesesTotales meses"),
+        ("academia", "🎓 Feedback academia", 0.10, conFeedback, sesionesAcademia, s"$conFeedback/$sesionesAcademia sesiones"))
+        .map { case (k, et, peso, num, den, det) =>
+          val pct: Option[Int] = if (den > 0) Some(math.min(100, num * 100 / den)) else None
+          Map[String, Any]("clave" -> k, "etiqueta" -> et, "peso" -> peso, "pct" -> pct, "detalle" -> (if (den > 0) det else "sin datos que medir"))
+        }
+      val medibles = componentes.filter(_("pct").asInstanceOf[Option[Int]].isDefined)
+      val pesoTotal = medibles.map(_("peso").asInstanceOf[Double]).sum
+      val score = if (pesoTotal <= 0) 0
+        else (medibles.map(c => c("pct").asInstanceOf[Option[Int]].get * c("peso").asInstanceOf[Double]).sum / pesoTotal).toInt
+      val nivel = if (score >= 80) "EXCELENTE" else if (score >= 60) "BUENO" else if (score >= 40) "MEJORABLE" else "INSUFICIENTE"
+      val avisos = List(
+        if (totalPartidos - conRubrica > 0) Some(s"⚠️ ${totalPartidos - conRubrica} partidos sin rúbrica completa — el arquetipo tiene baja confianza hasta que se completen.") else None
+      ).flatten
+      val masBajo = medibles.sortBy(_("pct").asInstanceOf[Option[Int]].get).headOption.map(_("etiqueta").toString)
+      Map("score" -> score, "nivel" -> nivel, "componentes" -> componentes, "avisos" -> avisos, "componenteMasBajo" -> masBajo)
+    } finally { conn.close() }
+  }
+
+  /** Barra de texto para el email/Telegram: ████████░░ */
+  def barraTexto(pct: Int, ancho: Int = 10): String = { val llenos = math.round(pct * ancho / 100.0).toInt; "█" * llenos + "░" * (ancho - llenos) }
+
+  /**
+   * Linea para el email del lunes si el score bajo respecto a la semana anterior. El score se guarda por
+   * semana ISO, asi que generar el resumen varias veces la misma semana no altera la comparacion.
+   */
+  def dataQualityCambioSemanal(): Option[String] = {
+    val dq = getDataQualityScore()
+    val score = dq("score").asInstanceOf[Int]
+    val hoy = LocalDate.now()
+    val fmt = java.time.format.DateTimeFormatter.ofPattern("YYYY-ww", java.util.Locale.forLanguageTag("es-ES"))
+    val claveHoy = s"dq_score_${hoy.format(fmt)}"
+    val claveAnterior = s"dq_score_${hoy.minusWeeks(1).format(fmt)}"
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT payload FROM feature_cache WHERE cache_key = ?")
+      ps.setString(1, claveAnterior)
+      val rs = ps.executeQuery()
+      val anterior = if (rs.next()) rs.getString("payload").toIntOption else None
+      val up = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
+      up.setString(1, claveHoy); up.setString(2, score.toString); up.executeUpdate()
+      anterior.filter(_ > score).map { a =>
+        s"📊 La calidad de datos bajó de $a a $score esta semana. El mayor gap: ${dq("componenteMasBajo").asInstanceOf[Option[String]].getOrElse("—")}."
+      }
     } finally { conn.close() }
   }
 
