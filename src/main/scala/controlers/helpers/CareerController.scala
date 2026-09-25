@@ -689,6 +689,7 @@ object CareerController extends cask.Routes {
     val content = basePage("career", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
         h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
+        div(cls := "d-grid mb-4", a(href := "/diary", cls := "btn btn-outline-warning fw-bold", "📖 EL DIARIO DE HÉCTOR")),
 
         div(cls:="card bg-dark text-white border-warning shadow mb-4",
           div(cls:="card-body text-center",
@@ -3293,59 +3294,77 @@ object CareerController extends cask.Routes {
   }
 
   // ── MODULO 5: DIARIO NARRATIVO AUTOMATICO DE TEMPORADA ──────────────────
+  // Diario narrativo mensual (relato literario de Gemini, cache permanente en season_diary)
+  private val diarioEnCurso = java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
+
   @cask.get("/diary")
-  def diaryPage(request: cask.Request) = withAuth(request) {
+  def diaryPage(request: cask.Request, mes: String = "", msg: String = "") = withAuth(request) {
     val entries = DatabaseManager.getSeasonDiaryEntries() // DESC por mes
+    val caritas = DatabaseManager.getCaritasPorMes()
     val today = java.time.LocalDate.now()
+    // Se ofrece el mes ya terminado (o el actual si hoy es su ultimo dia): el relato no se regenera despues
     val targetMonthDate = if (today.getDayOfMonth == today.lengthOfMonth()) today else today.minusMonths(1)
     val targetMonth = targetMonthDate.toString.take(7)
     val yaGenerado = entries.exists(_("mes").asInstanceOf[String] == targetMonth)
+    val seleccionado = entries.find(_("mes").asInstanceOf[String] == mes).orElse(entries.headOption)
 
-    val entriesHtml = entries.zipWithIndex.map { case (e, idx) =>
-      val mes         = e("mes").asInstanceOf[String]
-      val contenido    = e("contenido").asInstanceOf[String]
-      val partidos     = e("partidosIncluidos").asInstanceOf[Int]
-      val hitos        = e("hitosIncluidos").asInstanceOf[Int]
-      val openMod: Modifier = if (idx == 0) attr("open") := "open" else frag()
-      tag("details")(cls := "border-bottom border-secondary py-2", openMod,
-        tag("summary")(cls := "text-warning fw-bold", style := "cursor:pointer;",
-          s"${DatabaseManager.mesLabel(mes).capitalize} · $partidos partidos · $hitos hitos"
-        ),
-        div(cls := "text-light small mt-2", style := "white-space:pre-wrap; line-height:1.6;", contenido)
-      )
+    val listaMeses: Modifier = div(cls := "d-flex flex-wrap gap-2 mb-3",
+      frag(entries.map { e =>
+        val m = e("mes").asInstanceOf[String]
+        val activo = seleccionado.exists(_("mes") == m)
+        a(href := s"/diary?mes=$m", cls := s"btn btn-sm ${if (activo) "btn-warning" else "btn-outline-secondary"}",
+          caritas.get(m).map(c => span(style := "font-size:16px; margin-right:4px;", DatabaseManager.caritaEmoji(c))).getOrElse(frag()),
+          DatabaseManager.mesLabel(m).capitalize)
+      }: _*))
+
+    val relato: Modifier = seleccionado match {
+      case Some(e) =>
+        val m = e("mes").asInstanceOf[String]
+        div(cls := "card shadow mb-3", style := "background:#fbf7ef; color:#2b2419; border:0; border-radius:14px;",
+          div(cls := "card-body", style := "padding:28px 26px;",
+            div(style := "font-family:'Lora',Georgia,serif; font-size:13px; letter-spacing:2px; color:#8a6d3b; text-transform:uppercase; margin-bottom:10px;",
+              caritas.get(m).map(c => DatabaseManager.caritaEmoji(c) + " ").getOrElse("") + DatabaseManager.mesLabel(m)),
+            div(style := "font-family:'Lora',Georgia,serif; font-size:17px; line-height:1.9; white-space:pre-wrap;", e("contenido").asInstanceOf[String])))
+      case None => div(cls := "alert alert-secondary text-center", "Todavía no hay ningún mes en el diario.")
     }
 
     val content = basePage("diary",
+      link(rel := "stylesheet", href := "https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap"),
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
-          div(cls := "d-flex justify-content-between align-items-center mb-4",
-            h2(cls := "text-white mb-0", "📖 Diario de Temporada"),
-            a(href := "/diary/export", cls := "btn btn-outline-secondary btn-sm fw-bold", target := "_blank", "🖨️ Exportar")
-          ),
+          div(cls := "d-flex justify-content-between align-items-center mb-2",
+            h2(cls := "text-white mb-0", "📖 El Diario de Héctor"),
+            a(href := "/diary/export", cls := "btn btn-outline-secondary btn-sm fw-bold", target := "_blank", "🖨️ Exportar")),
+          div(cls := "xx-small text-muted mb-3 fst-italic", "Este diario está pensado para ser leído por Héctor cuando sea mayor."),
+          if (msg.nonEmpty) div(cls := "alert alert-info small p-2", msg) else frag(),
           if (!yaGenerado)
-            form(action := "/diary/generate", method := "post", cls := "mb-4",
+            form(action := "/diary/generate", method := "post", cls := "mb-3",
               input(tpe := "hidden", name := "mes", value := targetMonth),
-              button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", s"📖 Generar entrada de ${DatabaseManager.mesLabel(targetMonth)}")
-            )
-          else div(),
-          if (entries.isEmpty)
-            div(cls := "alert alert-secondary text-center", "Todavía no hay entradas en el diario")
-          else
-            div(cls := "card bg-dark border-secondary p-3",
-              frag(entriesHtml: _*)
-            )
-        )
-      )
-    )
+              button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", s"📖 Generar diario de ${DatabaseManager.mesLabel(targetMonth)}"))
+          else frag(),
+          listaMeses,
+          relato)))
     renderHtml(content)
   }
 
+  // Gemini en segundo plano al pulsar el boton; un mes ya generado no se regenera
   @cask.post("/diary/generate")
   def generateDiaryEntry(request: cask.Request) = withAuth(request) {
     val p = parseBody(request)
     val mes = p.getOrElse("mes", java.time.LocalDate.now().toString.take(7))
-    DatabaseManager.generateMonthlyDiary(mes)
-    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/diary"))
+    val msg =
+      if (!mes.matches("\\d{4}-\\d{2}")) "Mes no válido."
+      else if (!diarioEnCurso.add(mes)) s"⏳ El diario de ${DatabaseManager.mesLabel(mes)} ya se está generando."
+      else {
+        new Thread(() => {
+          try {
+            val r = DatabaseManager.generateMonthlyDiary(mes)
+            if (r.startsWith("Error")) println(s"[Diario] $mes: ${r.take(200)}")
+          } finally diarioEnCurso.remove(mes)
+        }).start()
+        s"⏳ Generando el diario de ${DatabaseManager.mesLabel(mes)} en segundo plano — recarga en unos segundos."
+      }
+    renderRedirect(s"/diary?mes=$mes&msg=${java.net.URLEncoder.encode(msg, "UTF-8")}")
   }
 
   @cask.get("/diary/export")

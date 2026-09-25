@@ -673,6 +673,8 @@ object DatabaseManager {
         partidos_incluidos   INT DEFAULT 0,
         hitos_incluidos      INT DEFAULT 0
       )""")
+      // Diario narrativo: contexto con el que se genero cada mes (datos_mes)
+      stmt.executeUpdate("ALTER TABLE season_diary ADD COLUMN IF NOT EXISTS datos_mes TEXT DEFAULT NULL")
 
       // ── Modulo 6: Periodizacion anual ────────────────────────────────────────
       stmt.executeUpdate("""CREATE TABLE IF NOT EXISTS periodization (
@@ -3913,7 +3915,7 @@ $analisisConcatenados"""
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE G — RESUMEN SEMANAL POR EMAIL (SQL puro, sin Gemini)
   // ─────────────────────────────────────────────────────────────────────────────
-  def generarResumenSemanal(incluirAlertaCarga: Boolean = true): String = {
+  def generarResumenSemanal(incluirAlertaCarga: Boolean = true, incluirDiario: Boolean = true): String = {
     val conn = getConnection()
     try {
       val hoy = LocalDate.now()
@@ -4012,6 +4014,12 @@ $analisisConcatenados"""
         """<p style="color:#fd7e14;"><strong>📚 Semana de carga escolar alta</strong> — reduce expectativas de rendimiento deportivo.</p>"""
       else ""
 
+      // Diario narrativo: el primer lunes de mes, aviso con la primera frase del relato del mes anterior
+      val diarioHtml = if (!incluirDiario) "" else asegurarDiarioMesAnterior().map { case (mes, contenido) =>
+        val primeraFrase = contenido.split("(?<=[.!?])\\s+").headOption.getOrElse(contenido).take(220)
+        s"""<p>📖 <strong>El diario narrativo de ${escHtml(mesLabel(mes))} está listo</strong> — ${escHtml(primeraFrase)}...</p>"""
+      }.getOrElse("")
+
       // BLOQUE G: aviso si la calidad de datos bajo respecto a la semana anterior
       val calidadDatosHtml = dataQualityCambioSemanal().map(m => s"""<p style="color:#ca8a04;"><strong>${escHtml(m)}</strong></p>""").getOrElse("")
 
@@ -4022,6 +4030,7 @@ $analisisConcatenados"""
       s"""
       <html><body style="font-family:sans-serif; color:#222;">
         <h2>Guardian Elite — Resumen semana del $hoy</h2>
+        $diarioHtml
         $alertaHtml
         $alertaCargaHtml
         $calidadDatosHtml
@@ -11331,6 +11340,27 @@ PLAZO: <texto>"""
     } else mes
   }
 
+  /** Carita de La Voz del Portero por mes (YYYY-MM -> 1..5), para la lista del diario. */
+  def getCaritasPorMes(): Map[String, Int] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, motivacion_carita FROM voz_portero")
+      Iterator.continually(rs).takeWhile(_.next()).map(r => r.getString("mes") -> r.getInt("motivacion_carita")).toMap
+    } finally { conn.close() }
+  }
+
+  /**
+   * Primer lunes de mes: asegura el diario del mes anterior (lo genera con Gemini si falta; se llama
+   * desde las tareas programadas, nunca desde el render). Devuelve (mes, contenido) si existe.
+   */
+  def asegurarDiarioMesAnterior(): Option[(String, String)] = {
+    val hoy = LocalDate.now()
+    if (hoy.getDayOfWeek != java.time.DayOfWeek.MONDAY || hoy.getDayOfMonth > 7) return None
+    val mes = hoy.minusMonths(1).toString.take(7)
+    val contenido = generateMonthlyDiary(mes)
+    if (contenido.isEmpty || contenido.startsWith("Error")) None else Some(mes -> contenido)
+  }
+
   def getSeasonDiaryEntries(): List[Map[String, Any]] = {
     val conn = getConnection()
     try {
@@ -11350,9 +11380,15 @@ PLAZO: <texto>"""
     } finally { conn.close() }
   }
 
+  /** Diario narrativo del mes. Cache permanente: si ya existe no se regenera. Nunca guarda un error de la IA. */
   def generateMonthlyDiary(mes: String): String = {
     val conn = getConnection()
     try {
+      val psExiste = conn.prepareStatement("SELECT contenido FROM season_diary WHERE mes = ?")
+      psExiste.setString(1, mes)
+      val rsExiste = psExiste.executeQuery()
+      if (rsExiste.next()) return rsExiste.getString("contenido")
+
       // Partidos del mes
       val psM = conn.prepareStatement(
         "SELECT rival, nota, goles_favor, goles_contra, analisis_voz FROM matches WHERE status='PLAYED' AND TO_CHAR(fecha, 'YYYY-MM') = ? ORDER BY fecha ASC")
@@ -11402,20 +11438,75 @@ PLAZO: <texto>"""
       val citaVozLinea = if (citaVoz.nonEmpty) s" Ese mes, cuando le preguntaron qué era lo que más le gustaba aprender, Héctor respondió: '$citaVoz'." else ""
 
       val mesLbl = mesLabel(mes)
-      val prompt = s"""Eres el cronista oficial de la carrera deportiva de Hector, portero que comenzo a los 6 anos. Escribe la entrada del diario de $mesLbl en tercera persona, como si fuera un periodista deportivo siguiendo su desarrollo desde el principio. Datos del mes: partidos=[$partidosStr], hitos conseguidos=[$hitosStr], oportunidades=[$oppsStr], extracto de audio mas destacado=[$audioDestacado].$citaVozLinea Escribe 3-4 parrafos narrativos, en pasado, con nombre propio. No uses listas ni bullets. Empieza siempre con 'En $mesLbl, Hector...'. Si hay una cita literal de Hector, inclúyela tal cual, entre comillas, como parte natural de la narrativa. Que sea emotivo pero basado unicamente en los datos reales."""
+      val edad = calcularEdadExacta(getLatestCardData().fechaNacimiento)
+      def filas(sql: String)(f: java.sql.ResultSet => String): List[String] = {
+        val ps = conn.prepareStatement(sql); ps.setString(1, mes)
+        val rs = ps.executeQuery(); Iterator.continually(rs).takeWhile(_.next()).map(f).toList
+      }
+      // Porterias a cero y hitos del Legado del mes
+      val porteriasCero = matches.count(_.resultado.endsWith("-0"))
+      val hitosLegado = filas("SELECT descripcion FROM hitos_conseguidos WHERE TO_CHAR(fecha, 'YYYY-MM') = ?")(r => fixEncoding(r.getString("descripcion")))
+      // ACWR medio del mes (misma serie diaria que el explorador de correlaciones)
+      val acwrMes: Option[Double] = variablesCorrelacion.find(_._1 == "acwr").flatMap { case (_, _, q) =>
+        val ps = conn.prepareStatement(s"SELECT AVG(v) as m FROM ($q) x WHERE TO_CHAR(d, 'YYYY-MM') = ? AND v IS NOT NULL")
+        ps.setString(1, mes)
+        val rs = ps.executeQuery()
+        if (rs.next()) Option(rs.getObject("m")).map(_ => rs.getDouble("m")) else None
+      }
+      val acwrTxt = acwrMes.map(a => f"ACWR medio $a%.2f (${nivelACWR(a)._3.toLowerCase})").getOrElse("sin datos de carga suficientes")
+      // Sueno
+      val suenoTxt = filas("SELECT AVG(horas_sueno) as h, AVG(sueno_profundo_min) FILTER (WHERE sueno_profundo_min > 0) as p, COUNT(*) as n FROM wellness WHERE horas_sueno > 0 AND TO_CHAR(fecha, 'YYYY-MM') = ?") { r =>
+        if (r.getInt("n") == 0) "sin registros de sueño"
+        else f"${r.getDouble("h")}%.1f h de media en ${r.getInt("n")} noches registradas" + Option(r.getObject("p")).map(_ => f", ${r.getDouble("p")}%.0f min de sueño profundo").getOrElse("")
+      }.headOption.getOrElse("sin registros de sueño")
+      // La Voz del Portero: carita y respuestas literales
+      val vozTxt = filas("SELECT motivacion_carita, respuesta_error, respuesta_aprendizaje FROM voz_portero WHERE TO_CHAR(fecha, 'YYYY-MM') = ?") { r =>
+        s"motivación ${r.getInt("motivacion_carita")}/5; ante un error dijo: \"${fixEncoding(r.getString("respuesta_error"))}\"; sobre lo que más le gusta aprender dijo: \"${fixEncoding(r.getString("respuesta_aprendizaje"))}\""
+      }.headOption.getOrElse("sin registro este mes")
+      // Analisis de video del mes
+      val videoTxt = filas("SELECT rival, video_analisis_ia FROM matches WHERE video_analisis_ia IS NOT NULL AND video_analisis_ia <> '' AND TO_CHAR(fecha, 'YYYY-MM') = ?") { r =>
+        val sec = parseVideoAnalysisSections(r.getString("video_analisis_ia"))
+        s"vs ${fixEncoding(r.getString("rival"))}: fuerte en ${sec.getOrElse("PUNTOS FUERTES", "").take(250)}; a mejorar ${sec.getOrElse("PUNTOS A MEJORAR", "").take(250)}"
+      }.mkString(" | ")
+      // Crecimiento y lesiones
+      val crecimientoTxt = filas("SELECT altura, peso FROM physical_growth WHERE TO_CHAR(fecha, 'YYYY-MM') = ? ORDER BY fecha DESC LIMIT 1") { r =>
+        Seq(Option(r.getObject("altura")).filter(_ => r.getDouble("altura") > 0).map(_ => f"${r.getDouble("altura")}%.0f cm"),
+            Option(r.getObject("peso")).filter(_ => r.getDouble("peso") > 0).map(_ => f"${r.getDouble("peso")}%.1f kg")).flatten.mkString(", ")
+      }.filter(_.nonEmpty).headOption.getOrElse("")
+      val lesionesTxt = filas("SELECT COALESCE(NULLIF(tipo, ''), 'lesión') as t, COALESCE(zona, '') as z FROM injuries WHERE TO_CHAR(fecha_inicio, 'YYYY-MM') = ?") { r =>
+        s"${fixEncoding(r.getString("t"))} ${fixEncoding(r.getString("z"))}".trim
+      }.mkString(", ")
 
-      // No se cachea con feature_cache: cada mes se persiste en season_diary bajo demanda del usuario
-      val contenido = AIProvider.ask(prompt, None, bypassCache = true)
+      val datosMes = List(
+        s"Partidos: $partidosStr",
+        s"Porterías a cero: $porteriasCero",
+        s"Hitos del Legado: ${if (hitosLegado.isEmpty) "ninguno" else hitosLegado.mkString(", ")}",
+        s"Habilidades conseguidas: $hitosStr",
+        s"Oportunidades: $oppsStr",
+        s"Carga: $acwrTxt",
+        s"Sueño: $suenoTxt",
+        s"La Voz del Portero: $vozTxt",
+        if (videoTxt.nonEmpty) s"Análisis de vídeo: $videoTxt" else "",
+        if (crecimientoTxt.nonEmpty) s"Crecimiento: $crecimientoTxt" else "",
+        if (lesionesTxt.nonEmpty) s"Lesiones: $lesionesTxt" else "",
+        if (audioDestacado.nonEmpty) s"Lo que contó tras un partido: ${audioDestacado.take(400)}" else ""
+      ).filter(_.nonEmpty).mkString("\n")
 
-      val upsert = conn.prepareStatement("""
-        INSERT INTO season_diary (mes, contenido, generado_en, partidos_incluidos, hitos_incluidos)
-        VALUES (?, ?, NOW(), ?, ?)
-        ON CONFLICT (mes) DO UPDATE SET contenido = EXCLUDED.contenido, generado_en = NOW(),
-          partidos_incluidos = EXCLUDED.partidos_incluidos, hitos_incluidos = EXCLUDED.hitos_incluidos
+      val promptNarrativo = s"""Eres un escritor que crea el diario deportivo mensual de Héctor, un portero de $edad años. Escribe un relato en tercera persona, en prosa literaria (no bullet points, no informe técnico), sobre cómo fue el mes de $mesLbl en la vida deportiva de Héctor. Usa los datos como base pero escribe como un narrador omnisciente que observa el desarrollo de un niño pequeño. Máximo 4-5 párrafos. Incluye detalles concretos de los datos pero escríbelos de forma narrativa, no estadística. Si Héctor dijo algo en La Voz del Portero, cítalo literalmente entre comillas. El tono es cálido, observacional y orientado al futuro. Nunca uses frases como 'según los datos' o 'las estadísticas muestran'. Datos del mes:
+$datosMes"""
+
+      // Cache permanente en season_diary (un registro por mes); un error de la IA no se guarda
+      val contenido = AIProvider.ask(promptNarrativo, None, bypassCache = true).trim
+      if (contenido.isEmpty || contenido.startsWith("Error")) return contenido
+
+      val insert = conn.prepareStatement("""
+        INSERT INTO season_diary (mes, contenido, generado_en, partidos_incluidos, hitos_incluidos, datos_mes)
+        VALUES (?, ?, NOW(), ?, ?, ?)
+        ON CONFLICT (mes) DO NOTHING
       """)
-      upsert.setString(1, mes); upsert.setString(2, contenido)
-      upsert.setInt(3, matches.size); upsert.setInt(4, hitos.size)
-      upsert.executeUpdate()
+      insert.setString(1, mes); insert.setString(2, contenido)
+      insert.setInt(3, matches.size); insert.setInt(4, hitos.size + hitosLegado.size); insert.setString(5, datosMes)
+      insert.executeUpdate()
 
       contenido
     } finally { conn.close() }
@@ -13952,6 +14043,12 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
         if (esLunes) predecirSobrecargaSemana().foreach { m => if (tgMarcarRecordatorio("SOBRECARGA")) msgs += m }
         if (esLunes && cuenta("SELECT COUNT(*) FROM physical_growth WHERE peso > 0 AND fecha > CURRENT_DATE - 7") == 0 && tgMarcarRecordatorio("PESO"))
           msgs += "⚖️ Sin registro de peso esta semana.\nPESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
+      }
+      // Diario narrativo del mes anterior (primer lunes de mes, a partir de las 9:00)
+      if (hora >= 9 && hora < 22 && esLunes && hoy.getDayOfMonth <= 7) {
+        asegurarDiarioMesAnterior().foreach { case (mes, _) =>
+          if (tgMarcarRecordatorio(s"DIARIO_$mes", 31)) msgs += s"📖 Diario de ${mesLabel(mes)} generado. Lee el relato del mes en Guardian."
+        }
       }
       if (hora == 15) {
         val hayPartido = sesionesHoy.contains("PARTIDO") ||

@@ -146,7 +146,7 @@ object GuardianServer extends cask.Main {
           }
           // BLOQUE G3: mismo contenido del resumen, en texto plano, por Telegram
           // (sin la alerta de carga: el bot ya la manda como mensaje propio a las 8:00, BLOQUE R)
-          val textoPlano = DatabaseManager.generarResumenSemanal(incluirAlertaCarga = false)
+          val textoPlano = DatabaseManager.generarResumenSemanal(incluirAlertaCarga = false, incluirDiario = false)
             .replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim
           TelegramService.enviar(textoPlano)
         } catch { case e: Exception =>
