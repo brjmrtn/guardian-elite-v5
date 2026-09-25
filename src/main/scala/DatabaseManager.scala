@@ -12238,4 +12238,42 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     } finally { conn.close() }
   }
 
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE E — TIMELINE CRONOLOGICO DE LA CARRERA — SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  /** Eventos de todas las fuentes ordenados por fecha. tipo: TODOS | PARTIDO | HITO | LESION | CRECIMIENTO | VOZ_PORTERO. */
+  def getCareerTimeline(limit: Int = 50, offset: Int = 0, tipo: String = "TODOS"): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT * FROM (
+          SELECT fecha, 'PARTIDO' as tipo, COALESCE(rival, '') || COALESCE(' ' || goles_favor || '-' || goles_contra, '') as descripcion,
+                 CASE WHEN nota > 0 THEN nota::text ELSE '' END as valor, id
+          FROM matches WHERE status = 'PLAYED' AND fecha IS NOT NULL
+          UNION ALL
+          SELECT fecha, 'HITO', descripcion, '', id FROM hitos_conseguidos
+          UNION ALL
+          SELECT fecha_inicio, 'LESION', COALESCE(NULLIF(tipo, ''), 'Lesión'), COALESCE(zona, ''), id
+          FROM injuries WHERE fecha_inicio IS NOT NULL
+          UNION ALL
+          SELECT fecha, 'CRECIMIENTO', COALESCE(altura::text || ' cm', ''), COALESCE(peso::text || ' kg', ''), id
+          FROM physical_growth WHERE fecha IS NOT NULL
+          UNION ALL
+          SELECT fecha, 'VOZ_PORTERO', motivacion_carita::text, '', id FROM voz_portero
+        ) t
+        WHERE (? = 'TODOS' OR t.tipo = ?)
+        ORDER BY fecha DESC, id DESC LIMIT ? OFFSET ?""")
+      ps.setString(1, tipo); ps.setString(2, tipo); ps.setInt(3, limit); ps.setInt(4, offset)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).map { r =>
+        Map[String, Any](
+          "fecha" -> r.getDate("fecha").toString,
+          "tipo" -> r.getString("tipo"),
+          "descripcion" -> fixEncoding(Option(r.getString("descripcion")).getOrElse("")),
+          "valor" -> fixEncoding(Option(r.getString("valor")).getOrElse("")),
+          "id" -> r.getInt("id"))
+      }.toList
+    } finally { conn.close() }
+  }
+
 }

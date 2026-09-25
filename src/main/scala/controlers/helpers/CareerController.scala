@@ -2340,6 +2340,68 @@ object CareerController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/opportunities"))
   }
 
+  // BLOQUE E: timeline cronologico — "Ver más" amplia el limite en bloques de 50
+  @cask.get("/career/timeline")
+  def careerTimelinePage(request: cask.Request, tipo: String = "TODOS", pagina: Int = 1) = withAuth(request) {
+    val filtros = Seq("TODOS" -> "Todos", "PARTIDO" -> "⚽ Partidos", "HITO" -> "🏆 Hitos", "LESION" -> "🩹 Lesiones")
+    val tipoOk = if (filtros.exists(_._1 == tipo)) tipo else "TODOS"
+    val paginaOk = math.max(1, pagina)
+    val porPagina = 50
+    // se pide uno de mas para saber si hay otra pagina sin un COUNT(*) aparte
+    val eventos = DatabaseManager.getCareerTimeline(porPagina * paginaOk + 1, 0, tipoOk)
+    val hayMas = eventos.size > porPagina * paginaOk
+    val visibles = eventos.take(porPagina * paginaOk)
+
+    def icono(t: String) = t match {
+      case "PARTIDO" => "⚽"; case "HITO" => "🏆"; case "LESION" => "🩹"
+      case "CRECIMIENTO" => "📏"; case "VOZ_PORTERO" => "🎤"; case _ => "•"
+    }
+    def detalle(e: Map[String, Any]): Modifier = {
+      val desc = e("descripcion").asInstanceOf[String]; val valor = e("valor").asInstanceOf[String]
+      e("tipo") match {
+        case "PARTIDO" => frag(span(cls := "text-white", desc), if (valor.nonEmpty) span(cls := "badge bg-warning text-dark ms-2", s"Nota $valor") else frag())
+        case "HITO" => span(cls := "text-warning", desc)
+        case "LESION" => frag(span(cls := "text-danger", desc), if (valor.nonEmpty) span(cls := "text-muted ms-2 small", valor) else frag())
+        case "CRECIMIENTO" => span(cls := "text-info", Seq(desc, valor).filter(_.nonEmpty).mkString(" · "))
+        case "VOZ_PORTERO" => span(cls := "text-white", s"Voz del portero — motivación $desc/5")
+        case _ => span(desc)
+      }
+    }
+
+    val lista: Modifier =
+      if (visibles.isEmpty) div(cls := "text-center text-muted small py-4", "Sin eventos registrados.")
+      else div(style := "border-left:2px solid #d4af37; margin-left:14px;",
+        frag(visibles.map { e =>
+          div(cls := "d-flex align-items-start mb-3", style := "margin-left:-15px;",
+            div(style := "width:28px; height:28px; border-radius:50%; background:#1e1e1e; border:2px solid #d4af37; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0;",
+              icono(e("tipo").asInstanceOf[String])),
+            div(cls := "ms-2",
+              div(cls := "xx-small text-muted", e("fecha").asInstanceOf[String]),
+              div(cls := "small", detalle(e)))
+          )
+        }: _*))
+
+    val content = basePage("timeline",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-warning mb-3", "📅 Timeline"),
+          div(cls := "d-flex flex-wrap gap-2 mb-3",
+            frag(filtros.map { case (valor, etiqueta) =>
+              a(href := s"/career/timeline?tipo=$valor",
+                cls := s"btn btn-sm fw-bold ${if (valor == tipoOk) "btn-warning" else "btn-outline-secondary"}", etiqueta)
+            }: _*)
+          ),
+          div(cls := "card bg-dark border-secondary shadow p-3", lista),
+          if (hayMas) div(cls := "d-grid mt-3",
+            a(href := s"/career/timeline?tipo=$tipoOk&pagina=${paginaOk + 1}#fin", cls := "btn btn-outline-warning fw-bold", "Ver más"))
+          else frag(),
+          div(id := "fin")
+        )
+      )
+    )
+    renderHtml(content)
+  }
+
   // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
   @cask.get("/benchmark")
   def benchmarkPage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
