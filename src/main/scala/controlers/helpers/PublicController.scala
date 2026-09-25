@@ -295,6 +295,7 @@ object PublicController extends cask.Routes {
           cognitivoSection,
           arquetipoSection,
           vozPorteroSection,
+          qrPerfilPublico("Comparte este perfil"),
           div(cls := "text-center text-muted xx-small mt-4",
             "Perfil generado con Guardian Elite · Datos actualizados en tiempo real")
         ),

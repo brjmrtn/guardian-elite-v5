@@ -100,6 +100,7 @@ object AdminController extends cask.Routes {
         button(tpe := "button", id := "btnCopyLink", cls := "btn btn-outline-warning fw-bold",
           onclick := "copyPublicLink()", "📋 Copiar enlace")
       ),
+      if (activo) qrPerfilPublico("Muestra este QR a los ojeadores para que accedan directamente al perfil de Héctor") else frag(),
       script(raw("""
         function copyPublicLink() {
           var link = window.location.origin + '/hector';

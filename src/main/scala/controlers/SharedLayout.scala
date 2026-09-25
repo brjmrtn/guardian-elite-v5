@@ -134,6 +134,14 @@ object SharedLayout {
     )
   }
 
+  // BLOQUE Q: QR del perfil publico (QRCode.js desde cdnjs), mismo enlace que "Copiar enlace"
+  def qrPerfilPublico(texto: String): Modifier = frag(
+    div(cls := "text-center my-3",
+      div(id := "qr-perfil", style := "display:inline-block; background:#fff; padding:10px; border-radius:10px;"),
+      div(cls := "xx-small text-muted mt-2", texto)),
+    script(src := "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"),
+    script(raw("(function(){ var el = document.getElementById('qr-perfil'); if (el && window.QRCode) new QRCode(el, { text: window.location.origin + '/hector', width: 200, height: 200 }); })();")))
+
   // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
     "<!DOCTYPE html>" +
