@@ -1,5 +1,26 @@
 import cask._
 
+/*
+ * REGLAS DE RUTAS CASK — LEER ANTES DE AÑADIR CUALQUIER RUTA
+ *
+ * 1. NUNCA mezclar rutas literales y wildcards al mismo nivel de árbol
+ *    (para el mismo método HTTP).
+ *    MAL:  /match-center/clima    (literal)
+ *          /match-center/:id/card (wildcard)
+ *    BIEN: /match-center/clima    (literal)
+ *          /partido-card/:id      (prefijo diferente para el wildcard)
+ *
+ * 2. Si necesitas añadir una ruta nueva con wildcard bajo un prefijo
+ *    que ya tiene rutas literales: usar un prefijo diferente para
+ *    la ruta con wildcard.
+ *
+ * 3. Ejemplos de prefijos seguros para wildcards:
+ *    /partido/:id, /entreno/:id, /hito/:id, /correlacion/:id
+ *
+ * El conflicto no lo detecta el compilador: solo aparece al arrancar el servidor.
+ * Arrancar el servidor en local tras añadir rutas.
+ */
+
 // GUARDIAN ELITE -- Punto de entrada del servidor.
 //
 // Logica por controlador:

@@ -96,9 +96,9 @@ object DatabaseManager {
   // ══════════════════════════════════════════════════════════════════
   // REGLA PERMANENTE — RESTAS DE FECHAS EN POSTGRESQL
   // NUNCA restar dos columnas DATE o TIMESTAMP directamente.
-  // SIEMPRE usar:
-  //   EXTRACT(EPOCH FROM (fecha1::timestamp - fecha2::timestamp)) / 86400
-  // para obtener el número de días entre dos fechas.
+  // SIEMPRE usar DateUtils (DateUtils.scala):
+  //   ${DateUtils.daysBetweenSQL("fecha1", "fecha2")}  /  ${DateUtils.daysFromTodaySQL("fecha")}
+  // que generan EXTRACT(EPOCH FROM (...::timestamp - ...::timestamp)) / 86400.
   // La resta directa (fecha1 - fecha2) produce un tipo 'interval' en
   // PostgreSQL que no es compatible con comparaciones numéricas y
   // genera el error: operator does not exist: timestamp - integer
@@ -3928,9 +3928,9 @@ $analisisConcatenados"""
       if (debeRecordarVozPortero()) pendientesTrimestre += "🎤 La Voz del Portero de este mes pendiente."
 
       // BLOQUE A — recordatorio de revision mensual del IDP (solo si hay temporada IDP activa)
-      val rsIdpRev = conn.createStatement().executeQuery("""
+      val rsIdpRev = conn.createStatement().executeQuery(s"""
         SELECT
-          EXTRACT(EPOCH FROM (CURRENT_DATE::timestamp - MAX(r.fecha)::timestamp)) / 86400 as dias
+          ${DateUtils.daysFromTodaySQL("MAX(r.fecha)")} as dias
         FROM idp_revisiones r
         JOIN idp_temporadas t ON t.id = r.temporada_id
         WHERE t.estado = 'ACTIVA'
@@ -4191,14 +4191,14 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
     try {
       conn=getConnection(); val sb=new StringBuilder(); val card=getLatestCardData(); val edad=calcularEdadExacta(card.fechaNacimiento);
       sb.append(s"Analista Elite ($edad anos). Tendencias:\n");
-      val rs=conn.createStatement().executeQuery("""
+      val rs=conn.createStatement().executeQuery(s"""
         SELECT m.fecha, m.rival, m.nota,
                COALESCE(f.distancia_km, 0)      AS dist_km,
                COALESCE(f.sprint_max_kmh, 0)    AS sprint_max,
                COALESCE(f.pases, 0)             AS pases
         FROM matches m
         LEFT JOIN footbar_sessions f ON f.match_id = m.id
-        WHERE m.status='PLAYED' AND m.season_id = (SELECT MAX(id) FROM seasons)
+        WHERE m.status='PLAYED' ${seasonFilterActual("m")}
         ORDER BY m.fecha ASC
       """);
       var c=0; while(rs.next()){ c+=1; sb.append(s"${rs.getString("fecha")}|${rs.getString("rival")}|${rs.getDouble("nota")}|${rs.getDouble("dist_km")}|${rs.getDouble("sprint_max")}|${rs.getInt("pases")}\n") };
@@ -5126,16 +5126,16 @@ Responde en espanol, tono positivo y motivador para un nino."""
   def getCondicionesPico(): Map[String, Any] = {
     val conn = getConnection()
     try {
-      val rsN = conn.createStatement().executeQuery("""
+      val rsN = conn.createStatement().executeQuery(s"""
         SELECT COUNT(*) as n FROM matches m
         LEFT JOIN forma_diaria f ON f.fecha = m.fecha::date
         WHERE m.status = 'PLAYED' AND f.indice_forma IS NOT NULL
-          AND m.season_id = (SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1)
+          ${seasonFilterActual("m")}
       """)
       val n = if (rsN.next()) rsN.getInt("n") else 0
       if (n < 15) return Map("suficiente" -> false, "n" -> n)
 
-      val rs = conn.createStatement().executeQuery("""
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT AVG(f.indice_forma) as forma_media_pico,
           AVG(f.sueno_score) as sueno_pico,
           AVG(f.acwr_score) as acwr_pico,
@@ -5145,7 +5145,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
           AVG(m.autopercepcion_prepartido) as autopercepcion_pico
         FROM (
           SELECT * FROM matches
-          WHERE status = 'PLAYED' AND season_id = (SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1)
+          WHERE status = 'PLAYED' ${seasonFilterActual()}
           ORDER BY COALESCE(cpi, nota) DESC LIMIT 10
         ) m
         LEFT JOIN forma_diaria f ON f.fecha = m.fecha::date
@@ -6274,7 +6274,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
   def getParadasAnalysis(seasonId: Int = 0): Map[String, Any] = {
     val conn = getConnection()
     try {
-      val sf = if (seasonId > 0) s"AND m.season_id = $seasonId" else ""
+      val sf = seasonFilter(seasonId, "m")
       val rs = conn.createStatement().executeQuery(s"""
         SELECT pd.tecnica, COUNT(*) as usos,
                COUNT(CASE WHEN pd.resultado IN ('ATRAPADO_LIMPIO','DESPEJADO_ZONA_SEGURA') THEN 1 END) as limpias
@@ -7166,12 +7166,12 @@ Responde en espanol, tono positivo y motivador para un nino."""
   def getRubricaMediasTemporada(): Option[Map[String, Double]] = {
     val conn = getConnection()
     try {
-      val rs = conn.createStatement().executeQuery("""
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT AVG(rubrica_posicion) as posicion, AVG(rubrica_decisiones) as decisiones,
                AVG(rubrica_pies) as pies, AVG(rubrica_comunicacion) as comunicacion,
                AVG(rubrica_actitud) as actitud, COUNT(*) as n
         FROM matches
-        WHERE status='PLAYED' AND rubrica_posicion IS NOT NULL AND season_id = (SELECT MAX(id) FROM seasons)""")
+        WHERE status='PLAYED' AND rubrica_posicion IS NOT NULL ${seasonFilterActual()}""")
       if (rs.next() && rs.getInt("n") > 0) Some(Map(
         "posicion" -> rs.getDouble("posicion"), "decisiones" -> rs.getDouble("decisiones"),
         "pies" -> rs.getDouble("pies"), "comunicacion" -> rs.getDouble("comunicacion"),
@@ -8905,8 +8905,18 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   // publico, scouting report, moneyball...) que esperan el historico completo de la carrera, no solo
   // la temporada activa. Las paginas del B4 resuelven "por defecto la temporada activa" ellas mismas
   // (val efectivo = if (temporadaId > 0) temporadaId else getTemporadaActivaId()) antes de llamar aqui.
-  def seasonFilter(seasonId: Int): String =
-    if (seasonId > 0) s"AND season_id = $seasonId" else ""
+  // Filtro de temporada centralizado — no escribir "season_id = ..." a mano en las consultas.
+  //   seasonFilter(id, alias): opcional; id <= 0 significa "todas las temporadas".
+  //   seasonFilterActual(alias): siempre la temporada actual (temporadaActualSQL).
+  def seasonFilter(seasonId: Int, alias: String = ""): String =
+    if (seasonId > 0) s"AND ${if (alias.isEmpty) "" else alias + "."}season_id = $seasonId" else ""
+
+  /** Temporada actual: la abierta (fecha_fin NULL) mas reciente o, si no hay ninguna abierta, la ultima. */
+  val temporadaActualSQL: String =
+    "COALESCE((SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1), (SELECT MAX(id) FROM seasons))"
+
+  def seasonFilterActual(alias: String = ""): String =
+    s"AND ${if (alias.isEmpty) "" else alias + "."}season_id = $temporadaActualSQL"
 
   def getTemporadaActivaInfo(): Option[Map[String, Any]] = {
     val conn = getConnection()
@@ -9735,12 +9745,12 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                   FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                         UNION ALL
                         (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-                  WHERE fecha <= w.fecha AND EXTRACT(EPOCH FROM (w.fecha::timestamp - fecha::timestamp)) / 86400 < 7) as acute_load,
+                  WHERE fecha <= w.fecha AND ${DateUtils.daysBetweenSQL("w.fecha", "fecha")} < 7) as acute_load,
                (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
                   FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                         UNION ALL
                         (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-                  WHERE fecha <= w.fecha AND EXTRACT(EPOCH FROM (w.fecha::timestamp - fecha::timestamp)) / 86400 < 28) as chronic_load
+                  WHERE fecha <= w.fecha AND ${DateUtils.daysBetweenSQL("w.fecha", "fecha")} < 28) as chronic_load
         FROM wellness w
         JOIN matches m ON m.status = 'PLAYED' AND m.fecha > w.fecha AND m.fecha <= w.fecha + 2 $sf
         ORDER BY w.fecha ASC
@@ -11056,13 +11066,13 @@ Solo HTML limpio."""
   def getContextPatterns(): List[Map[String, Any]] = {
     val conn = getConnection()
     try {
-      val rs = conn.createStatement().executeQuery("""
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT clima, es_local,
           CASE WHEN dias_descanso >= 5 THEN 'descansado' ELSE 'cargado' END as estado_descanso,
           AVG(nota) as nota_media, COUNT(*) as partidos
         FROM (
           SELECT m.nota, m.clima, m.es_local,
-            EXTRACT(EPOCH FROM (m.fecha::timestamp - LAG(m.fecha::timestamp) OVER (ORDER BY m.fecha))) / 86400 as dias_descanso
+            ${DateUtils.daysBetweenSQL("m.fecha", "LAG(m.fecha) OVER (ORDER BY m.fecha)")} as dias_descanso
           FROM matches m WHERE m.status = 'PLAYED'
         ) sub
         WHERE dias_descanso IS NOT NULL
@@ -11550,12 +11560,12 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 7) as acute_load,
+             WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 7) as acute_load,
           (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 28) as chronic_load
+             WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 28) as chronic_load
         FROM matches m
         WHERE m.status = 'PLAYED' AND m.nota > 0 $sf
         ORDER BY m.fecha ASC
@@ -11624,22 +11634,22 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   private def fetchObsRegresion(): List[ObsRegresion] = {
     val conn = getConnection()
     try {
-      val rs = conn.createStatement().executeQuery("""
+      val rs = conn.createStatement().executeQuery(s"""
         SELECT m.nota,
-          EXTRACT(EPOCH FROM (m.fecha::timestamp - LAG(m.fecha::timestamp) OVER (ORDER BY m.fecha))) / 86400 as dias_descanso,
+          ${DateUtils.daysBetweenSQL("m.fecha", "LAG(m.fecha) OVER (ORDER BY m.fecha)")} as dias_descanso,
           COALESCE(m.es_local::int, 0) as es_local,
           (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 7.0
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 7) as acute_load,
+             WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 7) as acute_load,
           (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
              FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
                    (SELECT 0, rpe, 1, fecha FROM trainings)) loads
-             WHERE fecha <= m.fecha AND EXTRACT(EPOCH FROM (m.fecha::timestamp - fecha::timestamp)) / 86400 < 28) as chronic_load,
-          COALESCE((SELECT w.horas_sueno FROM wellness w WHERE EXTRACT(EPOCH FROM (m.fecha::timestamp - w.fecha::timestamp)) / 86400 = 1), 0) as horas_sueno,
-          COALESCE((EXTRACT(EPOCH FROM (m.fecha::timestamp - (SELECT MAX(t.fecha) FROM trainings t WHERE t.tipo ILIKE '%academia%' AND t.fecha <= m.fecha)::timestamp)) / 86400), 999) as dias_desde_academia
+             WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 28) as chronic_load,
+          COALESCE((SELECT w.horas_sueno FROM wellness w WHERE ${DateUtils.daysBetweenSQL("m.fecha", "w.fecha")} = 1), 0) as horas_sueno,
+          COALESCE((${DateUtils.daysBetweenSQL("m.fecha", "SELECT MAX(t.fecha) FROM trainings t WHERE t.tipo ILIKE '%academia%' AND t.fecha <= m.fecha")}), 999) as dias_desde_academia
         FROM matches m
         WHERE m.status = 'PLAYED' AND m.nota > 0
         ORDER BY m.fecha ASC
@@ -12394,9 +12404,9 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   def quickSaveMatch(rival: String, gf: Int, gc: Int, nota: Double): Int = {
     val conn = getConnection()
     try {
-      val ps = conn.prepareStatement("""
+      val ps = conn.prepareStatement(s"""
         INSERT INTO matches (season_id, fecha, rival, goles_favor, goles_contra, nota, status, source)
-        VALUES (COALESCE((SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1), (SELECT MAX(id) FROM seasons)),
+        VALUES ($temporadaActualSQL,
                 CURRENT_DATE, ?, ?, ?, ?, 'PLAYED', 'quick')
         RETURNING id""")
       ps.setString(1, fixEncoding(rival)); ps.setInt(2, gf); ps.setInt(3, gc); ps.setDouble(4, nota)
