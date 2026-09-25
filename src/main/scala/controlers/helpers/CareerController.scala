@@ -1576,6 +1576,7 @@ object CareerController extends cask.Routes {
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
           h2(cls := "text-white mb-4 text-center", "🎤 LA VOZ DEL PORTERO"),
+          buscadorVozPortero(""),
           evolucionWidget,
           mesActualSeccion,
           if (historialAnterior.nonEmpty) div(
@@ -1585,6 +1586,53 @@ object CareerController extends cask.Routes {
         )
       )
     )
+    renderHtml(content)
+  }
+
+  // BLOQUE L: buscador libre sobre las respuestas de Hector
+  private def buscadorVozPortero(q: String): Modifier =
+    form(action := "/voz-portero/search", method := "get", cls := "d-flex gap-2 mb-3",
+      input(tpe := "search", name := "q", value := q, cls := "form-control form-control-sm bg-dark text-white border-secondary",
+        placeholder := "Buscar en lo que ha dicho Héctor…"),
+      button(tpe := "submit", cls := "btn btn-sm btn-outline-warning fw-bold", "🔍 Buscar"))
+
+  /** Texto con cada aparicion de `q` (sin distinguir mayusculas) envuelta en <mark>, sin HTML crudo. */
+  private def resaltar(texto: String, q: String): Modifier =
+    if (q.isEmpty) frag(texto)
+    else {
+      val partes = texto.split(s"(?i)(?=${java.util.regex.Pattern.quote(q)})|(?<=${java.util.regex.Pattern.quote(q)})")
+      frag(partes.toSeq.map(p => if (p.equalsIgnoreCase(q)) tag("mark")(style := "background:#d4af37; color:#000; padding:0 2px;", p) else frag(p)): _*)
+    }
+
+  @cask.get("/voz-portero/search")
+  def searchVozPorteroPage(request: cask.Request, q: String = "") = withAuth(request) {
+    val query = q.trim
+    val resultados = DatabaseManager.searchVozPortero(query)
+    val lista: Modifier =
+      if (query.isEmpty) div(cls := "text-muted small text-center py-3", "Escribe una palabra para buscar.")
+      else if (resultados.isEmpty) div(cls := "text-muted small text-center py-3", s"Ningún registro contiene «$query».")
+      else frag(
+        div(cls := "xx-small text-muted mb-2", s"${resultados.size} registro(s) con «$query»"),
+        frag(resultados.map { r =>
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small d-flex justify-content-between align-items-center",
+              span(s"🎤 ${r("fecha").asInstanceOf[String].take(7)}"),
+              span(style := "font-size:22px;", caritaEmoji(r("motivacionCarita").asInstanceOf[Int]))),
+            div(cls := "card-body p-3",
+              div(cls := "mb-2",
+                div(cls := "xx-small text-muted fw-bold", "ANTE UN ERROR, HÉCTOR DIJO:"),
+                div(cls := "fst-italic text-info", "“", resaltar(r("respuestaError").asInstanceOf[String], query), "”")),
+              div(
+                div(cls := "xx-small text-muted fw-bold", "SOBRE LO QUE MÁS LE GUSTA APRENDER, HÉCTOR DIJO:"),
+                div(cls := "fst-italic text-info", "“", resaltar(r("respuestaAprendizaje").asInstanceOf[String], query), "”"))))
+        }: _*))
+    val content = basePage("voz-portero",
+      div(cls := "row justify-content-center",
+        div(cls := "col-md-8 col-12",
+          h2(cls := "text-white mb-3 text-center", "🎤 LA VOZ DEL PORTERO"),
+          a(href := "/voz-portero", cls := "small text-warning d-inline-block mb-3", "← Volver"),
+          buscadorVozPortero(query),
+          lista)))
     renderHtml(content)
   }
 

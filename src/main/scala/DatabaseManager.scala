@@ -5981,6 +5981,32 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+  // BLOQUE L: busqueda libre en las respuestas de La Voz del Portero
+  def searchVozPortero(query: String): List[Map[String, Any]] = {
+    val q = query.trim
+    if (q.isEmpty) return Nil
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT id, fecha, motivacion_carita, respuesta_error, respuesta_aprendizaje
+        FROM voz_portero
+        WHERE respuesta_error ILIKE '%' || ? || '%'
+           OR respuesta_aprendizaje ILIKE '%' || ? || '%'
+        ORDER BY fecha DESC""")
+      // % y _ son comodines de LIKE: se escapan para buscar el texto literal
+      val literal = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+      ps.setString(1, literal); ps.setString(2, literal)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).map { r =>
+        Map[String, Any](
+          "id" -> r.getInt("id"), "fecha" -> r.getDate("fecha").toString,
+          "motivacionCarita" -> r.getInt("motivacion_carita"),
+          "respuestaError" -> fixEncoding(Option(r.getString("respuesta_error")).getOrElse("")),
+          "respuestaAprendizaje" -> fixEncoding(Option(r.getString("respuesta_aprendizaje")).getOrElse("")))
+      }.toList
+    } finally { conn.close() }
+  }
+
   /** Meses consecutivos (contando desde el mas reciente) con carita <= 3. None si la racha es menor de 3. */
   def getAlertaMotivacionVoz(): Option[String] = {
     val hist = getVozPorteroHistorial() // ya viene ordenado por fecha DESC
