@@ -12451,6 +12451,65 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE J — UNIFICACION DE NOMBRES DE RIVALES (encoding / espacios / mayusculas)
+  // ═════════════════════════════════════════════════════════════════════════════
+  /**
+   * Corrige el encoding de cada nombre de rival distinto en matches y, si el nombre corregido
+   * coincide (sin distinguir mayusculas) con otro ya existente, reasigna todos los partidos al
+   * nombre canonico (el mas usado). En `rivals` (nombre UNIQUE) solo se renombra si no choca.
+   */
+  def unificarNombresRivales(): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT rival, COUNT(*) as n FROM matches WHERE rival IS NOT NULL AND rival <> '' GROUP BY rival")
+      val usos = Iterator.continually(rs).takeWhile(_.next()).map(r => r.getString("rival") -> r.getInt("n")).toList
+      // Nombre canonico por clave normalizada: el mas usado entre las variantes ya correctas
+      def clave(s: String) = fixEncoding(s).trim.replaceAll("\\s+", " ").toLowerCase
+      val canonico: Map[String, String] = usos.groupBy(u => clave(u._1)).map { case (k, variantes) =>
+        val limpias = variantes.map { case (nombre, n) => (fixEncoding(nombre).trim.replaceAll("\\s+", " "), n) }
+        val porNombre = limpias.groupBy(_._1).map { case (nom, l) => nom -> l.map(_._2).sum }
+        k -> porNombre.maxBy(_._2)._1
+      }
+      val ps = conn.prepareStatement("UPDATE matches SET rival = ? WHERE rival = ?")
+      var nombresCorregidos = 0; var partidosActualizados = 0
+      usos.foreach { case (nombre, _) =>
+        val destino = canonico(clave(nombre))
+        if (destino != nombre) {
+          ps.setString(1, destino); ps.setString(2, nombre)
+          partidosActualizados += ps.executeUpdate(); nombresCorregidos += 1
+        }
+      }
+      // rivals: renombrar solo si el nombre corregido no existe ya (evita violar UNIQUE)
+      val rsR = conn.createStatement().executeQuery("SELECT nombre FROM rivals WHERE nombre IS NOT NULL")
+      val nombresRivals = Iterator.continually(rsR).takeWhile(_.next()).map(_.getString("nombre")).toSet
+      val psR = conn.prepareStatement("UPDATE rivals SET nombre = ? WHERE nombre = ?")
+      var fichasRenombradas = 0; var fichasDuplicadas = 0
+      nombresRivals.foreach { nombre =>
+        val destino = canonico.getOrElse(clave(nombre), fixEncoding(nombre).trim)
+        if (destino != nombre) {
+          if (nombresRivals.contains(destino)) fichasDuplicadas += 1
+          else { psR.setString(1, destino); psR.setString(2, nombre); fichasRenombradas += psR.executeUpdate() }
+        }
+      }
+      Map("nombresCorregidos" -> nombresCorregidos, "partidosActualizados" -> partidosActualizados,
+        "fichasRenombradas" -> fichasRenombradas, "fichasDuplicadas" -> fichasDuplicadas)
+    } finally { conn.close() }
+  }
+
+  /** Nombres de rival para el autocompletado, del mas al menos usado, con el encoding corregido. */
+  def getRivalesFrecuentes(limit: Int = 200): List[String] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT rival, COUNT(*) as n FROM matches WHERE rival IS NOT NULL AND TRIM(rival) <> '' GROUP BY rival ORDER BY n DESC, rival LIMIT ?")
+      ps.setInt(1, limit)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("rival")).trim).toList.distinct
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE E — TIMELINE CRONOLOGICO DE LA CARRERA — SQL puro, sin Gemini
   // ═════════════════════════════════════════════════════════════════════════════
   /** Eventos de todas las fuentes ordenados por fecha. tipo: TODOS | PARTIDO | HITO | LESION | CRECIMIENTO | VOZ_PORTERO. */

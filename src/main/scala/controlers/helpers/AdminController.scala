@@ -720,19 +720,13 @@ object AdminController extends cask.Routes {
         ps.executeUpdate()
         count += 1
       }
-      // rivals
-      val rs2 = conn.createStatement().executeQuery(
-        "SELECT nombre FROM rivals WHERE nombre LIKE '%Ã%'")
-      val ps2 = conn.prepareStatement("UPDATE rivals SET nombre=? WHERE nombre=?")
-      while (rs2.next()) {
-        val nombreOld = rs2.getString("nombre")
-        ps2.setString(1, fixEncoding(nombreOld))
-        ps2.setString(2, nombreOld)
-        ps2.executeUpdate()
-        count += 1
-      }
     } finally { conn.close() }
-    renderHtml(s"<h2>Fix encoding completado — $count registros corregidos</h2>")
+    // BLOQUE J: unifica variantes del mismo rival en matches y renombra fichas de rivals sin violar UNIQUE
+    val u = DatabaseManager.unificarNombresRivales()
+    renderHtml(s"<h2>Fix encoding completado — $count registros corregidos</h2>" +
+      s"<p>Rivales unificados: ${u("nombresCorregidos")} nombres · ${u("partidosActualizados")} partidos actualizados · " +
+      s"${u("fichasRenombradas")} fichas de scouting renombradas" +
+      (if (u("fichasDuplicadas").asInstanceOf[Int] > 0) s" · ${u("fichasDuplicadas")} fichas duplicadas sin tocar (revisar a mano)" else "") + "</p>")
   }
 
   @cask.get("/admin/init_legends")

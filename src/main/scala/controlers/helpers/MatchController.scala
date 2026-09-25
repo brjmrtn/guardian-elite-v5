@@ -139,7 +139,7 @@ object MatchController extends cask.Routes {
                   ),
                   div(id:="quickPanel", style:="display:none;",
                     div(cls:="xx-small text-muted mt-2 mb-2", "Solo rival, resultado y nota. Podrás completar el resto después con ✏️ Editar."),
-                    input(tpe:="text", name:="rival", attr("form"):="quickRegisterForm", required:=true,
+                    input(tpe:="text", name:="rival", attr("form"):="quickRegisterForm", required:=true, attr("list"):="rivalesSugeridos", attr("autocomplete"):="off",
                       cls:="form-control form-control-sm bg-dark text-white border-info fw-bold mb-2", placeholder:="Rival"),
                     div(cls:="d-flex gap-2 align-items-center mb-2",
                       input(tpe:="number", name:="goles_favor", attr("form"):="quickRegisterForm", required:=true, attr("min"):="0", attr("max"):="99",
@@ -169,6 +169,8 @@ object MatchController extends cask.Routes {
                     tpe := "text",
                     name := "rival",
                     id := "rivalInput",
+                    attr("list") := "rivalesSugeridos",
+                    attr("autocomplete") := "off",
                     cls := "form-control form-control-lg fw-bold text-white",
                     value := (if (preRival.nonEmpty) fixEncoding(preRival) else ""),
                     placeholder := "Ej: Rayo Vallecano",
@@ -177,6 +179,8 @@ object MatchController extends cask.Routes {
                     if (scheduleId > 0) readonly := true else ()
                   )
                 ),
+                // BLOQUE J: autocompletado de rivales, del mas al menos frecuente, con encoding corregido
+                tag("datalist")(id := "rivalesSugeridos", frag(DatabaseManager.getRivalesFrecuentes().map(r => option(value := r)): _*)),
                 div(cls := "mb-3", label(cls := "form-label text-white fw-bold small", "FECHA"), input(tpe := "date", name := "fecha", id := "fechaInput", cls := "form-control", value := preFecha)),
                 div(cls:="mb-3", label(cls:="form-label text-white fw-bold small", "ESTADIO / CAMPO"), input(tpe:="text", name:="estadio", cls:="form-control bg-dark text-white", value:=fixEncoding(preEstadio), placeholder:="Ej: Valdebebas Campo 3")),
                 div(cls:="mb-3",
