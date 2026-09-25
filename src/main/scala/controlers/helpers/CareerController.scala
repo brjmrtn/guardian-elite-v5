@@ -160,7 +160,7 @@ object CareerController extends cask.Routes {
     val resEventos  = resilience("eventos").asInstanceOf[List[Map[String, Any]]]
 
     if (resIndice <= 0) span()
-    else {
+    else conConfianza("resilience_index", resEventos.size) {
       val resColor = if (resIndice < 5) "danger" else if (resIndice <= 7) "warning" else "success"
       val labelsJs  = resEventos.map(e => s""""${e("label").asInstanceOf[String]}"""").mkString("[", ",", "]")
       val antesJs   = resEventos.map(e => f"${e("antes").asInstanceOf[Double]}%.1f").mkString("[", ",", "]")
@@ -1422,8 +1422,11 @@ object CareerController extends cask.Routes {
       )
     }
 
+    // BLOQUE C: confianza segun los partidos en los que se basa el arquetipo
+    val contenidoConConfianza = conConfianza("arquetipo", arq.get("pj").map(_.toString.toDouble.toInt).getOrElse(0),
+      arq("activo").asInstanceOf[Boolean])(content)
     renderHtml(basePage("arquetipo",
-      div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", content))
+      div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", contenidoConConfianza))
     ))
   }
 
@@ -2493,7 +2496,7 @@ object CareerController extends cask.Routes {
           val (xMin, xMax) = (xs.min, xs.max)
           val puntosJs = pares.map { case (a, b, d) => s"{x:$a,y:$b,d:'$d'}" }.mkString("[", ",", "]")
           val lineaJs = s"[{x:$xMin,y:${pendiente * xMin + ordenada}},{x:$xMax,y:${pendiente * xMax + ordenada}}]"
-          frag(
+          conConfianza("correlacion", puntos)(frag(
             div(cls := "card bg-dark border-secondary p-3 mb-3 text-center",
               div(cls := "xx-small text-muted", s"${etiqueta(xSel)} vs ${etiqueta(ySel)} · $puntos días"),
               div(style := s"font-size:40px; font-weight:900; color:$color;", f"r = $corr%.2f"),
@@ -2515,7 +2518,7 @@ object CareerController extends cask.Routes {
                     x: { title: { display: true, text: ${ujson.Str(etiqueta(xSel)).render()}, color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
                     y: { title: { display: true, text: ${ujson.Str(etiqueta(ySel)).render()}, color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } } } }
               });
-            """)))
+            """))))
         }
       }
 
@@ -2652,7 +2655,7 @@ object CareerController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/benchmark"),
           rffmSection,
-          volatilitySection,
+          conConfianza("volatility_index", vol("partidos").asInstanceOf[Int], vol("suficiente").asInstanceOf[Boolean])(volatilitySection),
           condicionesPicoSection,
           if (sinDatos)
             div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")

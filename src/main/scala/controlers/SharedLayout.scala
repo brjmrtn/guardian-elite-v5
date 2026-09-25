@@ -142,6 +142,23 @@ object SharedLayout {
     script(src := "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"),
     script(raw("(function(){ var el = document.getElementById('qr-perfil'); if (el && window.QRCode) new QRCode(el, { text: window.location.origin + '/hector', width: 200, height: 200 }); })();")))
 
+  // BLOQUE C: badge de confianza estadistica encima de un modulo analitico. Discreto (gris) salvo
+  // si es INSUFICIENTE: entonces el badge va en rojo y el modulo con borde rojo discontinuo.
+  // visible=false (modulo oculto por falta de datos) no pinta nada.
+  def badgeConfianza(tipo: String, n: Int, prefijo: String = ""): Modifier = {
+    val c = DatabaseManager.getConfianzaModulo(tipo, n)
+    val insuficiente = c("nivel") == "INSUFICIENTE"
+    div(cls := "xx-small mb-1", attr("title") := s"Confianza: ${c("nivel")}",
+      style := (if (insuficiente) s"color:#${c("color")}; font-weight:700;" else "color:#94a3b8;"),
+      s"$prefijo${c("emoji")} ${c("texto")}")
+  }
+
+  def conConfianza(tipo: String, n: Int, visible: Boolean = true)(modulo: Modifier): Modifier =
+    if (!visible) modulo
+    else if (DatabaseManager.getConfianzaModulo(tipo, n)("nivel") == "INSUFICIENTE")
+      div(cls := "mb-3", style := "border:2px dashed #dc2626; border-radius:12px; padding:6px;", badgeConfianza(tipo, n), modulo)
+    else div(badgeConfianza(tipo, n), modulo)
+
   // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
     "<!DOCTYPE html>" +

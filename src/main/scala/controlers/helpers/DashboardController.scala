@@ -939,7 +939,10 @@ object DashboardController extends cask.Routes {
         deudaSuenoWidget,
         riesgoLesionWidget,
         rfmfPendientesWidget,
-        rffmWidget,
+        DatabaseManager.getPercentilRealHector() match {
+          case Some(p) => conConfianza("rfmf_benchmarking", p("pjHector").asInstanceOf[Int])(rffmWidget)
+          case None => rffmWidget
+        },
 
         // ── HERO HEADER (dark) ─────────────────────────────────────────────
         div(style := "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:20px; margin-bottom:20px;",

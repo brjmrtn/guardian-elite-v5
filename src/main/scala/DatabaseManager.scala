@@ -6993,6 +6993,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
           else 10
 
         Map(
+          "pjHector"         -> rH.getInt("pj"),
           "mediaGcHector"    -> mediaGcHector,
           "percentilGC"      -> percentilGC,
           "mediaCategoria"   -> p50,
@@ -12677,6 +12678,44 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       val rs = ps.executeQuery()
       Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("rival")).trim).toList.distinct
     } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BLOQUE C — INDICADORES DE CONFIANZA ESTADISTICA (sin SQL: solo el numero de observaciones)
+  // ═════════════════════════════════════════════════════════════════════════════
+  def getConfianzaModulo(tipo: String, n: Int): Map[String, String] = {
+    val (minRojo, minAmarillo) = tipo match {
+      case "arquetipo"              => (5, 25)
+      case "firma_fatiga"           => (8, 20)
+      case "z_score"                => (15, 30)
+      case "cpi"                    => (10, 25)
+      case "transferencia"          => (5, 15)
+      case "correlacion"            => (10, 30)
+      case "volatility_index"       => (8, 20)
+      case "resilience_index"       => (10, 25)
+      case "rendimiento_por_fase"   => (15, 30)
+      case "1v1_angulo"             => (15, 30)
+      case "paso_negativo"          => (8, 20)
+      case "scanning_efectividad"   => (10, 25)
+      case "rfmf_benchmarking"      => (5, 15)
+      case _                        => (10, 25)
+    }
+    if (n < minRojo) Map(
+      "nivel" -> "INSUFICIENTE",
+      "emoji" -> "🔴",
+      "texto" -> s"Resultado orientativo ($n observaciones). Se necesitan $minAmarillo+ para resultados robustos.",
+      "color" -> "dc2626"
+    ) else if (n < minAmarillo) Map(
+      "nivel" -> "EMERGENTE",
+      "emoji" -> "🟡",
+      "texto" -> s"Patrón emergente ($n observaciones). Confirmar en próximas semanas.",
+      "color" -> "ca8a04"
+    ) else Map(
+      "nivel" -> "ROBUSTO",
+      "emoji" -> "🟢",
+      "texto" -> s"Base estadística sólida ($n observaciones).",
+      "color" -> "16a34a"
+    )
   }
 
   // ═════════════════════════════════════════════════════════════════════════════

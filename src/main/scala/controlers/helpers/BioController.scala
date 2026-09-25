@@ -495,7 +495,7 @@ object BioController extends cask.Routes {
           formaValidacionWidget,
           autopercepcionWidget,
           jetlagWidget,
-          transferenciaWidget
+          conConfianza("transferencia", transferenciaTotal, transferenciaTotal >= 5)(transferenciaWidget)
         )
       ), script(src := "https://cdn.jsdelivr.net/npm/chart.js"), script(raw(s"""
       const gCtx=document.getElementById('growthChart');const gData=$growthData;if(gCtx){new Chart(gCtx,{type:'line',data:{labels:gData.labels,datasets:[{label:'Altura (cm)',data:gData.data,borderColor:'#0dcaf0',borderWidth:3,tension:0.3,pointBackgroundColor:'#fff',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#eee',font:{weight:'bold'}},grid:{color:'#444'},pointLabels:{color:'#fff'}},x:{display:false}}}});}

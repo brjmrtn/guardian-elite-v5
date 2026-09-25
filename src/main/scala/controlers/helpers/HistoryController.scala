@@ -245,6 +245,9 @@ object HistoryController extends cask.Routes {
         ),
         if (msg.nonEmpty) div(cls := "alert alert-warning small p-2 mb-3", msg) else frag(),
         seasonSelector(temporadas, efectivo, "/history"),
+        // BLOQUE C: confianza de los indicadores por fila (Z-Score y CPI)
+        if (zScoresByMatchId.nonEmpty) badgeConfianza("z_score", zScoresByMatchId.size, "Z-Score · ") else frag(),
+        { val nCpi = matches.count(_.cpi.isDefined); if (nCpi > 0) badgeConfianza("cpi", nCpi, "CPI · ") else frag() },
         archivadaBanner,
         resumenArchivada,
         div(cls := "card shadow-sm border-0",
@@ -1674,9 +1677,9 @@ object HistoryController extends cask.Routes {
 
             paradasAnalysisWidget,
             heatmapGolesWidget,
-            pasoNegativoWidget,
-            angulo1v1Widget,
-            vulnerabilidadWidget,
+            conConfianza("paso_negativo", pasoNegativo("n").asInstanceOf[Int], pasoNegativo("suficiente").asInstanceOf[Boolean])(pasoNegativoWidget),
+            conConfianza("1v1_angulo", angulo1v1("n").asInstanceOf[Int], angulo1v1("suficiente").asInstanceOf[Boolean])(angulo1v1Widget),
+            conConfianza("rendimiento_por_fase", rendimientoFase("n").asInstanceOf[Int], rendimientoFase("suficiente").asInstanceOf[Boolean])(vulnerabilidadWidget),
 
             script(raw("""
             function switchMode(mode) {
@@ -3601,14 +3604,14 @@ object HistoryController extends cask.Routes {
           ),
 
           // BLOQUE G: ratio de efectividad del scanning
-          if (conDatos == 0) frag() else div(cls := "card bg-dark border-success shadow mb-3",
+          if (conDatos == 0) frag() else conConfianza("scanning_efectividad", conDatos)(div(cls := "card bg-dark border-success shadow mb-3",
             div(cls := "card-body p-3 text-center",
               div(cls := "xx-small text-muted fw-bold", "EFECTIVIDAD DEL SCANNING"),
               div(cls := "display-5 fw-black text-success", f"$ratioEfectividad%.0f%%"),
               div(cls := "xx-small text-muted mt-1",
                 "% de escaneos que terminaron en encontrar un compañero libre. Escanear mucho sin encontrar opciones vale menos que escanear lo justo y decidir bien — este ratio mide la calidad de la lectura, no solo la cantidad.")
             )
-          ),
+          )),
 
           // Grafico dual
           if (conDatos >= 3) div(cls := "card bg-dark border-secondary shadow mb-3",
@@ -4227,7 +4230,7 @@ object HistoryController extends cask.Routes {
           {
             val firma = DatabaseManager.getFirmaFatiga()
             if (!firma("suficiente").asInstanceOf[Boolean]) frag()
-            else {
+            else conConfianza("firma_fatiga", firma("n").asInstanceOf[Int]) {
               val comparativa = firma("comparativa").asInstanceOf[List[Map[String, Any]]]
               val dimensionPrincipal = firma("firmaFatiga").asInstanceOf[String]
               div(cls := "card bg-dark border-danger shadow mb-3",
