@@ -673,6 +673,44 @@ object AdminController extends cask.Routes {
             form(action := "/admin/weather/fill-historical", method := "post", cls := "d-grid",
               button(tpe := "submit", cls := "btn btn-outline-info w-100 fw-bold", "🌐 Rellenar clima histórico"))
           ),
+          // BLOQUE S: importar partidos historicos (CSV pegado) — resultado via fetch, sin recargar
+          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", id := "importarHistorico",
+            h5(cls := "text-white", "📥 Importar datos históricos"),
+            p(cls := "small text-muted fw-bold mb-1", "Pega los partidos anteriores a Guardian, uno por línea:"),
+            pre(cls := "xx-small text-info bg-dark p-2 rounded mb-2", "fecha,rival,goles_favor,goles_contra,nota\n2025-09-14,CD Rivas,2,1,7.5\n2025-09-07,AD Miraflores,0,2,6.0"),
+            textarea(id := "csvHistorico", cls := "form-control form-control-sm bg-dark text-white border-secondary mb-2", rows := "6",
+              placeholder := "fecha,rival,goles_favor,goles_contra,nota"),
+            div(cls := "d-grid", button(tpe := "button", id := "btnImportarHistorico", cls := "btn btn-outline-warning fw-bold",
+              onclick := "importarHistorico()", "📥 Importar partidos históricos")),
+            div(cls := "xx-small text-muted mt-2", "Los partidos importados se marcan con 📥 en el historial y entran en todos los análisis estadísticos."),
+            div(id := "resultadoImportHistorico", cls := "mt-2"),
+            script(raw("""
+              function importarHistorico(){
+                var btn = document.getElementById('btnImportarHistorico');
+                var out = document.getElementById('resultadoImportHistorico');
+                var csv = document.getElementById('csvHistorico').value;
+                if (!csv.trim()) return;
+                btn.disabled = true; out.textContent = 'Importando…';
+                fetch('/admin/import-history', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'csv='+encodeURIComponent(csv) })
+                  .then(function(r){ return r.json(); })
+                  .then(function(j){
+                    out.innerHTML = '';
+                    var res = document.createElement('div');
+                    res.className = 'small fw-bold mb-1 ' + (j.errores > 0 ? 'text-warning' : 'text-success');
+                    res.textContent = '✅ ' + j.importados + ' importados · ⚠️ ' + j.errores + ' errores';
+                    out.appendChild(res);
+                    j.detalle.forEach(function(d){
+                      var l = document.createElement('div');
+                      l.className = 'xx-small ' + (d.ok ? 'text-success' : 'text-danger');
+                      l.textContent = (d.ok ? '📥 ' : '✕ Línea ' + d.linea + ': ' + d.motivo + ' — ') + d.texto;
+                      out.appendChild(l);
+                    });
+                  })
+                  .catch(function(){ out.textContent = 'Error al importar.'; })
+                  .finally(function(){ btn.disabled = false; });
+              }
+            """))
+          ),
           div(cls := "card bg-dark border-info shadow p-3",
             h5(cls := "text-info", "Gestionar Objetivos"),
             if (objs.isEmpty) div("Sin objetivos.")
@@ -958,10 +996,8 @@ object AdminController extends cask.Routes {
           ),
           div(cls := "card bg-dark text-white border-warning shadow p-4 mb-4",
             h4("Importar Historial"),
-            form(action := "/admin/upload_matches", method := "post",
-              textarea(name := "csvContent", cls := "form-control mb-3 fw-bold", rows := "3"),
-              button(tpe := "submit", cls := "btn btn-warning w-100 fw-bold", "Procesar")
-            )
+            p(cls := "small text-muted fw-bold", "El importador de partidos con fecha vive ahora en Admin."),
+            a(href := "/admin#importarHistorico", cls := "btn btn-warning w-100 fw-bold", "📥 Importar datos históricos — ir a Admin")
           ),
           div(cls := "card bg-dark text-white border-info shadow p-4",
             h4("Importar Wellness"),
@@ -1303,6 +1339,20 @@ object AdminController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
       "Location" -> s"/admin?msg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
     ))
+  }
+
+  // BLOQUE S: importacion de partidos historicos — devuelve {"importados","errores","detalle"}
+  @cask.post("/admin/import-history")
+  def importHistory(request: cask.Request) = withAuth(request) {
+    val csv = parseFormBody(request).getOrElse("csv", "")
+    val r = DatabaseManager.importarPartidosHistoricos(csv)
+    val detalle = r("detalle").asInstanceOf[List[Map[String, Any]]].map { d =>
+      ujson.Obj("linea" -> d("linea").asInstanceOf[Int], "ok" -> d("ok").asInstanceOf[Boolean],
+        "texto" -> d("texto").toString, "motivo" -> d("motivo").toString)
+    }
+    val json = ujson.Obj("importados" -> r("importados").asInstanceOf[Int], "errores" -> r("errores").asInstanceOf[Int],
+      "detalle" -> ujson.Arr(detalle: _*))
+    cask.Response(ujson.write(json).getBytes("UTF-8"), headers = Seq("Content-Type" -> "application/json; charset=utf-8"))
   }
 
   // BLOQUE C: relleno del clima historico en background — responde al instante

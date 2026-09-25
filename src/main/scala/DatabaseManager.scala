@@ -12405,6 +12405,58 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     } finally { conn.close() }
   }
 
+  // BLOQUE S: importacion de partidos historicos (fecha,rival,goles_favor,goles_contra,nota).
+  // A diferencia de importMatchesCSV, respeta la fecha de cada fila y no toca la carta FUT.
+  def importarPartidosHistoricos(csv: String): Map[String, Any] = {
+    val lineas = csv.split("\r?\n").map(_.trim).filter(_.nonEmpty).toList
+    val datos = if (lineas.headOption.exists(_.toLowerCase.contains("rival"))) lineas.drop(1) else lineas
+    val detalle = scala.collection.mutable.ListBuffer[Map[String, Any]]()
+    var importados = 0; var errores = 0
+    val conn = getConnection()
+    try {
+      val psExiste = conn.prepareStatement(
+        "SELECT COUNT(*) as c FROM matches WHERE fecha = ?::date AND LOWER(TRIM(rival)) = LOWER(TRIM(?)) AND status = 'PLAYED'")
+      val psInsert = conn.prepareStatement("""
+        INSERT INTO matches (season_id, fecha, rival, goles_favor, goles_contra, nota, status, source)
+        VALUES ((SELECT id FROM seasons WHERE fecha_inicio <= ?::date AND (fecha_fin IS NULL OR fecha_fin >= ?::date) ORDER BY id DESC LIMIT 1),
+                ?::date, ?, ?, ?, ?, 'PLAYED', 'importado')
+        RETURNING id""")
+      datos.zipWithIndex.foreach { case (linea, i) =>
+        val nLinea = i + 1
+        def error(motivo: String): Unit = { errores += 1; detalle += Map("linea" -> nLinea, "ok" -> false, "texto" -> linea, "motivo" -> motivo) }
+        val sep = if (!linea.contains(",") && linea.contains(";")) ";" else ","
+        val p = linea.split(sep, -1).map(_.trim)
+        if (p.length < 5) error("Faltan columnas (fecha,rival,goles_favor,goles_contra,nota)")
+        else {
+          val fecha = scala.util.Try(LocalDate.parse(p(0))).toOption
+          val rival = fixEncoding(p(1))
+          val gf = p(2).toIntOption.filter(_ >= 0)
+          val gc = p(3).toIntOption.filter(_ >= 0)
+          val nota = p(4).replace(",", ".").toDoubleOption.filter(n => n >= 0 && n <= 10)
+          if (fecha.isEmpty) error("Fecha no válida (usa AAAA-MM-DD)")
+          else if (fecha.get.isAfter(LocalDate.now())) error("La fecha es futura")
+          else if (rival.isEmpty) error("Rival vacío")
+          else if (gf.isEmpty || gc.isEmpty) error("Goles no válidos")
+          else if (nota.isEmpty) error("La nota debe estar entre 0 y 10")
+          else {
+            psExiste.setString(1, fecha.get.toString); psExiste.setString(2, rival)
+            val rsE = psExiste.executeQuery()
+            if (rsE.next() && rsE.getInt("c") > 0) error("Ya existe un partido con esa fecha y rival")
+            else {
+              psInsert.setString(1, fecha.get.toString); psInsert.setString(2, fecha.get.toString); psInsert.setString(3, fecha.get.toString)
+              psInsert.setString(4, rival); psInsert.setInt(5, gf.get); psInsert.setInt(6, gc.get); psInsert.setDouble(7, nota.get)
+              psInsert.executeQuery()
+              importados += 1
+              detalle += Map("linea" -> nLinea, "ok" -> true, "texto" -> s"${fecha.get} · $rival ${gf.get}-${gc.get} · nota ${nota.get}", "motivo" -> "")
+            }
+          }
+        }
+      }
+    } finally { conn.close() }
+    if (importados > 0) new Thread(() => detectarHitos()).start()
+    Map("importados" -> importados, "errores" -> errores, "detalle" -> detalle.toList)
+  }
+
   /** Badges de origen para el historial: QUICK_PENDIENTE (registro minimo sin rubrica completa) e IMPORTADO. */
   def getMatchSourceBadges(seasonId: Int = 0): Map[Int, String] = {
     val conn = getConnection()
