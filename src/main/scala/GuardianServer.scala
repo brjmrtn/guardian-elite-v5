@@ -201,6 +201,9 @@ object GuardianServer extends cask.Main {
       def run(): Unit = {
         try DatabaseManager.tgRecordatoriosPendientes().foreach(TelegramService.enviar)
         catch { case e: Exception => println(s"[Telegram recordatorios] ERROR: ${e.getMessage.take(200)}") }
+        // Protocolo de recuperacion: se genera aqui (nunca en el render del dashboard) si la carga lo requiere
+        try DatabaseManager.comprobarProtocoloRecuperacion()
+        catch { case e: Exception => println(s"[Recuperacion] ERROR: ${e.getMessage.take(200)}") }
       }
     },
     60 * 1000L,

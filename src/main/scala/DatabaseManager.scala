@@ -4024,6 +4024,18 @@ $analisisConcatenados"""
         s"""<p>📖 <strong>El diario narrativo de ${escHtml(mesLabel(mes))} está listo</strong> — ${escHtml(primeraFrase)}...</p>"""
       }.getOrElse("")
 
+      // Protocolo de recuperacion en el email si el ACWR proyectado al sabado supera el umbral de riesgo
+      val protocoloHtml = {
+        val dow = hoy.getDayOfWeek.getValue
+        val proyectado = if (dow <= 5) acwrProyectadoHasta(6 - dow) else None
+        if (!proyectado.exists(_ > umbralesACWR().riesgo)) ""
+        else generarProtocoloRecuperacion() match {
+          case Right(texto) =>
+            s"""<h3>🔄 PROTOCOLO DE RECUPERACIÓN ESTA SEMANA</h3><p style="white-space:pre-wrap;">${escHtml(texto)}</p>"""
+          case Left(_) => ""
+        }
+      }
+
       // BLOQUE G: aviso si la calidad de datos bajo respecto a la semana anterior
       val calidadDatosHtml = dataQualityCambioSemanal().map(m => s"""<p style="color:#ca8a04;"><strong>${escHtml(m)}</strong></p>""").getOrElse("")
 
@@ -4037,6 +4049,7 @@ $analisisConcatenados"""
         $diarioHtml
         $alertaHtml
         $alertaCargaHtml
+        $protocoloHtml
         $calidadDatosHtml
         $cargaEscolarHtml
         <h3>⚽ Partidos ($numPartidos)</h3>
@@ -12841,6 +12854,79 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
+  // PROTOCOLO DE RECUPERACION (Gemini en tarea programada o al pulsar el boton; nunca en el render)
+  // Cache en ai_cache con clave recuperacion_<temporada>_<semana ISO>; se regenera si el ACWR cambia > 0.2.
+  // ═════════════════════════════════════════════════════════════════════════════
+  private def claveRecuperacion(): String = {
+    val semana = LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("YYYY-ww", java.util.Locale.forLanguageTag("es-ES")))
+    s"recuperacion_${getTemporadaActivaId()}_$semana"
+  }
+
+  /** Protocolo guardado esta semana: (texto, acwr con el que se genero, fecha). */
+  def getProtocoloRecuperacion(): Option[(String, Double, String)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT respuesta, creado_en FROM ai_cache WHERE prompt_hash = ?")
+      ps.setString(1, claveRecuperacion())
+      val rs = ps.executeQuery()
+      if (!rs.next()) None
+      else scala.util.Try(ujson.read(rs.getString("respuesta"))).toOption
+        .map(j => (j("texto").str, j("acwr").num, Option(rs.getTimestamp("creado_en")).map(_.toString.take(16)).getOrElse("")))
+    } finally { conn.close() }
+  }
+
+  /** ACWR alto (umbral de riesgo de su edad) o riesgo de lesion ALTO/CRITICO. */
+  def necesitaProtocoloRecuperacion(): Boolean = {
+    val e = calcularACWRConEstado()
+    val acwrAlto = e("status") != "INSUFICIENTE" && e("acwr").asInstanceOf[Double] > umbralesACWR().riesgo
+    acwrAlto || calcularRiesgoLesion()("riesgo").asInstanceOf[Double] >= 4.0
+  }
+
+  /** Genera (o devuelve el de esta semana si el ACWR no ha cambiado > 0.2). Left = error de la IA. */
+  def generarProtocoloRecuperacion(forzar: Boolean = false): Either[String, String] = {
+    val estado = calcularACWRConEstado()
+    val acwr = estado("acwr").asInstanceOf[Double]
+    getProtocoloRecuperacion() match {
+      case Some((texto, acwrGuardado, _)) if !forzar && math.abs(acwr - acwrGuardado) <= 0.2 => return Right(texto)
+      case _ =>
+    }
+    val card = getLatestCardData()
+    val edad = calcularEdadExacta(card.fechaNacimiento)
+    val peso = {
+      val conn = getConnection()
+      try {
+        val rs = conn.createStatement().executeQuery("SELECT peso FROM physical_growth WHERE peso > 0 ORDER BY fecha DESC, id DESC LIMIT 1")
+        if (rs.next()) f"${rs.getDouble("peso")}%.1f" else "desconocido"
+      } finally { conn.close() }
+    }
+    val fasePhv = try getBioBandingData().getOrElse("faseBio", "").toString match { case "" => "desconocida"; case f => f } catch { case _: Exception => "desconocida" }
+    val riesgo = calcularRiesgoLesion()
+    val dias = Seq("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+    val estructura = getWeeklyStructure().filter(_("activo").asInstanceOf[Boolean])
+      .groupBy(_("diaSemana").asInstanceOf[Int]).toSeq.sortBy(_._1)
+      .map { case (d, l) => s"${dias(d - 1)}: ${l.map(_("tipoSesion")).mkString(" + ")}" }.mkString("; ")
+    val acwrTxt = if (estado("status") == "INSUFICIENTE") "sin histórico suficiente" else f"$acwr%.2f"
+    val prompt = s"""Eres un preparador físico especializado en fútbol base pediátrico. Héctor tiene $edad años, pesa ${peso}kg, está en fase $fasePhv de maduración. Su ACWR actual es $acwrTxt y su riesgo de lesión es ${riesgo("clasificacion")} (${f"${riesgo("riesgo").asInstanceOf[Double]}%.1f"}/10; factores: ${riesgo("factoresActivos").asInstanceOf[List[String]].mkString(", ")}). Los entrenamientos previstos esta semana son: $estructura. Genera un protocolo de recuperación activa concreto y específico para esta semana, día a día, que le permita llegar al partido del sábado en las mejores condiciones posibles. Incluye: qué hacer en cada sesión de entrenamiento (intensidad reducida, tipo de trabajo, duración máxima), qué hacer en casa (sueño, hidratación, estiramientos específicos), y qué señales de alarma vigilar. Máximo 6 líneas en total — una por día de la semana. Tono práctico y directo para un padre, no clínico. Texto plano, una línea por día empezando por el nombre del día."""
+    val texto = AIProvider.ask(prompt, None, bypassCache = true).replace("```", "").trim
+    if (texto.isEmpty || texto.startsWith("Error")) return Left(if (texto.isEmpty) "Respuesta vacía de la IA" else texto)
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO ai_cache (prompt_hash, respuesta, creado_en) VALUES (?, ?, NOW()) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta, creado_en = NOW()")
+      ps.setString(1, claveRecuperacion()); ps.setString(2, ujson.write(ujson.Obj("texto" -> texto, "acwr" -> acwr)))
+      ps.executeUpdate()
+    } finally { conn.close() }
+    Right(texto)
+  }
+
+  /** Tarea programada: si hace falta, asegura el protocolo de la semana (solo llama a Gemini si falta o cambio el ACWR). */
+  def comprobarProtocoloRecuperacion(): Unit =
+    if (necesitaProtocoloRecuperacion()) generarProtocoloRecuperacion() match {
+      case Left(e) => println(s"[Recuperacion] ${e.take(200)}")
+      case Right(_) =>
+    }
+
+  // ═════════════════════════════════════════════════════════════════════════════
   // NUTRICION E HIDRATACION PRE-PARTIDO. SQL puro, sin Gemini
   // ═════════════════════════════════════════════════════════════════════════════
   def guardarNutricionPrepartido(matchId: Int, horasUltimaComida: Option[Int], hidratacion: Option[String], desayuno: Option[Boolean]): Unit = {
@@ -14119,6 +14205,12 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
           msgs += "❤️ Sin datos de FC esta semana.\nFC [bpm]\nEjemplo: FC 58"
         detectarEnfermedadIncipiente().foreach { m => if (tgMarcarRecordatorio("ENFERMEDAD")) msgs += m }
         if (esLunes) predecirSobrecargaSemana().foreach { m => if (tgMarcarRecordatorio("SOBRECARGA")) msgs += m }
+        if (esLunes && necesitaProtocoloRecuperacion()) generarProtocoloRecuperacion().foreach { texto =>
+          if (tgMarcarRecordatorio("PROTOCOLO")) {
+            val resumen = texto.linesIterator.map(_.trim).filter(_.nonEmpty).take(2).mkString("\n")
+            msgs += s"🔄 PROTOCOLO DE RECUPERACIÓN esta semana:\n$resumen\nVer completo en Guardian."
+          }
+        }
         if (esLunes && cuenta("SELECT COUNT(*) FROM physical_growth WHERE peso > 0 AND fecha > CURRENT_DATE - 7") == 0 && tgMarcarRecordatorio("PESO"))
           msgs += "⚖️ Sin registro de peso esta semana.\nPESO [kg] o con báscula: PESO [kg] [músculo kg] [masa ósea kg]\nEjemplo: PESO 27.3\nCon báscula: PESO 27.3 19.2 1.1"
       }

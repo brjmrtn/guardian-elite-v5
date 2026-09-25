@@ -47,6 +47,24 @@ object DashboardController extends cask.Routes {
           s"🔴 RIESGO DE LESIÓN CRÍTICO — factores: ${riesgoFactores.mkString(", ")}")
       else div()
 
+    // Protocolo de recuperacion (solo lectura; se genera en la tarea programada o con el boton)
+    val protocoloWidget: Modifier =
+      if (!riesgoEsAltoOCritico) frag()
+      else {
+        val proto = DatabaseManager.getProtocoloRecuperacion()
+        div(cls := "card bg-dark border-info shadow-sm mb-3 p-3",
+          div(style := "font-size:11px; color:#7dd3fc; letter-spacing:1px;", "🔄 PROTOCOLO DE RECUPERACIÓN ESTA SEMANA"),
+          proto match {
+            case Some((texto, _, fecha)) => frag(
+              div(cls := "small mt-1", style := "white-space:pre-wrap; color:#e2e8f0;", texto),
+              div(cls := "xx-small text-muted mt-1", s"Generado $fecha"))
+            case None => div(cls := "xx-small text-muted mt-1", "Todavía no hay protocolo para esta semana.")
+          },
+          form(action := "/recuperacion/actualizar", method := "post", cls := "mt-2",
+            button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold w-100",
+              if (proto.isDefined) "🔄 Actualizar protocolo" else "🔄 Generar protocolo")))
+      }
+
     val riesgoLesionWidget: Modifier = {
       val explicacion: Modifier =
         if (riesgoEsAltoOCritico) div(cls := "xx-small mt-1", style := "color:#fca5a5;",
@@ -920,6 +938,7 @@ object DashboardController extends cask.Routes {
           div(style := "font-size:12px; color:#94a3b8; letter-spacing:2px;", "ÍNDICE DE FORMA HOY"),
           div(style := s"font-size:64px; font-weight:900; color:$colorForma; line-height:1.1;", f"$semaforo $indice%.1f")),
         if (riesgoEsAltoOCritico) riesgoLesionWidget else frag(),
+        protocoloWidget,
         microObjetivoCard("Hoy"),
         // BLOQUE H: rachas de registro — discreto, sin alarma si se rompe
         {
@@ -983,6 +1002,7 @@ object DashboardController extends cask.Routes {
         arquetipoWidget,
         deudaSuenoWidget,
         riesgoLesionWidget,
+        protocoloWidget,
         rfmfPendientesWidget,
         DatabaseManager.getPercentilRealHector() match {
           case Some(p) => conConfianza("rfmf_benchmarking", p("pjHector").asInstanceOf[Int])(rffmWidget)
@@ -1330,6 +1350,16 @@ object DashboardController extends cask.Routes {
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE 5.5 — RUTA: GENERAR PREPARACION SEMANAL (solo al pulsar el boton)
   // ─────────────────────────────────────────────────────────────────────────────
+  // Protocolo de recuperacion: Gemini solo al pulsar el boton (en segundo plano)
+  @cask.post("/recuperacion/actualizar")
+  def actualizarProtocoloRecuperacion(request: cask.Request) = withAuth(request) {
+    new Thread(() => DatabaseManager.generarProtocoloRecuperacion(forzar = true) match {
+      case Left(e) => println(s"[Recuperacion] ${e.take(200)}")
+      case Right(_) =>
+    }).start()
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/"))
+  }
+
   @cask.post("/preparacion-semanal/generar")
   def generarPreparacionSemanalAction(request: cask.Request) = withAuth(request) {
     DatabaseManager.generarPreparacionSemanal()
