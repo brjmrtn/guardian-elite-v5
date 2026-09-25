@@ -2264,7 +2264,7 @@ object MatchController extends cask.Routes {
   // BLOQUE H — SHAREABLE MATCH CARD (540px, pensada para captura de pantalla)
   // Solo datos publicos: nada de rubrica, analisis IA ni datos medicos.
   // ─────────────────────────────────────────────────────────────────────────────
-  @cask.get("/match-center/:matchId/card")
+  @cask.get("/partido-card/:matchId")
   def matchShareCard(request: cask.Request, matchId: Int) = withAuth(request) {
     DatabaseManager.getMatchCardData(matchId) match {
       case None => renderRedirect("/history")

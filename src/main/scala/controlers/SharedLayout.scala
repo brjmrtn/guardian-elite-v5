@@ -104,7 +104,7 @@ object SharedLayout {
         if (readOnly) frag() else a(href := s"/match/edit/${m.id}", cls := "text-decoration-none me-2", "✏️"),
         if (m.paradas > 0) a(href := s"/history/paradas/${m.id}", cls := "text-decoration-none me-2", attr("title") := "Desglosar paradas", "📊") else frag(),
         a(href := s"/audio-diary/partido/${m.id}", cls := "text-decoration-none", audioIcon),
-        a(href := s"/match-center/${m.id}/card", target := "_blank", cls := "text-decoration-none ms-2", attr("title") := "Compartir", "📤")
+        a(href := s"/partido-card/${m.id}", target := "_blank", cls := "text-decoration-none ms-2", attr("title") := "Compartir", "📤")
       )
     )
   }
