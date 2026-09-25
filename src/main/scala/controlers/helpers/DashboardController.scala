@@ -1275,7 +1275,11 @@ object DashboardController extends cask.Routes {
         (function(){
           var t = 'hoy';
           try { t = localStorage.getItem('guardian_dashboard_tab') || 'hoy'; } catch(e) {}
+          if (location.hash === '#completo') t = 'completo'; else if (location.hash === '#hoy') t = 'hoy';
           mostrarTabDashboard(t);
+          window.addEventListener('hashchange', function(){
+            if (location.hash === '#completo' || location.hash === '#hoy') mostrarTabDashboard(location.hash.slice(1));
+          });
         })();
         function registrarAutopercepcionDashboard(v){
           fetch('/match/autopercepcion', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'valor='+v })

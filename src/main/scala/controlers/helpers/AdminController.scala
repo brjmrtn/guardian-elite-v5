@@ -719,7 +719,7 @@ object AdminController extends cask.Routes {
             a(href := "/admin/init_legends", cls := "btn btn-outline-warning w-100 fw-bold",
               "Inicializar BBDD Leyendas")
           ),
-          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
+          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", id := "backups",
             h5(cls := "text-white", "Copia de Seguridad"),
             p(cls := "small text-muted fw-bold", "Descarga los partidos, o todas las tablas principales en un ZIP."),
             div(cls := "d-grid gap-2",

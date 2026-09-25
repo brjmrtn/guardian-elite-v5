@@ -159,6 +159,115 @@ object SharedLayout {
       div(cls := "mb-3", style := "border:2px dashed #dc2626; border-radius:12px; padding:6px;", badgeConfianza(tipo, n), modulo)
     else div(badgeConfianza(tipo, n), modulo)
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BLOQUE I — NAVEGACION EN DOS NIVELES: 6 categorias + 3 favoritos (localStorage)
+  // Movil: barra inferior con las categorias; al pulsar, el submenu se despliega hacia arriba.
+  // Escritorio: menu lateral colapsable. Toda pagina nueva debe anadirse a una categoria.
+  // ─────────────────────────────────────────────────────────────────────────────
+  val navCategorias: Seq[(String, String, Seq[(String, String)])] = Seq(
+    ("🏠", "HOY", Seq("Dashboard HOY" -> "/#hoy", "Dashboard COMPLETO" -> "/#completo")),
+    ("⚽", "PARTIDO", Seq("Registrar partido" -> "/match-center", "Historial" -> "/history", "Timeline" -> "/career/timeline",
+      "Flash-cards" -> "/flash-cards", "Torneo" -> "/tournament/bracket", "Pizarra" -> "/tactics", "Contexto del partido" -> "/match-context",
+      "Rivales" -> "/striker-clustering", "Scouting NLP" -> "/scouting/nlp", "Vídeo IA" -> "/video-history")),
+    ("💪", "HÉCTOR", Seq("Bio / Sueño" -> "/bio", "Crecimiento / PHV" -> "/bio-banding", "Tests físicos" -> "/physical-tests",
+      "Movilidad" -> "/movilidad-tests", "Cognitivo" -> "/cognitivo", "Psico" -> "/psych", "Emocional" -> "/emocional",
+      "Reset cognitivo" -> "/cognitive-reset", "Guantes" -> "/bio/guantes", "Lesiones" -> "/lesiones", "Nutrición" -> "/nutrition",
+      "Skills" -> "/goalkeeper-skills", "Dojo" -> "/dojo", "Dojo entrenador" -> "/dojo/entrenador", "Diario" -> "/diary",
+      "Periodización" -> "/periodization", "Footbar" -> "/footbar")),
+    ("📊", "ANÁLISIS", Seq("Benchmark / RFMF" -> "/benchmark", "Correlaciones" -> "/correlaciones", "RedZone" -> "/red-zone",
+      "PSxG" -> "/psxg-delta", "Biomecánica" -> "/biomecanica", "Arquetipo" -> "/arquetipo", "Voz del Portero" -> "/voz-portero",
+      "Influencia" -> "/gk-influence", "Scanning" -> "/scanning-rate", "Evolución" -> "/temporal", "Simulador" -> "/simulate",
+      "Moneyball" -> "/moneyball", "Efecto mariposa" -> "/efecto-mariposa")),
+    ("🏆", "CARRERA", Seq("IDP / Objetivos" -> "/idp", "Legado / Hitos" -> "/career/legacy", "Trayectoria" -> "/career",
+      "Digital Twin" -> "/digital-twin", "Visibilidad" -> "/visibility", "Contactos" -> "/contacts",
+      "Informe captación" -> "/scouting-report", "Oportunidades" -> "/opportunities", "Pathway" -> "/pathway",
+      "Techo" -> "/techo", "Mercado" -> "/market-estimator")),
+    ("⚙️", "SISTEMA", Seq("Settings / Perfil público" -> "/settings", "Admin" -> "/admin", "Backups / Export" -> "/admin#backups"))
+  )
+
+  private def navegacion(): Modifier = {
+    val itemsJs = ujson.write(ujson.Arr(navCategorias.flatMap(_._3).map { case (l, h) => ujson.Obj("h" -> h, "l" -> l) }: _*))
+    def enlaces(items: Seq[(String, String)]): Modifier =
+      frag(items.map { case (l, h) => a(href := h, cls := "gnav-link", attr("data-h") := h, l) }: _*)
+    frag(
+      // Escritorio: menu lateral
+      tags2.nav(id := "gnavSide", cls := "gnav-side",
+        div(cls := "gnav-side-title", span(cls := "text-warning", "G"), " GUARDIAN"),
+        frag(navCategorias.zipWithIndex.map { case ((emoji, nombre, items), i) =>
+          div(cls := "gnav-side-cat",
+            button(tpe := "button", cls := "gnav-side-btn", attr("data-cat") := i.toString, onclick := s"gnavSideToggle($i)", s"$emoji $nombre"),
+            div(id := s"gnavSideSub$i", cls := "gnav-side-sub", enlaces(items)))
+        }: _*)),
+      // Movil: submenus (hacia arriba) + favoritos + barra de categorias
+      div(cls := "gnav-mobile",
+        frag(navCategorias.zipWithIndex.map { case ((emoji, nombre, items), i) =>
+          div(id := s"gnavSub$i", cls := "gnav-sub", div(cls := "gnav-sub-title", s"$emoji $nombre"), enlaces(items))
+        }: _*),
+        div(id := "gnavFavs", cls := "gnav-favs"),
+        div(cls := "gnav-bar",
+          frag(navCategorias.zipWithIndex.map { case ((emoji, nombre, _), i) =>
+            button(tpe := "button", cls := "gnav-bar-btn", attr("data-cat") := i.toString, onclick := s"gnavOpen($i)",
+              div(cls := "gnav-bar-icon", emoji), div(cls := "gnav-bar-label", nombre))
+          }: _*))),
+      script(raw(s"""
+        var GNAV_ITEMS = $itemsJs;
+        var GNAV_FAV_DEFAULT = [{h:'/#hoy',l:'HOY'},{h:'/match-center',l:'Registrar partido'},{h:'/bio',l:'Bio / Sueño'}];
+        function gnavLS(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(e) { return null; } }
+        function gnavFavs(){ try { var f = JSON.parse(gnavLS('guardian_favoritos')); if (Array.isArray(f)) return f; } catch(e) {} return GNAV_FAV_DEFAULT.slice(); }
+        function gnavPath(h){ return h.split('#')[0]; }
+        function gnavActual(){ return location.pathname; }
+        function gnavRenderFavs(){
+          var cont = document.getElementById('gnavFavs'); if (!cont) return;
+          cont.innerHTML = '';
+          gnavFavs().forEach(function(f){
+            var a = document.createElement('a'); a.href = f.h; a.className = 'gnav-fav'; a.textContent = '⭐ ' + f.l;
+            cont.appendChild(a);
+          });
+          var esFav = gnavFavs().some(function(f){ return gnavPath(f.h) === gnavActual(); });
+          var star = document.getElementById('gnavStar'); if (star) { star.textContent = esFav ? '★' : '☆'; star.title = esFav ? 'Quitar de favoritos' : 'Fijar en favoritos (máx. 3)'; }
+        }
+        function gnavToggleFav(){
+          var favs = gnavFavs(), actual = gnavActual();
+          var idx = favs.findIndex(function(f){ return gnavPath(f.h) === actual; });
+          if (idx >= 0) favs.splice(idx, 1);
+          else {
+            var item = GNAV_ITEMS.find(function(it){ return gnavPath(it.h) === actual; });
+            favs.push({h: actual, l: item ? item.l : (document.querySelector('h2') ? document.querySelector('h2').textContent.trim().slice(0, 24) : actual)});
+            while (favs.length > 3) favs.shift();
+          }
+          gnavLS('guardian_favoritos', JSON.stringify(favs));
+          gnavRenderFavs();
+        }
+        function gnavOpen(i){
+          document.querySelectorAll('.gnav-sub').forEach(function(p, j){ p.classList.toggle('open', j === i && !p.classList.contains('open')); });
+        }
+        document.addEventListener('click', function(e){
+          if (!e.target.closest('.gnav-mobile')) document.querySelectorAll('.gnav-sub.open').forEach(function(p){ p.classList.remove('open'); });
+        });
+        function gnavSideToggle(i){ var s = document.getElementById('gnavSideSub' + i); if (s) s.classList.toggle('open'); }
+        function gnavSidebar(){
+          var abierto = !document.body.classList.contains('gnav-side-open');
+          document.body.classList.toggle('gnav-side-open', abierto);
+          gnavLS('guardian_sidebar', abierto ? '1' : '0');
+        }
+        (function(){
+          if (gnavLS('guardian_sidebar') !== '0') document.body.classList.add('gnav-side-open');
+          var actual = gnavActual();
+          document.querySelectorAll('.gnav-link').forEach(function(a){
+            if (gnavPath(a.getAttribute('data-h')) === actual && !(actual === '/' && a.getAttribute('data-h') === '/#completo')) {
+              a.classList.add('active');
+              var cat = a.closest('.gnav-sub, .gnav-side-sub');
+              if (cat && cat.classList.contains('gnav-side-sub')) cat.classList.add('open');
+              var i = cat ? cat.id.replace(/\\D/g, '') : null;
+              if (i !== null) document.querySelectorAll('[data-cat="' + i + '"]').forEach(function(b){ b.classList.add('active'); });
+            }
+          });
+          gnavRenderFavs();
+        })();
+      """))
+    )
+  }
+
   // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
     "<!DOCTYPE html>" +
@@ -173,7 +282,10 @@ object SharedLayout {
         ),
         body(
           div(cls := "app-header d-flex justify-content-between align-items-center px-3",
-            div(span(cls := "text-warning", "G"), " GUARDIAN ELITE"),
+            div(
+              span(cls := "gnav-hamb", onclick := "gnavSidebar()", attr("title") := "Mostrar/ocultar menú", "☰ "),
+              span(cls := "text-warning", "G"), " GUARDIAN ELITE",
+              span(id := "gnavStar", onclick := "gnavToggleFav()", style := "cursor:pointer; color:#facc15; font-size:18px; margin-left:10px;", "☆")),
             div(cls:="d-flex align-items-center gap-3",
               a(href:="/profiles", style:="text-decoration:none; color:#ffc107; font-size:11px; font-weight:bold; border: 1px solid #ffc107; padding: 2px 8px; border-radius: 4px;", "👤 PERFIL"),
               a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
@@ -181,7 +293,7 @@ object SharedLayout {
               a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
             )
           ),
-          div(cls := "container main-content", pageContents), tags2.nav(cls := "bottom-nav", a(href:="/", cls:=s"nav-item ${if(activeLink=="home") "active" else ""}", div(cls:="nav-icon", "H"), span(cls:="nav-label", "Inicio")), a(href:="/match-center", cls:=s"nav-item ${if(activeLink=="match-center") "active" else ""}", div(cls:="nav-icon", "P"), span(cls:="nav-label", "Jugar")), a(href:="/bio", cls:=s"nav-item ${if(activeLink=="bio") "active" else ""}", div(cls:="nav-icon", "B"), span(cls:="nav-label", "Bio")), a(href:="/bio/guantes", cls:=s"nav-item ${if(activeLink=="guantes") "active" else ""}", div(cls:="nav-icon", "🧤"), span(cls:="nav-label", "Guantes")), a(href:="/career/legacy", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon text-warning", "⭐"), span(cls:="nav-label text-warning", "Legado")), a(href:="/tactics", cls:=s"nav-item ${if(activeLink=="tactics") "active" else ""}", div(cls:="nav-icon", "ℹ️"), span(cls:="nav-label", "Pizarra")), a(href:="/career", cls:=s"nav-item ${if(activeLink=="career") "active" else ""}", div(cls:="nav-icon", "T"), span(cls:="nav-label", "Trayect.")), a(href:="/arquetipo", cls:=s"nav-item ${if(activeLink=="arquetipo") "active" else ""}", div(cls:="nav-icon", "🎭"), span(cls:="nav-label", "ARQUETIPO")), a(href:="/voz-portero", cls:=s"nav-item ${if(activeLink=="voz-portero") "active" else ""}", div(cls:="nav-icon", "🎤"), span(cls:="nav-label", "VOZ")), a(href:="/career/timeline", cls:=s"nav-item ${if(activeLink=="timeline") "active" else ""}", div(cls:="nav-icon", "📅"), span(cls:="nav-label", "TIMELINE")), a(href:="/correlaciones", cls:=s"nav-item ${if(activeLink=="correlaciones") "active" else ""}", div(cls:="nav-icon", "🔬"), span(cls:="nav-label", "CORRELAC.")), a(href:="/tournament/bracket", cls:=s"nav-item ${if(activeLink=="bracket") "active" else ""}", div(cls:="nav-icon", "🏆"), span(cls:="nav-label", "Torneo")), a(href:="/history", cls:=s"nav-item ${if(activeLink=="history") "active" else ""}", div(cls:="nav-icon", "L"), span(cls:="nav-label", "Historial")), a(href:="/lesiones", cls:=s"nav-item ${if(activeLink=="lesiones") "active" else ""}", div(cls:="nav-icon", "🩹"), span(cls:="nav-label", "Lesiones")), a(href:="/flash-cards", cls:=s"nav-item ${if(activeLink=="flash-cards") "active" else ""}", div(cls:="nav-icon", "📋"), span(cls:="nav-label", "PrePartido")), a(href:="/gk-influence", cls:=s"nav-item ${if(activeLink=="gk-influence") "active" else ""}", div(cls:="nav-icon", "📡"), span(cls:="nav-label", "Influencia")), a(href:="/biomecanica", cls:=s"nav-item ${if(activeLink=="biomecanica") "active" else ""}", div(cls:="nav-icon", "🎯"), span(cls:="nav-label", "Biomecanica")), a(href:="/emocional", cls:=s"nav-item ${if(activeLink=="emocional") "active" else ""}", div(cls:="nav-icon", "🧠"), span(cls:="nav-label", "Emocional")), a(href:="/digital-twin", cls:=s"nav-item ${if(activeLink=="digital-twin") "active" else ""}", div(cls:="nav-icon", "🔮"), span(cls:="nav-label", "Twin")), a(href:="/moneyball", cls:=s"nav-item ${if(activeLink=="moneyball") "active" else ""}", div(cls:="nav-icon", "$"), span(cls:="nav-label", "Moneyball")), a(href:="/cognitive-reset", cls:=s"nav-item ${if(activeLink=="cognitive-reset") "active" else ""}", div(cls:="nav-icon", "🧩"), span(cls:="nav-label", "Reset")), a(href:="/red-zone", cls:=s"nav-item ${if(activeLink=="red-zone") "active" else ""}", div(cls:="nav-icon", "🔴"), span(cls:="nav-label", "RedZone")), a(href:="/psxg-delta", cls:=s"nav-item ${if(activeLink=="psxg-delta") "active" else ""}", div(cls:="nav-icon", "xG"), span(cls:="nav-label", "PSxG")), a(href:="/dojo", cls:=s"nav-item ${if(activeLink=="dojo") "active" else ""}", div(cls:="nav-icon", "🧠"), span(cls:="nav-label", "Dojo")), a(href:="/dojo/entrenador", cls:=s"nav-item ${if(activeLink=="dojo-entrenador") "active" else ""}", div(cls:="nav-icon", "📋"), span(cls:="nav-label", "DEntren.")), a(href:="/bio-banding", cls:=s"nav-item ${if(activeLink=="bio-banding") "active" else ""}", div(cls:="nav-icon", "🧬"), span(cls:="nav-label", "BioBand")), a(href:="/pathway", cls:=s"nav-item ${if(activeLink=="pathway") "active" else ""}", div(cls:="nav-icon", "🗺️"), span(cls:="nav-label", "Pathway")), a(href:="/striker-clustering", cls:=s"nav-item ${if(activeLink=="striker-clustering") "active" else ""}", div(cls:="nav-icon", "⚔️"), span(cls:="nav-label", "Rivales")), a(href:="/scanning-rate", cls:=s"nav-item ${if(activeLink=="scanning-rate") "active" else ""}", div(cls:="nav-icon", "👁️"), span(cls:="nav-label", "Scanning")), a(href:="/match-context", cls:=s"nav-item ${if(activeLink=="match-context") "active" else ""}", div(cls:="nav-icon", "📊"), span(cls:="nav-label", "Contexto")), a(href:="/market-estimator", cls:=s"nav-item ${if(activeLink=="market-estimator") "active" else ""}", div(cls:="nav-icon", "💰"), span(cls:="nav-label", "Mercado")), a(href:="/scouting/nlp", cls:=s"nav-item ${if(activeLink=="scouting-nlp") "active" else ""}", div(cls:="nav-icon", "🔍"), span(cls:="nav-label", "Scouting")), a(href:="/nutrition", cls:=s"nav-item ${if(activeLink=="nutrition") "active" else ""}", div(cls:="nav-icon", "🥗"), span(cls:="nav-label", "Nutrición")), a(href:="/efecto-mariposa", cls:=s"nav-item ${if(activeLink=="efecto-mariposa") "active" else ""}", div(cls:="nav-icon", "🦋"), span(cls:="nav-label", "Mariposa")), a(href:="/footbar", cls:=s"nav-item ${if(activeLink=="footbar") "active" else ""}", div(cls:="nav-icon", "🦵"), span(cls:="nav-label", "FOOTBAR")), a(href:="/goalkeeper-skills", cls:=s"nav-item ${if(activeLink=="goalkeeper-skills") "active" else ""}", div(cls:="nav-icon", "🧤"), span(cls:="nav-label", "SKILLS")), a(href:="/opportunities", cls:=s"nav-item ${if(activeLink=="opportunities") "active" else ""}", div(cls:="nav-icon", "🏆"), span(cls:="nav-label", "OPP.")), a(href:="/benchmark", cls:=s"nav-item ${if(activeLink=="benchmark") "active" else ""}", div(cls:="nav-icon", "📊"), span(cls:="nav-label", "BENCH.")), a(href:="/periodization", cls:=s"nav-item ${if(activeLink=="periodization") "active" else ""}", div(cls:="nav-icon", "📅"), span(cls:="nav-label", "PERIOD.")), a(href:="/scouting-report", cls:=s"nav-item ${if(activeLink=="scouting-report") "active" else ""}", div(cls:="nav-icon", "📄"), span(cls:="nav-label", "REPORT")), a(href:="/techo", cls:=s"nav-item ${if(activeLink=="techo") "active" else ""}", div(cls:="nav-icon", "🎯"), span(cls:="nav-label", "TECHO")), a(href:="/simulate", cls:=s"nav-item ${if(activeLink=="simulate") "active" else ""}", div(cls:="nav-icon", "🔮"), span(cls:="nav-label", "SIMUL.")), a(href:="/diary", cls:=s"nav-item ${if(activeLink=="diary") "active" else ""}", div(cls:="nav-icon", "📖"), span(cls:="nav-label", "DIARIO")), a(href:="/temporal", cls:=s"nav-item ${if(activeLink=="temporal") "active" else ""}", div(cls:="nav-icon", "📈"), span(cls:="nav-label", "EVOLUC.")), a(href:="/contacts", cls:=s"nav-item ${if(activeLink=="contacts") "active" else ""}", div(cls:="nav-icon", "👥"), span(cls:="nav-label", "RED")), a(href:="/visibility", cls:=s"nav-item ${if(activeLink=="visibility") "active" else ""}", div(cls:="nav-icon", "🗺️"), span(cls:="nav-label", "VISIB.")), a(href:="/physical-tests", cls:=s"nav-item ${if(activeLink=="physical-tests") "active" else ""}", div(cls:="nav-icon", "💪"), span(cls:="nav-label", "TESTS")), a(href:="/movilidad-tests", cls:=s"nav-item ${if(activeLink=="movilidad-tests") "active" else ""}", div(cls:="nav-icon", "🤸"), span(cls:="nav-label", "MOVILIDAD")), a(href:="/psych", cls:=s"nav-item ${if(activeLink=="psych") "active" else ""}", div(cls:="nav-icon", "🧠"), span(cls:="nav-label", "PSICO")), a(href:="/video-history", cls:=s"nav-item ${if(activeLink=="video-history") "active" else ""}", div(cls:="nav-icon", "🎬"), span(cls:="nav-label", "VÍDEO IA")), a(href:="/idp", cls:=s"nav-item ${if(activeLink=="idp") "active" else ""}", div(cls:="nav-icon", "🗺️"), span(cls:="nav-label", "IDP")), a(href:="/cognitivo", cls:=s"nav-item ${if(activeLink=="cognitivo") "active" else ""}", div(cls:="nav-icon", "🧠"), span(cls:="nav-label", "COGNITIVO")), a(href:="/settings", cls:=s"nav-item ${if(activeLink=="settings") "active" else ""}", div(cls:="nav-icon", "🌍"), span(cls:="nav-label", "PÚBLICO"))))
+          div(cls := "container main-content", pageContents), navegacion())
         ,script(raw("""
         (function(){
           var t=localStorage.getItem('guardian_theme')||'dark';
@@ -198,6 +310,39 @@ object SharedLayout {
   }
 
   def getCss() = """
+    /* BLOQUE I: navegacion en dos niveles */
+    .gnav-side { display: none; }
+    .gnav-hamb { display: none; cursor: pointer; color: #94a3b8; }
+    .gnav-mobile { position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; }
+    .gnav-bar { display: flex; background: #1a1a1a; border-top: 1px solid #333; box-shadow: 0 -2px 10px rgba(0,0,0,0.5); padding: 6px 0 8px; }
+    .gnav-bar-btn { flex: 1; background: none; border: 0; color: #888; text-align: center; padding: 0; min-width: 0; }
+    .gnav-bar-btn.active { color: #d4af37; }
+    .gnav-bar-icon { font-size: 19px; line-height: 1.2; }
+    .gnav-bar-label { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; }
+    .gnav-favs { display: flex; gap: 6px; padding: 4px 8px; background: #111; border-top: 1px solid #262626; overflow-x: auto; }
+    .gnav-fav { font-size: 10px; color: #facc15; text-decoration: none; white-space: nowrap; border: 1px solid #3f3f1f; border-radius: 10px; padding: 2px 8px; }
+    .gnav-sub { display: none; max-height: 55vh; overflow-y: auto; background: #151515; border-top: 2px solid #d4af37; padding: 8px 10px; }
+    .gnav-sub.open { display: block; }
+    .gnav-sub-title { font-size: 11px; color: #d4af37; font-weight: bold; letter-spacing: 1px; margin-bottom: 6px; }
+    .gnav-link { display: block; padding: 7px 8px; color: #ddd; text-decoration: none; font-size: 13px; border-radius: 6px; }
+    .gnav-link:hover, .gnav-link.active { background: #262626; color: #d4af37; }
+    @media (max-width: 991.98px) { body { padding-bottom: 110px !important; } }
+    @media (min-width: 992px) {
+      .gnav-mobile { display: none; }
+      .gnav-hamb { display: inline; }
+      body { padding-bottom: 24px !important; }
+      body.gnav-side-open { padding-left: 230px; }
+      body.gnav-side-open .gnav-side { display: block; position: fixed; top: 0; left: 0; bottom: 0; width: 230px; overflow-y: auto;
+        background: #151515; border-right: 1px solid #333; z-index: 1001; padding: 12px 8px; }
+      .gnav-side-title { font-weight: bold; letter-spacing: 2px; color: #fff; padding: 6px 8px 12px; }
+      .gnav-side-btn { width: 100%; text-align: left; background: none; border: 0; color: #bbb; font-weight: bold; font-size: 13px; padding: 8px; border-radius: 6px; }
+      .gnav-side-btn.active { color: #d4af37; }
+      .gnav-side-btn:hover { background: #222; }
+      .gnav-side-sub { display: none; padding-left: 10px; }
+      .gnav-side-sub.open { display: block; }
+    }
+    body.light-mode .gnav-bar, body.light-mode .gnav-sub, body.light-mode .gnav-favs, body.light-mode .gnav-side { background: #fff !important; border-color: #ddd !important; }
+    body.light-mode .gnav-link { color: #333; }
     @keyframes pulseYellow {
       0%, 100% { border-left: 3px solid transparent; }
       50% { border-left: 3px solid #ffc107; }
