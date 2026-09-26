@@ -2760,36 +2760,57 @@ object CareerController extends cask.Routes {
         )
       }
 
+    // ── Bloque principal: nota media, consistencia y porterias a cero en tres tarjetas ──
+    val cpiMedio = DatabaseManager.getCpiMedioTemporada()
+    val iaPendiente = d.get("iaPendiente").exists(_.asInstanceOf[Boolean])
+    def tarjeta(valor: String, etiqueta: String, color: String): Modifier =
+      div(cls := "col-4", div(cls := "card bg-dark text-center py-2 h-100", style := s"border:1px solid $color;",
+        div(style := s"font-size:22px; font-weight:900; color:$color;", valor), div(cls := "xx-small text-muted", etiqueta)))
+    val principal: Modifier = if (sinDatos) div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")
+      else div(cls := "row g-2 mb-3",
+        tarjeta(f"$notaMediaReal%.1f", "Nota media", "#facc15"),
+        tarjeta(if (vol("suficiente").asInstanceOf[Boolean]) s"${vol("emoji")} σ ${"%.2f".format(vol("desviacion").asInstanceOf[Double])}" else "—",
+          if (vol("suficiente").asInstanceOf[Boolean]) vol("etiqueta").toString else "Consistencia (8+ partidos)", "#0dcaf0"),
+        tarjeta(s"$pctCSReal%", "Porterías a cero", "#20c997"))
+
     val content = basePage("benchmark",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
-          div(cls := "d-flex justify-content-between align-items-center mb-4",
-            h2(cls := "text-white mb-0", "📊 Benchmark"),
-            form(action := "/benchmark/refresh", method := "post",
-              input(tpe := "hidden", name := "temporadaId", value := efectivo.toString),
-              button(tpe := "submit", cls := "btn btn-outline-warning btn-sm fw-bold", "🔄 Actualizar benchmark"))
-          ),
+          div(cls := "d-flex justify-content-between align-items-center mb-3",
+            h2(cls := "text-white mb-0", "📊 Benchmark")),
           seasonSelector(temporadasDb, efectivo, "/benchmark"),
+          principal,
           rffmSection,
-          conConfianza("volatility_index", vol("partidos").asInstanceOf[Int], vol("suficiente").asInstanceOf[Boolean])(volatilitySection),
-          nutricionSection,
-          condicionesPicoSection,
-          if (sinDatos)
-            div(cls := "alert alert-secondary text-center", "Necesitas al menos 3 partidos registrados para generar el benchmark")
-          else frag(
-            raeTable,
-            div(cls := "card bg-dark border-primary shadow mb-3",
-              div(cls := "card-header text-primary fw-bold small", "📈 PERCENTIL DE PROGRESIÓN"),
-              div(cls := "card-body text-light small", d("percentil").asInstanceOf[String])
-            ),
-            div(cls := "card bg-dark border-warning shadow mb-3",
-              div(cls := "card-header text-warning fw-bold small", "🎯 ÁREAS PRIORITARIAS"),
-              div(cls := "card-body text-light small", d("areas").asInstanceOf[String])
-            ),
-            div(cls := "card bg-dark border-success shadow mb-3",
-              div(cls := "card-header text-success fw-bold small", "⭐ REFERENCIA REAL"),
-              div(cls := "card-body text-light small", d("referencia").asInstanceOf[String])
-            )
+
+          seccion("⚖️ Ajuste RAE y contexto")(
+            if (sinDatos) frag() else raeTable,
+            cpiMedio match {
+              case Some(c) => div(cls := "card bg-dark border-info p-2 mb-3 small",
+                f"🎯 CPI medio de la temporada: $c%.1f — nota ajustada por la dificultad real de cada partido.")
+              case None => SharedLayout.sinDatos("CPI medio")
+            },
+            conConfianza("volatility_index", vol("partidos").asInstanceOf[Int], vol("suficiente").asInstanceOf[Boolean])(volatilitySection),
+            condicionesPicoSection,
+            nutricionSection
+          ),
+
+          seccion("🧠 Análisis IA")(
+            if (sinDatos) SharedLayout.sinDatos("Análisis IA", "Se necesitan al menos 3 partidos")
+            else frag(
+              if (iaPendiente) div(cls := "guardian-sin-datos", "🧠 El análisis IA se genera solo cuando lo pides (Gemini).")
+              else frag(
+                div(cls := "card bg-dark border-primary shadow mb-3",
+                  div(cls := "card-header text-primary fw-bold small", "📈 PERCENTIL DE PROGRESIÓN"),
+                  div(cls := "card-body text-light small", d("percentil").asInstanceOf[String])),
+                div(cls := "card bg-dark border-warning shadow mb-3",
+                  div(cls := "card-header text-warning fw-bold small", "🎯 ÁREAS PRIORITARIAS"),
+                  div(cls := "card-body text-light small", d("areas").asInstanceOf[String])),
+                div(cls := "card bg-dark border-success shadow mb-3",
+                  div(cls := "card-header text-success fw-bold small", "⭐ REFERENCIA REAL"),
+                  div(cls := "card-body text-light small", d("referencia").asInstanceOf[String]))),
+              form(action := "/benchmark/refresh", method := "post", cls := "d-grid",
+                input(tpe := "hidden", name := "temporadaId", value := efectivo.toString),
+                button(tpe := "submit", cls := "btn btn-outline-warning fw-bold", if (iaPendiente) "🧠 Generar análisis IA" else "🔄 Actualizar análisis IA")))
           )
         )
       )
@@ -2797,11 +2818,13 @@ object CareerController extends cask.Routes {
     renderHtml(content)
   }
 
+  // Analisis IA del benchmark: Gemini solo aqui, al pulsar el boton
   @cask.post("/benchmark/refresh")
   def refreshBenchmark(request: cask.Request) = withAuth(request) {
     val p = parseBody(request)
     val temporadaId = p.getOrElse("temporadaId", "0").toIntOption.getOrElse(0)
     DatabaseManager.invalidateBenchmarkCache(temporadaId)
+    DatabaseManager.getBenchmark(temporadaId, generarIA = true)
     val loc = if (temporadaId > 0) s"/benchmark?temporadaId=$temporadaId" else "/benchmark"
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> loc))
   }

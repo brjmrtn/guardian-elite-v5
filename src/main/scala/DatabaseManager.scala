@@ -2114,7 +2114,12 @@ RECOMENDACION: <texto>"""
 
   // ── MODULO 5: BENCHMARKING CONTRA PORTEROS DE SU EDAD ───────────────────
   // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
-  def getBenchmark(seasonId: Int = 0): Map[String, Any] = {
+  /**
+   * Benchmark de la temporada. Las cifras (RAE, RFMF) son SQL; el texto de Gemini (percentil, areas,
+   * referencia) solo se genera con generarIA = true (boton de la pagina) y se cachea 7 dias. Sin cache y sin
+   * generarIA, devuelve iaPendiente = true: la pagina nunca llama a Gemini al cargarse.
+   */
+  def getBenchmark(seasonId: Int = 0, generarIA: Boolean = false): Map[String, Any] = {
     val conn = getConnection()
     try {
       val rae = getRaeAdjustedStats()
@@ -2138,6 +2143,7 @@ RECOMENDACION: <texto>"""
       val pj = matches.size
 
       if (pj < 3) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> true) ++ rae ++ rffmReal
+      if (!generarIA) return Map("percentil" -> "", "areas" -> "", "referencia" -> "", "sinDatos" -> false, "iaPendiente" -> true) ++ rae ++ rffmReal
 
       val notaMedia = matches.map(_.nota).sum / pj
       def gcOf(m: MatchLog): Int = m.resultado.split("-").lastOption.flatMap(_.trim.toIntOption).getOrElse(1)
