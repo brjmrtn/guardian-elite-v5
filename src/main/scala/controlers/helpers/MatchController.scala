@@ -73,7 +73,7 @@ object MatchController extends cask.Routes {
   }
 
   @cask.get("/match-center")
-  def matchCenterPage(request: cask.Request, scheduleId: Int = 0) = withAuth(request) {
+  def matchCenterPage(request: cask.Request, scheduleId: Int = 0, quick: Int = 0) = withAuth(request) {
     val today = java.time.LocalDate.now().toString
     var preRival = ""; var preFecha = today; var isScheduled = false; var preEstadio = ""
     // BLOQUE B2: si ya se registro la autopercepcion desde el banner del dashboard, viene pre-seleccionada
@@ -727,7 +727,7 @@ object MatchController extends cask.Routes {
                     var hayCerradas = btns.some(function(b){ return b.nextElementSibling.classList.contains('collapsed'); });
                     btns.forEach(function(b){ if (b.nextElementSibling.classList.contains('collapsed') === hayCerradas) toggleSection(b); });
                   }
-                  // /match-center?quick=1 abre directamente el registro minimo
+                  // /match-center?quick=1 abre directamente el registro minimo (el parametro se declara en la ruta para que Cask no lo rechace)
                   (function(){
                     if (new URLSearchParams(location.search).get('quick') !== '1') return;
                     var p = document.getElementById('quickPanel'), c = document.getElementById('quickChevron');
