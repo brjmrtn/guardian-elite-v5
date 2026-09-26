@@ -665,33 +665,30 @@ object CareerController extends cask.Routes {
   def legacyPage(request: cask.Request) = withAuth(request) {
     val rpg = DatabaseManager.getRPGStatus()
     val percent = if(rpg.nextLevelXp > 0) (rpg.xp.toDouble / rpg.nextLevelXp.toDouble * 100).toInt else 100
+    val card = DatabaseManager.getLatestCardData()
 
     // BLOQUE E: hitos de carrera — lista cronologica completa
     val hitos = DatabaseManager.getTodosLosHitos()
-    val hitosSection: Modifier =
-      if (hitos.isEmpty) div()
-      else div(cls := "card bg-dark text-white border-warning shadow mb-4",
-        div(cls := "card-header bg-warning text-dark fw-bold text-center", "📜 HITOS DE CARRERA"),
-        div(cls := "card-body p-3",
-          hitos.map { h =>
-            val contexto = h("contexto").asInstanceOf[String]
-            div(cls := "border-start border-warning border-3 ps-2 mb-2",
-              div(cls := "d-flex justify-content-between",
-                span(cls := "fw-bold small", h("descripcion").asInstanceOf[String]),
-                span(cls := "xx-small text-muted", h("fecha").asInstanceOf[String])
-              ),
-              if (contexto.nonEmpty) div(cls := "xx-small text-muted fst-italic", contexto) else div()
-            )
-          }
-        )
+    def filaHito(h: Map[String, Any]): Modifier = {
+      val contexto = h("contexto").asInstanceOf[String]
+      div(cls := "border-start border-warning border-3 ps-2 mb-2",
+        div(cls := "d-flex justify-content-between",
+          span(cls := "fw-bold small", h("descripcion").asInstanceOf[String]),
+          span(cls := "xx-small text-muted", h("fecha").asInstanceOf[String])
+        ),
+        if (contexto.nonEmpty) div(cls := "xx-small text-muted fst-italic", contexto) else div()
       )
+    }
+    val retos = DatabaseManager.getHistorialRetos()
+    val ultimoRetoCompletado = retos.reverse.find(_("completado").asInstanceOf[Option[String]].contains("SI"))
+    val diario = DatabaseManager.getSeasonDiaryEntries().headOption
 
     val content = basePage("career", div(cls:="row justify-content-center",
       div(cls:="col-md-8 col-12",
-        h2(cls:="text-center text-warning mb-4", "⭐ MODO LEGADO"),
-        div(cls := "d-grid mb-4", a(href := "/diary", cls := "btn btn-outline-warning fw-bold", "📖 EL DIARIO DE HÉCTOR")),
+        h2(cls:="text-center text-warning mb-3", "⭐ MODO LEGADO"),
 
-        div(cls:="card bg-dark text-white border-warning shadow mb-4",
+        // ── Carta RPG: nivel + atributos ──
+        div(cls:="card bg-dark text-white border-warning shadow mb-3",
           div(cls:="card-body text-center",
             h6(cls:="text-muted text-uppercase letter-spacing-2", "Rango Actual"),
             h1(cls:="display-4 fw-bold text-warning mb-0", rpg.titulo),
@@ -701,43 +698,71 @@ object CareerController extends cask.Routes {
               div(cls:="progress-bar bg-warning progress-bar-striped progress-bar-animated",
                 style:=s"width: $percent%", s"${rpg.xp} XP")
             ),
-            div(cls:="d-flex justify-content-between small text-muted",
+            div(cls:="d-flex justify-content-between small text-muted mb-3",
               span("Inicio Nivel"),
               span(s"Siguiente: ${rpg.nextLevelXp} XP")
+            ),
+            div(cls := "row g-2",
+              frag(Seq(("DIV", card.div), ("HAN", card.han), ("KIC", card.kic), ("REF", card.ref), ("SPD", card.spd), ("POS", card.pos)).map { case (l, v) =>
+                div(cls := "col-4", div(cls := "p-2 border border-secondary rounded bg-secondary bg-opacity-10",
+                  div(cls := "fw-bold text-warning", style := "font-size:20px;", v.toString), div(cls := "xx-small text-muted", l)))
+              }: _*)
             )
           )
         ),
 
-        div(cls:="row g-2",
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🛡"), h6("Muro"), small("Bonus por Porteria a Cero"))),
-          div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🧤"), h6("Manos de Oro"), small("Bonus por Paradas")))
+        // ── Ultimos 3 hitos ──
+        div(cls := "card bg-dark text-white border-warning shadow mb-3",
+          div(cls := "card-header text-warning fw-bold small", "🏅 ÚLTIMOS HITOS"),
+          div(cls := "card-body p-3",
+            if (hitos.isEmpty) SharedLayout.sinDatos("Hitos de carrera", "Se desbloquean automáticamente al registrar partidos")
+            else div(hitos.takeRight(3).reverse.map(filaHito): _*))
         ),
 
-        div(cls:="alert alert-dark border-info mt-4 text-center",
-          h5(cls:="text-info", "Sistema de Puntos"),
-          ul(cls:="list-unstyled small text-start d-inline-block",
+        // ── Reto mas reciente completado ──
+        ultimoRetoCompletado match {
+          case Some(r) => div(cls := "card bg-dark border-success p-2 mb-3 small",
+            span(cls := "text-success fw-bold", s"✅ Último reto completado (${r("semana")}): "), r("reto").toString)
+          case None => SharedLayout.sinDatos("Retos de Héctor completados")
+        },
+
+        seccion("📜 Historial de hitos")(
+          if (hitos.isEmpty) SharedLayout.sinDatos("Hitos de carrera") else div(hitos.map(filaHito): _*)
+        ),
+        seccion("🎯 Historial de retos de Héctor")(
+          if (retos.isEmpty) SharedLayout.sinDatos("Retos de Héctor", "Se crean desde el IDP o en Ajustes")
+          else frag(retos.map { r =>
+            val estado = r("completado").asInstanceOf[Option[String]] match {
+              case Some("SI") => "✅"; case Some("CASI") => "🔄"; case Some("NO") => "❌"; case _ => "·" }
+            div(cls := "d-flex gap-2 small mb-1",
+              span(cls := "text-muted", style := "min-width:78px;", r("semana").toString),
+              span(estado), span(r("reto").toString))
+          }: _*)
+        ),
+        seccion("📖 Diario narrativo")(
+          diario match {
+            case Some(e) =>
+              val m = e("mes").asInstanceOf[String]
+              div(
+                div(cls := "small text-warning fw-bold mb-1", DatabaseManager.mesLabel(m).capitalize),
+                div(cls := "small text-muted fst-italic mb-2", style := "white-space:pre-wrap;", e("contenido").toString.take(280) + (if (e("contenido").toString.length > 280) "…" else "")),
+                a(href := s"/diary?mes=$m", cls := "btn btn-sm btn-outline-warning fw-bold", "📖 Leer el último mes"))
+            case None => div(SharedLayout.sinDatos("Diario narrativo"),
+              a(href := "/diary", cls := "btn btn-sm btn-outline-warning fw-bold", "📖 Ir al diario de Héctor"))
+          }
+        ),
+        seccion("ℹ️ Sistema de puntos")(
+          div(cls:="row g-2 mb-2",
+            div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🛡"), h6("Muro"), small("Bonus por Porteria a Cero"))),
+            div(cls:="col-6", div(cls:="p-3 border border-secondary rounded text-center bg-secondary bg-opacity-10", h3("🧤"), h6("Manos de Oro"), small("Bonus por Paradas")))
+          ),
+          ul(cls:="list-unstyled small mb-0",
             li("- Partido Jugado: +50 XP"),
             li("- Porteria a Cero: +100 XP"),
             li("- Parada: +5 XP"),
             li("- Nota > 7.0: +100 XP (Bonus)")
           )
         ),
-
-        hitosSection,
-        {
-          val retos = DatabaseManager.getHistorialRetos()
-          if (retos.isEmpty) frag()
-          else div(cls := "card bg-dark text-white border-warning shadow mb-4",
-            div(cls := "card-header text-warning fw-bold small", "🎯 LOS RETOS DE HÉCTOR"),
-            div(cls := "card-body p-3",
-              frag(retos.map { r =>
-                val estado = r("completado").asInstanceOf[Option[String]] match {
-                  case Some("SI") => "✅"; case Some("CASI") => "🔄"; case Some("NO") => "❌"; case _ => "·" }
-                div(cls := "d-flex gap-2 small mb-1",
-                  span(cls := "text-muted", style := "min-width:78px;", r("semana").toString),
-                  span(estado), span(r("reto").toString))
-              }: _*)))
-        },
 
         div(cls:="d-grid gap-2 mt-3",
           a(href:="/career/comparativa", cls:="btn btn-outline-info fw-bold", "📊 Comparativa entre temporadas"),
