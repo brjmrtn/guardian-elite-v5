@@ -138,7 +138,7 @@ object AmateurDatabaseManager {
       val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
         "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
       val r = requests.post(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey",
         data = ujson.write(payload),
         headers = Map("Content-Type" -> "application/json"),
         readTimeout = 45000
@@ -802,7 +802,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       )
 
       val r = requests.post(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey",
         data    = ujson.write(payload),
         headers = Map("Content-Type" -> "application/json"),
         readTimeout = 30000
@@ -1801,7 +1801,7 @@ $jsonTpl"""
       val payload = ujson.Obj("contents" -> ujson.Arr(ujson.Obj(
         "parts" -> ujson.Arr(ujson.Obj("text" -> prompt)))))
       val r = requests.post(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey",
         data = ujson.write(payload),
         headers = Map("Content-Type" -> "application/json"),
         readTimeout = 45000
