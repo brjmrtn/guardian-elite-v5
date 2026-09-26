@@ -497,7 +497,8 @@ object SharedLayout {
     .guardian-section-body.collapsed { display: none; }
     .toggle-icon { font-size: 10px; }
     .guardian-sin-datos { font-size: 12px; color: #94a3b8; border: 1px dashed #334155; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
-    .guardian-tabs-nav { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; padding-bottom: 2px; }
+    .guardian-tabs-nav { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; padding-bottom: 2px; scrollbar-width: none; }
+    .guardian-tabs-nav::-webkit-scrollbar { display: none; }
     .guardian-tab-btn { flex: 1 0 auto; background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 8px;
       padding: 8px 12px; font-size: 12px; font-weight: 700; white-space: nowrap; }
     .guardian-tab-btn.active { background: #d4af37; color: #111; border-color: #d4af37; }

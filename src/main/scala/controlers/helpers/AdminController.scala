@@ -448,9 +448,83 @@ object AdminController extends cask.Routes {
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/settings"))
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // /settings — pestaña OBJETIVOS: IDP activo y reto de Hector de la semana
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def objetivosSettingsPanel(): Modifier = {
+    val idp = DatabaseManager.getActiveIdpTemporada()
+    val reto = DatabaseManager.getRetoSemana()
+    div(
+      div(cls := "card bg-dark text-white border-info shadow p-3 mb-3",
+        h5(cls := "text-info", "🗺️ Plan de Desarrollo Individual (IDP)"),
+        idp match {
+          case Some(t) =>
+            val objetivos = DatabaseManager.getIdpObjetivos(t("id").asInstanceOf[Int])
+            div(
+              div(cls := "small text-muted mb-2", s"Temporada ${t("temporada")} · ${objetivos.size} objetivos"),
+              frag(objetivos.map(o => div(cls := "d-flex justify-content-between small border-bottom border-secondary py-1",
+                span(o("objetivo").toString), span(cls := "text-info fw-bold", s"${o("progresoPct")}%"))): _*))
+          case None => SharedLayout.sinDatos("IDP de la temporada", "Crea el plan desde la página del IDP")
+        },
+        a(href := "/idp", cls := "btn btn-outline-info fw-bold w-100 mt-2", "🗺️ Gestionar IDP")
+      ),
+      div(cls := "card bg-dark text-white border-warning shadow p-3 mb-3",
+        h5(cls := "text-warning", "🎯 Reto de Héctor"),
+        reto match {
+          case Some(r) => div(cls := "small mb-2", span(cls := "text-muted", s"Semana ${r("semana")}: "), r("reto").toString)
+          case None => SharedLayout.sinDatos("Reto de esta semana", "Se genera automáticamente los lunes o al pulsar el botón")
+        },
+        div(cls := "d-flex gap-2",
+          form(action := "/reto-hector/generar", method := "post", cls := "flex-grow-1",
+            button(tpe := "submit", cls := "btn btn-outline-warning fw-bold w-100", "🎲 Generar reto")),
+          a(href := "/career/legacy", cls := "btn btn-outline-secondary fw-bold flex-grow-1", "📜 Historial"))
+      )
+    )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // /settings — pestaña NOTIFICACIONES: Telegram, email de backup y horarios de recordatorios
+  // (se configuran por variables de entorno en Render: aqui se ve el estado)
+  // ─────────────────────────────────────────────────────────────────────────────
+  private def notificacionesPanel(): Modifier = {
+    def env(k: String) = sys.env.get(k).exists(_.trim.nonEmpty)
+    def estado(ok: Boolean): Modifier = span(cls := (if (ok) "text-success fw-bold" else "text-warning fw-bold"), if (ok) "✅ activo" else "⚠️ sin configurar")
+    val emailOk = env("BACKUP_EMAIL") && env("SMTP_USER") && env("SMTP_PASS")
+    val horarios = Seq(
+      ("Diario 8:00", "Recordatorio de sueño si no se ha registrado (Telegram)"),
+      ("Cada 3 días 8:00", "Recordatorio de FC en reposo (Telegram)"),
+      ("Diario 9:00", "Aviso de día de partido (Telegram)"),
+      ("Diario 9:00–21:00", "Alertas positivas, como mucho una al día (Telegram)"),
+      ("Lunes 6:00", "Sincronización RFMF"),
+      ("Lunes 7:00", "Reto semanal de Héctor"),
+      ("Lunes 8:00", "Resumen semanal, recordatorio de peso y protocolo de recuperación si hace falta"),
+      ("Domingo 3:00", "Backup automático (BD + email si está configurado)"))
+    div(
+      div(cls := "card bg-dark text-white border-info shadow p-3 mb-3",
+        h5(cls := "text-info", "📲 Telegram"),
+        div(cls := "d-flex justify-content-between small mb-2", span("Bot (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)"), estado(TelegramService.configurado)),
+        div(cls := "xx-small text-muted", "Comandos: SUEÑO, RPE, PESO… — el bot responde solo al chat configurado.")
+      ),
+      div(cls := "card bg-dark text-white border-warning shadow p-3 mb-3",
+        h5(cls := "text-warning", "📧 Email de backup"),
+        div(cls := "d-flex justify-content-between small mb-2", span("BACKUP_EMAIL + SMTP"), estado(emailOk)),
+        form(action := "/admin/backup/send-email", method := "post",
+          button(tpe := "submit", cls := "btn btn-outline-warning fw-bold w-100", "📧 Enviarme el backup ahora por email")),
+        a(href := "/admin#backups", cls := "btn btn-link btn-sm text-muted w-100", "Ver backups en Admin")
+      ),
+      div(cls := "card bg-dark text-white border-secondary shadow p-3 mb-3",
+        h5(cls := "text-white", "⏰ Horarios de recordatorios"),
+        frag(horarios.map { case (h, d) => div(cls := "d-flex gap-2 small border-bottom border-secondary py-1",
+          span(cls := "text-info fw-bold", style := "min-width:120px;", h), span(d)) }: _*),
+        div(cls := "xx-small text-muted mt-2", s"Hora de ${sys.env.getOrElse("GUARDIAN_TZ", "Europe/Madrid")}.")
+      )
+    )
+  }
+
   @cask.get("/settings") def settingsPage(request: cask.Request, backupMsg: String = "", rffmMsg: String = "") = withAuth(request) {
     val card = DatabaseManager.getLatestCardData()
-    val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h2(cls := "text-warning mb-4", "Configuracion General"),
+    val content = div(cls := "row justify-content-center", div(cls := "col-md-8 col-12", h2(cls := "text-warning mb-3", "⚙️ Configuración"), pestanas("settings", Seq(
+      "👤 PERFIL" -> div(div(cls := "card bg-dark text-white border-secondary shadow p-4 mb-3", h5(cls := "text-warning mb-3", "Configuracion General"),
       form(action := "/settings/save_base64", method := "post",
         div(cls := "mb-4", label(cls := "form-label text-info fw-bold", "Nombre Visual (Carta)"), input(tpe := "text", name := "nombreClub", cls := "form-control fw-bold", value:=card.clubNombre, placeholder := "Ej: Rayo (Corto)")),
         div(cls := "mb-4", label(cls := "form-label text-success fw-bold", "Fecha de Nacimiento"), input(tpe := "date", name := "fechaNac", cls := "form-control fw-bold", value:=card.fechaNacimiento)),
@@ -479,7 +553,11 @@ object AdminController extends cask.Routes {
       script(raw("""function convertToBase64(i,t){if(i.files&&i.files[0]){var r=new FileReader();r.onload=function(e){document.getElementById(t).value=e.target.result;};r.readAsDataURL(i.files[0]);}}"""))), div(cls:="d-flex gap-2 mt-2",
       a(href:="/videoteca", cls:="btn btn-warning fw-bold flex-grow-1", "🎬 VIDEOTECA"),
       a(href:="/admin", cls:="btn btn-outline-danger fw-bold", "⚙️ ADMIN")
-    ), weeklyStructurePanel(), perfilPublicoPanel(), rffmBenchmarkPanel(rffmMsg), calendarioEscolarPanel(), rutinaPrepartidoPanel(), backupsPanel(backupMsg)));
+    ), perfilPublicoPanel()),
+      "📅 ESTRUCTURA" -> div(weeklyStructurePanel(), rutinaPrepartidoPanel(), calendarioEscolarPanel()),
+      "🎯 OBJETIVOS" -> objetivosSettingsPanel(),
+      "🔔 NOTIFICACIONES" -> notificacionesPanel()
+    ))));
     renderHtml(basePage("settings", content))
   }
 
@@ -539,7 +617,7 @@ object AdminController extends cask.Routes {
     } catch { case e: Exception => s"⚠️ Error generando el backup: ${e.getMessage.take(150)}" }
 
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location" -> s"/settings?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+      "Location" -> s"/admin?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}#backups"
     ))
   }
 
@@ -564,7 +642,7 @@ object AdminController extends cask.Routes {
       }
 
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location" -> s"/settings?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}"
+      "Location" -> s"/admin?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}#backups"
     ))
   }
 
@@ -572,7 +650,7 @@ object AdminController extends cask.Routes {
   def syncRffmNow(request: cask.Request) = withAuth(request) {
     DatabaseManager.syncRFFMBenchmarkAsync()
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location" -> s"/settings?rffmMsg=${java.net.URLEncoder.encode("⏳ Sincronización lanzada en segundo plano. Recarga la página en unos minutos.", "UTF-8")}"
+      "Location" -> s"/admin?rffmMsg=${java.net.URLEncoder.encode("⏳ Sincronización lanzada en segundo plano. Recarga la página en unos minutos.", "UTF-8")}#rffm"
     ))
   }
 
@@ -581,7 +659,7 @@ object AdminController extends cask.Routes {
     val p = parseBody(request)
     DatabaseManager.setRffmConfig(p.getOrElse("competicionId", ""), p.getOrElse("temporada", ""))
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location" -> s"/settings?rffmMsg=${java.net.URLEncoder.encode("✅ Configuración RFFM guardada.", "UTF-8")}"
+      "Location" -> s"/admin?rffmMsg=${java.net.URLEncoder.encode("✅ Configuración RFFM guardada.", "UTF-8")}#rffm"
     ))
   }
 
@@ -590,7 +668,7 @@ object AdminController extends cask.Routes {
     val p = parseBody(request)
     DatabaseManager.setLigaRFMFConfig(p.getOrElse("ligaTipo", "INTERNA"), p.getOrElse("nombreEquipo", ""), p.getOrElse("grupoId", ""))
     cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location" -> s"/settings?rffmMsg=${java.net.URLEncoder.encode("✅ Liga de la temporada guardada.", "UTF-8")}"
+      "Location" -> s"/admin?rffmMsg=${java.net.URLEncoder.encode("✅ Liga de la temporada guardada.", "UTF-8")}#rffm"
     ))
   }
 
@@ -755,45 +833,52 @@ object AdminController extends cask.Routes {
   }
 
   @cask.get("/admin")
-  def adminPage(request: cask.Request, msg: String = "") = withAuth(request) {
+  def adminPage(request: cask.Request, msg: String = "", backupMsg: String = "", rffmMsg: String = "") = withAuth(request) {
     val objs = DatabaseManager.getSeasonObjectives()
+    def env(k: String) = sys.env.get(k).exists(_.trim.nonEmpty)
+    def estadoEnv(nombre: String, ok: Boolean): Modifier =
+      div(cls := "d-flex justify-content-between small border-bottom border-secondary py-1",
+        span(nombre), span(cls := (if (ok) "text-success fw-bold" else "text-warning fw-bold"), if (ok) "✅ configurado" else "⚠️ sin configurar"))
+    val rt = Runtime.getRuntime
+    val zonaHoraria: String = sys.env.getOrElse("GUARDIAN_TZ", "Europe/Madrid")
     val content = basePage("settings",
       div(cls := "row justify-content-center",
         div(cls := "col-md-8 col-12",
-          h2(cls := "text-danger text-center mb-4", "ADMINISTRACION"),
+          h2(cls := "text-danger text-center mb-3", "ADMINISTRACION"),
           if (msg.nonEmpty) div(cls := "alert alert-success small p-2 mb-3", msg) else div(),
-          temporadasPanel(""),
-          calidadDatosPanel(),
-          calibracionPanel(),
-          div(cls := "card bg-dark border-warning shadow mb-4 p-3",
-            h5(cls := "text-warning", "Base de Datos Leyendas"),
-            p(cls := "small text-muted fw-bold", "Si no ves la comparacion en Trayectoria, pulsa aqui."),
-            a(href := "/admin/init_legends", cls := "btn btn-outline-warning w-100 fw-bold",
-              "Inicializar BBDD Leyendas")
-          ),
-          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", id := "backups",
+          pestanas("admin", Seq(
+            "🏃 TEMPORADA" -> div(
+              temporadasPanel(""),
+          div(cls := "card bg-dark border-info shadow p-3",
+            h5(cls := "text-info", "Gestionar Objetivos"),
+            if (objs.isEmpty) div("Sin objetivos.")
+            else div(
+              (for (o <- objs) yield
+                form(action := "/admin/update_obj", method := "post",
+                  cls := "row align-items-center mb-2",
+                  div(cls := "col-7 small text-white fw-bold", o.descripcion),
+                  div(cls := "col-3",
+                    input(tpe := "number", name := "meta", value := o.meta.toString,
+                      cls := "form-control form-control-sm text-center fw-bold")
+                  ),
+                  input(tpe := "hidden", name := "id", value := o.id.toString),
+                  div(cls := "col-2",
+                    button(tpe := "submit", cls := "btn btn-sm btn-outline-success fw-bold", "S")
+                  )
+                )
+                ).toSeq
+            )
+          )
+            ),
+            "💾 DATOS" -> div(
+              div(id := "backups", backupsPanel(backupMsg)),
+          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", id := "exportar",
             h5(cls := "text-white", "Copia de Seguridad"),
             p(cls := "small text-muted fw-bold", "Descarga los partidos, o todas las tablas principales en un ZIP."),
             div(cls := "d-grid gap-2",
               a(href := "/admin/download_csv", cls := "btn btn-primary w-100 fw-bold", "⬇️ CSV Partidos"),
               a(href := "/admin/download_full_csv", cls := "btn btn-outline-primary w-100 fw-bold", "⬇️ Exportación completa (ZIP)")
             )
-          ),
-          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
-            h5(cls := "text-white", "Informe PDF"),
-            p(cls := "small text-muted fw-bold", "Genera un informe limpio para imprimir o guardar como PDF."),
-            div(cls := "d-grid gap-2",
-              a(href := "/admin/print_report", target := "_blank", cls := "btn btn-info w-100 fw-bold",
-                "Generar Informe PDF"),
-              a(href := "/admin/captacion", target := "_blank", cls := "btn btn-outline-warning w-100 fw-bold",
-                "🎭 Dossier Captacion Anonimo")
-            )
-          ),
-          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
-            h5(cls := "text-white", "Mantenimiento de datos"),
-            p(cls := "small text-muted fw-bold", "Completa el clima de los partidos antiguos que no lo tienen (Open-Meteo)."),
-            form(action := "/admin/weather/fill-historical", method := "post", cls := "d-grid",
-              button(tpe := "submit", cls := "btn btn-outline-info w-100 fw-bold", "🌐 Rellenar clima histórico"))
           ),
           // BLOQUE S: importar partidos historicos (CSV pegado) — resultado via fetch, sin recargar
           div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3", id := "importarHistorico",
@@ -833,29 +918,57 @@ object AdminController extends cask.Routes {
               }
             """))
           ),
-          div(cls := "card bg-dark border-info shadow p-3",
-            h5(cls := "text-info", "Gestionar Objetivos"),
-            if (objs.isEmpty) div("Sin objetivos.")
-            else div(
-              (for (o <- objs) yield
-                form(action := "/admin/update_obj", method := "post",
-                  cls := "row align-items-center mb-2",
-                  div(cls := "col-7 small text-white fw-bold", o.descripcion),
-                  div(cls := "col-3",
-                    input(tpe := "number", name := "meta", value := o.meta.toString,
-                      cls := "form-control form-control-sm text-center fw-bold")
-                  ),
-                  input(tpe := "hidden", name := "id", value := o.id.toString),
-                  div(cls := "col-2",
-                    button(tpe := "submit", cls := "btn btn-sm btn-outline-success fw-bold", "S")
-                  )
-                )
-                ).toSeq
+          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
+            h5(cls := "text-white", "Mantenimiento de datos"),
+            p(cls := "small text-muted fw-bold", "Completa el clima de los partidos antiguos que no lo tienen (Open-Meteo)."),
+            form(action := "/admin/weather/fill-historical", method := "post", cls := "d-grid",
+              button(tpe := "submit", cls := "btn btn-outline-info w-100 fw-bold", "🌐 Rellenar clima histórico")),
+            p(cls := "small text-muted fw-bold mt-3 mb-1", "Corrige textos con caracteres rotos (Ã©…) y unifica nombres de rivales."),
+            a(href := "/admin/fix-encoding", cls := "btn btn-outline-secondary w-100 fw-bold", "🔤 Arreglar encoding")
+          ),
+          div(cls := "card bg-secondary bg-opacity-25 border-secondary mb-4 p-3",
+            h5(cls := "text-white", "Informe PDF"),
+            p(cls := "small text-muted fw-bold", "Genera un informe limpio para imprimir o guardar como PDF."),
+            div(cls := "d-grid gap-2",
+              a(href := "/admin/print_report", target := "_blank", cls := "btn btn-info w-100 fw-bold",
+                "Generar Informe PDF"),
+              a(href := "/admin/captacion", target := "_blank", cls := "btn btn-outline-warning w-100 fw-bold",
+                "🎭 Dossier Captacion Anonimo")
             )
+          ),
+          div(cls := "card bg-dark border-warning shadow mb-4 p-3",
+            h5(cls := "text-warning", "Base de Datos Leyendas"),
+            p(cls := "small text-muted fw-bold", "Si no ves la comparacion en Trayectoria, pulsa aqui."),
+            a(href := "/admin/init_legends", cls := "btn btn-outline-warning w-100 fw-bold",
+              "Inicializar BBDD Leyendas")
           ),
           div(cls := "d-grid mt-4",
             a(href := "/admin/importer", cls := "btn btn-warning fw-bold", "IMPORTAR DATOS MASIVOS (CSV)")
           )
+            ),
+            "📊 CALIDAD" -> div(
+              calidadDatosPanel(),
+              calibracionPanel()
+            ),
+            "🔧 SISTEMA" -> div(
+              div(id := "rffm", rffmBenchmarkPanel(rffmMsg)),
+              div(cls := "card bg-dark border-info shadow mb-4 p-3", id := "testIA",
+                h5(cls := "text-info", "🧠 Test de IA"),
+                p(cls := "small text-muted fw-bold", "Comprueba la conexión con Gemini (hace una llamada real)."),
+                a(href := "/admin/test-ai", cls := "btn btn-outline-info w-100 fw-bold", "🧪 Probar conexión IA")
+              ),
+              div(cls := "card bg-dark border-secondary shadow mb-4 p-3", id := "debug",
+                h5(cls := "text-white", "🐞 Debug"),
+                estadoEnv("Gemini (GEMINI_API_KEY)", env("GEMINI_API_KEY")),
+                estadoEnv("Telegram (bot + chat)", TelegramService.configurado),
+                estadoEnv("Email de backup (BACKUP_EMAIL)", env("BACKUP_EMAIL")),
+                estadoEnv("SMTP (SMTP_USER / SMTP_PASS)", env("SMTP_USER") && env("SMTP_PASS")),
+                div(cls := "d-flex justify-content-between small py-1", span("Memoria JVM"),
+                  span(s"${(rt.totalMemory - rt.freeMemory) / 1048576} MB usados de ${rt.maxMemory / 1048576} MB")),
+                div(cls := "d-flex justify-content-between small py-1", span("Zona horaria"), span(zonaHoraria))
+              )
+            )
+          ))
         )
       )
     )
