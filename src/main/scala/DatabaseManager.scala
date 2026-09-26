@@ -14026,28 +14026,78 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
     val despierto = a.lift(3).flatMap(tgInt).filter(_ >= 0)
     val energia = tgEnRango(a.lift(4).flatMap(tgInt), 1, 5)
     val animo = tgEnRango(a.lift(5).flatMap(tgInt), 1, 5)
+    registrarSuenoHoy(horas.get, profundo, ligero, despierto, energia, animo)
+    val forma = calcularFormaHoy()("indiceForma").asInstanceOf[Double]
+    val horasTxt = if (horas.get % 1 == 0) f"${horas.get}%.0fh" else f"${horas.get}%.1fh"
+    s"✅ Sueño registrado: $horasTxt" + profundo.map(p => s" · ${p}min profundo").getOrElse("") +
+      f" · Índice de Forma: $forma%.1f ${formaSemaforo(forma)}"
+  }
+
+  /**
+   * Registro rapido del sueno de hoy (bot de Telegram y /bio/sueno). Upsert que no pisa lo ya registrado
+   * hoy desde el formulario completo (FC, dolor, notas...): los campos vacios conservan su valor.
+   */
+  def registrarSuenoHoy(horas: Double, profundo: Option[Int] = None, ligero: Option[Int] = None, despierto: Option[Int] = None,
+                        energia: Option[Int] = None, animo: Option[Int] = None, somnolencia: Option[Int] = None): Unit = {
     val conn = getConnection()
     try {
-      // Upsert que no pisa lo ya registrado hoy desde la app (FC, dolor, notas...)
       val ps = conn.prepareStatement("""
-        INSERT INTO wellness (fecha, horas_sueno, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min, energia, animo)
-        VALUES (CURRENT_DATE, ?, ?, ?, ?, ?, ?)
+        INSERT INTO wellness (fecha, horas_sueno, sueno_profundo_min, sueno_ligero_min, sueno_despierto_min, energia, animo, somnolencia)
+        VALUES (CURRENT_DATE, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (fecha) DO UPDATE SET horas_sueno = EXCLUDED.horas_sueno,
           sueno_profundo_min = COALESCE(EXCLUDED.sueno_profundo_min, wellness.sueno_profundo_min),
           sueno_ligero_min = COALESCE(EXCLUDED.sueno_ligero_min, wellness.sueno_ligero_min),
           sueno_despierto_min = COALESCE(EXCLUDED.sueno_despierto_min, wellness.sueno_despierto_min),
           energia = COALESCE(EXCLUDED.energia, wellness.energia),
-          animo = COALESCE(EXCLUDED.animo, wellness.animo)""")
-      ps.setDouble(1, horas.get)
-      Seq(profundo, ligero, despierto, energia, animo).zipWithIndex.foreach { case (v, i) =>
+          animo = COALESCE(EXCLUDED.animo, wellness.animo),
+          somnolencia = COALESCE(EXCLUDED.somnolencia, wellness.somnolencia)""")
+      ps.setDouble(1, horas)
+      Seq(profundo, ligero, despierto, energia, animo, somnolencia).zipWithIndex.foreach { case (v, i) =>
         v match { case Some(x) => ps.setInt(i + 2, x); case None => ps.setNull(i + 2, java.sql.Types.INTEGER) }
       }
       ps.executeUpdate()
     } finally { conn.close() }
-    val forma = calcularFormaHoy()("indiceForma").asInstanceOf[Double]
-    val horasTxt = if (horas.get % 1 == 0) f"${horas.get}%.0fh" else f"${horas.get}%.1fh"
-    s"✅ Sueño registrado: $horasTxt" + profundo.map(p => s" · ${p}min profundo").getOrElse("") +
-      f" · Índice de Forma: $forma%.1f ${formaSemaforo(forma)}"
+  }
+
+  /** Sueno registrado hoy (horas > 0), si lo hay. */
+  def getSuenoHoy(): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(
+        "SELECT horas_sueno, sueno_profundo_min, energia, animo, somnolencia FROM wellness WHERE fecha = CURRENT_DATE AND horas_sueno > 0")
+      if (!rs.next()) None
+      else {
+        def oi(c: String) = Option(rs.getObject(c)).map(_ => rs.getInt(c))
+        Some(Map("horas" -> rs.getDouble("horas_sueno"), "profundo" -> oi("sueno_profundo_min"), "energia" -> oi("energia"),
+          "animo" -> oi("animo"), "somnolencia" -> oi("somnolencia")))
+      }
+    } finally { conn.close() }
+  }
+
+  /** Ultimos dias de wellness con FC, somnolencia o dolor muscular: (fecha, fc, somnolencia, dolor). */
+  def getWellnessReciente(dias: Int = 14): List[(String, Option[Int], Option[Int], Option[Int])] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT fecha, fc_reposo, somnolencia, dolor_muscular FROM wellness
+        WHERE fecha > CURRENT_DATE - ? AND (fc_reposo IS NOT NULL OR somnolencia IS NOT NULL OR dolor_muscular IS NOT NULL)
+        ORDER BY fecha DESC""")
+      ps.setInt(1, dias)
+      val rs = ps.executeQuery()
+      def oi(c: String) = Option(rs.getObject(c)).map(_ => rs.getInt(c))
+      Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getDate("fecha").toString, oi("fc_reposo"), oi("somnolencia"), oi("dolor_muscular"))).toList
+    } finally { conn.close() }
+  }
+
+  /** Ultimos entrenos con RPE de Hector: (fecha, tipo, rpe padre, rpe Hector 1-5). */
+  def getRpeHectorReciente(n: Int = 10): List[(String, String, Int, Int)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT fecha, tipo, rpe, rpe_hector FROM trainings WHERE rpe_hector IS NOT NULL ORDER BY fecha DESC, id DESC LIMIT ?")
+      ps.setInt(1, n)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getDate("fecha").toString, fixEncoding(r.getString("tipo")), r.getInt("rpe"), r.getInt("rpe_hector"))).toList
+    } finally { conn.close() }
   }
 
   // ── FC ────────────────────────────────────────────────────────────────────

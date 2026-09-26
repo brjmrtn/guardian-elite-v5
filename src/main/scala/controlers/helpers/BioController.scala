@@ -1219,6 +1219,89 @@ object BioController extends cask.Routes {
       )
     }
 
+    // ── Bloque principal: el sueno de hoy (resumen o formulario rapido) ──
+    val suenoHoyWidget: Modifier = DatabaseManager.getSuenoHoy() match {
+      case Some(s) =>
+        val horas = s("horas").asInstanceOf[Double]
+        div(cls := "card bg-dark border-info shadow mb-3 p-3",
+          div(cls := "xx-small text-info fw-bold", "💤 SUEÑO DE ESTA NOCHE — REGISTRADO"),
+          div(cls := "d-flex align-items-baseline gap-3 mt-1",
+            span(style := "font-size:36px; font-weight:900; color:#fff;", f"$horas%.1fh"),
+            s("profundo").asInstanceOf[Option[Int]].map(p => span(cls := "small text-info", s"$p min profundo")).getOrElse(frag())),
+          div(cls := "xx-small text-muted",
+            Seq(s("energia").asInstanceOf[Option[Int]].map(v => s"Energía $v/5"), s("animo").asInstanceOf[Option[Int]].map(v => s"Ánimo $v/5"),
+              s("somnolencia").asInstanceOf[Option[Int]].map(v => s"Somnolencia $v/3")).flatten.mkString(" · ")),
+          a(href := "/bio", cls := "xx-small", "Completar o corregir en Bio →"))
+      case None =>
+        div(cls := "card bg-dark border-info shadow mb-3 p-3",
+          div(cls := "xx-small text-info fw-bold mb-2", "💤 ¿CÓMO DURMIÓ HÉCTOR ESTA NOCHE?"),
+          form(action := "/bio/sueno/registrar", method := "post",
+            div(cls := "row g-2",
+              div(cls := "col-6", label(cls := "xx-small text-muted", "Horas"),
+                input(tpe := "number", name := "horas", step := "0.5", min := "0", max := "16", required := true, value := "9",
+                  cls := "form-control form-control-lg text-center fw-bold bg-dark text-white border-info", attr("inputmode") := "decimal")),
+              div(cls := "col-6", label(cls := "xx-small text-muted", "Sueño profundo (min, opcional)"),
+                input(tpe := "number", name := "profundo", min := "0", cls := "form-control form-control-lg text-center bg-dark text-white border-secondary", attr("inputmode") := "numeric")),
+              frag(Seq(("energia", "⚡ Energía", 1 to 5), ("animo", "🙂 Ánimo", 1 to 5), ("somnolencia", "☀️ Somnolencia", 0 to 3)).map { case (campo, et, rango) =>
+                div(cls := "col-12",
+                  div(cls := "xx-small text-muted", et),
+                  div(cls := "btn-group w-100", role := "group",
+                    frag(rango.map { v => frag(
+                      input(tpe := "radio", cls := "btn-check", name := campo, id := s"sq_${campo}_$v", value := v.toString, autocomplete := "off"),
+                      label(cls := "btn btn-sm btn-outline-info", `for` := s"sq_${campo}_$v", v.toString)) }: _*)))
+              }: _*)),
+            div(cls := "d-grid mt-3", button(tpe := "submit", cls := "btn btn-info fw-bold", "💤 Guardar sueño")),
+            div(cls := "xx-small text-muted mt-1", "No borra nada de lo ya registrado hoy en Bio (FC, dolor, notas...).")))
+    }
+    // Indice de forma de hoy con sus componentes
+    val formaHoy = DatabaseManager.calcularFormaHoy()
+    val formaHoyWidget: Modifier = {
+      val indice = formaHoy("indiceForma").asInstanceOf[Double]
+      val color = if (indice >= 7.5) "#20c997" else if (indice >= 5.0) "#facc15" else "#ef4444"
+      div(cls := "card bg-dark border-secondary shadow mb-3 p-3",
+        div(cls := "d-flex justify-content-between align-items-center",
+          span(cls := "xx-small text-muted fw-bold", "ÍNDICE DE FORMA HOY"),
+          span(style := s"font-size:26px; font-weight:900; color:$color;", f"${DatabaseManager.formaSemaforo(indice)} $indice%.1f")),
+        div(cls := "row row-cols-3 row-cols-md-6 g-1 mt-1",
+          frag(Seq("Sueño" -> "suenoScore", "Energía" -> "energiaScore", "Ánimo" -> "animoScore", "Carga" -> "acwrScore",
+            "Descanso" -> "descansoScore", "PHV" -> "phvScore").map { case (et, k) =>
+            val v = formaHoy(k).asInstanceOf[Double]
+            div(cls := "col", div(cls := "xx-small text-center text-muted", et),
+              div(cls := "progress", style := "height:5px;", div(cls := "progress-bar bg-info", style := s"width:${v * 10}%;")),
+              div(cls := "xx-small text-center fw-bold", style := "color:#e2e8f0;", f"$v%.1f"))
+          }: _*)))
+    }
+    // Deuda de sueno semanal: solo si es MODERADA o superior
+    val deuda = formaHoy("deudaSueno").asInstanceOf[Map[String, Any]]
+    val deudaWidget: Modifier = deuda("nivel").asInstanceOf[String] match {
+      case "MINIMA" => frag()
+      case nivel => div(cls := s"alert ${if (nivel == "CRITICA") "alert-danger" else "alert-warning"} small p-2 mb-3",
+        f"💤 Deuda de sueño ${nivel.toLowerCase}: ${deuda("deudaHoras").asInstanceOf[Double]}%.1fh esta semana (${deuda("mediaDiaria").asInstanceOf[Double]}%.1fh/noche de media)")
+    }
+    // Wellness: FC en reposo, somnolencia, dolor muscular y RPE de Hector
+    val wellnessWidget: Modifier = {
+      val w = DatabaseManager.getWellnessReciente(14)
+      val rpe = DatabaseManager.getRpeHectorReciente(8)
+      def op(o: Option[Int]): String = o.map(_.toString).getOrElse("-")
+      div(
+        if (w.isEmpty) sinDatos("FC, somnolencia y dolor muscular", "Se registran en Bio o por Telegram")
+        else div(cls := "card bg-dark border-secondary p-2 mb-2",
+          div(cls := "xx-small fw-bold text-white mb-1", "❤️ FC en reposo · ☀️ somnolencia (0-3) · 💪 dolor muscular (0-3) — últimos 14 días"),
+          table(cls := "table table-dark table-sm mb-0 xx-small text-center",
+            thead(tr(th("Fecha"), th("FC"), th("Somnol."), th("Dolor"))),
+            tbody(frag(w.map { case (f, fc, so, dm) =>
+              tr(td(f.drop(5)), td(op(fc)), td(op(so)), td(op(dm)))
+            }: _*)))),
+        if (rpe.isEmpty) sinDatos("RPE de Héctor", "Se pregunta al registrar un entreno (en Bio o por Telegram)")
+        else div(cls := "card bg-dark border-secondary p-2 mb-2",
+          div(cls := "xx-small fw-bold text-white mb-1", "😴 Cómo llegó Héctor a casa (1-5) vs RPE registrado (1-10)"),
+          frag(rpe.map { case (f, tipo, rp, rh) =>
+            div(cls := "xx-small d-flex justify-content-between", span(s"${f.drop(5)} · $tipo"),
+              span(s"Héctor ${DatabaseManager.etiquetasRpeHector.lift(rh - 1).getOrElse(rh.toString).toLowerCase} ($rh) · RPE $rp"))
+          }: _*)),
+        div(cls := "xx-small", a(href := "/bio", "Importar FC por captura de pantalla en Bio →")))
+    }
+
     val content = basePage("bio",
       div(cls := "row justify-content-center",
         div(cls := "col-md-11 col-12",
@@ -1227,7 +1310,17 @@ object BioController extends cask.Routes {
             a(href := "/bio", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Bio")
           ),
 
-          // KPIs
+          // ── BLOQUE PRINCIPAL: sueno de hoy, indice de forma y deuda de sueno ──
+          suenoHoyWidget,
+          formaHoyWidget,
+          deudaWidget,
+
+          // ── HISTORICO Y ANALISIS (colapsable) ──
+          seccion("📊 Histórico y análisis")(
+          DatabaseManager.detectarJetlagSocial() match {
+            case Some(msg) => div(cls := "alert alert-warning small p-2 mb-3", msg)
+            case None => frag()
+          },
           div(cls := "row g-2 mb-4",
             Seq(
               ("Media Horas", avgHoras + "h", "info"),
@@ -1343,11 +1436,27 @@ object BioController extends cask.Routes {
                 }
               });
             """))
-          )
+          ),
+          div(cls := "small mb-3", "📱 ¿Tienes el sueño en el reloj? ", a(href := "/bio", "Importa la FC por captura o completa el registro con los datos del smartwatch en Bio →"))
+          ),
+
+          // ── WELLNESS (colapsable) ──
+          seccion("📈 Wellness")(wellnessWidget)
         )
       )
     )
     renderHtml(content)
+  }
+
+  // Registro rapido del sueno desde /bio/sueno (no pisa el resto de campos del dia)
+  @cask.post("/bio/sueno/registrar")
+  def registrarSuenoAction(request: cask.Request) = withAuth(request) {
+    val p = parseBody(request)
+    def int(k: String, min: Int, max: Int) = p.get(k).flatMap(_.toIntOption).filter(v => v >= min && v <= max)
+    p.get("horas").flatMap(_.replace(",", ".").toDoubleOption).filter(h => h > 0 && h <= 16).foreach { horas =>
+      DatabaseManager.registrarSuenoHoy(horas, int("profundo", 0, 600), None, None, int("energia", 1, 5), int("animo", 1, 5), int("somnolencia", 0, 3))
+    }
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/bio/sueno"))
   }
 
   // Llamada explicita a Gemini disparada por boton POST — nunca en el render de pagina
