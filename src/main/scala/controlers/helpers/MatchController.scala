@@ -261,13 +261,6 @@ object MatchController extends cask.Routes {
                   div(cls := "col-4 text-center", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))
                 ),
 
-                // 3. DISTRIBUCION (EDERSON)
-                div(cls:="mb-4 p-2 border border-info rounded bg-info bg-opacity-10", label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCION"),
-                  div(cls:="row mb-2 align-items-center", div(cls:="col-4 text-end small fw-bold", "CORTO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pc', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pc', false)", "X"), input(tpe:="text", id:="display_pc", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)))),
-                  div(cls:="row align-items-center", div(cls:="col-4 text-end small fw-bold", "LARGO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pl', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pl', false)", "X"), input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true))))
-                ),
-                input(tpe:="hidden", name:="passData", id:="passData", value:="0,0,0,0"), input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"), input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0"),
-
                 // 4. PORTERIA (REJILLA 3x3)
                 div(cls:="tactical-section mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
                   div(cls:="d-flex justify-content-center mb-2", div(cls:="btn-group w-100", role:="group", input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeSave", autocomplete:="off", checked:=true, onclick:="setMode('save')"), label(cls:="btn btn-outline-success fw-bold", attr("for"):="modeSave", "MODO PARADA"), input(tpe:="radio", cls:="btn-check", name:="mode", id:="modeGoal", autocomplete:="off", onclick:="setMode('goal')"), label(cls:="btn btn-outline-danger fw-bold", attr("for"):="modeGoal", "MODO GOL"))),
@@ -282,6 +275,52 @@ object MatchController extends cask.Routes {
                     div(cls:="col-4", div(cls:="d-grid", button(tpe:="button", cls:="btn btn-outline-light btn-sm", onclick:="incCounter('pPie')", "Pie"), input(tpe:="text", id:="disp_pPie", value:="0", cls:="form-control form-control-sm text-center mt-1 bg-dark text-white border-0", readonly:=true)))
                   ),
                   input(tpe:="hidden", name:="actionData", id:="actionData", value:="0,0,0"), input(tpe:="hidden", id:="cnt_p1v1", value:="0"), input(tpe:="hidden", id:="cnt_pAir", value:="0"), input(tpe:="hidden", id:="cnt_pPie", value:="0"),
+
+                  label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"),
+                  div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))
+                ),
+
+                // ── REGISTRO DE GOLES ENCAJADOS ─────────────────────────
+                div(cls:="mb-4 p-3 border border-danger rounded",
+                  style:="background:rgba(220,53,69,0.05);",
+                  div(cls:="d-flex justify-content-between align-items-center mb-2",
+                    label(cls:="text-danger fw-bold small", "ANALISIS DE GOLES ENCAJADOS"),
+                    tag("button")(tpe:="button", cls:="btn btn-outline-danger btn-sm fw-bold",
+                      onclick:="addGoalRow()", "Añadir gol")
+                  ),
+                  div(cls:="xx-small text-muted mb-2",
+                    "Registra el contexto de cada gol para analisis avanzado (PSxG, Clutch, Nota ajustada)"),
+                  div(id:="goalsContainer"),
+                  input(tpe:="hidden", name:="goalsData", id:="goalsDataInput", value:="")
+                ),
+
+                div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
+
+                div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", id := "notaInput", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
+
+                // ── BLOQUE B2: AUTOPERCEPCION PRE-PARTIDO DE HECTOR ───────
+                div(cls := "mb-4 p-2 border border-primary rounded bg-primary bg-opacity-10",
+                  label(cls := "form-label text-white small fw-bold w-100 text-center", "🎯 ¿Cómo se encontraba Héctor antes del partido?"),
+                  div(cls := "btn-group w-100", attr("role") := "group",
+                    Seq((1, "😞 1"), (2, "😕 2"), (3, "😐 3"), (4, "🙂 4"), (5, "😃 5")).map { case (v, txt) =>
+                      frag(
+                        input(tpe := "radio", cls := "btn-check", name := "autopercepcionPrepartido", id := s"autop$v", value := v.toString,
+                          if (autopercepcionPrefill.contains(v)) attr("checked") := "checked" else frag()),
+                        label(cls := "btn btn-outline-primary btn-sm", `for` := s"autop$v", txt)
+                      )
+                    }
+                  ),
+                  div(cls := "xx-small text-muted mt-1 text-center", "1=Muy mal · 2=Regular · 3=Normal · 4=Bien · 5=Muy bien")
+                ),
+
+                // ── METRICAS DE PORTERO (colapsable; recuerda su estado) ──
+                seccion("📊 Métricas de portero")(
+                // 3. DISTRIBUCION (EDERSON)
+                div(cls:="mb-4 p-2 border border-info rounded bg-info bg-opacity-10", label(cls:="form-label text-info small fw-bold w-100 text-center", "DISTRIBUCION"),
+                  div(cls:="row mb-2 align-items-center", div(cls:="col-4 text-end small fw-bold", "CORTO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pc', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pc', false)", "X"), input(tpe:="text", id:="display_pc", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true)))),
+                  div(cls:="row align-items-center", div(cls:="col-4 text-end small fw-bold", "LARGO"), div(cls:="col-8", div(cls:="btn-group w-100", button(tpe:="button", cls:="btn btn-outline-success btn-sm", onclick:="pass('pl', true)", "✅"), button(tpe:="button", cls:="btn btn-outline-danger btn-sm", onclick:="pass('pl', false)", "X"), input(tpe:="text", id:="display_pl", cls:="btn btn-dark btn-sm", style:="width:50px;", value:="0/0", readonly:=true))))
+                ),
+                input(tpe:="hidden", name:="passData", id:="passData", value:="0,0,0,0"), input(tpe:="hidden", id:="pcTot", value:="0"), input(tpe:="hidden", id:="pcOk", value:="0"), input(tpe:="hidden", id:="plTot", value:="0"), input(tpe:="hidden", id:="plOk", value:="0"),
 
                   // BLOQUE H: desglose de 1v1 por angulo de entrada (opcional)
                   div(cls:="mb-2 mt-2 p-2 border border-info rounded bg-info bg-opacity-10",
@@ -368,87 +407,6 @@ object MatchController extends cask.Routes {
                     )
                   ),
 
-                  label(cls:="form-label text-white small fw-bold w-100 text-center mt-3", "ZONAS DE ATAQUE (Tiros)"),
-                  div(cls:="shot-origin d-flex gap-2 justify-content-center", div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Left')", "Izquierda"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Center')", "Centro"), div(cls:="btn btn-outline-secondary btn-sm shot-btn", onclick:="toggleOrigin(this, 'Right')", "Derecha"), input(tpe:="hidden", name:="zonaTiros", id:="hiddenOrigin"))
-                ),
-
-                // 5. NUEVO: MAPA DE CALOR DE CAMPO (AQUI ESTA LA INTEGRACION)
-                div(cls:="mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
-                  label(cls:="form-label text-success small fw-bold w-100 text-center", "MAPA DE CALOR (INTERVENCIONES)"),
-                  div(cls:="position-relative mx-auto shadow", style:="width: 280px; height: 380px; background-color: #2e7d32; border: 2px solid white; border-radius: 4px;",
-                    div(style:="position:absolute; top:0; left:50%; transform:translateX(-50%); width:60%; height:15%; border:2px solid rgba(255,255,255,0.6); border-top:none;"),
-                    div(style:="position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:60%; height:15%; border:2px solid rgba(255,255,255,0.6); border-bottom:none;"),
-                    div(style:="position:absolute; top:50%; width:100%; height:2px; background:rgba(255,255,255,0.4);"),
-                    div(style:="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:60px; height:60px; border:2px solid rgba(255,255,255,0.4); border-radius:50%;"),
-                    div(id:="fieldMap", style:="width:100%; height:100%; cursor:crosshair; z-index:10;", onclick:="regFieldPos(event)")
-                  ),
-                  div(cls:="text-center mt-1 small text-muted", "Toca donde intervino (Parada/Corte/Pase)"),
-                  input(tpe:="hidden", name:="mapaCampo", id:="hiddenFieldMap", value:="")
-                ),
-
-                // 6. ENTORNO Y NOTAS
-                div(cls:="mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
-                  label(cls:="form-label text-white small fw-bold w-100 text-center", "ENTORNO"),
-                  div(cls:="row mb-2",
-                    div(cls:="col-6",
-                      div(cls:="d-flex justify-content-between align-items-center",
-                        label(cls:="small text-muted fw-bold", "Clima"),
-                        span(id:="climaAutoBadge", cls:="badge bg-info text-dark xx-small", style:="display:none;", "🌐 Auto")
-                      ),
-                      select(name:="clima", id:="climaSelect", cls:="form-select form-select-sm bg-dark text-white fw-bold", onchange:="document.getElementById('climaAutoBadge').style.display='none';", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Calor", "Calor"), option(value:="Viento", "Viento"))),
-                    div(cls:="col-6", label(cls:="small text-muted fw-bold", "Temp (C)"), input(tpe:="number", name:="temp", cls:="form-control form-control-sm bg-dark text-white fw-bold", value:="20"))
-                  )
-                ),
-                div(cls:="mb-3 p-2 border border-danger rounded bg-danger bg-opacity-10", label(cls:="form-label text-danger small fw-bold w-100 text-center", "SALA DE VIDEO"), input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="Link Video (Youtube/Drive)")),
-                div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white fw-bold", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
-                input(tpe:="hidden", name:="reaccion", value:=""),  // campo legacy mantenido para DB
-                div(cls := "mb-3", label(cls := "form-label small fw-bold", "MINUTOS"), input(tpe := "number", name := "minutos", cls := "form-control fw-bold", value := "40", attr("inputmode") := "numeric")),
-
-                div(cls := "mb-4", label(cls := "form-label text-warning fw-bold small", "NOTA (0-10)"), input(tpe := "number", step := "0.1", name := "nota", id := "notaInput", cls := "form-control form-control-lg text-center fw-bold", placeholder := "Ej: 7.5", required := true, attr("inputmode") := "decimal")),
-
-                // ── REGISTRO DE GOLES ENCAJADOS ─────────────────────────
-                div(cls:="mb-4 p-3 border border-danger rounded",
-                  style:="background:rgba(220,53,69,0.05);",
-                  div(cls:="d-flex justify-content-between align-items-center mb-2",
-                    label(cls:="text-danger fw-bold small", "ANALISIS DE GOLES ENCAJADOS"),
-                    tag("button")(tpe:="button", cls:="btn btn-outline-danger btn-sm fw-bold",
-                      onclick:="addGoalRow()", "Añadir gol")
-                  ),
-                  div(cls:="xx-small text-muted mb-2",
-                    "Registra el contexto de cada gol para analisis avanzado (PSxG, Clutch, Nota ajustada)"),
-                  div(id:="goalsContainer"),
-                  input(tpe:="hidden", name:="goalsData", id:="goalsDataInput", value:="")
-                ),
-
-                // ── FOOTBAR (SENSOR GPS DE RENDIMIENTO) — OPCIONAL ───────
-                div(cls:="mb-4 p-3 border border-info rounded", style:="background:rgba(13,202,240,0.05);",
-                  div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;", onclick:="toggleFootbar()",
-                    label(cls:="text-info fw-bold small mb-0", style:="cursor:pointer;", "🦵 DATOS FOOTBAR (opcional)"),
-                    span(id:="footbarChevron", cls:="text-info small", "▼")
-                  ),
-                  div(id:="footbarPanel", style:="display:none;",
-                    div(cls:="xx-small text-muted mt-2 mb-2", "Introduce los datos del sensor Footbar tras el partido. Se guardan solo si rellenas la distancia."),
-                    div(cls:="xx-small text-info fw-bold mb-1", "INFORME FISICO"),
-                    div(cls:="row g-2 mb-2",
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Distancia (km)"), input(tpe:="number", step:="0.01", min:="0", name:="fbDistancia", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Alta intensidad (m)"), input(tpe:="number", step:="1", min:="0", name:="fbAltaIntensidad", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Sprint max (km/h)"), input(tpe:="number", step:="0.1", min:="0", name:="fbSprintMax", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "% Actividad"), input(tpe:="number", step:="0.1", min:="0", max:="100", name:="fbPctActividad", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiempo actividad (min)"), input(tpe:="number", step:="1", min:="0", name:="fbTiempoActividad", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Aceleraciones"), input(tpe:="number", step:="1", min:="0", name:="fbAceleraciones", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Desaceleraciones"), input(tpe:="number", step:="1", min:="0", name:="fbDesaceleraciones", cls:="form-control form-control-sm bg-dark text-white border-info"))
-                    ),
-                    div(cls:="xx-small text-info fw-bold mb-1 mt-2", "INFORME TECNICO"),
-                    div(cls:="row g-2",
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Balones"), input(tpe:="number", step:="1", min:="0", name:="fbBalones", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Pases"), input(tpe:="number", step:="1", min:="0", name:="fbPases", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiempo con balon (s)"), input(tpe:="number", step:="1", min:="0", name:="fbTiempoBalon", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Disparos"), input(tpe:="number", step:="1", min:="0", name:="fbDisparos", cls:="form-control form-control-sm bg-dark text-white border-info")),
-                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiro max (km/h)"), input(tpe:="number", step:="0.1", min:="0", name:="fbTiroMax", cls:="form-control form-control-sm bg-dark text-white border-info"))
-                    )
-                  )
-                ),
-
                 // ── BLOQUE C: SET-PIECE CONTROL (opcional) ────────────────
                 div(cls:="mb-4 p-3 border border-warning rounded bg-warning bg-opacity-10",
                   label(cls:="form-label text-warning small fw-bold w-100 text-center mb-2", "🏴 BALÓN PARADO (opcional)"),
@@ -489,51 +447,6 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
-                // ── COMPORTAMIENTO BAJO PRESION ──────────────────────────
-                div(cls := "mb-4 p-2 border border-info rounded bg-info bg-opacity-10",
-                  label(cls := "form-label text-info small fw-bold w-100 text-center", "🧠 COMPORTAMIENTO TRAS GOLES ENCAJADOS"),
-                  select(name := "comportamientoPresion", cls := "form-select form-select-sm bg-dark text-white fw-bold",
-                    option(value := "NA", "— Sin goles encajados / No aplica"),
-                    option(value := "RAPIDO", "✅ Se repuso rápido — recuperó concentración en menos de 2 minutos"),
-                    option(value := "LIDER", "💪 Lideró al equipo — animó a los compañeros o dirigió la defensa"),
-                    option(value := "NEUTRO", "😐 Neutro — ni se afectó ni lideró"),
-                    option(value := "AFECTADO", "😟 Se afectó visiblemente — bajó el nivel en los siguientes minutos"),
-                    option(value := "INTENSO", "🔥 Reaccionó con más intensidad — el gol le activó")
-                  )
-                ),
-
-                // ── NUTRICION E HIDRATACION PRE-PARTIDO ───────────────────
-                div(cls := "mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
-                  label(cls := "form-label text-success small fw-bold w-100 text-center", "🍽️ NUTRICIÓN PRE-PARTIDO (opcional)"),
-                  div(cls := "xx-small text-muted mb-1", "Comida de las 3h antes del partido"),
-                  select(name := "nutricionPrepartido", cls := "form-select form-select-sm bg-dark text-white fw-bold mb-2",
-                    option(value := "", "— Sin especificar —"),
-                    option(value := "completa", "Comida completa (pasta, arroz, proteína)"),
-                    option(value := "ligera", "Comida ligera (bocadillo, fruta)"),
-                    option(value := "snack", "Solo snack (galletas, barrita)"),
-                    option(value := "sin_comer", "Sin comer o muy poco"),
-                    option(value := "no_adecuada", "Comida no adecuada (rápida, pesada)")
-                  ),
-                  div(cls := "xx-small text-muted mb-1", "Horas desde la última comida"),
-                  select(name := "horasUltimaComida", cls := "form-select form-select-sm bg-dark text-white fw-bold mb-2",
-                    option(value := "", "— Sin especificar —"),
-                    option(value := "0", "Menos de 1h"), option(value := "1", "1-2h"),
-                    option(value := "2", "2-3h"), option(value := "3", "Más de 3h")),
-                  div(cls := "xx-small text-muted mb-1", "Hidratación antes del partido"),
-                  div(cls := "btn-group w-100 mb-2", attr("role") := "group",
-                    frag(DatabaseManager.etiquetasHidratacion.toSeq.sortBy { case (k, _) => Seq("BIEN", "NORMAL", "POCO").indexOf(k) }.map { case (k, et) =>
-                      frag(
-                        input(tpe := "radio", cls := "btn-check", name := "hidratacion", id := s"hidra_$k", value := k),
-                        label(cls := "btn btn-outline-success btn-sm", `for` := s"hidra_$k", et))
-                    }: _*)),
-                  div(cls := "xx-small text-muted mb-1", "¿Desayunó bien?"),
-                  div(cls := "btn-group w-100", attr("role") := "group",
-                    input(tpe := "radio", cls := "btn-check", name := "desayuno", id := "desayuno_si", value := "true"),
-                    label(cls := "btn btn-outline-success btn-sm", `for` := "desayuno_si", "✅ Sí"),
-                    input(tpe := "radio", cls := "btn-check", name := "desayuno", id := "desayuno_no", value := "false"),
-                    label(cls := "btn btn-outline-success btn-sm", `for` := "desayuno_no", "❌ No o poco"))
-                ),
-
                 // ── BLOQUE 4.3: METRICAS DE CANTERA (opcional) ────────────
                 div(cls := "mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
                   label(cls := "form-label text-white small fw-bold w-100 text-center", "📐 MÉTRICAS DE CANTERA (opcional)"),
@@ -570,21 +483,53 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
-                // ── BLOQUE B2: AUTOPERCEPCION PRE-PARTIDO DE HECTOR ───────
-                div(cls := "mb-4 p-2 border border-primary rounded bg-primary bg-opacity-10",
-                  label(cls := "form-label text-white small fw-bold w-100 text-center", "🎯 ¿Cómo se encontraba Héctor antes del partido?"),
-                  div(cls := "btn-group w-100", attr("role") := "group",
-                    Seq((1, "😞 1"), (2, "😕 2"), (3, "😐 3"), (4, "🙂 4"), (5, "😃 5")).map { case (v, txt) =>
-                      frag(
-                        input(tpe := "radio", cls := "btn-check", name := "autopercepcionPrepartido", id := s"autop$v", value := v.toString,
-                          if (autopercepcionPrefill.contains(v)) attr("checked") := "checked" else frag()),
-                        label(cls := "btn btn-outline-primary btn-sm", `for` := s"autop$v", txt)
-                      )
-                    }
+                // 5. NUEVO: MAPA DE CALOR DE CAMPO (AQUI ESTA LA INTEGRACION)
+                div(cls:="mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
+                  label(cls:="form-label text-success small fw-bold w-100 text-center", "MAPA DE CALOR (INTERVENCIONES)"),
+                  div(cls:="position-relative mx-auto shadow", style:="width: 280px; height: 380px; background-color: #2e7d32; border: 2px solid white; border-radius: 4px;",
+                    div(style:="position:absolute; top:0; left:50%; transform:translateX(-50%); width:60%; height:15%; border:2px solid rgba(255,255,255,0.6); border-top:none;"),
+                    div(style:="position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:60%; height:15%; border:2px solid rgba(255,255,255,0.6); border-bottom:none;"),
+                    div(style:="position:absolute; top:50%; width:100%; height:2px; background:rgba(255,255,255,0.4);"),
+                    div(style:="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:60px; height:60px; border:2px solid rgba(255,255,255,0.4); border-radius:50%;"),
+                    div(id:="fieldMap", style:="width:100%; height:100%; cursor:crosshair; z-index:10;", onclick:="regFieldPos(event)")
                   ),
-                  div(cls := "xx-small text-muted mt-1 text-center", "1=Muy mal · 2=Regular · 3=Normal · 4=Bien · 5=Muy bien")
+                  div(cls:="text-center mt-1 small text-muted", "Toca donde intervino (Parada/Corte/Pase)"),
+                  input(tpe:="hidden", name:="mapaCampo", id:="hiddenFieldMap", value:="")
                 ),
 
+                // ── FOOTBAR (SENSOR GPS DE RENDIMIENTO) — OPCIONAL ───────
+                div(cls:="mb-4 p-3 border border-info rounded", style:="background:rgba(13,202,240,0.05);",
+                  div(cls:="d-flex justify-content-between align-items-center", style:="cursor:pointer;", onclick:="toggleFootbar()",
+                    label(cls:="text-info fw-bold small mb-0", style:="cursor:pointer;", "🦵 DATOS FOOTBAR (opcional)"),
+                    span(id:="footbarChevron", cls:="text-info small", "▼")
+                  ),
+                  div(id:="footbarPanel", style:="display:none;",
+                    div(cls:="xx-small text-muted mt-2 mb-2", "Introduce los datos del sensor Footbar tras el partido. Se guardan solo si rellenas la distancia."),
+                    div(cls:="xx-small text-info fw-bold mb-1", "INFORME FISICO"),
+                    div(cls:="row g-2 mb-2",
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Distancia (km)"), input(tpe:="number", step:="0.01", min:="0", name:="fbDistancia", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Alta intensidad (m)"), input(tpe:="number", step:="1", min:="0", name:="fbAltaIntensidad", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Sprint max (km/h)"), input(tpe:="number", step:="0.1", min:="0", name:="fbSprintMax", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "% Actividad"), input(tpe:="number", step:="0.1", min:="0", max:="100", name:="fbPctActividad", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiempo actividad (min)"), input(tpe:="number", step:="1", min:="0", name:="fbTiempoActividad", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Aceleraciones"), input(tpe:="number", step:="1", min:="0", name:="fbAceleraciones", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Desaceleraciones"), input(tpe:="number", step:="1", min:="0", name:="fbDesaceleraciones", cls:="form-control form-control-sm bg-dark text-white border-info"))
+                    ),
+                    div(cls:="xx-small text-info fw-bold mb-1 mt-2", "INFORME TECNICO"),
+                    div(cls:="row g-2",
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Balones"), input(tpe:="number", step:="1", min:="0", name:="fbBalones", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Pases"), input(tpe:="number", step:="1", min:="0", name:="fbPases", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiempo con balon (s)"), input(tpe:="number", step:="1", min:="0", name:="fbTiempoBalon", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Disparos"), input(tpe:="number", step:="1", min:="0", name:="fbDisparos", cls:="form-control form-control-sm bg-dark text-white border-info")),
+                      div(cls:="col-6", label(cls:="xx-small text-muted fw-bold", "Tiro max (km/h)"), input(tpe:="number", step:="0.1", min:="0", name:="fbTiroMax", cls:="form-control form-control-sm bg-dark text-white border-info"))
+                    )
+                  )
+                ),
+
+                ),
+
+                // ── CONTEXTO Y EXTRAS (colapsable; recuerda su estado) ──
+                seccion("⚙️ Contexto y extras")(
                 // ── BLOQUE C: CONTEXTO AVANZADO (opcional) ─────────────────
                 div(cls := "mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
                   div(cls := "d-flex justify-content-between align-items-center", style := "cursor:pointer;", onclick := "toggleContextoAvanzado()",
@@ -645,6 +590,38 @@ object MatchController extends cask.Routes {
                   )
                 ),
 
+                // ── NUTRICION E HIDRATACION PRE-PARTIDO ───────────────────
+                div(cls := "mb-4 p-2 border border-success rounded bg-success bg-opacity-10",
+                  label(cls := "form-label text-success small fw-bold w-100 text-center", "🍽️ NUTRICIÓN PRE-PARTIDO (opcional)"),
+                  div(cls := "xx-small text-muted mb-1", "Comida de las 3h antes del partido"),
+                  select(name := "nutricionPrepartido", cls := "form-select form-select-sm bg-dark text-white fw-bold mb-2",
+                    option(value := "", "— Sin especificar —"),
+                    option(value := "completa", "Comida completa (pasta, arroz, proteína)"),
+                    option(value := "ligera", "Comida ligera (bocadillo, fruta)"),
+                    option(value := "snack", "Solo snack (galletas, barrita)"),
+                    option(value := "sin_comer", "Sin comer o muy poco"),
+                    option(value := "no_adecuada", "Comida no adecuada (rápida, pesada)")
+                  ),
+                  div(cls := "xx-small text-muted mb-1", "Horas desde la última comida"),
+                  select(name := "horasUltimaComida", cls := "form-select form-select-sm bg-dark text-white fw-bold mb-2",
+                    option(value := "", "— Sin especificar —"),
+                    option(value := "0", "Menos de 1h"), option(value := "1", "1-2h"),
+                    option(value := "2", "2-3h"), option(value := "3", "Más de 3h")),
+                  div(cls := "xx-small text-muted mb-1", "Hidratación antes del partido"),
+                  div(cls := "btn-group w-100 mb-2", attr("role") := "group",
+                    frag(DatabaseManager.etiquetasHidratacion.toSeq.sortBy { case (k, _) => Seq("BIEN", "NORMAL", "POCO").indexOf(k) }.map { case (k, et) =>
+                      frag(
+                        input(tpe := "radio", cls := "btn-check", name := "hidratacion", id := s"hidra_$k", value := k),
+                        label(cls := "btn btn-outline-success btn-sm", `for` := s"hidra_$k", et))
+                    }: _*)),
+                  div(cls := "xx-small text-muted mb-1", "¿Desayunó bien?"),
+                  div(cls := "btn-group w-100", attr("role") := "group",
+                    input(tpe := "radio", cls := "btn-check", name := "desayuno", id := "desayuno_si", value := "true"),
+                    label(cls := "btn btn-outline-success btn-sm", `for` := "desayuno_si", "✅ Sí"),
+                    input(tpe := "radio", cls := "btn-check", name := "desayuno", id := "desayuno_no", value := "false"),
+                    label(cls := "btn btn-outline-success btn-sm", `for` := "desayuno_no", "❌ No o poco"))
+                ),
+
                 // ── BLOQUE S: TOOLKIT DE REGULACIÓN EMOCIONAL (solo si hay goles encajados) ──
                 div(id := "regulacionEmocionalPanel", style := "display:none;", cls := "mb-4 p-2 border border-info rounded bg-info bg-opacity-10",
                   label(cls := "form-label text-info small fw-bold w-100 text-center", "🧠 ¿QUÉ HIZO HÉCTOR EN LOS 30 SEGUNDOS DESPUÉS DEL GOL MÁS IMPORTANTE?"),
@@ -660,6 +637,19 @@ object MatchController extends cask.Routes {
                         label(cls := "btn btn-outline-info btn-sm w-100 mb-1", `for` := s"regem_$v", txt)
                       )
                     }
+                  )
+                ),
+
+                // ── COMPORTAMIENTO BAJO PRESION ──────────────────────────
+                div(cls := "mb-4 p-2 border border-info rounded bg-info bg-opacity-10",
+                  label(cls := "form-label text-info small fw-bold w-100 text-center", "🧠 COMPORTAMIENTO TRAS GOLES ENCAJADOS"),
+                  select(name := "comportamientoPresion", cls := "form-select form-select-sm bg-dark text-white fw-bold",
+                    option(value := "NA", "— Sin goles encajados / No aplica"),
+                    option(value := "RAPIDO", "✅ Se repuso rápido — recuperó concentración en menos de 2 minutos"),
+                    option(value := "LIDER", "💪 Lideró al equipo — animó a los compañeros o dirigió la defensa"),
+                    option(value := "NEUTRO", "😐 Neutro — ni se afectó ni lideró"),
+                    option(value := "AFECTADO", "😟 Se afectó visiblemente — bajó el nivel en los siguientes minutos"),
+                    option(value := "INTENSO", "🔥 Reaccionó con más intensidad — el gol le activó")
                   )
                 ),
 
@@ -708,6 +698,43 @@ object MatchController extends cask.Routes {
                       }: _*)))
                   case None => frag()
                 },
+
+                // 6. ENTORNO Y NOTAS
+                div(cls:="mb-4 p-2 border border-secondary rounded bg-secondary bg-opacity-10",
+                  label(cls:="form-label text-white small fw-bold w-100 text-center", "ENTORNO"),
+                  div(cls:="row mb-2",
+                    div(cls:="col-6",
+                      div(cls:="d-flex justify-content-between align-items-center",
+                        label(cls:="small text-muted fw-bold", "Clima"),
+                        span(id:="climaAutoBadge", cls:="badge bg-info text-dark xx-small", style:="display:none;", "🌐 Auto")
+                      ),
+                      select(name:="clima", id:="climaSelect", cls:="form-select form-select-sm bg-dark text-white fw-bold", onchange:="document.getElementById('climaAutoBadge').style.display='none';", option(value:="Sol", "Sol"), option(value:="Nubes", "Nubes"), option(value:="Lluvia", "Lluvia"), option(value:="Nublado", "Nublado"), option(value:="Frio", "Frio"), option(value:="Calor", "Calor"), option(value:="Viento", "Viento"))),
+                    div(cls:="col-6", label(cls:="small text-muted fw-bold", "Temp (C)"), input(tpe:="number", name:="temp", cls:="form-control form-control-sm bg-dark text-white fw-bold", value:="20"))
+                  )
+                ),
+                div(cls:="mb-3 p-2 border border-danger rounded bg-danger bg-opacity-10", label(cls:="form-label text-danger small fw-bold w-100 text-center", "SALA DE VIDEO"), input(tpe:="url", name:="video", cls:="form-control form-control-sm bg-dark text-white fw-bold", placeholder:="Link Video (Youtube/Drive)")),
+                div(cls:="mb-3", label(cls:="form-label text-white small fw-bold", "ANOTACIONES DEL ENTRENADOR"), textarea(name:="notas", cls:="form-control form-control-sm bg-dark text-white fw-bold", rows:="3", placeholder:="Notas generales: Saques, posicionamiento, lectura del juego, voz de mando...")),
+                input(tpe:="hidden", name:="reaccion", value:=""),  // campo legacy mantenido para DB
+                ),
+
+                // Boton flotante (movil): abre o cierra de golpe las secciones del formulario sin perder el scroll
+                button(tpe := "button", id := "btnSeccionesPartido", cls := "btn btn-sm btn-secondary fw-bold shadow d-lg-none",
+                  style := "position:fixed; right:12px; bottom:86px; z-index:1001; border-radius:20px; opacity:0.92;",
+                  onclick := "alternarSeccionesPartido()", "⤢ Secciones"),
+                script(raw("""
+                  function alternarSeccionesPartido(){
+                    var btns = Array.prototype.slice.call(document.querySelectorAll('form .guardian-section-toggle'));
+                    var hayCerradas = btns.some(function(b){ return b.nextElementSibling.classList.contains('collapsed'); });
+                    btns.forEach(function(b){ if (b.nextElementSibling.classList.contains('collapsed') === hayCerradas) toggleSection(b); });
+                  }
+                  // /match-center?quick=1 abre directamente el registro minimo
+                  (function(){
+                    if (new URLSearchParams(location.search).get('quick') !== '1') return;
+                    var p = document.getElementById('quickPanel'), c = document.getElementById('quickChevron');
+                    if (p) { p.style.display = 'block'; if (c) c.textContent = '▲'; p.scrollIntoView({block:'center'}); }
+                    var r = p ? p.querySelector('input[name="rival"]') : null; if (r) r.focus();
+                  })();
+                """)),
 
                 div(cls := "d-grid", button(tpe := "submit", cls := "btn btn-success btn-lg py-3 fw-bold", "GUARDAR PARTIDO"))
               ) // fin form
