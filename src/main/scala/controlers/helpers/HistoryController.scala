@@ -229,12 +229,39 @@ object HistoryController extends cask.Routes {
     }
 
     // 1. Generamos las filas de la tabla (solo lectura si la temporada esta archivada)
-    val tableRows = if (matches.isEmpty) {
-      Seq(tr(td(colspan := 4, cls := "text-center p-4", "Sin partidos")))
-    } else {
+    val tarjetas: Modifier = if (matches.isEmpty) sinDatos("Partidos de esta temporada")
+    else {
       val sourceBadges = DatabaseManager.getMatchSourceBadges(efectivo)
-      matches.map(m => renderMatchRow(m, zScoresByMatchId.get(m.id), readOnly = esArchivada, sourceBadge = sourceBadges.get(m.id)))
+      val detalles = DatabaseManager.getDetalleHistorial(efectivo)
+      div(matches.map(m => renderMatchCard(m, zScoresByMatchId.get(m.id), readOnly = esArchivada,
+        sourceBadge = sourceBadges.get(m.id), detalle = detalles.getOrElse(m.id, Map.empty))))
     }
+    // KPIs de la temporada en una fila
+    val kpisTemporada: Modifier = if (matches.isEmpty) frag() else {
+      val gcs = matches.flatMap(_.resultado.split("-").lift(1).flatMap(_.trim.toIntOption))
+      val conNota = matches.filter(_.nota > 0)
+      div(cls := "d-flex justify-content-between text-center mb-2 p-2", style := "background:#0f172a; border:1px solid #334155; border-radius:10px;",
+        frag(Seq(
+          (matches.size.toString, "PJ"),
+          (if (gcs.nonEmpty) f"${gcs.sum.toDouble / gcs.size}%.1f" else "—", "GC/partido"),
+          (if (gcs.nonEmpty) s"${gcs.count(_ == 0) * 100 / gcs.size}%" else "—", "% PC0"),
+          (if (conNota.nonEmpty) f"${conNota.map(_.nota).sum / conNota.size}%.1f" else "—", "Nota media")
+        ).map { case (v, l) => div(div(style := "font-size:18px; font-weight:900; color:#facc15;", v), div(style := "font-size:9px; color:#94a3b8;", l)) }: _*))
+    }
+    val filtros: Modifier = div(cls := "d-flex gap-1 mb-2", style := "overflow-x:auto;",
+      frag(Seq("todos" -> "Todos", "V" -> "Victorias", "D" -> "Derrotas", "pc0" -> "Porterías a cero", "video" -> "Con vídeo").zipWithIndex.map { case ((k, t), i) =>
+        button(tpe := "button", cls := s"hchip${if (i == 0) " active" else ""}", attr("data-filtro") := k, onclick := "filtrarHistorial(this)", t)
+      }: _*),
+      script(raw("""
+        function filtrarHistorial(btn){
+          var f = btn.getAttribute('data-filtro');
+          document.querySelectorAll('.hchip').forEach(function(b){ b.classList.toggle('active', b === btn); });
+          document.querySelectorAll('.hcard').forEach(function(c){
+            var ok = f === 'todos' || (f === 'pc0' ? c.getAttribute('data-pc0') === '1' : f === 'video' ? c.getAttribute('data-video') === '1' : c.getAttribute('data-res') === f);
+            c.style.display = ok ? '' : 'none';
+          });
+        }
+      """)))
 
     // 2. Definimos el contenido central (SIN llamar a basePage aqui)
     val mainContent = div(cls := "row justify-content-center",
@@ -244,25 +271,15 @@ object HistoryController extends cask.Routes {
           a(href := "/mapa-goles", cls := "btn btn-outline-danger btn-sm fw-bold", "MAPA DE GOLES")
         ),
         if (msg.nonEmpty) div(cls := "alert alert-warning small p-2 mb-3", msg) else frag(),
+        kpisTemporada,
         seasonSelector(temporadas, efectivo, "/history"),
         // BLOQUE C: confianza de los indicadores por fila (Z-Score y CPI)
         if (zScoresByMatchId.nonEmpty) badgeConfianza("z_score", zScoresByMatchId.size, "Z-Score · ") else frag(),
         { val nCpi = matches.count(_.cpi.isDefined); if (nCpi > 0) badgeConfianza("cpi", nCpi, "CPI · ") else frag() },
         archivadaBanner,
         resumenArchivada,
-        div(cls := "card shadow-sm border-0",
-          div(cls := "card-body p-0",
-            table(cls := "table table-hover tm-table mb-0",
-              thead(tr(
-                th("Rival"),
-                th(cls:="text-center", "Res"),
-                th(cls:="text-center", "Nota"),
-                th(cls:="text-end", "Accion")
-              )),
-              tbody(tableRows)
-            )
-          )
-        )
+        filtros,
+        tarjetas
       )
     )
 

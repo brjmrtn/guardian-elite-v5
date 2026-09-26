@@ -81,32 +81,53 @@ object SharedLayout {
       java.net.URLDecoder.decode(kv(0), "UTF-8") -> (if (kv.length > 1) java.net.URLDecoder.decode(kv(1), "UTF-8") else "")
     }.toMap
 
-  def renderMatchRow(m: MatchLog, zScoreOpt: Option[Double] = None, readOnly: Boolean = false,
-                     sourceBadge: Option[String] = None) = {
-    val notaCls = if (m.nota >= 7) "table-success" else if (m.nota >= 5) "table-warning" else "table-danger"
-    val audioIcon = if (m.analisisVoz.nonEmpty) span(style := "color:#8b5cf6;", "🎙️") else span("🎤")
-    // BLOQUE C: badge si el partido coincidio con un periodo de examenes escolares
-    val examenesBadge: Modifier =
-      if (DatabaseManager.esFechaDeExamenes(m.fecha)) span(cls := "badge bg-secondary xx-small d-block mt-1", "📚 Semana de exámenes") else frag()
-    // BLOQUE D/S: registro minimo pendiente de completar / partido importado por CSV
-    val origenBadge: Modifier = sourceBadge match {
-      case Some("QUICK_PENDIENTE") => span(cls := "badge bg-warning text-dark xx-small d-block mt-1", "⚡ Datos pendientes")
-      case Some("IMPORTADO")       => span(cls := "badge bg-info text-dark xx-small d-block mt-1", "📥 Importado")
-      case _                       => frag()
+  /**
+   * Partido del historial como tarjeta compacta de una linea (fecha, rival, resultado y nota); al pulsarla se
+   * despliega el detalle. Los data-* alimentan los filtros de la pagina.
+   */
+  def renderMatchCard(m: MatchLog, zScoreOpt: Option[Double] = None, readOnly: Boolean = false,
+                      sourceBadge: Option[String] = None, detalle: Map[String, Any] = Map.empty): Modifier = {
+    val (gf, gc) = m.resultado.split("-").map(_.trim.toIntOption) match {
+      case Array(Some(a), Some(b)) => (Some(a), Some(b)); case _ => (None, None)
     }
-    tr(cls := notaCls,
-      td(div(fixEncoding(m.rival)), div(cls := "xx-small text-muted", m.fecha.take(10)), examenesBadge, origenBadge),
-      td(m.resultado),
-      td(cls := "text-center fw-bold", m.nota.toString,
-        m.cpi.map(c => span(cls := "xx-small text-info d-block", attr("title") := "El CPI ajusta la nota por la dificultad real del contexto: rival, condiciones físicas, clima y si jugó en casa o fuera.", f"CPI: $c%.1f")).getOrElse(frag()),
-        zScoreOpt.map(zScoreBadge).getOrElse(frag())),
-      td(cls := "text-end",
-        if (readOnly) frag() else a(href := s"/match/edit/${m.id}", cls := "text-decoration-none me-2", "✏️"),
-        if (m.paradas > 0) a(href := s"/history/paradas/${m.id}", cls := "text-decoration-none me-2", attr("title") := "Desglosar paradas", "📊") else frag(),
-        a(href := s"/audio-diary/partido/${m.id}", cls := "text-decoration-none", audioIcon),
-        a(href := s"/partido-card/${m.id}", target := "_blank", cls := "text-decoration-none ms-2", attr("title") := "Compartir", "📤")
-      )
-    )
+    val res = (gf, gc) match { case (Some(a), Some(b)) if a > b => "V"; case (Some(a), Some(b)) if a < b => "D"; case (Some(_), Some(_)) => "E"; case _ => "" }
+    val notaColor = if (m.nota >= 7) "#20c997" else if (m.nota >= 5) "#f59e0b" else "#ef4444"
+    val pendiente = sourceBadge.contains("QUICK_PENDIENTE")
+    val videoIA = detalle.get("videoIA").exists(_.asInstanceOf[Boolean])
+    val audioIcon = if (m.analisisVoz.nonEmpty) span(style := "color:#8b5cf6;", "🎙️") else span("🎤")
+    val rubrica = detalle.getOrElse("rubrica", Nil).asInstanceOf[List[Option[Int]]]
+    val goles = detalle.getOrElse("goles", Nil).asInstanceOf[List[String]]
+    tag("details")(cls := s"hcard${if (pendiente) " hcard-pendiente" else ""}",
+      attr("data-res") := res, attr("data-pc0") := (if (gc.contains(0)) "1" else "0"), attr("data-video") := (if (videoIA || m.video.nonEmpty) "1" else "0"),
+      tag("summary")(cls := "hcard-sum",
+        span(cls := "hcard-fecha", m.fecha.take(10).drop(5).split("-").reverse.mkString("/")),
+        span(cls := "hcard-rival", fixEncoding(m.rival)),
+        span(cls := "hcard-res", m.resultado),
+        span(cls := "hcard-nota", style := s"background:$notaColor;", f"${m.nota}%.1f")),
+      div(cls := "hcard-body",
+        div(cls := "d-flex flex-wrap gap-1 mb-2",
+          sourceBadge match {
+            case Some("QUICK_PENDIENTE") => span(cls := "badge bg-warning text-dark", "⚡ Datos pendientes")
+            case Some("IMPORTADO") => span(cls := "badge bg-info text-dark", "📥 Importado")
+            case _ => frag()
+          },
+          if (DatabaseManager.esFechaDeExamenes(m.fecha)) span(cls := "badge bg-secondary", "📚 Semana de exámenes") else frag(),
+          m.cpi.map(c => span(cls := "badge bg-dark border border-info text-info", attr("title") := "El CPI ajusta la nota por la dificultad real del contexto: rival, condiciones físicas, clima y si jugó en casa o fuera.", f"CPI $c%.1f")).getOrElse(frag()),
+          zScoreOpt.map(zScoreBadge).getOrElse(frag()),
+          if (videoIA) span(cls := "badge bg-danger", "🎬 Vídeo IA") else frag()),
+        if (rubrica.exists(_.isDefined))
+          div(cls := "xx-small mb-1", span(cls := "text-muted", "Rúbrica: "),
+            Seq("Pos", "Dec", "Pie", "Com", "Act").zip(rubrica).map { case (e, v) => s"$e ${v.map(_.toString).getOrElse("—")}" }.mkString(" · "))
+        else div(cls := "xx-small text-muted mb-1", "Rúbrica sin completar"),
+        div(cls := "xx-small mb-1", span(cls := "text-muted", "Paradas: "),
+          s"${m.paradas} (${m.p1v1} en 1v1 · ${m.pAir} aéreas · ${m.pPie} con el pie) · ${m.minutos} min"),
+        if (goles.nonEmpty) div(cls := "xx-small mb-1", span(cls := "text-muted", "Goles: "), goles.mkString(", ")) else frag(),
+        if (m.notas.trim.nonEmpty) div(cls := "xx-small text-muted fst-italic mb-1", fixEncoding(m.notas).take(200)) else frag(),
+        div(cls := "d-flex gap-3 mt-2",
+          if (readOnly) frag() else a(href := s"/match/edit/${m.id}", cls := "text-decoration-none", "✏️ Editar"),
+          if (m.paradas > 0) a(href := s"/history/paradas/${m.id}", cls := "text-decoration-none", "📊 Paradas") else frag(),
+          a(href := s"/audio-diary/partido/${m.id}", cls := "text-decoration-none", audioIcon, " Audio"),
+          a(href := s"/partido-card/${m.id}", target := "_blank", cls := "text-decoration-none", "📤 Compartir"))))
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -452,6 +473,20 @@ object SharedLayout {
     body.light-mode .gnav-bar, body.light-mode .gnav-side { background: #fff !important; border-color: #ddd !important; }
     body.light-mode .gnav-sub { background: rgba(255,255,255,0.9); }
     body.light-mode .gnav-tile, body.light-mode .gnav-link { color: #333; }
+
+    /* HISTORIAL: tarjetas de partido desplegables y filtros */
+    .hcard { background: #1e293b; border: 1px solid #334155; border-radius: 10px; margin-bottom: 6px; }
+    .hcard-pendiente { border-color: #facc15; background: rgba(250,204,21,0.08); }
+    .hcard-sum { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; list-style: none; color: #e2e8f0; }
+    .hcard-sum::-webkit-details-marker { display: none; }
+    .hcard-fecha { font-size: 11px; color: #94a3b8; min-width: 38px; }
+    .hcard-rival { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hcard-res { font-weight: 700; min-width: 34px; text-align: center; }
+    .hcard-nota { color: #111; font-weight: 900; border-radius: 6px; padding: 2px 8px; min-width: 42px; text-align: center; }
+    .hcard-body { padding: 0 12px 10px; color: #e2e8f0; }
+    .hchip { background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 14px; padding: 4px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .hchip.active { background: #d4af37; color: #111; border-color: #d4af37; }
+    body.light-mode .hcard { background: #f8fafc; border-color: #cbd5e1; } body.light-mode .hcard-sum, body.light-mode .hcard-body { color: #1e293b; }
 
     /* PATRONES COMUNES: secciones colapsables, sin datos, pestanas */
     .guardian-section-toggle { width: 100%; text-align: left; background: #1e293b; color: #94a3b8; border: 1px solid #334155;

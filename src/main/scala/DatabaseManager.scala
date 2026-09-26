@@ -12699,6 +12699,35 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
     Map("importados" -> importados, "errores" -> errores, "detalle" -> detalle.toList)
   }
 
+  /**
+   * Detalle de cada partido para el historial (una consulta por temporada): rubrica (5 dimensiones),
+   * goles encajados (zona, cuarto, situacion) y si tiene analisis de video por IA.
+   */
+  def getDetalleHistorial(seasonId: Int = 0): Map[Int, Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT id, rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud,
+          (video_analisis_ia IS NOT NULL AND video_analisis_ia <> '') as video_ia
+        FROM matches WHERE status = 'PLAYED' ${seasonFilter(seasonId)}""")
+      val base = Iterator.continually(rs).takeWhile(_.next()).map { r =>
+        def oi(c: String) = Option(r.getObject(c)).map(_ => r.getInt(c))
+        r.getInt("id") -> Map[String, Any](
+          "rubrica" -> List("rubrica_posicion", "rubrica_decisiones", "rubrica_pies", "rubrica_comunicacion", "rubrica_actitud").map(oi),
+          "videoIA" -> r.getBoolean("video_ia"))
+      }.toMap
+      val rsG = conn.createStatement().executeQuery(s"""
+        SELECT g.match_id, g.zona_gol, g.minuto, g.situacion FROM match_goals g JOIN matches m ON m.id = g.match_id
+        WHERE m.status = 'PLAYED' ${seasonFilter(seasonId, "m")} ORDER BY g.match_id, g.minuto, g.id""")
+      val goles = Iterator.continually(rsG).takeWhile(_.next()).map { r =>
+        val m = r.getInt("minuto")
+        val cuarto = if (m <= 0) "" else if (m <= 12) " Q1" else if (m <= 25) " Q2" else if (m <= 37) " Q3" else " Q4"
+        r.getInt("match_id") -> (Option(r.getString("zona_gol")).getOrElse("?") + cuarto + Option(r.getString("situacion")).filter(_.nonEmpty).map(" · " + _).getOrElse(""))
+      }.toList.groupBy(_._1).map { case (k, l) => k -> l.map(_._2) }
+      base.map { case (id, d) => id -> (d + ("goles" -> goles.getOrElse(id, Nil))) }
+    } finally { conn.close() }
+  }
+
   /** Badges de origen para el historial: QUICK_PENDIENTE (registro minimo sin rubrica completa) e IMPORTADO. */
   def getMatchSourceBadges(seasonId: Int = 0): Map[Int, String] = {
     val conn = getConnection()
