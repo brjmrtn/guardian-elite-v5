@@ -2840,6 +2840,28 @@ $analisisConcatenados"""
     } finally { conn.close() }
   }
 
+  /** Analisis IA del progreso del IDP (solo al pulsar el boton). Se guarda en idp_temporadas.resumen_ia. */
+  def generarAnalisisIdp(temporadaId: Int): String = {
+    val objetivos = getIdpObjetivos(temporadaId)
+    if (objetivos.isEmpty) return "Error: el IDP no tiene objetivos"
+    val edad = calcularEdadExacta(getLatestCardData().fechaNacimiento)
+    val lineas = objetivos.map { o =>
+      s"- ${o("dimension")}: ${o("objetivo")} | métrica: ${o("metrica")} | actual: ${o("valorActual")} → objetivo: ${o("valorObjetivo")} | progreso ${o("progresoPct")}% | fecha límite ${o("fechaLimite")} | estado ${o("estado")}"
+    }.mkString("\n")
+    val prompt = s"""Eres el entrenador de porteros de Héctor, de $edad años. Este es el estado de su Plan de Desarrollo Individual a ${LocalDate.now()}:
+$lineas
+En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál necesita más atención, si alguno parece poco realista para la fecha límite, y una acción concreta para las próximas dos semanas. Texto plano, sin listas."""
+    val r = AIProvider.ask(prompt).trim
+    if (r.nonEmpty && !r.startsWith("Error")) {
+      val conn = getConnection()
+      try {
+        val ps = conn.prepareStatement("UPDATE idp_temporadas SET resumen_ia = ? WHERE id = ?")
+        ps.setString(1, r); ps.setInt(2, temporadaId); ps.executeUpdate()
+      } finally { conn.close() }
+    }
+    r
+  }
+
   def getIdpObjetivos(temporadaId: Int): List[Map[String, Any]] = {
     val conn = getConnection()
     try {

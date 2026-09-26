@@ -4673,7 +4673,8 @@ object CareerController extends cask.Routes {
                   div(cls := "progress-bar", style := s"width:$progreso%; background:$progresoColor;")
                 ),
                 div(cls := "xx-small text-muted mb-2", s"Fecha límite: $fechaLimiteTxt"),
-                form(action := s"/idp/objetivo/$objId/notas", method := "post", cls := "mb-2",
+                tag("details")(tag("summary")(cls := "xx-small text-info", style := "cursor:pointer;", "✏️ Notas y ajuste"),
+                form(action := s"/idp/objetivo/$objId/notas", method := "post", cls := "mb-2 mt-2",
                   textarea(name := "notas", cls := "form-control form-control-sm bg-dark text-white border-secondary",
                     rows := "2", placeholder := "Notas...", notasTxt),
                   button(tpe := "submit", cls := "btn btn-sm btn-outline-secondary mt-1", "💾 Guardar notas")
@@ -4687,7 +4688,7 @@ object CareerController extends cask.Routes {
                       value := fechaLimiteTxt),
                     button(tpe := "submit", cls := "btn btn-sm btn-warning fw-bold w-100", "Guardar ajuste")
                   )
-                )
+                ))
               )
             )
           )
@@ -4711,6 +4712,12 @@ object CareerController extends cask.Routes {
             )
           }: _*)
 
+        // proxima revision mensual: 30 dias despues de la ultima (o del inicio del IDP)
+        val ultimaRevision = revisiones.headOption.map(r => java.time.LocalDate.parse(r("fecha").toString))
+          .getOrElse(java.time.LocalDate.parse(temp("fechaInicio").toString))
+        val proximaRevisionFecha = ultimaRevision.plusDays(30)
+        val revisionPendiente = !proximaRevisionFecha.isAfter(java.time.LocalDate.now())
+        val proximaRevision = proximaRevisionFecha.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", new java.util.Locale("es", "ES")))
         val temporadaTxt: String = temp("temporada").asInstanceOf[String]
         val fechaInicioTxt: String = temp("fechaInicio").asInstanceOf[String]
         val fechaFinTxt: String = temp("fechaFin").asInstanceOf[String]
@@ -4735,12 +4742,14 @@ object CareerController extends cask.Routes {
                 )
               ),
               div(cls := "row", objetivoCards),
-              div(cls := "card bg-dark border-secondary shadow mt-3",
-                div(cls := "card-header text-white fw-bold small", "📅 REVISIONES"),
-                div(cls := "card-body p-3", revisionesList)
-              ),
-              div(cls := "card bg-dark border-secondary shadow mt-3",
-                div(cls := "card-header text-white fw-bold small", "➕ Revisión mensual"),
+              // Reto de Hector de esta semana y proxima revision mensual
+              DatabaseManager.getRetoSemana().map(r => div(cls := "card bg-dark border-warning p-2 mb-2 small",
+                span(cls := "text-warning fw-bold", "🎯 Reto de Héctor esta semana: "), r("reto").toString)).getOrElse(frag()),
+              div(cls := s"card bg-dark p-2 mb-3 small ${if (revisionPendiente) "border-danger" else "border-secondary"}",
+                s"📅 Próxima revisión mensual: $proximaRevision" + (if (revisionPendiente) " — pendiente" else "")),
+              seccion("📊 Historial de revisiones")(revisionesList),
+              seccion("➕ Registrar revisión mensual", abierta = revisionPendiente)(
+              div(cls := "card bg-dark border-secondary shadow",
                 div(cls := "card-body p-3",
                   form(action := "/idp/revision/save", method := "post",
                     div(cls := "mb-2",
@@ -4754,7 +4763,15 @@ object CareerController extends cask.Routes {
                     button(tpe := "submit", cls := "btn btn-info fw-bold w-100", "Guardar revisión")
                   )
                 )
-              )
+              )),
+              seccion("🔬 Análisis IA del IDP")(
+                if (temp("resumenIa").toString.nonEmpty)
+                  div(cls := "card bg-dark border-info p-3 mb-2 small", style := "white-space:pre-wrap;", temp("resumenIa").toString)
+                else div(cls := "guardian-sin-datos", "🧠 Aún no hay análisis del IDP — se genera al pulsar el botón (Gemini)."),
+                revisiones.find(_("analisisIa").toString.nonEmpty).map(r =>
+                  div(cls := "xx-small text-muted mb-2", s"Último análisis de revisión (${r("fecha")}): ", span(style := "white-space:pre-wrap;", r("analisisIa").toString))).getOrElse(frag()),
+                form(action := "/idp/analizar", method := "post", cls := "d-grid",
+                  button(tpe := "submit", cls := "btn btn-outline-info fw-bold", "🧠 Analizar IDP ahora")))
             )
           ),
           script(raw("""
@@ -4802,6 +4819,13 @@ object CareerController extends cask.Routes {
   def idpObjetivoAjustarAction(request: cask.Request, id: Int) = withAuth(request) {
     val p = parseBody(request)
     DatabaseManager.ajustarIdpObjetivo(id, p.getOrElse("nuevoValor", ""), p.getOrElse("nuevaFecha", ""))
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/idp"))
+  }
+
+  // Analisis IA del IDP: Gemini solo al pulsar el boton
+  @cask.post("/idp/analizar")
+  def idpAnalizarAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.getActiveIdpTemporada().foreach(t => DatabaseManager.generarAnalisisIdp(t("id").asInstanceOf[Int]))
     cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/idp"))
   }
 
