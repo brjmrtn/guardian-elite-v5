@@ -5827,6 +5827,33 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+  /**
+   * Historico de metricas de portero por partido (economia de movimiento 1-5, calidad de decision %,
+   * velocidad de distribucion) y efectividad global del scanning, para /biomecanica.
+   */
+  def getMetricasPorteroHistorico(seasonId: Int = 0, limite: Int = 10): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(s"""
+        SELECT fecha, rival, economia_movimiento, calidad_decision_pct, velocidad_distribucion FROM matches
+        WHERE status = 'PLAYED' ${seasonFilter(seasonId)}
+          AND (economia_movimiento IS NOT NULL OR calidad_decision_pct IS NOT NULL OR velocidad_distribucion IS NOT NULL)
+        ORDER BY fecha DESC LIMIT ?""")
+      ps.setInt(1, limite)
+      val rs = ps.executeQuery()
+      def oi(r: java.sql.ResultSet, c: String) = Option(r.getObject(c)).map(_ => r.getInt(c))
+      val filas = Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getDate("fecha").toString, fixEncoding(Option(r.getString("rival")).getOrElse("")),
+        oi(r, "economia_movimiento"), oi(r, "calidad_decision_pct"), Option(r.getString("velocidad_distribucion")).filter(_.nonEmpty))).toList
+      val rsS = conn.createStatement().executeQuery(s"""
+        SELECT SUM(scanning_efectivo) as ef, SUM(scanning_rate) as total, COUNT(*) as n FROM matches
+        WHERE status = 'PLAYED' AND scanning_rate > 0 ${seasonFilter(seasonId)}""")
+      rsS.next()
+      val scanTotal = rsS.getInt("total")
+      Map("filas" -> filas, "scanningPartidos" -> rsS.getInt("n"),
+        "scanningPct" -> (if (scanTotal > 0) Some(rsS.getInt("ef") * 100 / scanTotal) else None))
+    } finally { conn.close() }
+  }
+
   def getMovilidadTests(): List[Map[String, Any]] = {
     val conn = getConnection()
     try {

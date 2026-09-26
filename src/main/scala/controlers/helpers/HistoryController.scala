@@ -1512,6 +1512,107 @@ object HistoryController extends cask.Routes {
             ),
             seasonSelector(temporadasDb, efectivo, "/biomecanica"),
 
+            heatmapGolesWidget,
+            conConfianza("paso_negativo", pasoNegativo("n").asInstanceOf[Int], pasoNegativo("suficiente").asInstanceOf[Boolean])(pasoNegativoWidget),
+            conConfianza("1v1_angulo", angulo1v1("n").asInstanceOf[Int], angulo1v1("suficiente").asInstanceOf[Boolean])(angulo1v1Widget),
+
+            // ── Metricas detalladas (colapsable) ──
+            seccion("📊 Métricas detalladas")(
+              {
+                val mh = DatabaseManager.getMetricasPorteroHistorico(efectivo)
+                val filas = mh("filas").asInstanceOf[List[(String, String, Option[Int], Option[Int], Option[String])]]
+                div(
+                  mh("scanningPct").asInstanceOf[Option[Int]] match {
+                    case Some(pct) => conConfianza("scanning_efectividad", mh("scanningPartidos").asInstanceOf[Int])(
+                      div(cls := "card bg-dark border-success p-2 mb-3 small", s"👁️ Scanning efectivo de la temporada: $pct% de los escaneos encontraron un compañero libre"))
+                    case None => SharedLayout.sinDatos("Scanning efectividad")
+                  },
+                  if (filas.isEmpty) SharedLayout.sinDatos("Economía de movimiento, calidad de decisión y velocidad de distribución", "Se registran en 'Métricas de portero' / 'Contexto' del formulario de partido")
+                  else div(cls := "card bg-dark border-secondary mb-3",
+                    div(cls := "card-header text-white fw-bold small", "📈 ECONOMÍA · CALIDAD DE DECISIÓN · DISTRIBUCIÓN — últimos partidos"),
+                    div(cls := "table-responsive", table(cls := "table table-dark table-sm mb-0 xx-small",
+                      thead(tr(th("Fecha"), th("Rival"), th(cls := "text-center", "Economía"), th(cls := "text-center", "Decisión"), th(cls := "text-center", "Distribución"))),
+                      tbody(frag(filas.map { case (f, r, e, c, v) =>
+                        def txt(o: Option[Any], suf: String): String = o.map(_.toString + suf).getOrElse("-")
+                        tr(td(f.drop(5)), td(r), td(cls := "text-center", txt(e, "/5")),
+                          td(cls := "text-center", txt(c, "%")), td(cls := "text-center", txt(v, "")))
+                      }: _*))))))
+              },
+            conConfianza("rendimiento_por_fase", rendimientoFase("n").asInstanceOf[Int], rendimientoFase("suficiente").asInstanceOf[Boolean])(vulnerabilidadWidget),
+            // BLOQUE C: CONTROL DE BALON PARADO ──────────────────────────
+            {
+              val nSP           = setPieceStats("nPartidosConDatos").asInstanceOf[Int]
+              val ratioDominio  = setPieceStats("ratioDominio").asInstanceOf[Double]
+              val totalDom      = setPieceStats("totalDominados").asInstanceOf[Int]
+              val totalCed      = setPieceStats("totalCedidos").asInstanceOf[Int]
+              val totalFaltasSP = setPieceStats("totalFaltas").asInstanceOf[Int]
+              val tendenciaSP   = setPieceStats("tendencia").asInstanceOf[String]
+              val notaDominioSP   = setPieceStats("notaMediaDominio").asInstanceOf[Double]
+              val notaNoDominioSP = setPieceStats("notaMediaNoDominio").asInstanceOf[Double]
+              val serieFechasSP = setPieceStats("serieFechas").asInstanceOf[List[String]]
+              val serieRatiosSP = setPieceStats("serieRatios").asInstanceOf[List[Double]]
+
+              if (nSP == 0) div(cls:="card bg-dark border-secondary shadow mb-4",
+                div(cls:="card-header text-white fw-bold small", "🏴 CONTROL DE BALÓN PARADO"),
+                div(cls:="card-body text-center text-muted small py-4", "Sin datos de balón parado registrados todavía.")
+              ) else {
+                val barColor = if (ratioDominio >= 70) "success" else if (ratioDominio >= 50) "warning" else "danger"
+                val fraseAuto: Modifier =
+                  if (nSP >= 5) {
+                    val interpretacion =
+                      if (ratioDominio >= 70) "un dominio claro del juego aéreo — un diferencial de élite para su edad"
+                      else if (ratioDominio >= 50) "un control razonable, con margen de mejora en la toma de decisión de salida"
+                      else "dificultad para imponerse en el área — foco recomendado en salidas aéreas"
+                    div(cls:="alert alert-secondary small mt-2",
+                      f"Héctor domina el $ratioDominio%.0f%% de los córners — $interpretacion.")
+                  } else div()
+
+                val labelsJson = serieFechasSP.map(f => "\"" + f + "\"").mkString("[",",","]")
+                val ratiosJson = serieRatiosSP.map(r => f"$r%.0f").mkString("[",",","]")
+
+                div(cls:="card bg-dark border-warning shadow mb-4",
+                  div(cls:="card-header text-warning fw-bold small", "🏴 CONTROL DE BALÓN PARADO"),
+                  div(cls:="card-body p-3",
+                    div(cls:="d-flex justify-content-between align-items-center mb-1",
+                      span(cls:="small text-muted", "Dominio aéreo en córners"),
+                      span(cls:=s"fw-bold text-$barColor", f"$ratioDominio%.0f%%")
+                    ),
+                    div(cls:="progress mb-3", style:="height:10px;",
+                      div(cls:=s"progress-bar bg-$barColor", style:=f"width:$ratioDominio%.0f%%;")
+                    ),
+                    div(cls:="row g-2 text-center mb-3",
+                      div(cls:="col-4", div(cls:="fw-bold text-warning", totalDom.toString), div(cls:="xx-small text-muted", "Dominados")),
+                      div(cls:="col-4", div(cls:="fw-bold text-secondary", totalCed.toString), div(cls:="xx-small text-muted", "Cedidos")),
+                      div(cls:="col-4", div(cls:="fw-bold text-info", totalFaltasSP.toString), div(cls:="xx-small text-muted", "Faltas dominadas"))
+                    ),
+                    if (serieRatiosSP.nonEmpty) div(
+                      div(style:="height:180px;", tag("canvas")(id:="chartSetPiece")),
+                      script(raw(s"""
+                        var ctxSP = document.getElementById('chartSetPiece');
+                        if (ctxSP) {
+                          new Chart(ctxSP, {
+                            type: 'line',
+                            data: { labels: $labelsJson, datasets: [{ label: '% Dominio córners', data: $ratiosJson,
+                              borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.15)', borderWidth:2, pointRadius:3, fill:true, tension:0.3 }] },
+                            options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:100 } } }
+                          });
+                        }
+                      """))
+                    ) else div(),
+                    if (notaDominioSP > 0 && notaNoDominioSP > 0) div(cls:="xx-small text-muted mt-2",
+                      f"Nota media cuando domina el área: $notaDominioSP%.1f · cuando no: $notaNoDominioSP%.1f")
+                    else div(),
+                    fraseAuto
+                  )
+                )
+              }
+            },
+
+            paradasAnalysisWidget,
+            ),
+
+            // ── Mapa posicional de la porteria (colapsable) ──
+            seccion("🥅 Mapa posicional de la portería")(
             // Alertas puntos ciegos y zonas fuertes
             div(cls:="row g-2 mb-4",
               div(cls:="col-md-6",
@@ -1623,80 +1724,19 @@ object HistoryController extends cask.Routes {
 
             script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
 
-            // BLOQUE C: CONTROL DE BALON PARADO ──────────────────────────
-            {
-              val nSP           = setPieceStats("nPartidosConDatos").asInstanceOf[Int]
-              val ratioDominio  = setPieceStats("ratioDominio").asInstanceOf[Double]
-              val totalDom      = setPieceStats("totalDominados").asInstanceOf[Int]
-              val totalCed      = setPieceStats("totalCedidos").asInstanceOf[Int]
-              val totalFaltasSP = setPieceStats("totalFaltas").asInstanceOf[Int]
-              val tendenciaSP   = setPieceStats("tendencia").asInstanceOf[String]
-              val notaDominioSP   = setPieceStats("notaMediaDominio").asInstanceOf[Double]
-              val notaNoDominioSP = setPieceStats("notaMediaNoDominio").asInstanceOf[Double]
-              val serieFechasSP = setPieceStats("serieFechas").asInstanceOf[List[String]]
-              val serieRatiosSP = setPieceStats("serieRatios").asInstanceOf[List[Double]]
+            ),
 
-              if (nSP == 0) div(cls:="card bg-dark border-secondary shadow mb-4",
-                div(cls:="card-header text-white fw-bold small", "🏴 CONTROL DE BALÓN PARADO"),
-                div(cls:="card-body text-center text-muted small py-4", "Sin datos de balón parado registrados todavía.")
-              ) else {
-                val barColor = if (ratioDominio >= 70) "success" else if (ratioDominio >= 50) "warning" else "danger"
-                val fraseAuto: Modifier =
-                  if (nSP >= 5) {
-                    val interpretacion =
-                      if (ratioDominio >= 70) "un dominio claro del juego aéreo — un diferencial de élite para su edad"
-                      else if (ratioDominio >= 50) "un control razonable, con margen de mejora en la toma de decisión de salida"
-                      else "dificultad para imponerse en el área — foco recomendado en salidas aéreas"
-                    div(cls:="alert alert-secondary small mt-2",
-                      f"Héctor domina el $ratioDominio%.0f%% de los córners — $interpretacion.")
-                  } else div()
-
-                val labelsJson = serieFechasSP.map(f => "\"" + f + "\"").mkString("[",",","]")
-                val ratiosJson = serieRatiosSP.map(r => f"$r%.0f").mkString("[",",","]")
-
-                div(cls:="card bg-dark border-warning shadow mb-4",
-                  div(cls:="card-header text-warning fw-bold small", "🏴 CONTROL DE BALÓN PARADO"),
-                  div(cls:="card-body p-3",
-                    div(cls:="d-flex justify-content-between align-items-center mb-1",
-                      span(cls:="small text-muted", "Dominio aéreo en córners"),
-                      span(cls:=s"fw-bold text-$barColor", f"$ratioDominio%.0f%%")
-                    ),
-                    div(cls:="progress mb-3", style:="height:10px;",
-                      div(cls:=s"progress-bar bg-$barColor", style:=f"width:$ratioDominio%.0f%%;")
-                    ),
-                    div(cls:="row g-2 text-center mb-3",
-                      div(cls:="col-4", div(cls:="fw-bold text-warning", totalDom.toString), div(cls:="xx-small text-muted", "Dominados")),
-                      div(cls:="col-4", div(cls:="fw-bold text-secondary", totalCed.toString), div(cls:="xx-small text-muted", "Cedidos")),
-                      div(cls:="col-4", div(cls:="fw-bold text-info", totalFaltasSP.toString), div(cls:="xx-small text-muted", "Faltas dominadas"))
-                    ),
-                    if (serieRatiosSP.nonEmpty) div(
-                      div(style:="height:180px;", tag("canvas")(id:="chartSetPiece")),
-                      script(raw(s"""
-                        var ctxSP = document.getElementById('chartSetPiece');
-                        if (ctxSP) {
-                          new Chart(ctxSP, {
-                            type: 'line',
-                            data: { labels: $labelsJson, datasets: [{ label: '% Dominio córners', data: $ratiosJson,
-                              borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.15)', borderWidth:2, pointRadius:3, fill:true, tension:0.3 }] },
-                            options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0, max:100 } } }
-                          });
-                        }
-                      """))
-                    ) else div(),
-                    if (notaDominioSP > 0 && notaNoDominioSP > 0) div(cls:="xx-small text-muted mt-2",
-                      f"Nota media cuando domina el área: $notaDominioSP%.1f · cuando no: $notaNoDominioSP%.1f")
-                    else div(),
-                    fraseAuto
-                  )
-                )
-              }
-            },
-
-            paradasAnalysisWidget,
-            heatmapGolesWidget,
-            conConfianza("paso_negativo", pasoNegativo("n").asInstanceOf[Int], pasoNegativo("suficiente").asInstanceOf[Boolean])(pasoNegativoWidget),
-            conConfianza("1v1_angulo", angulo1v1("n").asInstanceOf[Int], angulo1v1("suficiente").asInstanceOf[Boolean])(angulo1v1Widget),
-            conConfianza("rendimiento_por_fase", rendimientoFase("n").asInstanceOf[Int], rendimientoFase("suficiente").asInstanceOf[Boolean])(vulnerabilidadWidget),
+            // ── Tests de movilidad (colapsable) ──
+            seccion("🧠 Tests de movilidad")(
+              DatabaseManager.getMovilidadTests().lastOption match {
+                case Some(t) => div(cls := "card bg-dark border-secondary p-2 mb-2 small",
+                  s"Último test (${t("fecha")}): " + Seq(
+                    t.get("alcancePie").flatMap(_.asInstanceOf[Option[Int]]).map(v => s"alcance de pie $v cm"),
+                    t.get("asimetria").flatMap(_.asInstanceOf[Option[Int]]).map(v => s"asimetría lateral $v cm")).flatten.mkString(" · "))
+                case None => SharedLayout.sinDatos("Tests de movilidad")
+              },
+              a(href := "/movilidad-tests", cls := "btn btn-sm btn-outline-info fw-bold", "🤸 Ir a tests de movilidad")
+            ),
 
             script(raw("""
             function switchMode(mode) {
