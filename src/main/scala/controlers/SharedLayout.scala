@@ -330,6 +330,8 @@ object SharedLayout {
       body.classList.toggle('collapsed', !abierta);
       btn.querySelector('.toggle-icon').textContent = abierta ? '▲' : '▼';
       try { localStorage.setItem('guardian_section_' + location.pathname + '_' + btn.getAttribute('data-key'), abierta ? '1' : '0'); } catch(e) {}
+      // los graficos dibujados dentro de una seccion cerrada necesitan recalcular su tamano al abrirla
+      if (abierta) window.dispatchEvent(new Event('resize'));
     }
     function mostrarPestana(id, i) {
       var cont = document.querySelector('[data-tabs="' + id + '"]'); if (!cont) return;

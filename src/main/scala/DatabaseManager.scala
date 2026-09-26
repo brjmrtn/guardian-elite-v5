@@ -13709,6 +13709,49 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
     } finally { conn.close() }
   }
 
+  /** Sesiones de los ultimos `dias` dias con su carga (misma formula que getWorkloads): (fecha, tipo, rpe/minutos, carga). */
+  def getSesionesCarga(dias: Int = 28): List[(String, String, String, Double)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("""
+        SELECT fecha, tipo, detalle, carga FROM (
+          SELECT fecha, 'Partido vs ' || COALESCE(rival, '') as tipo, minutos || ' min' as detalle, minutos * 4.0 as carga, 1 as orden
+          FROM matches WHERE status = 'PLAYED' AND fecha >= CURRENT_DATE - ?
+          UNION ALL
+          SELECT fecha, tipo || CASE WHEN tipo_ausencia IS NOT NULL THEN ' (no fue)' ELSE '' END, 'RPE ' || rpe,
+                 60 * rpe * (1 + COALESCE(fb_distancia, 0) * 0.05), 2
+          FROM trainings WHERE fecha >= CURRENT_DATE - ?
+        ) t ORDER BY fecha DESC, orden""")
+      ps.setInt(1, dias); ps.setInt(2, dias)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).map(r =>
+        (r.getDate("fecha").toString, fixEncoding(Option(r.getString("tipo")).getOrElse("")), Option(r.getString("detalle")).getOrElse(""), r.getDouble("carga"))).toList
+    } finally { conn.close() }
+  }
+
+  /** ACWR diario de los ultimos `dias` dias (misma serie que el explorador de correlaciones). */
+  def getSerieACWR(dias: Int = 60): List[(String, Double)] = variablesCorrelacion.find(_._1 == "acwr").map { case (_, _, q) =>
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(s"SELECT d, v FROM ($q) x WHERE v IS NOT NULL AND d >= CURRENT_DATE - ? ORDER BY d")
+      ps.setInt(1, dias)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getDate("d").toString, r.getDouble("v"))).toList
+    } finally { conn.close() }
+  }.getOrElse(Nil)
+
+  /** Avisos E3 de los entrenos de los ultimos `dias` dias (FC de la manana siguiente por encima de lo normal). */
+  def avisosRPEconFCRecientes(dias: Int = 14): List[(String, String)] = {
+    val conn = getConnection()
+    val sesiones = try {
+      val ps = conn.prepareStatement("SELECT id, fecha, tipo FROM trainings WHERE fecha >= CURRENT_DATE - ? AND tipo_ausencia IS NULL AND rpe > 0 ORDER BY fecha DESC")
+      ps.setInt(1, dias)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).map(r => (r.getInt("id"), s"${r.getDate("fecha")} · ${fixEncoding(r.getString("tipo"))}")).toList
+    } finally { conn.close() }
+    sesiones.flatMap { case (id, et) => validarRPEconFC(id).map(et -> _) }
+  }
+
   /** Avisos E3 de los entrenos de ayer (se muestran junto al registro de sueno de hoy). */
   def avisosRPEconFCHoy(): List[String] = {
     val conn = getConnection()

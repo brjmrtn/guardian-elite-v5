@@ -954,22 +954,35 @@ object BioController extends cask.Routes {
             h2(cls := "text-warning mb-0", "GRAFICO DE CARGA"),
             a(href := "/bio", cls := "btn btn-outline-secondary btn-sm fw-bold", "← Bio")
           ),
-          div(cls := "d-grid mb-3",
-            a(href := "/career/acwr-proyeccion", cls := "btn btn-outline-warning btn-sm fw-bold", "📅 Planificar próxima semana")
-          ),
-
-          // BLOQUE E4: percepcion del esfuerzo padre vs Hector (>=5 entrenos con ambos datos)
+          // ── PRINCIPAL: ACWR con semaforo, carga aguda vs cronica y proyeccion del sabado ──
+          div(cls := s"card bg-dark border-$acwrColor shadow mb-2 p-3 text-center",
+            div(cls := "xx-small text-muted fw-bold", "ACWR — RELACIÓN CARGA AGUDA / CRÓNICA"),
+            div(cls := s"text-$acwrColor fw-bold", style := "font-size:52px; line-height:1.1;", if (acwrInsuficiente) "📊" else f"$acwr%.2f"),
+            div(cls := s"badge bg-$acwrColor fs-6", acwrLabel),
+            if (acwrInsuficiente) div(cls := "xx-small text-muted mt-1", "Acumulando datos (mín. 3 semanas)") else frag()),
+          div(cls := "xx-small mb-3", style := "color:#64748b;", DatabaseManager.disclaimerACWR),
           {
-            val div4 = DatabaseManager.getDivergenciaRPE(DatabaseManager.getTemporadaActivaId())
-            if (!div4("suficiente").asInstanceOf[Boolean]) frag()
-            else div(cls := s"card bg-dark shadow mb-3 p-3 border-${if (div4("divergente").asInstanceOf[Boolean]) "warning" else "secondary"}",
-              div(cls := "fw-bold small text-white mb-1", "🔄 PERCEPCIÓN DEL ESFUERZO — Padre vs Héctor"),
-              div(cls := "small", div4("mensaje").toString),
-              div(cls := "xx-small text-muted mt-1", s"${div4("n")} entrenos con ambos datos. El RPE de Héctor (1-5) se compara ×2 en la escala 1-10."))
+            val aguda = acwrEstado("aguda").asInstanceOf[Double]; val cronica = acwrEstado("cronica").asInstanceOf[Double]
+            val max = math.max(1.0, math.max(aguda, cronica))
+            div(cls := "card bg-dark border-secondary p-3 mb-3",
+              frag(Seq(("⚡ Carga aguda (7 días)", aguda, "#f59e0b"), ("🧱 Carga crónica (28 días)", cronica, "#0dcaf0")).map { case (et, v, c) =>
+                div(cls := "mb-2",
+                  div(cls := "d-flex justify-content-between xx-small", span(cls := "text-muted fw-bold", et), span(cls := "fw-bold", style := s"color:$c;", f"$v%.0f /día")),
+                  div(cls := "progress", style := "height:10px; background:#334155;", div(cls := "progress-bar", style := s"width:${v / max * 100}%; background:$c;")))
+              }: _*))
+          },
+          DatabaseManager.diasHastaPartidoSabado() match {
+            case Some(dias) =>
+              val pred = DatabaseManager.predecirFormaPartido(dias)
+              if (!pred("disponible").asInstanceOf[Boolean]) frag()
+              else div(cls := "card bg-dark border-secondary p-2 mb-3 small",
+                f"📊 Forma proyectada para el sábado: ${pred("semaforo")} ${pred("indice").asInstanceOf[Double]}%.1f",
+                pred("acwrProyectado").asInstanceOf[Option[Double]].map(a => span(cls := "text-muted", f" · ACWR previsto $a%.2f")).getOrElse(frag()))
+            case None => frag()
           },
 
-          // ACWR + KPIs (BLOQUE D: aviso de umbrales adaptados a la edad)
-          div(cls := "xx-small mb-1", style := "color:#64748b;", DatabaseManager.disclaimerACWR),
+          // ── DETALLE DE CARGA (colapsable) ──
+          seccion("📊 Detalle de carga")(
           div(cls := "row g-2 mb-4",
             div(cls := "col-3",
               div(cls := s"card bg-dark border-$acwrColor text-center py-3",
@@ -988,6 +1001,44 @@ object BioController extends cask.Routes {
                 )
             }
           ),
+
+          {
+            val sesiones = DatabaseManager.getSesionesCarga(28)
+            if (sesiones.isEmpty) sinDatos("Sesiones de los últimos 28 días")
+            else div(cls := "card bg-dark border-secondary mb-3",
+              div(cls := "card-header text-white fw-bold small", "CARGA POR SESIÓN — últimos 28 días"),
+              div(cls := "table-responsive", style := "max-height:320px; overflow-y:auto;",
+                table(cls := "table table-dark table-sm mb-0 xx-small",
+                  thead(tr(th("Fecha"), th("Sesión"), th("Detalle"), th(cls := "text-end", "Carga"))),
+                  tbody(frag(sesiones.map { case (f, t, d, c) => tr(td(f.drop(5)), td(t), td(d), td(cls := "text-end fw-bold", f"$c%.0f")) }: _*)))))
+          },
+          {
+            val serie = DatabaseManager.getSerieACWR(60)
+            if (serie.size < 2) sinDatos("Evolución del ACWR")
+            else {
+              val u = DatabaseManager.umbralesACWR()
+              div(cls := "card bg-dark border-secondary mb-3",
+                div(cls := "card-header text-white fw-bold small", "EVOLUCIÓN DEL ACWR — últimos 60 días"),
+                div(cls := "card-body", div(style := "position:relative; height:200px;", tag("canvas")(id := "chartAcwrEvol"))),
+                script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
+                script(raw(s"""
+                  (function(){
+                    var f = ${serie.map(x => "\"" + x._1.drop(5) + "\"").mkString("[", ",", "]")};
+                    var v = ${serie.map(x => f"${x._2}%.3f".replace(",", ".")).mkString("[", ",", "]")};
+                    new Chart(document.getElementById('chartAcwrEvol'), { type: 'line',
+                      data: { labels: f, datasets: [
+                        { label: 'ACWR', data: v, borderColor: '#d4af37', borderWidth: 2, pointRadius: 0, tension: 0.2 },
+                        { label: 'Riesgo (${u.riesgo})', data: f.map(function(){ return ${u.riesgo}; }), borderColor: '#ef4444', borderDash: [4,4], borderWidth: 1, pointRadius: 0 },
+                        { label: 'Óptimo mín. (${u.optimoMin})', data: f.map(function(){ return ${u.optimoMin}; }), borderColor: '#20c997', borderDash: [4,4], borderWidth: 1, pointRadius: 0 } ] },
+                      options: { responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { labels: { color: '#ccc', font: { size: 10 } } } },
+                        scales: { x: { ticks: { color: '#888', maxTicksLimit: 8 } }, y: { ticks: { color: '#aaa' } } } } });
+                  })();
+                """)))
+            }
+          },
+          div(cls := "d-grid mb-3",
+            a(href := "/career/acwr-proyeccion", cls := "btn btn-outline-warning btn-sm fw-bold", "📅 Proyección de carga de la próxima semana")),
 
           if (weekly.isEmpty && rpeHist.isEmpty) {
             div(cls := "alert alert-secondary text-center py-5",
@@ -1067,6 +1118,32 @@ object BioController extends cask.Routes {
                 }
               });
             """))
+          )
+          ),
+
+          // ── ANALISIS AVANZADO (colapsable) ──
+          seccion("🔬 Análisis avanzado")(
+          // BLOQUE E4: percepcion del esfuerzo padre vs Hector (>=5 entrenos con ambos datos)
+          {
+            val div4 = DatabaseManager.getDivergenciaRPE(DatabaseManager.getTemporadaActivaId())
+            if (!div4("suficiente").asInstanceOf[Boolean]) frag()
+            else div(cls := s"card bg-dark shadow mb-3 p-3 border-${if (div4("divergente").asInstanceOf[Boolean]) "warning" else "secondary"}",
+              div(cls := "fw-bold small text-white mb-1", "🔄 PERCEPCIÓN DEL ESFUERZO — Padre vs Héctor"),
+              div(cls := "small", div4("mensaje").toString),
+              div(cls := "xx-small text-muted mt-1", s"${div4("n")} entrenos con ambos datos. El RPE de Héctor (1-5) se compara ×2 en la escala 1-10."))
+          },
+
+          {
+            val avisos = DatabaseManager.avisosRPEconFCRecientes(14)
+            if (avisos.isEmpty) div(cls := "guardian-sin-datos", "❤️ Validación con FC: ninguna sesión de las últimas 2 semanas parece más intensa de lo registrado.")
+            else div(cls := "card bg-dark border-warning p-2 mb-2",
+              div(cls := "xx-small fw-bold text-warning mb-1", "❤️ VALIDACIÓN CRUZADA CON LA FC DE LA MAÑANA SIGUIENTE"),
+              frag(avisos.map { case (sesion, msg) => div(cls := "xx-small mb-1", strong(sesion), " — ", msg) }: _*))
+          },
+          DatabaseManager.getDivergenciaRPE(DatabaseManager.getTemporadaActivaId())("suficiente") match {
+            case true => frag()
+            case _ => sinDatos("Percepción del esfuerzo padre vs Héctor", "Se necesitan 5 entrenos con RPE de Héctor")
+          }
           )
         )
       )
