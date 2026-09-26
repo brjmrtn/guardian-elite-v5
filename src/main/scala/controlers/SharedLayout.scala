@@ -160,35 +160,39 @@ object SharedLayout {
     else div(badgeConfianza(tipo, n), modulo)
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // BLOQUE I — NAVEGACION EN DOS NIVELES: 6 categorias + 3 favoritos (localStorage)
-  // Movil: barra inferior con las categorias; al pulsar, el submenu se despliega hacia arriba.
+  // NAVEGACION: 6 categorias + 3 favoritos (localStorage)
+  // Movil: barra inferior (categorias + favoritos); al pulsar una categoria se abre un panel hacia
+  // arriba con sus paginas en cuadricula de 3 columnas. HOY va directo al dashboard.
   // Escritorio: menu lateral colapsable. Toda pagina nueva debe anadirse a una categoria.
   // ─────────────────────────────────────────────────────────────────────────────
-  val navCategorias: Seq[(String, String, Seq[(String, String)])] = Seq(
-    ("🏠", "HOY", Seq("Dashboard HOY" -> "/#hoy", "Dashboard COMPLETO" -> "/#completo")),
-    ("⚽", "PARTIDO", Seq("Registrar partido" -> "/match-center", "Historial" -> "/history", "Timeline" -> "/career/timeline",
-      "Flash-cards" -> "/flash-cards", "Torneo" -> "/tournament/bracket", "Pizarra" -> "/tactics", "Contexto del partido" -> "/match-context",
-      "Rivales" -> "/striker-clustering", "Scouting NLP" -> "/scouting/nlp", "Vídeo IA" -> "/video-history")),
-    ("💪", "HÉCTOR", Seq("Bio / Sueño" -> "/bio", "Crecimiento / PHV" -> "/bio-banding", "Tests físicos" -> "/physical-tests",
-      "Movilidad" -> "/movilidad-tests", "Cognitivo" -> "/cognitivo", "Psico" -> "/psych", "Emocional" -> "/emocional",
-      "Reset cognitivo" -> "/cognitive-reset", "Guantes" -> "/bio/guantes", "Lesiones" -> "/lesiones", "Nutrición" -> "/nutrition",
-      "Skills" -> "/goalkeeper-skills", "Dojo" -> "/dojo", "Dojo entrenador" -> "/dojo/entrenador",
-      "Periodización" -> "/periodization", "Footbar" -> "/footbar")),
-    ("📊", "ANÁLISIS", Seq("Benchmark / RFMF" -> "/benchmark", "Correlaciones" -> "/correlaciones", "RedZone" -> "/red-zone",
-      "PSxG" -> "/psxg-delta", "Biomecánica" -> "/biomecanica", "Arquetipo" -> "/arquetipo", "Voz del Portero" -> "/voz-portero",
-      "Influencia" -> "/gk-influence", "Scanning" -> "/scanning-rate", "Evolución" -> "/temporal", "Simulador" -> "/simulate",
-      "Moneyball" -> "/moneyball", "Efecto mariposa" -> "/efecto-mariposa")),
-    ("🏆", "CARRERA", Seq("IDP / Objetivos" -> "/idp", "Legado / Hitos" -> "/career/legacy", "📖 Diario" -> "/diary", "📅 Calendario" -> "/career/calendario", "Trayectoria" -> "/career",
-      "Digital Twin" -> "/digital-twin", "Visibilidad" -> "/visibility", "Contactos" -> "/contacts",
-      "Informe captación" -> "/scouting-report", "Oportunidades" -> "/opportunities", "Pathway" -> "/pathway",
-      "Techo" -> "/techo", "Mercado" -> "/market-estimator")),
-    ("⚙️", "SISTEMA", Seq("Settings / Perfil público" -> "/settings", "Admin" -> "/admin", "Backups / Export" -> "/admin#backups"))
+  val navCategorias: Seq[(String, String, Seq[(String, String, String)])] = Seq(
+    ("🏠", "HOY", Seq(("🏠", "Dashboard", "/"))),
+    ("⚽", "PARTIDO", Seq(("⚡", "Registro rápido", "/match-center?quick=1"), ("📝", "Partido completo", "/match-center"),
+      ("📋", "Historial", "/history"), ("🗓️", "Flash-cards", "/flash-cards"), ("🏆", "Torneo", "/tournament/bracket"),
+      ("📈", "Evolución", "/temporal"), ("📊", "Contexto", "/match-context"), ("🦋", "Mariposa", "/efecto-mariposa"),
+      ("🎯", "Mapa goles", "/mapa-goles"), ("⛳", "Penaltis", "/penalties"), ("🎬", "Vídeo IA", "/video-history"),
+      ("🧩", "Pizarra", "/tactics"))),
+    ("💪", "HÉCTOR", Seq(("📝", "Registro diario", "/bio"), ("💤", "Sueño", "/bio/sueno"), ("📈", "Carga ACWR", "/bio/carga"),
+      ("😴", "Fatiga", "/bio/fatiga"), ("💪", "Tests físicos", "/physical-tests"), ("🧠", "Cognitivo", "/cognitivo"),
+      ("🧠", "Psicológico", "/psych"), ("💚", "Emocional", "/emocional"), ("🤸", "Movilidad", "/movilidad-tests"),
+      ("🥗", "Nutrición", "/nutrition"), ("🩹", "Lesiones", "/lesiones"), ("🧤", "Guantes", "/bio/guantes"),
+      ("🦵", "Footbar", "/footbar"), ("👁️", "Scanning", "/scanning-rate"), ("🧬", "BioBand", "/bio-banding"))),
+    ("📊", "ANÁLISIS", Seq(("📊", "Benchmark", "/benchmark"), ("🔬", "Correlaciones", "/correlaciones"), ("🔴", "RedZone", "/red-zone"),
+      ("xG", "PSxG", "/psxg-delta"), ("🎯", "Biomecánica", "/biomecanica"), ("📡", "Influencia", "/gk-influence"),
+      ("🎭", "Arquetipo", "/arquetipo"), ("⚔️", "Rivales", "/striker-clustering"), ("🔍", "Scouting", "/scouting/nlp"),
+      ("🎯", "Techo", "/techo"), ("🔮", "Simulador", "/simulate"), ("🧠", "Dojo", "/dojo"), ("📋", "D.Entren", "/dojo/entrenador"))),
+    ("🏆", "CARRERA", Seq(("🗺️", "IDP", "/idp"), ("⭐", "Legado", "/career/legacy"), ("🔮", "Twin 2035", "/digital-twin"),
+      ("💰", "Mercado", "/market-estimator"), ("📄", "Informe", "/scouting-report"), ("🤖", "Skills", "/goalkeeper-skills"),
+      ("🎤", "Voz portero", "/voz-portero"), ("📖", "Diario", "/diary"), ("📅", "Calendario", "/career/calendario"),
+      ("📅", "Timeline", "/career/timeline"), ("🗺️", "Pathway", "/pathway"), ("👥", "Red", "/contacts"),
+      ("🗺️", "Visibilidad", "/visibility"), ("🏆", "Oportunidades", "/opportunities"), ("🔬", "Longitudinal", "/career/longitudinal"))),
+    ("⚙️", "SISTEMA", Seq(("⚙️", "Settings", "/settings"), ("🔧", "Admin", "/admin"), ("🧩", "Reset", "/cognitive-reset"),
+      ("📅", "Periodización", "/periodization"), ("💵", "Moneyball", "/moneyball"), ("📊", "Trayectoria", "/career"),
+      ("⚙️", "Distribución", "/distribution")))
   )
 
   private def navegacion(): Modifier = {
-    val itemsJs = ujson.write(ujson.Arr(navCategorias.flatMap(_._3).map { case (l, h) => ujson.Obj("h" -> h, "l" -> l) }: _*))
-    def enlaces(items: Seq[(String, String)]): Modifier =
-      frag(items.map { case (l, h) => a(href := h, cls := "gnav-link", attr("data-h") := h, l) }: _*)
+    val itemsJs = ujson.write(ujson.Arr(navCategorias.flatMap(_._3).map { case (e, l, h) => ujson.Obj("h" -> h, "l" -> l, "e" -> e) }: _*))
     frag(
       // Escritorio: menu lateral
       tags2.nav(id := "gnavSide", cls := "gnav-side",
@@ -196,32 +200,42 @@ object SharedLayout {
         frag(navCategorias.zipWithIndex.map { case ((emoji, nombre, items), i) =>
           div(cls := "gnav-side-cat",
             button(tpe := "button", cls := "gnav-side-btn", attr("data-cat") := i.toString, onclick := s"gnavSideToggle($i)", s"$emoji $nombre"),
-            div(id := s"gnavSideSub$i", cls := "gnav-side-sub", enlaces(items)))
+            div(id := s"gnavSideSub$i", cls := "gnav-side-sub",
+              frag(items.map { case (e, l, h) => a(href := h, cls := "gnav-link", attr("data-h") := h, s"$e $l") }: _*)))
         }: _*)),
-      // Movil: submenus (hacia arriba) + favoritos + barra de categorias
+      // Movil: panel de submenu (cuadricula) + barra inferior con categorias y favoritos
       div(cls := "gnav-mobile",
-        frag(navCategorias.zipWithIndex.map { case ((emoji, nombre, items), i) =>
-          div(id := s"gnavSub$i", cls := "gnav-sub", div(cls := "gnav-sub-title", s"$emoji $nombre"), enlaces(items))
-        }: _*),
-        div(id := "gnavFavs", cls := "gnav-favs"),
+        div(id := "gnavPanel", cls := "gnav-panel", onclick := "if(event.target===this)gnavCerrar()",
+          frag(navCategorias.zipWithIndex.map { case ((emoji, nombre, items), i) =>
+            div(id := s"gnavSub$i", cls := "gnav-sub",
+              div(cls := "gnav-sub-title", s"$emoji $nombre"),
+              div(cls := "gnav-grid",
+                frag(items.map { case (e, l, h) =>
+                  a(href := h, cls := "gnav-tile gnav-link", attr("data-h") := h, div(cls := "gnav-tile-icon", e), div(cls := "gnav-tile-label", l))
+                }: _*)))
+          }: _*)),
         div(cls := "gnav-bar",
           frag(navCategorias.zipWithIndex.map { case ((emoji, nombre, _), i) =>
-            button(tpe := "button", cls := "gnav-bar-btn", attr("data-cat") := i.toString, onclick := s"gnavOpen($i)",
+            button(tpe := "button", cls := "gnav-bar-btn", attr("data-cat") := i.toString,
+              onclick := (if (i == 0) "location.href='/'" else s"gnavOpen($i)"),
               div(cls := "gnav-bar-icon", emoji), div(cls := "gnav-bar-label", nombre))
-          }: _*))),
+          }: _*),
+          div(id := "gnavFavsBar", cls := "gnav-favs-bar"))),
       script(raw(s"""
         var GNAV_ITEMS = $itemsJs;
-        var GNAV_FAV_DEFAULT = [{h:'/#hoy',l:'HOY'},{h:'/match-center',l:'Registrar partido'},{h:'/bio',l:'Bio / Sueño'}];
+        var GNAV_FAV_DEFAULT = [{h:'/bio/sueno',l:'Sueño',e:'💤'},{h:'/match-center',l:'Partido',e:'📝'},{h:'/history',l:'Historial',e:'📋'}];
         function gnavLS(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(e) { return null; } }
-        function gnavFavs(){ try { var f = JSON.parse(gnavLS('guardian_favoritos')); if (Array.isArray(f)) return f; } catch(e) {} return GNAV_FAV_DEFAULT.slice(); }
-        function gnavPath(h){ return h.split('#')[0]; }
+        function gnavFavs(){ try { var f = JSON.parse(gnavLS('guardian_favoritos_v2')); if (Array.isArray(f)) return f; } catch(e) {} return GNAV_FAV_DEFAULT.slice(); }
+        function gnavPath(h){ return h.split('#')[0].split('?')[0]; }
         function gnavActual(){ return location.pathname; }
         function gnavRenderFavs(){
-          var cont = document.getElementById('gnavFavs'); if (!cont) return;
+          var cont = document.getElementById('gnavFavsBar'); if (!cont) return;
           cont.innerHTML = '';
           gnavFavs().forEach(function(f){
-            var a = document.createElement('a'); a.href = f.h; a.className = 'gnav-fav'; a.textContent = '⭐ ' + f.l;
-            cont.appendChild(a);
+            var a = document.createElement('a'); a.href = f.h; a.className = 'gnav-fav' + (gnavPath(f.h) === gnavActual() ? ' active' : '');
+            var i = document.createElement('div'); i.className = 'gnav-bar-icon'; i.textContent = f.e || '⭐';
+            var l = document.createElement('div'); l.className = 'gnav-bar-label'; l.textContent = (f.l || '').split(' ')[0].slice(0, 9);
+            a.appendChild(i); a.appendChild(l); cont.appendChild(a);
           });
           var esFav = gnavFavs().some(function(f){ return gnavPath(f.h) === gnavActual(); });
           var star = document.getElementById('gnavStar'); if (star) { star.textContent = esFav ? '★' : '☆'; star.title = esFav ? 'Quitar de favoritos' : 'Fijar en favoritos (máx. 3)'; }
@@ -231,19 +245,25 @@ object SharedLayout {
           var idx = favs.findIndex(function(f){ return gnavPath(f.h) === actual; });
           if (idx >= 0) favs.splice(idx, 1);
           else {
-            var item = GNAV_ITEMS.find(function(it){ return gnavPath(it.h) === actual; });
-            favs.push({h: actual, l: item ? item.l : (document.querySelector('h2') ? document.querySelector('h2').textContent.trim().slice(0, 24) : actual)});
+            var item = GNAV_ITEMS.find(function(it){ return it.h === actual; }) || GNAV_ITEMS.find(function(it){ return gnavPath(it.h) === actual; });
+            favs.push({h: actual, l: item ? item.l : (document.querySelector('h2') ? document.querySelector('h2').textContent.trim().slice(0, 24) : actual), e: item ? item.e : '⭐'});
             while (favs.length > 3) favs.shift();
           }
-          gnavLS('guardian_favoritos', JSON.stringify(favs));
+          gnavLS('guardian_favoritos_v2', JSON.stringify(favs));
           gnavRenderFavs();
         }
-        function gnavOpen(i){
-          document.querySelectorAll('.gnav-sub').forEach(function(p, j){ p.classList.toggle('open', j === i && !p.classList.contains('open')); });
+        function gnavCerrar(){
+          document.getElementById('gnavPanel').classList.remove('open');
+          document.querySelectorAll('.gnav-sub').forEach(function(p){ p.classList.remove('open'); });
         }
-        document.addEventListener('click', function(e){
-          if (!e.target.closest('.gnav-mobile')) document.querySelectorAll('.gnav-sub.open').forEach(function(p){ p.classList.remove('open'); });
-        });
+        function gnavOpen(i){
+          var sub = document.getElementById('gnavSub' + i);
+          var yaAbierto = sub.classList.contains('open');
+          gnavCerrar();
+          if (!yaAbierto) { sub.classList.add('open'); document.getElementById('gnavPanel').classList.add('open'); }
+        }
+        document.addEventListener('click', function(e){ if (!e.target.closest('.gnav-mobile')) gnavCerrar(); });
+        document.addEventListener('keydown', function(e){ if (e.key === 'Escape') gnavCerrar(); });
         function gnavSideToggle(i){ var s = document.getElementById('gnavSideSub' + i); if (s) s.classList.toggle('open'); }
         function gnavSidebar(){
           var abierto = !document.body.classList.contains('gnav-side-open');
@@ -254,7 +274,7 @@ object SharedLayout {
           if (gnavLS('guardian_sidebar') !== '0') document.body.classList.add('gnav-side-open');
           var actual = gnavActual();
           document.querySelectorAll('.gnav-link').forEach(function(a){
-            if (gnavPath(a.getAttribute('data-h')) === actual && !(actual === '/' && a.getAttribute('data-h') === '/#completo')) {
+            if (gnavPath(a.getAttribute('data-h')) === actual) {
               a.classList.add('active');
               var cat = a.closest('.gnav-sub, .gnav-side-sub');
               if (cat && cat.classList.contains('gnav-side-sub')) cat.classList.add('open');
@@ -267,6 +287,79 @@ object SharedLayout {
       """))
     )
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PATRONES COMUNES DE PAGINA: secciones colapsables, "sin datos aun" y pestanas
+  // ─────────────────────────────────────────────────────────────────────────────
+  /** Clave estable de una seccion: sin cifras (los contadores del titulo no cambian la clave). */
+  private def claveSeccion(titulo: String): String = titulo.replaceAll("[0-9]+", "").replaceAll("\\s+", " ").trim.take(40)
+
+  /**
+   * Seccion colapsable. `abierta` es el estado por defecto; si el usuario la abre o la cierra, se recuerda
+   * por pagina y titulo en localStorage.
+   */
+  def seccion(titulo: String, abierta: Boolean = false)(contenido: Modifier*): Modifier =
+    div(cls := "guardian-section",
+      button(tpe := "button", cls := "guardian-section-toggle", attr("data-key") := claveSeccion(titulo), onclick := "toggleSection(this)",
+        span(titulo), span(cls := "toggle-icon", if (abierta) "▲" else "▼")),
+      div(cls := s"guardian-section-body${if (abierta) "" else " collapsed"}", contenido))
+
+  /** Marcador compacto para un modulo sin datos suficientes (en lugar de un panel vacio). */
+  def sinDatos(titulo: String, detalle: String = ""): Modifier =
+    div(cls := "guardian-sin-datos", attr("title") := detalle, span(s"📭 $titulo"), span(cls := "text-muted", " — sin datos aún"),
+      if (detalle.nonEmpty) div(cls := "xx-small text-muted", detalle) else frag())
+
+  /**
+   * Pestanas. La activa se recuerda en localStorage; si la URL trae un #ancla que esta dentro de una
+   * pestana, se abre esa pestana.
+   */
+  def pestanas(id: String, tabs: Seq[(String, Modifier)]): Modifier =
+    div(cls := "guardian-tabs", attr("data-tabs") := id,
+      div(cls := "guardian-tabs-nav",
+        frag(tabs.zipWithIndex.map { case ((titulo, _), i) =>
+          button(tpe := "button", cls := s"guardian-tab-btn${if (i == 0) " active" else ""}", onclick := s"mostrarPestana('$id', $i)", titulo)
+        }: _*)),
+      frag(tabs.zipWithIndex.map { case ((_, contenido), i) =>
+        div(cls := "guardian-tab-body", attr("data-tab") := i.toString, style := (if (i == 0) "" else "display:none;"), contenido)
+      }: _*))
+
+  private val jsPatronesComunes = """
+    function toggleSection(btn) {
+      var body = btn.nextElementSibling;
+      var abierta = body.classList.contains('collapsed');
+      body.classList.toggle('collapsed', !abierta);
+      btn.querySelector('.toggle-icon').textContent = abierta ? '▲' : '▼';
+      try { localStorage.setItem('guardian_section_' + location.pathname + '_' + btn.getAttribute('data-key'), abierta ? '1' : '0'); } catch(e) {}
+    }
+    function mostrarPestana(id, i) {
+      var cont = document.querySelector('[data-tabs="' + id + '"]'); if (!cont) return;
+      cont.querySelectorAll('.guardian-tab-btn').forEach(function(b, j){ b.classList.toggle('active', j === i); });
+      cont.querySelectorAll('.guardian-tab-body').forEach(function(b){ b.style.display = b.getAttribute('data-tab') == i ? '' : 'none'; });
+      try { localStorage.setItem('guardian_tab_' + id, String(i)); } catch(e) {}
+    }
+    (function(){
+      document.querySelectorAll('.guardian-section-toggle').forEach(function(btn) {
+        try {
+          var v = localStorage.getItem('guardian_section_' + location.pathname + '_' + btn.getAttribute('data-key'));
+          if (v === null) return;
+          var abierta = v === '1';
+          btn.nextElementSibling.classList.toggle('collapsed', !abierta);
+          btn.querySelector('.toggle-icon').textContent = abierta ? '▲' : '▼';
+        } catch(e) {}
+      });
+      document.querySelectorAll('[data-tabs]').forEach(function(cont) {
+        var id = cont.getAttribute('data-tabs'), i = null;
+        if (location.hash) {
+          var destino = document.getElementById(location.hash.slice(1));
+          var body = destino ? destino.closest('.guardian-tab-body') : null;
+          if (body && cont.contains(body)) i = parseInt(body.getAttribute('data-tab'));
+        }
+        if (i === null) { try { var g = localStorage.getItem('guardian_tab_' + id); if (g !== null) i = parseInt(g); } catch(e) {} }
+        if (i !== null && cont.querySelector('[data-tab="' + i + '"]')) mostrarPestana(id, i);
+        if (location.hash) { var d = document.getElementById(location.hash.slice(1)); if (d) setTimeout(function(){ d.scrollIntoView(); }, 50); }
+      });
+    })();
+  """
 
   // --- BASE PAGE ---
   def basePage(activeLink: String, pageContents: Modifier*) = {
@@ -286,14 +379,14 @@ object SharedLayout {
               span(cls := "gnav-hamb", onclick := "gnavSidebar()", attr("title") := "Mostrar/ocultar menú", "☰ "),
               span(cls := "text-warning", "G"), " GUARDIAN ELITE",
               span(id := "gnavStar", onclick := "gnavToggleFav()", style := "cursor:pointer; color:#facc15; font-size:18px; margin-left:10px;", "☆")),
-            div(cls:="d-flex align-items-center gap-3",
-              a(href:="/profiles", style:="text-decoration:none; color:#ffc107; font-size:11px; font-weight:bold; border: 1px solid #ffc107; padding: 2px 8px; border-radius: 4px;", "👤 PERFIL"),
-              a(href:="/logout", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "SALIR"),
+            div(cls:="d-flex align-items-center gap-2",
+              a(href:="/profiles", attr("title") := "Perfiles", style:="text-decoration:none; color:#ffc107; font-size:11px; font-weight:bold; border: 1px solid #ffc107; padding: 2px 8px; border-radius: 4px;", "👤", span(cls := "hdr-txt", " PERFIL")),
+              a(href:="/logout", attr("title") := "Salir", style:="text-decoration:none; color:#ff4d4d; font-size:11px; font-weight:bold; border: 1px solid #ff4d4d; padding: 2px 8px; border-radius: 4px;", "⏻", span(cls := "hdr-txt", " SALIR")),
               span(id:="themeToggle", onclick:="toggleTheme()", style:="cursor:pointer; font-size:20px; user-select:none;", "☀️"),
               a(href:="/settings", style:="text-decoration:none; color:white; font-size:24px;", "⚙️")
             )
           ),
-          div(cls := "container main-content", pageContents), navegacion())
+          div(cls := "container main-content", pageContents), navegacion(), script(raw(jsPatronesComunes)))
         ,script(raw("""
         (function(){
           var t=localStorage.getItem('guardian_theme')||'dark';
@@ -310,23 +403,36 @@ object SharedLayout {
   }
 
   def getCss() = """
-    /* BLOQUE I: navegacion en dos niveles */
+    /* NAVEGACION: barra inferior (categorias + favoritos), panel en cuadricula y menu lateral */
     .gnav-side { display: none; }
     .gnav-hamb { display: none; cursor: pointer; color: #94a3b8; }
     .gnav-mobile { position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; }
-    .gnav-bar { display: flex; background: #1a1a1a; border-top: 1px solid #333; box-shadow: 0 -2px 10px rgba(0,0,0,0.5); padding: 6px 0 8px; }
-    .gnav-bar-btn { flex: 1; background: none; border: 0; color: #888; text-align: center; padding: 0; min-width: 0; }
-    .gnav-bar-btn.active { color: #d4af37; }
+    .gnav-bar { display: flex; align-items: stretch; background: #1a1a1a; border-top: 1px solid #333; box-shadow: 0 -2px 10px rgba(0,0,0,0.5); padding: 6px 2px 8px; }
+    .gnav-bar-btn, .gnav-fav { flex: 1; background: none; border: 0; color: #888; text-align: center; padding: 0; min-width: 0; text-decoration: none; }
+    .gnav-bar-btn.active, .gnav-fav.active { color: #d4af37; }
     .gnav-bar-icon { font-size: 19px; line-height: 1.2; }
-    .gnav-bar-label { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; }
-    .gnav-favs { display: flex; gap: 6px; padding: 4px 8px; background: #111; border-top: 1px solid #262626; overflow-x: auto; }
-    .gnav-fav { font-size: 10px; color: #facc15; text-decoration: none; white-space: nowrap; border: 1px solid #3f3f1f; border-radius: 10px; padding: 2px 8px; }
-    .gnav-sub { display: none; max-height: 55vh; overflow-y: auto; background: #151515; border-top: 2px solid #d4af37; padding: 8px 10px; }
+    .gnav-bar-label { font-size: 8.5px; font-weight: bold; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gnav-favs-bar { display: flex; flex: 3; border-left: 1px solid #333; margin-left: 2px; }
+    .gnav-fav { color: #facc15; }
+    .gnav-panel { display: none; position: fixed; left: 0; right: 0; top: 0; bottom: 58px; background: rgba(0,0,0,0.35); }
+    .gnav-panel.open { display: flex; align-items: flex-end; }
+    .gnav-sub { display: none; width: 100%; max-height: 70vh; overflow-y: auto; padding: 12px 10px 14px;
+      background: rgba(17,17,17,0.82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border-top: 2px solid #d4af37; border-radius: 16px 16px 0 0; animation: gnavSube .18s ease-out; }
     .gnav-sub.open { display: block; }
-    .gnav-sub-title { font-size: 11px; color: #d4af37; font-weight: bold; letter-spacing: 1px; margin-bottom: 6px; }
-    .gnav-link { display: block; padding: 7px 8px; color: #ddd; text-decoration: none; font-size: 13px; border-radius: 6px; }
-    .gnav-link:hover, .gnav-link.active { background: #262626; color: #d4af37; }
-    @media (max-width: 991.98px) { body { padding-bottom: 110px !important; } }
+    @keyframes gnavSube { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .gnav-sub-title { font-size: 11px; color: #d4af37; font-weight: bold; letter-spacing: 1px; margin-bottom: 8px; }
+    .gnav-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .gnav-tile { display: block; text-align: center; padding: 10px 4px; border-radius: 12px; background: rgba(255,255,255,0.06); color: #e5e5e5; text-decoration: none; }
+    .gnav-tile.active { background: rgba(212,175,55,0.2); color: #d4af37; }
+    .gnav-tile-icon { font-size: 22px; line-height: 1.2; }
+    .gnav-tile-label { font-size: 11px; font-weight: 600; margin-top: 2px; }
+    .gnav-link { color: #ddd; text-decoration: none; }
+    .gnav-side .gnav-link { display: block; padding: 6px 8px; font-size: 13px; border-radius: 6px; }
+    .gnav-side .gnav-link:hover, .gnav-side .gnav-link.active { background: #262626; color: #d4af37; }
+    .hdr-txt { }
+    @media (max-width: 991.98px) { body { padding-bottom: 76px !important; } }
+    @media (max-width: 520px) { .hdr-txt { display: none; } .app-header { letter-spacing: 1px !important; font-size: 17px !important; } }
     @media (min-width: 992px) {
       .gnav-mobile { display: none; }
       .gnav-hamb { display: inline; }
@@ -341,8 +447,24 @@ object SharedLayout {
       .gnav-side-sub { display: none; padding-left: 10px; }
       .gnav-side-sub.open { display: block; }
     }
-    body.light-mode .gnav-bar, body.light-mode .gnav-sub, body.light-mode .gnav-favs, body.light-mode .gnav-side { background: #fff !important; border-color: #ddd !important; }
-    body.light-mode .gnav-link { color: #333; }
+    body.light-mode .gnav-bar, body.light-mode .gnav-side { background: #fff !important; border-color: #ddd !important; }
+    body.light-mode .gnav-sub { background: rgba(255,255,255,0.9); }
+    body.light-mode .gnav-tile, body.light-mode .gnav-link { color: #333; }
+
+    /* PATRONES COMUNES: secciones colapsables, sin datos, pestanas */
+    .guardian-section-toggle { width: 100%; text-align: left; background: #1e293b; color: #94a3b8; border: 1px solid #334155;
+      padding: 10px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .guardian-section-toggle:hover { background: #263548; color: #e2e8f0; }
+    .guardian-section-body { margin-bottom: 12px; }
+    .guardian-section-body.collapsed { display: none; }
+    .toggle-icon { font-size: 10px; }
+    .guardian-sin-datos { font-size: 12px; color: #94a3b8; border: 1px dashed #334155; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
+    .guardian-tabs-nav { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; padding-bottom: 2px; }
+    .guardian-tab-btn { flex: 1 0 auto; background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 8px;
+      padding: 8px 12px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .guardian-tab-btn.active { background: #d4af37; color: #111; border-color: #d4af37; }
+    body.light-mode .guardian-section-toggle, body.light-mode .guardian-tab-btn { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
     @keyframes pulseYellow {
       0%, 100% { border-left: 3px solid transparent; }
       50% { border-left: 3px solid #ffc107; }
