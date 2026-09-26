@@ -1149,6 +1149,10 @@ object HistoryController extends cask.Routes {
             ),
             seasonSelector(temporadasDb, efectivo, "/gk-influence"),
 
+            // Cabecera comun: KPI principal, insight y confianza
+            cabeceraAnalisis(influenceScore.toString, "Índice de influencia del portero (/100)", s"Impacto ${scoreLabel.toLowerCase}: ${f"$avgPie%.1f"} acciones con el pie por partido y ${if (centTotal > 0) f"${pctCentros * 100}%.0f%%" else "--"} de centros controlados.", if (scoreColor == "success") "#28a745" else if (scoreColor == "warning") "#ffc107" else "#dc3545", "gk_influence", pj),
+
+          seccion("📊 Ver detalle")(
             // Score principal
             div(cls:=s"card bg-dark border-$scoreColor shadow mb-4",
               div(cls:=s"card-header bg-$scoreColor bg-opacity-10 border-$scoreColor d-flex justify-content-between align-items-center",
@@ -1235,6 +1239,9 @@ object HistoryController extends cask.Routes {
           )
         )
       ),
+
+          ),
+          analisisIA("gk-influence", "GK Influence", s"/gk-influence?temporadaId=$efectivo", s"Partidos: $pj; porterías a cero $pcs; acciones con el pie por partido ${f"$avgPie%.1f"} (total $totalPie); centros controlados $centOk/$centTotal; balones largos buenos $largOk/$largTotal; nota con más juego de pie ${f"$notaAltaPie%.1f"} vs con menos ${f"$notaBajaPie%.1f"}; índice de influencia $influenceScore/100."),
 
       script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
       {
@@ -3483,10 +3490,14 @@ object HistoryController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/striker-clustering"),
 
+          // Cabecera comun: KPI principal, insight y confianza
+          if (nRivales == 0) SharedLayout.sinDatos("Perfil de delantero rival") else cabeceraAnalisis(masComun, "Perfil de delantero rival más frecuente", s"${arquetipos.getOrElse(masComun, 0)} de $nRivales rivales encajan en este perfil.", "#ffc107", "striker_clustering", nRivales),
+
           if (nRivales == 0) div(cls := "alert alert-secondary",
             "Sin datos suficientes. Registra partidos y clasifica los goles en el Match Center."
           ) else frag(),
 
+          seccion("📊 Ver detalle")(
           // Resumen de arquetipos
           div(cls := "row g-3 mb-3",
             frag(Seq(
@@ -3570,6 +3581,8 @@ object HistoryController extends cask.Routes {
               )
             )
           ) else frag()
+          ),
+          analisisIA("striker-clustering", "Striker Clustering", s"/striker-clustering?temporadaId=$efectivo", if (nRivales == 0) "" else s"$nRivales rivales clasificados: " + arquetipos.map { case (k, v) => s"$k $v" }.mkString(", ") + s". Más frecuente: $masComun.")
         )
       )
     ))
@@ -3645,6 +3658,10 @@ object HistoryController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/scanning-rate"),
 
+          // Cabecera comun: KPI principal, insight y confianza
+          if (conDatos == 0) SharedLayout.sinDatos("Scanning rate", "Registra los escaneos en el formulario de partido") else cabeceraAnalisis(avgScanStr, "Escaneos por partido (media)", s"Correlación con la nota: $corrStr (${corrLabel.toLowerCase}). El ${f"$ratioEfectividad%.0f"}% de los escaneos encontró un compañero libre.", s"var(--bs-$corrColor)", "scanning_efectividad", conDatos),
+
+          seccion("📊 Ver detalle")(
           div(cls := "card bg-dark border-secondary mb-3",
             div(cls := "card-body p-3 small text-muted",
               span(cls := "text-white fw-bold", "¿Qué mide? "),
@@ -3754,6 +3771,9 @@ object HistoryController extends cask.Routes {
               )
             )
           ) else frag(),
+
+          ),
+          analisisIA("scanning-rate", "Scanning Rate", s"/scanning-rate?temporadaId=$efectivo", if (conDatos == 0) "" else s"$conDatos partidos con scanning registrado; media $avgScanStr escaneos por partido; nota media ${f"$avgNota%.1f"}; correlación escaneos-nota $corrStr ($corrLabel); efectividad ${f"$ratioEfectividad%.0f"}% de escaneos encontraron compañero libre."),
 
           script(raw(s"""
             (function() {
@@ -3875,10 +3895,14 @@ object HistoryController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/psxg-delta"),
 
+          // Cabecera comun: KPI principal, insight y confianza
+          if (nGoles == 0) SharedLayout.sinDatos("PSxG delta", "Clasifica los goles encajados en el Match Center") else cabeceraAnalisis(psxgDeltaStr, "PSxG delta (goles encajados − esperados)", s"Ha encajado $nGoles goles cuando se esperaban $xgTotalStr: $psxgLabel.", s"var(--bs-$psxgDeltaColor)", "psxg_delta", nGoles),
+
           if (nGoles == 0) div(cls := "alert alert-secondary",
             "Sin goles registrados con análisis. Clasifica los goles en el Match Center para ver el PSxG Delta."
           ) else frag(),
 
+          seccion("📊 Ver detalle")(
           // Explicacion breve
           div(cls := "card bg-dark border-secondary mb-3",
             div(cls := "card-body p-3 small text-muted",
@@ -4020,6 +4044,9 @@ object HistoryController extends cask.Routes {
             )
           ) else frag(),
 
+          ),
+          analisisIA("psxg-delta", "PSxG Delta", s"/psxg-delta?temporadaId=$efectivo", if (nGoles == 0) "" else s"Partidos: $nPartidos; goles encajados $nGoles; xG total $xgTotalStr ($xgPorPartidoStr por partido); PSxG delta $psxgDeltaStr ($psxgLabel). Goles por dificultad: alta $golesAltaDif ($pctAltaDif%), media $golesMediaDif ($pctMediaDif%), baja $golesBajaDif ($pctBajaDif%). Por zona: " + porZona.map(z => s"${z("zona")}: ${z("goles")} goles / xG ${z("xg")}").mkString(", ")),
+
           script(raw(s"""
             (function() {
               var ctx = document.getElementById('psxgChart');
@@ -4065,6 +4092,19 @@ object HistoryController extends cask.Routes {
   }
 
   // == RED-ZONE ANALYTICS ======================================================
+  // Analisis IA de las paginas de analisis: Gemini solo al pulsar el boton
+  @cask.post("/analisis-ia/:clave")
+  def analisisIaPaginaAction(request: cask.Request, clave: String) = withAuth(request) {
+    val p = parseBody(request)
+    val volver = p.getOrElse("volver", "/") match {
+      case v if v.matches("/[A-Za-z0-9_/?=&.%-]*") && !v.startsWith("//") => v
+      case _ => "/"
+    }
+    if (clave.matches("[a-z0-9-]{1,40}"))
+      DatabaseManager.generarAnalisisPagina(clave, p.getOrElse("titulo", clave).take(80), p.getOrElse("datos", "").take(4000))
+    renderRedirect(volver)
+  }
+
   @cask.get("/red-zone")
   def redZonePage(request: cask.Request, temporadaId: Int = 0) = withAuth(request) {
     val temporadasDb = DatabaseManager.getTodasTemporadas()
@@ -4126,10 +4166,14 @@ object HistoryController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/red-zone"),
 
+          // Cabecera comun: KPI principal, insight y confianza
+          if (totalPartidos < 5) SharedLayout.sinDatos("Índice de resiliencia", "Hacen falta 5+ partidos") else cabeceraAnalisis(resilienceIndex.toString, "Índice de resiliencia bajo asedio (/100)", (if (nAsedio > 0) s"Con 2+ goles en contra su nota es $avgNotaAsedioStr ($deltaAsedioStr vs su media)" else "Aún no ha jugado partidos con 2+ goles en contra") + (if (nFatiga > 0) s"; con 70+ minutos, $avgNotaFatigaStr ($deltaFatigaStr)." else "."), s"var(--bs-$resilienceColor)", "resilience_index", nAsedio),
+
           if (totalPartidos < 5) div(cls := "alert alert-secondary",
             s"Datos insuficientes. Necesitas al menos 5 partidos registrados (tienes $totalPartidos)."
           ) else frag(),
 
+          seccion("📊 Ver detalle")(
           // Referencia global
           div(cls := "card bg-dark border-secondary shadow mb-3",
             div(cls := "card-body p-3",
@@ -4343,6 +4387,9 @@ object HistoryController extends cask.Routes {
             }
           },
 
+          ),
+          analisisIA("red-zone", "Red-Zone: rendimiento bajo presión", s"/red-zone?temporadaId=$efectivo", if (totalPartidos < 5) "" else s"Partidos: $totalPartidos; nota media $avgNotaGlobalStr; goles en contra por partido ${f"$avgGcGlobal%.1f"}. Bajo asedio (2+ GC): $nAsedio partidos, nota $avgNotaAsedioStr, paradas ${f"$avgParadasAsedio%.1f"}, índice de resiliencia $resilienceIndex/100 ($resilienceLabel). Partidos de 70+ minutos: $nFatiga, nota $avgNotaFatigaStr, índice de fatiga $fatigueIndex/100 ($fatigueLabel). Colapso (3+ GC): $nColapso partidos, nota $avgNotaColapsoStr."),
+
           script(raw(s"""
             (function() {
               var ctx = document.getElementById('redZoneChart');
@@ -4491,6 +4538,13 @@ object HistoryController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/match-context"),
 
+          // Cabecera comun: KPI principal, insight y confianza
+          (if (totalPJ < 3) SharedLayout.sinDatos("Contexto de partido", "Hacen falta 3+ partidos") else mejorCtx match {
+            case Some((ctx, nota, _)) => cabeceraAnalisis(f"$nota%.1f", s"Nota en su mejor entorno: $ctx", peorCtx.map(p => f"Donde más le cuesta: ${p._1} (${p._2}%.1f). Su media global es $notaGlobalStr.").getOrElse(s"Su media global es $notaGlobalStr."), "#20c997", "match_context", totalPJ)
+            case None => cabeceraAnalisis(notaGlobalStr, "Nota media global", "Aún no hay contextos con 2+ partidos para comparar.", "#ffc107", "match_context", totalPJ)
+          }),
+
+          seccion("📊 Ver detalle")(
           // Banner resumen
           if (totalPJ >= 3) div(cls:="row g-2 mb-3",
             frag(Seq(
@@ -4633,6 +4687,12 @@ object HistoryController extends cask.Routes {
             "Cuantos más partidos registres, más precisas serán las comparativas. ",
             "La columna 'vs media' compara cada entorno con tu nota global de temporada."
           ),
+
+          ),
+          analisisIA("match-context", "Match Context", s"/match-context?temporadaId=$efectivo", (if (totalPJ < 3) "" else {
+            def fmt(rows: List[Map[String, Any]], k: String) = rows.map(r => s"${r(k)}: ${r("pj")} PJ, nota ${f"${r("nota").asInstanceOf[Double]}%.1f"}, GC ${f"${r("gc").asInstanceOf[Double]}%.1f"}").mkString("; ")
+            s"Partidos $totalPJ; nota media $notaGlobalStr; GC medio $gcGlobalStr. Local: $localPJ PJ, nota ${f"$localNota%.1f"}, GC ${f"$localGC%.1f"}, $localLimpias porterías a cero. Visitante: $visitPJ PJ, nota ${f"$visitNota%.1f"}, GC ${f"$visitGC%.1f"}, $visitLimpias porterías a cero. Por tipo: ${fmt(porTipo, "tipo")}. Por clima: ${fmt(porClima, "clima")}. Por duración: ${fmt(porDuracion, "franja")}."
+          })),
 
           // Script gráfico tendencia
           if (trendLabels.size >= 2) frag(

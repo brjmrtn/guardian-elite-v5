@@ -12517,6 +12517,38 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
   }
 
   // Lectura desde cache unicamente — nunca llama a Gemini en el render de pagina
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ANALISIS IA GENERICO DE LAS PAGINAS DE ANALISIS (/red-zone, /psxg-delta, ...)
+  // Gemini solo al pulsar el boton; el ultimo analisis se guarda en feature_cache 'ia_pagina_<clave>'.
+  // ─────────────────────────────────────────────────────────────────────────────
+  def getAnalisisPagina(clave: String): Option[(String, String)] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT payload, updated_at::date AS f FROM feature_cache WHERE cache_key = ?")
+      ps.setString(1, s"ia_pagina_$clave")
+      val rs = ps.executeQuery()
+      if (rs.next()) Some((ujson.read(rs.getString("payload"))("analisis").str, rs.getString("f"))) else None
+    } finally { conn.close() }
+  }
+
+  def generarAnalisisPagina(clave: String, titulo: String, datos: String): String = {
+    if (datos.trim.isEmpty) return "Error: la página no tiene datos que analizar"
+    val edad = calcularEdadExacta(getLatestCardData().fechaNacimiento)
+    val prompt = s"""Eres el analista de rendimiento de Héctor, portero de fútbol de $edad años. Estos son los datos actuales de la página "$titulo" de su app de seguimiento:
+$datos
+En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (sin sobreinterpretar si la muestra es pequeña) y una acción concreta de entrenamiento para las próximas semanas. Texto plano, sin listas ni títulos."""
+    val r = AIProvider.ask(prompt).trim
+    if (r.nonEmpty && !r.startsWith("Error")) {
+      val conn = getConnection()
+      try {
+        val ps = conn.prepareStatement(
+          "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
+        ps.setString(1, s"ia_pagina_$clave"); ps.setString(2, ujson.write(ujson.Obj("analisis" -> r))); ps.executeUpdate()
+      } finally { conn.close() }
+    }
+    r
+  }
+
   def getPsychAnalysisCached(): Option[String] = {
     val conn = getConnection()
     try {

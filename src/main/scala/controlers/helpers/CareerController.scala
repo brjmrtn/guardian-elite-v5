@@ -2610,13 +2610,16 @@ object CareerController extends cask.Routes {
           val (xMin, xMax) = (xs.min, xs.max)
           val puntosJs = pares.map { case (a, b, d) => s"{x:$a,y:$b,d:'$d'}" }.mkString("[", ",", "]")
           val lineaJs = s"[{x:$xMin,y:${pendiente * xMin + ordenada}},{x:$xMax,y:${pendiente * xMax + ordenada}}]"
-          conConfianza("correlacion", puntos)(frag(
+          conConfianza("correlacion", puntos)(div(
             div(cls := "card bg-dark border-secondary p-3 mb-3 text-center",
               div(cls := "xx-small text-muted", s"${etiqueta(xSel)} vs ${etiqueta(ySel)} · $puntos días"),
               div(style := s"font-size:40px; font-weight:900; color:$color;", f"r = $corr%.2f"),
               div(cls := "small text-white", r("interpretacion").asInstanceOf[String]),
               div(cls := "xx-small text-muted mt-1", "Correlación no implica causalidad: indica que ambas variables se mueven juntas.")),
-            div(cls := "card bg-dark border-secondary p-2 mb-3", div(style := "height:320px;", canvas(id := "corrChart"))),
+            seccion("📊 Ver detalle")(div(cls := "card bg-dark border-secondary p-2 mb-3", div(style := "height:320px;", canvas(id := "corrChart")))),
+            analisisIA(s"corr-${xSel.replace('_', '-')}-${ySel.replace('_', '-')}".take(40), s"Correlación ${etiqueta(xSel)} vs ${etiqueta(ySel)}",
+              s"/correlaciones?x=$xSel&y=$ySel&temporadaId=$temporadaId",
+              f"Correlación entre ${etiqueta(xSel)} y ${etiqueta(ySel)}: r = $corr%.2f con $puntos días (pendiente $pendiente%.3f). " + r("interpretacion").toString),
             script(src := "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"),
             script(raw(s"""
               new Chart(document.getElementById('corrChart'), {
@@ -3067,6 +3070,10 @@ object CareerController extends cask.Routes {
           ),
           seasonSelector(temporadasDb, efectivo, "/efecto-mariposa"),
 
+          // Cabecera comun: KPI principal, insight y confianza
+          cabeceraAnalisis(s"$diffSign$diff pts", "Victorias con portería a cero vs sin ella", s"Con portería a cero gana el $csWinRate% de los partidos; sin ella, el $nonCsWinRate%. Lleva $cs porterías a cero en $pj partidos.", diffColor, "efecto_mariposa", pj),
+
+          seccion("📊 Ver detalle")(
           // ── CLEAN SHEET IMPACT ──────────────────────────────────────────
           div(cls := "card bg-dark border-success shadow mb-3",
             div(cls := "card-header bg-success bg-opacity-10 border-success",
@@ -3177,6 +3184,9 @@ object CareerController extends cask.Routes {
                 )
             )
           ),
+
+          ),
+          analisisIA("efecto-mariposa", "Efecto Mariposa", s"/efecto-mariposa?temporadaId=$efectivo", s"$pj partidos: $ganados ganados, $empatados empatados, $perdidos perdidos; nota media ${f"$notaMedia%.1f"}; $cs porterías a cero ($csRate%); victorias con portería a cero $csWinRate% vs sin ella $nonCsWinRate%; clutch points $clutch."),
 
           script(src := "https://cdn.jsdelivr.net/npm/chart.js"),
           script(raw(s"""

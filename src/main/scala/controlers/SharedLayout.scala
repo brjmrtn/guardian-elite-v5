@@ -325,6 +325,41 @@ object SharedLayout {
         span(titulo), span(cls := "toggle-icon", if (abierta) "▲" else "▼")),
       div(cls := s"guardian-section-body${if (abierta) "" else " collapsed"}", contenido))
 
+  /**
+   * Cabecera comun de las paginas de analisis: KPI principal grande, insight de una frase y badge de confianza.
+   * tipoConfianza vacio = sin badge.
+   */
+  def cabeceraAnalisis(valor: String, etiqueta: String, insight: String, color: String = "#ffc107",
+                       tipoConfianza: String = "", n: Int = 0): Modifier =
+    div(cls := "card bg-dark border-secondary shadow mb-3 text-center p-3",
+      div(cls := "fw-bold", style := s"font-size:46px; line-height:1; color:$color;", valor),
+      div(cls := "xx-small text-muted text-uppercase fw-bold mt-1 mb-2", etiqueta),
+      div(cls := "small text-white mb-1", insight),
+      if (tipoConfianza.nonEmpty) badgeConfianza(tipoConfianza, n) else frag())
+
+  /**
+   * Seccion "🧠 Analisis IA" comun: muestra el ultimo analisis guardado y un boton que lo genera.
+   * Gemini nunca se llama al renderizar: solo al pulsar (POST /analisis-ia/:clave).
+   * `datos` es el resumen en texto de la pagina que se envia a Gemini.
+   */
+  def analisisIA(clave: String, titulo: String, volver: String, datos: String): Modifier = {
+    val guardado = DatabaseManager.getAnalisisPagina(clave)
+    seccion("🧠 Análisis IA")(
+      guardado match {
+        case Some((texto, fecha)) => div(cls := "card bg-dark border-info p-3 mb-2 small",
+          div(cls := "xx-small text-muted mb-1", s"Generado el $fecha"),
+          div(style := "white-space:pre-wrap;", texto))
+        case None => div(cls := "guardian-sin-datos", "🧠 Aún no hay análisis — se genera al pulsar el botón (Gemini).")
+      },
+      if (datos.trim.isEmpty) div(cls := "xx-small text-muted", "Hacen falta datos en esta página para poder analizarla.")
+      else form(action := s"/analisis-ia/$clave", method := "post", cls := "d-grid",
+        input(tpe := "hidden", name := "titulo", value := titulo),
+        input(tpe := "hidden", name := "volver", value := volver),
+        input(tpe := "hidden", name := "datos", value := datos),
+        button(tpe := "submit", cls := "btn btn-outline-info fw-bold", if (guardado.nonEmpty) "🔄 Actualizar análisis IA" else "🧠 Generar análisis IA"))
+    )
+  }
+
   /** Marcador compacto para un modulo sin datos suficientes (en lugar de un panel vacio). */
   def sinDatos(titulo: String, detalle: String = ""): Modifier =
     div(cls := "guardian-sin-datos", attr("title") := detalle, span(s"📭 $titulo"), span(cls := "text-muted", " — sin datos aún"),
