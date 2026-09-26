@@ -1755,6 +1755,13 @@ object HistoryController extends cask.Routes {
   }
 
   // ── EMOTIONAL INTELLIGENCE ENGINE ───────────────────────────────────────
+  // Analisis IA del diario emocional: Gemini solo al pulsar el boton
+  @cask.post("/emocional/analizar")
+  def analizarEmocionalAction(request: cask.Request) = withAuth(request) {
+    DatabaseManager.getEmotionalData(generarIA = true)
+    cask.Response(Array.emptyByteArray, 302, headers = Seq("Location" -> "/emocional"))
+  }
+
   @cask.get("/emocional")
   def emocionalPage(request: cask.Request) = withAuth(request) {
     val stats = DatabaseManager.getEmotionalData()
@@ -1821,6 +1828,49 @@ object HistoryController extends cask.Routes {
               a(href:="/bio", cls:="btn btn-outline-secondary btn-sm fw-bold","Bio")
             ),
 
+      // BLOQUE S: toolkit de regulacion emocional tras gol encajado
+      {
+        val re = DatabaseManager.getRegulacionEmocional()
+        if (!re("suficiente").asInstanceOf[Boolean]) SharedLayout.sinDatos("Toolkit de regulación emocional", "Se registra tras los partidos con goles encajados")
+        else {
+          val distribucion = re("distribucion").asInstanceOf[List[Map[String, Any]]]
+          val notaReorganiza = re("notaReorganiza").asInstanceOf[Option[Double]]
+          val notaDecaido = re("notaDecaido").asInstanceOf[Option[Double]]
+          val pctDecaido = re("pctDecaido").asInstanceOf[Double]
+          val pctSaludable = re("pctSaludable").asInstanceOf[Double]
+          val labelsJs = distribucion.map(d => s""""${d("comportamiento")}"""").mkString("[", ",", "]")
+          val dataJs = distribucion.map(d => d("n").asInstanceOf[Int].toString).mkString("[", ",", "]")
+          val comparativa: Modifier = (notaReorganiza, notaDecaido) match {
+            case (Some(nr), Some(nd)) => div(cls := "small text-white mt-2", f"Cuando se reorganiza con la defensa, la nota media del resto del partido es $nr%.1f. Cuando decae, es $nd%.1f.")
+            case _ => div()
+          }
+          div(cls := "card bg-dark border-info shadow mb-3",
+            div(cls := "card-header text-info fw-bold small", "🧠 TOOLKIT DE REGULACIÓN EMOCIONAL"),
+            div(cls := "card-body p-3",
+              div(style := "height:200px;", tag("canvas")(id := "chartRegulacionEmocional")),
+              comparativa,
+              if (pctDecaido > 40) div(cls := "xx-small text-warning fw-bold mt-2", "⚠️ Más del 40% de las veces decae tras un gol — trabajar con el entrenador.")
+              else if (pctSaludable >= 50) div(cls := "xx-small text-success fw-bold mt-2", "✅ Héctor muestra señales de regulación emocional saludable")
+              else div(),
+              script(raw(s"""
+                var ctxRE = document.getElementById('chartRegulacionEmocional');
+                if (ctxRE) {
+                  new Chart(ctxRE, { type: 'doughnut',
+                    data: { labels: $labelsJs, datasets: [{ data: $dataJs,
+                      backgroundColor: ['#0dcaf0','#20c997','#dc3545','#6c757d','#ffc107','#8b5cf6'] }] },
+                    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{color:'#eee', font:{size:10}} } } }
+                  });
+                }
+              """))
+            )
+          )
+        }
+      },
+
+      // Desgaste silencioso, solo si esta activo
+      DatabaseManager.detectarDesgasteSilencioso().map(msg => div(cls := "alert alert-danger fw-bold small mb-3", msg)).getOrElse(frag()),
+
+      seccion("📈 Estado emocional diario")(
             // Score resiliencia + KPIs
             div(cls:="row g-2 mb-3",
               div(cls:="col-md-4",
@@ -1861,34 +1911,6 @@ object HistoryController extends cask.Routes {
       )
       ),
 
-      // Analisis IA
-      if (patron.nonEmpty || fortaleza.nonEmpty || consejo.nonEmpty) {
-        div(cls:="card bg-dark border-info shadow mb-3",
-          div(cls:="card-header text-info fw-bold small", "🤖 ANALISIS PSICOPEDAGOGICO (IA)"),
-          div(cls:="card-body p-3",
-            div(cls:="row g-3",
-              frag(Seq(
-                ("PATRON EMOCIONAL", patron, "info", "?"),
-                ("FORTALEZA MENTAL", fortaleza, "success", "*"),
-                ("CONSEJO DE LA SEMANA", consejo, "warning", ">")
-              ).filter(_._2.nonEmpty).map { case (titulo, texto, c, ico) =>
-                div(cls:="col-md-4",
-                  div(cls:=s"p-3 rounded h-100",
-                    style:=s"background:rgba(${if(c=="info")"13,202,240"else if(c=="success")"40,167,69"else"255,193,7"},0.1); border-left:3px solid ${if(c=="info")"#0dcaf0"else if(c=="success")"#28a745"else"#ffc107"};",
-                    div(cls:=s"text-$c fw-bold xx-small mb-2", s"$ico $titulo"),
-                    div(cls:="text-white small", texto)
-                  )
-                )
-              }: _*)
-            )
-          )
-        )
-      } else div(cls:="card bg-dark border-secondary shadow mb-3",
-        div(cls:="card-body p-3 text-muted small text-center",
-          "Escribe notas de conducta en tu registro diario para activar el analisis IA"
-        )
-      ),
-
       // Grafico animo + energia + nota
       div(cls:="card bg-dark border-secondary shadow mb-3",
         div(cls:="card-header text-white fw-bold small", "EVOLUCION EMOCIONAL (ultimos 30 dias)"),
@@ -1925,65 +1947,44 @@ object HistoryController extends cask.Routes {
         )
       ) else div(),
 
-      // BLOQUE S: toolkit de regulacion emocional tras gol encajado
-      {
-        val re = DatabaseManager.getRegulacionEmocional()
-        if (!re("suficiente").asInstanceOf[Boolean]) div()
-        else {
-          val distribucion = re("distribucion").asInstanceOf[List[Map[String, Any]]]
-          val notaReorganiza = re("notaReorganiza").asInstanceOf[Option[Double]]
-          val notaDecaido = re("notaDecaido").asInstanceOf[Option[Double]]
-          val pctDecaido = re("pctDecaido").asInstanceOf[Double]
-          val pctSaludable = re("pctSaludable").asInstanceOf[Double]
-          val labelsJs = distribucion.map(d => s""""${d("comportamiento")}"""").mkString("[", ",", "]")
-          val dataJs = distribucion.map(d => d("n").asInstanceOf[Int].toString).mkString("[", ",", "]")
-          val comparativa: Modifier = (notaReorganiza, notaDecaido) match {
-            case (Some(nr), Some(nd)) => div(cls := "small text-white mt-2", f"Cuando se reorganiza con la defensa, la nota media del resto del partido es $nr%.1f. Cuando decae, es $nd%.1f.")
-            case _ => div()
-          }
-          div(cls := "card bg-dark border-info shadow mb-3",
-            div(cls := "card-header text-info fw-bold small", "🧠 TOOLKIT DE REGULACIÓN EMOCIONAL"),
-            div(cls := "card-body p-3",
-              div(style := "height:200px;", tag("canvas")(id := "chartRegulacionEmocional")),
-              comparativa,
-              if (pctDecaido > 40) div(cls := "xx-small text-warning fw-bold mt-2", "⚠️ Más del 40% de las veces decae tras un gol — trabajar con el entrenador.")
-              else if (pctSaludable >= 50) div(cls := "xx-small text-success fw-bold mt-2", "✅ Héctor muestra señales de regulación emocional saludable")
-              else div(),
-              script(raw(s"""
-                var ctxRE = document.getElementById('chartRegulacionEmocional');
-                if (ctxRE) {
-                  new Chart(ctxRE, { type: 'doughnut',
-                    data: { labels: $labelsJs, datasets: [{ data: $dataJs,
-                      backgroundColor: ['#0dcaf0','#20c997','#dc3545','#6c757d','#ffc107','#8b5cf6'] }] },
-                    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{color:'#eee', font:{size:10}} } } }
-                  });
-                }
-              """))
+      ),
+      seccion("🧠 Análisis IA")(
+      // Analisis IA
+      if (patron.nonEmpty || fortaleza.nonEmpty || consejo.nonEmpty) {
+        div(cls:="card bg-dark border-info shadow mb-3",
+          div(cls:="card-header text-info fw-bold small", "🤖 ANALISIS PSICOPEDAGOGICO (IA)"),
+          div(cls:="card-body p-3",
+            div(cls:="row g-3",
+              frag(Seq(
+                ("PATRON EMOCIONAL", patron, "info", "?"),
+                ("FORTALEZA MENTAL", fortaleza, "success", "*"),
+                ("CONSEJO DE LA SEMANA", consejo, "warning", ">")
+              ).filter(_._2.nonEmpty).map { case (titulo, texto, c, ico) =>
+                div(cls:="col-md-4",
+                  div(cls:=s"p-3 rounded h-100",
+                    style:=s"background:rgba(${if(c=="info")"13,202,240"else if(c=="success")"40,167,69"else"255,193,7"},0.1); border-left:3px solid ${if(c=="info")"#0dcaf0"else if(c=="success")"#28a745"else"#ffc107"};",
+                    div(cls:=s"text-$c fw-bold xx-small mb-2", s"$ico $titulo"),
+                    div(cls:="text-white small", texto)
+                  )
+                )
+              }: _*)
             )
           )
-        }
-      },
+        )
+      } else div(cls:="card bg-dark border-secondary shadow mb-3",
+        div(cls:="card-body p-3 text-muted small text-center",
+          "Escribe notas de conducta en tu registro diario para activar el analisis IA"
+        )
+      ),
 
-      // BLOQUE O: nota media segun si siguio la rutina pre-partido o no
-      {
-        val ra = DatabaseManager.getRutinaAnalysis()
-        if (!ra("suficiente").asInstanceOf[Boolean]) div()
-        else {
-          val notaSigue = ra("notaMediaSigue").asInstanceOf[Double]
-          val notaNoSigue = ra("notaMediaNoSigue").asInstanceOf[Double]
-          div(cls := "card bg-dark border-secondary shadow mb-3",
-            div(cls := "card-header text-white fw-bold small", "🔄 RUTINA PRE-PARTIDO"),
-            div(cls := "card-body p-3",
-              div(cls := "small text-white", f"Cuando sigue su rutina pre-partido, la nota media es $notaSigue%.1f. Cuando no la sigue, es $notaNoSigue%.1f.")
-            )
-          )
-        }
-      },
-
+        form(action := "/emocional/analizar", method := "post", cls := "d-grid mt-2",
+          button(tpe := "submit", cls := "btn btn-outline-info fw-bold", if (analisisIA.nonEmpty) "🔄 Actualizar análisis IA" else "🧠 Generar análisis IA"))
+      ),
+      seccion("👨 Impacto del padre")(
       // BLOQUE B: impacto de la conducta del padre en la banda — solo visible aqui, nunca en publico
       {
         val cp = DatabaseManager.getConductaPadreAnalysis()
-        if (!cp("suficiente").asInstanceOf[Boolean]) div()
+        if (!cp("suficiente").asInstanceOf[Boolean]) SharedLayout.sinDatos("Impacto del padre", "Hacen falta 10+ partidos con tu autoevaluación")
         else {
           val mediaConducta = cp("mediaConducta").asInstanceOf[Double]
           val notaInterv = cp("notaMediaIntervencionista").asInstanceOf[Double]
@@ -2007,6 +2008,34 @@ object HistoryController extends cask.Routes {
           )
         }
       },
+
+      ),
+      seccion("🔄 Rutina pre-partido")(
+      // BLOQUE O: nota media segun si siguio la rutina pre-partido o no
+      {
+        val ra = DatabaseManager.getRutinaAnalysis()
+        if (!ra("suficiente").asInstanceOf[Boolean]) SharedLayout.sinDatos("Rutina pre-partido", "Hacen falta 10+ partidos con la rutina registrada")
+        else {
+          val notaSigue = ra("notaMediaSigue").asInstanceOf[Double]
+          val notaNoSigue = ra("notaMediaNoSigue").asInstanceOf[Double]
+          div(cls := "card bg-dark border-secondary shadow mb-3",
+            div(cls := "card-header text-white fw-bold small", "🔄 RUTINA PRE-PARTIDO"),
+            div(cls := "card-body p-3",
+              div(cls := "small text-white", f"Cuando sigue su rutina pre-partido, la nota media es $notaSigue%.1f. Cuando no la sigue, es $notaNoSigue%.1f.")
+            )
+          )
+        }
+      },
+
+      ),
+      seccion("📊 Registro psicológico")(
+        DatabaseManager.getPsychRecords().lastOption match {
+          case Some(r) => div(cls := "card bg-dark border-secondary p-2 mb-2 small",
+            s"Último registro (${r("fecha")}): motivación ${r("motivacion")}/5 · disfrute ${r.getOrElse("disfrute", "-")}/5")
+          case None => SharedLayout.sinDatos("Registro psicológico")
+        },
+        a(href := "/psych", cls := "btn btn-sm btn-outline-info fw-bold", "🧠 Ir al registro psicológico")
+      ),
 
       script(src:="https://cdn.jsdelivr.net/npm/chart.js"),
       {

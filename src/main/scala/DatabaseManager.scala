@@ -5009,7 +5009,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
   case class EmotionalEntry(fecha: String, animo: Int, energia: Int, notas: String,
                              notaPartido: Option[Double], reaccionGoles: String)
 
-  def getEmotionalData(): Map[String, Any] = {
+  def getEmotionalData(generarIA: Boolean = false): Map[String, Any] = {
     val conn = getConnection()
     try {
       // Serie de 45 dias: animo + energia + notas conducta + nota partido ese dia
@@ -5080,8 +5080,14 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
         math.min(99, math.max(1, s.toInt))
       }
 
-      // Analisis IA de las notas emocionales (bypassCache para siempre tener fresco)
-      val analisisIA: String = if (notasParaIA.nonEmpty) {
+      // Analisis IA de las notas emocionales: se genera solo al pulsar el boton (generarIA) y se guarda en
+      // feature_cache; al cargar la pagina solo se lee lo guardado (antes se llamaba a Gemini en cada visita).
+      val analisisGuardado: Option[String] = {
+        val rsIa = conn.createStatement().executeQuery("SELECT payload FROM feature_cache WHERE cache_key = 'emocional_ia'")
+        if (rsIa.next()) Option(rsIa.getString("payload")).filter(_.nonEmpty) else None
+      }
+      val analisisIA: String = if (!generarIA) analisisGuardado.getOrElse("")
+      else if (notasParaIA.nonEmpty) {
         val prompt = s"""Eres un psicopedagogo deportivo analizando el diario emocional de Hector, portero de 9 anos.
 Entradas recientes (fecha: nota): $notasParaIA
 Reacciones a goles encajados: ${reacciones.mkString(" | ")}
@@ -5090,7 +5096,13 @@ PATRON: [patron emocional detectado en 1 frase]
 FORTALEZA: [principal fortaleza mental en 1 frase]
 CONSEJO: [1 consejo practico concreto para esta semana]
 Responde en espanol, tono positivo y motivador para un nino."""
-        AIProvider.ask(prompt, None, bypassCache = true)
+        val r = AIProvider.ask(prompt, None, bypassCache = true)
+        if (r.nonEmpty && !r.startsWith("Error")) {
+          val ps = conn.prepareStatement(
+            "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('emocional_ia', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
+          ps.setString(1, r); ps.executeUpdate()
+        }
+        r
       } else "Sin suficientes notas de conducta para el analisis. Registra tu estado diario para activar este modulo."
 
       Map(
