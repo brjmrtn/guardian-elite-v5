@@ -82,14 +82,18 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE 5.6: DETECTOR DE DESGASTE SILENCIOSO (prioridad maxima) ────────
-    val desgasteWidget: Modifier = DatabaseManager.detectarDesgasteSilencioso() match {
+    val desgasteDetectado = DatabaseManager.detectarDesgasteSilencioso()
+    val desgasteActivo = desgasteDetectado.isDefined
+    val desgasteWidget: Modifier = desgasteDetectado match {
       case Some(msg) => div(cls := "alert alert-danger fw-bold shadow mb-3", style := "border-left:6px solid #dc3545;", msg)
       case None => div()
     }
 
     // ── ALERTAS POSITIVAS (verde suave; riesgo = rojo, recordatorios = amarillo) ──
+    val alertasPositivas = DatabaseManager.detectarAlertasPositivas()
+    val hayAlertasPositivas = alertasPositivas.nonEmpty
     val alertasPositivasWidget: Modifier = {
-      val pos = DatabaseManager.detectarAlertasPositivas()
+      val pos = alertasPositivas
       if (pos.isEmpty) frag()
       else div(cls := "mb-3",
         frag(pos.map(p => div(cls := "small p-2 mb-2 rounded fw-bold",
@@ -103,8 +107,10 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE B2: PENDIENTE DE REGISTRAR (estructura semanal, SQL puro) ──────
+    val pendientesSemana = DatabaseManager.getSemanaIncompleta()
+    val hayPendientes = pendientesSemana.nonEmpty
     val pendienteWidget: Modifier = {
-      val pendientes = DatabaseManager.getSemanaIncompleta()
+      val pendientes = pendientesSemana
       if (pendientes.isEmpty) div()
       else div(cls := "card bg-secondary bg-opacity-25 border-secondary shadow-sm mb-3 p-2",
         div(cls := "xx-small text-muted fw-bold mb-1", "📋 PENDIENTE DE REGISTRAR"),
@@ -298,8 +304,9 @@ object DashboardController extends cask.Routes {
       })
 
     // ── MODULO LA VOZ DEL PORTERO: recordatorio mensual (SQL puro, sin Gemini) ─
+    val debeRecordarVoz = DatabaseManager.debeRecordarVozPortero()
     val vozPorteroWidget: Modifier =
-      if (!DatabaseManager.debeRecordarVozPortero()) div()
+      if (!debeRecordarVoz) div()
       else div(cls := "card bg-dark border-warning shadow-sm mb-3 p-2",
         a(href := "/voz-portero", cls := "text-decoration-none xx-small text-warning fw-bold",
           "🎤 Este mes aún no has registrado La Voz del Portero — tarda 2 minutos.")
@@ -319,7 +326,8 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE RFFM: BENCHMARK REAL VS CATEGORIA (SQL puro, sin Gemini) ───────
-    val rffmWidget: Modifier = DatabaseManager.getPercentilRealHector() match {
+    val percentilRffm = DatabaseManager.getPercentilRealHector()
+    val rffmWidget: Modifier = percentilRffm match {
       case Some(p) =>
         val totalEquipos = p("totalEquipos").asInstanceOf[Int]
         val mediaGc = p("mediaGcHector").asInstanceOf[Double]
@@ -995,66 +1003,17 @@ object DashboardController extends cask.Routes {
       button(tpe := "button", id := "tabBtnHoy", cls := "btn btn-warning fw-bold flex-fill", onclick := "mostrarTabDashboard('hoy')", "☀️ HOY"),
       button(tpe := "button", id := "tabBtnCompleto", cls := "btn btn-outline-secondary fw-bold flex-fill", onclick := "mostrarTabDashboard('completo')", "📊 COMPLETO"))
 
+    val acwrSobreRiesgo = !acwrInsuficiente && acwr > umbrales.riesgo
+
     val content = basePage("home",
       faseGuardianModal,
       tabsNav,
       div(id := "tabHoy", hoyTab),
       div(id := "tabCompleto", style := "display:none;",
       div(
-        // ── BLOQUE F2: RIESGO DE LESION CRITICO (maxima prioridad, por encima del desgaste) ─
+        // ── CRITICO: siempre arriba si esta activo ──
         riesgoCriticoAlert,
-
-        // ── BLOQUE 5.6: DESGASTE SILENCIOSO (prioridad maxima sobre todo lo demas) ─
-        desgasteWidget,
         enfermedadWidget,
-        alertasPositivasWidget,
-
-        // ── BLOQUE C: MODO DIA DE PARTIDO ───────────────────────────────────
-        diaPartidoBanner,
-        postPartidoWidget,
-
-        // ── BLOQUE 2.7: ALERTAS DE TEMPORADA ────────────────────────────────
-        temporadaAlertWidget,
-
-        // ── BLOQUE B2: PENDIENTE DE REGISTRAR ───────────────────────────────
-        pendienteWidget,
-
-        // ── BLOQUE 4.2: ULTIMA ACADEMIA ─────────────────────────────────────
-        ultimaAcademiaWidget,
-        academiaVideoTipWidget,
-
-        // ── BLOQUE 5.4/5.5: FOCO SEMANAL Y PREPARACION ──────────────────────
-        microObjetivoWidget,
-        preparacionWidget,
-
-        // ── BLOQUE I: SUGERENCIAS DE SKILL DESDE EL FEEDBACK ─────────────────
-        sugerenciasSkillWidget,
-
-        // ── BLOQUE E: HITOS RECIENTES ────────────────────────────────────────
-        hitosWidget,
-
-        // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
-        formaWidget,
-        formaProyectadaWidget,
-        // Rachas de registro — discreto, sin alarma si se rompe
-        {
-          val st = DatabaseManager.getStreakRegistro()
-          val racha = st("streakSueno").asInstanceOf[Int]
-          div(cls := "mb-3 xx-small", style := "color:#94a3b8; line-height:1.7;",
-            div(s"🔥 Sueño: $racha ${if (racha == 1) "día seguido" else "días seguidos"}"),
-            if (st("partidos").asInstanceOf[Int] > 0) div(s"⚽ Partidos: ${st("partidosConRubrica")}/${st("partidos")} con rúbrica completa esta temporada") else frag(),
-            div(s"💤 Esta semana: ${st("diasSemana")}/7 días registrados"))
-        },
-        vozPorteroWidget,
-        arquetipoWidget,
-        deudaSuenoWidget,
-        riesgoLesionWidget,
-        protocoloWidget,
-        rfmfPendientesWidget,
-        DatabaseManager.getPercentilRealHector() match {
-          case Some(p) => conConfianza("rfmf_benchmarking", p("pjHector").asInstanceOf[Int])(rffmWidget)
-          case None => rffmWidget
-        },
 
         // ── HERO HEADER (dark) ─────────────────────────────────────────────
         div(style := "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius:16px; padding:20px; margin-bottom:20px;",
@@ -1114,7 +1073,9 @@ object DashboardController extends cask.Routes {
                   (f"$avgLast5%2.1f", "RACHA 5", if(trendDiff>0)"#20c997" else if(trendDiff<0)"#ef4444" else "#94a3b8"),
                   (acwrValStr,        "ACWR",    if(acwrInsuficiente)"#94a3b8" else acwrHex(acwr)),
                   (if(matches.nonEmpty) f"${matches.head.nota}%.1f" else "—", "ÚLTIMO", "#d4af37"),
-                  (if(matches.nonEmpty) matches.head.resultado else "—", "RESULT", "#94a3b8")
+                  (if(matches.nonEmpty) matches.head.resultado else "—", "RESULT", "#94a3b8"),
+                  (if (matches.nonEmpty) s"${matches.count(_.resultado.trim.endsWith("-0")) * 100 / matches.size}%" else "—", "PORT. A 0", "#20c997"),
+                  (DatabaseManager.getTodosLosHitos().size.toString, "HITOS", "#facc15")
                 ).map { case (v, lbl, color) =>
                   div(cls := "col-6",
                     div(style := "background:#1e293b; border:1px solid #334155; border-radius:8px; padding:8px; text-align:center;",
@@ -1143,6 +1104,54 @@ object DashboardController extends cask.Routes {
             )
           )
         ),
+
+        // ── 2. Carta FUT: badge del arquetipo ──
+        arquetipoWidget,
+
+        // ── 3. Indice de Forma + deuda de sueno + riesgo de lesion ──
+        formaWidget,
+        // Rachas de registro — discreto, sin alarma si se rompe
+        {
+          val st = DatabaseManager.getStreakRegistro()
+          val racha = st("streakSueno").asInstanceOf[Int]
+          div(cls := "mb-3 xx-small", style := "color:#94a3b8; line-height:1.7;",
+            div(s"🔥 Sueño: $racha ${if (racha == 1) "día seguido" else "días seguidos"}"),
+            if (st("partidos").asInstanceOf[Int] > 0) div(s"⚽ Partidos: ${st("partidosConRubrica")}/${st("partidos")} con rúbrica completa esta temporada") else frag(),
+            div(s"💤 Esta semana: ${st("diasSemana")}/7 días registrados"))
+        },
+        deudaSuenoWidget,
+        riesgoLesionWidget,
+
+        // ── 4. Modo dia de partido o preparacion semanal (segun el dia) ──
+        if (esDiaDePartido) div(diaPartidoBanner, postPartidoWidget) else div(preparacionWidget, formaProyectadaWidget),
+
+        // ── Bloques colapsables: abiertos solo si tienen algo que mostrar ──
+        seccion("🌟 Alertas positivas", abierta = hayAlertasPositivas)(
+          if (hayAlertasPositivas) alertasPositivasWidget else sinDatos("Alertas positivas")),
+        seccion("🔄 Protocolo de recuperación", abierta = riesgoEsAltoOCritico || acwrSobreRiesgo)(
+          if (riesgoEsAltoOCritico) protocoloWidget
+          else div(cls := "guardian-sin-datos", "🔄 Solo se genera con la carga o el riesgo de lesión altos.")),
+        seccion("⚠️ Desgaste silencioso", abierta = desgasteActivo)(
+          if (desgasteActivo) desgasteWidget else div(cls := "guardian-sin-datos", "✅ Sin señales de desgaste silencioso.")),
+        seccion("📋 Pendiente de registrar", abierta = hayPendientes)(
+          if (hayPendientes) pendienteWidget else div(cls := "guardian-sin-datos", "✅ Todo registrado esta semana.")),
+        seccion("🎤 La Voz del Portero", abierta = debeRecordarVoz)(
+          if (debeRecordarVoz) vozPorteroWidget
+          else div(cls := "guardian-sin-datos", "✅ La Voz del Portero de este mes ya está registrada. ", a(href := "/voz-portero", "Ver"))),
+        seccion("📊 RFMF — comparación con la categoría")(
+          percentilRffm match {
+            case Some(pr) => conConfianza("rfmf_benchmarking", pr("pjHector").asInstanceOf[Int])(rffmWidget)
+            case None => sinDatos("Benchmark RFMF", "Se activa al sincronizar la clasificación en Ajustes")
+          }),
+
+        // ── Resto del dashboard ──
+        temporadaAlertWidget,
+        ultimaAcademiaWidget,
+        academiaVideoTipWidget,
+        microObjetivoWidget,
+        sugerenciasSkillWidget,
+        hitosWidget,
+        rfmfPendientesWidget,
 
         contextWidget,
         idpAlertWidget,
@@ -1311,8 +1320,8 @@ object DashboardController extends cask.Routes {
               )
             else span(),
 
-            // Acceso rápido — PRIORIDAD 4
-            div(cls := "row g-2",
+            // Acceso rápido — colapsado: el menu de navegacion ya lo cubre
+            seccion("🚀 Acceso rápido a módulos")(div(cls := "row g-2",
               frag(Seq(
                 ("/scouting",       "🔍", "Scouting",   "#0ea5e9"),
                 ("/penalties",      "⛳", "Penaltis",   "#ef4444"),
@@ -1331,7 +1340,7 @@ object DashboardController extends cask.Routes {
                   )
                 )
               }: _*)
-            )
+            ))
           )
         )
       )),
