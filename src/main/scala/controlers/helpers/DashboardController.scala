@@ -947,9 +947,21 @@ object DashboardController extends cask.Routes {
         div(cls := "text-center mb-3", style := "background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%); border-radius:16px; padding:22px; border:1px solid #334155;",
           div(style := "font-size:12px; color:#94a3b8; letter-spacing:2px;", "ÍNDICE DE FORMA HOY"),
           div(style := s"font-size:64px; font-weight:900; color:$colorForma; line-height:1.1;", f"$semaforo $indice%.1f")),
-        if (riesgoEsAltoOCritico) riesgoLesionWidget else frag(),
+        // Riesgo de lesion solo si no es BAJO (el protocolo de recuperacion acompana al riesgo ALTO/CRITICO)
+        if (riesgoClasificacion != "BAJO") riesgoLesionWidget else frag(),
         protocoloWidget,
-        microObjetivoCard("Hoy"),
+        // Partido hoy o en los proximos 2 dias
+        DatabaseManager.getProximoPartidoEn(2) match {
+          case Some((dias, rival)) =>
+            val cuando = dias match { case 0 => "HOY"; case 1 => "MAÑANA"; case d => s"EN $d DÍAS" }
+            div(cls := "mb-3 p-3", style := "background:linear-gradient(135deg,#451a03,#1e293b); border:1px solid #d4af37; border-radius:14px;",
+              div(style := "font-size:12px; color:#facc15; letter-spacing:1px; font-weight:900;", s"🏟️ PARTIDO $cuando"),
+              if (rival.nonEmpty) div(cls := "fw-bold", style := "color:#fff; font-size:18px;", s"vs $rival") else frag(),
+              if (dias == 0) a(href := "/match-center", cls := "btn btn-warning fw-bold w-100 mt-2", "⚽ Registrar partido") else frag())
+          case None => frag()
+        },
+        formaProyectadaWidget,
+        if (microObjetivo("objetivo").toString.trim.nonEmpty) microObjetivoCard("Hoy") else frag(),
         // Reto semanal PARA Hector (se genera en la tarea programada; si falta, boton)
         DatabaseManager.getRetoSemana() match {
           case Some(r) =>
@@ -964,18 +976,19 @@ object DashboardController extends cask.Routes {
             form(action := "/reto-hector/generar", method := "post", cls := "d-grid mb-3",
               button(tpe := "submit", cls := "btn btn-sm btn-outline-warning fw-bold", "🎯 Generar el reto de Héctor de esta semana"))
         },
-        // BLOQUE H: rachas de registro — discreto, sin alarma si se rompe
+        // Registros pendientes: solo los 3 primeros
         {
-          val st = DatabaseManager.getStreakRegistro()
-          val racha = st("streakSueno").asInstanceOf[Int]
-          div(cls := "mb-3 xx-small", style := "color:#94a3b8; line-height:1.7;",
-            div(s"🔥 Sueño: $racha ${if (racha == 1) "día seguido" else "días seguidos"}"),
-            if (st("partidos").asInstanceOf[Int] > 0) div(s"⚽ Partidos: ${st("partidosConRubrica")}/${st("partidos")} con rúbrica completa esta temporada") else frag(),
-            div(s"💤 Esta semana: ${st("diasSemana")}/7 días registrados"))
+          val pendientes = DatabaseManager.getSemanaIncompleta()
+          if (pendientes.isEmpty) frag()
+          else div(cls := "mb-3 p-2", style := "border-left:4px solid #facc15; background:rgba(250,204,21,0.07); border-radius:8px;",
+            div(cls := "xx-small fw-bold mb-1", style := "color:#facc15;", "📋 PENDIENTE DE REGISTRAR"),
+            frag(pendientes.take(3).map(p => div(cls := "xx-small text-light", p)): _*),
+            if (pendientes.size > 3) div(cls := "xx-small text-muted", s"+${pendientes.size - 3} más en COMPLETO") else frag())
         },
+        // Acciones principales
         div(cls := "d-grid gap-2 mb-3",
           a(href := "/bio", cls := "btn btn-lg btn-info fw-bold py-3", "💤 Registrar sueño"),
-          if (esDiaDePartido) a(href := "/match-center", cls := "btn btn-lg btn-warning fw-bold py-3", "⚽ Registrar partido") else frag())
+          a(href := "/match-center", cls := s"btn btn-lg ${if (esDiaDePartido) "btn-warning" else "btn-outline-warning"} fw-bold py-3", "⚽ Registrar partido"))
       )
     }
     val tabsNav: Modifier = div(cls := "d-flex gap-2 mb-3",
@@ -1023,6 +1036,15 @@ object DashboardController extends cask.Routes {
         // ── BLOQUE A3: INDICE DE FORMA DIARIO ───────────────────────────────
         formaWidget,
         formaProyectadaWidget,
+        // Rachas de registro — discreto, sin alarma si se rompe
+        {
+          val st = DatabaseManager.getStreakRegistro()
+          val racha = st("streakSueno").asInstanceOf[Int]
+          div(cls := "mb-3 xx-small", style := "color:#94a3b8; line-height:1.7;",
+            div(s"🔥 Sueño: $racha ${if (racha == 1) "día seguido" else "días seguidos"}"),
+            if (st("partidos").asInstanceOf[Int] > 0) div(s"⚽ Partidos: ${st("partidosConRubrica")}/${st("partidos")} con rúbrica completa esta temporada") else frag(),
+            div(s"💤 Esta semana: ${st("diasSemana")}/7 días registrados"))
+        },
         vozPorteroWidget,
         arquetipoWidget,
         deudaSuenoWidget,

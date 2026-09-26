@@ -3240,11 +3240,11 @@ $analisisConcatenados"""
     }
   }
 
-  /** Dias hasta el sabado si hoy es miercoles o jueves y hay partido ese sabado (programado o en weekly_structure). */
+  /** Dias hasta el sabado si hoy es miercoles, jueves o viernes y hay partido ese sabado (programado o en weekly_structure). */
   def diasHastaPartidoSabado(): Option[Int] = {
     val hoy = LocalDate.now()
     val dow = hoy.getDayOfWeek.getValue
-    if (dow != 3 && dow != 4) return None
+    if (dow < 3 || dow > 5) return None
     val sabado = hoy.plusDays(6 - dow)
     val conn = getConnection()
     try {
@@ -3254,6 +3254,24 @@ $analisisConcatenados"""
       ps.setString(1, sabado.toString)
       val rs = ps.executeQuery()
       if (rs.next() && rs.getInt("c") > 0) Some(6 - dow) else None
+    } finally { conn.close() }
+  }
+
+  /** Proximo partido en los proximos `dias` dias: (dias que faltan, rival si esta programado). */
+  def getProximoPartidoEn(dias: Int = 2): Option[(Int, String)] = {
+    val hoy = LocalDate.now()
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT fecha, rival FROM matches WHERE status = 'SCHEDULED' AND fecha >= CURRENT_DATE AND fecha <= CURRENT_DATE + ? ORDER BY fecha LIMIT 1")
+      ps.setInt(1, dias)
+      val rs = ps.executeQuery()
+      if (rs.next()) Some((java.time.temporal.ChronoUnit.DAYS.between(hoy, rs.getDate("fecha").toLocalDate).toInt, fixEncoding(Option(rs.getString("rival")).getOrElse(""))))
+      else {
+        val rsW = conn.createStatement().executeQuery("SELECT dia_semana FROM weekly_structure WHERE activo = TRUE AND tipo_sesion IN ('PARTIDO','TORNEO')")
+        val diasPartido = Iterator.continually(rsW).takeWhile(_.next()).map(_.getInt("dia_semana")).toSet
+        (0 to dias).find(i => diasPartido.contains(hoy.plusDays(i).getDayOfWeek.getValue)).map(i => (i, ""))
+      }
     } finally { conn.close() }
   }
 
