@@ -1144,7 +1144,7 @@ object DatabaseManager {
   }
 
   // --- IA CONFIG ---
-  val modelList = Seq("gemini-3.8-flash", "gemini-flash-latest")
+  val modelList = Seq("gemini-2.5-flash", "gemini-flash-latest")
   object AIProvider {
     import java.security.MessageDigest
 
@@ -1197,8 +1197,8 @@ object DatabaseManager {
 
       // Usar siempre v1beta — soporta PDF y es compatible con cualquier API key de Google AI Studio
       val urls = Seq(
-        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey",
-        // s"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-exp:generateContent?key=$apiKey",
+        s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey",
+        // s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-exp:generateContent?key=$apiKey",
         //s"https://generativelanguage.googleapis.com/v1beta/models/:generateContent?key=$apiKey"
       )
 
