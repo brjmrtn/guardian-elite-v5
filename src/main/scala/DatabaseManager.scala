@@ -1385,10 +1385,10 @@ object DatabaseManager {
       }
 
       // 4. Calculo de Cargas (ACWR) — inline para no abrir segunda conexion
-      val rsAc = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      val rsAc = conn.prepareStatement("SELECT COALESCE(SUM(rpe * COALESCE(duracion_min, 60)), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
       rsAc.setInt(1, 7); val rsAcR = rsAc.executeQuery()
       val acuteLoads = Seq(if (rsAcR.next()) rsAcR.getDouble(1) else 0.0)
-      val rsCh = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      val rsCh = conn.prepareStatement("SELECT COALESCE(SUM(rpe * COALESCE(duracion_min, 60)), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
       rsCh.setInt(1, 28); val rsChR = rsCh.executeQuery()
       val chronicLoads = Seq(if (rsChR.next()) rsChR.getDouble(1) else 0.0)
       val acuteAvg = if (acuteLoads.nonEmpty) acuteLoads.sum / 7.0 else 0.0
@@ -9963,9 +9963,9 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       // BLOQUE B: si hay fb_distancia (Footbar), la carga efectiva pondera por la distancia
       // recorrida en el entreno — un mismo RPE con mas km recorridos supone mas carga objetiva.
       val ps = conn.prepareStatement("""
-      (SELECT (minutos * 4) as load FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - ?)
+      (SELECT (COALESCE(NULLIF(minutos, 0), 45) * 4) as load FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - ?)
       UNION ALL
-      (SELECT (60 * rpe * (1 + COALESCE(fb_distancia, 0) * 0.05)) as load FROM trainings WHERE fecha >= CURRENT_DATE - ?)
+      (SELECT (COALESCE(duracion_min, 60) * rpe * (1 + COALESCE(fb_distancia, 0) * 0.05)) as load FROM trainings WHERE fecha >= CURRENT_DATE - ?)
     """)
       ps.setInt(1, days); ps.setInt(2, days)
       val rs = ps.executeQuery()
@@ -10058,7 +10058,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       val rs = conn.createStatement().executeQuery(s"""
         SELECT
           TO_CHAR(DATE_TRUNC('week', fecha), 'YYYY-MM-DD') as semana,
-          SUM(rpe * 60) as carga,
+          SUM(rpe * COALESCE(duracion_min, 60)) as carga,
           COUNT(*) as sesiones
         FROM trainings
         WHERE fecha >= CURRENT_DATE - ${weeks * 7}
@@ -10125,15 +10125,15 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
                w.sueno_profundo_min, w.sueno_ligero_min, w.sueno_despierto_min,
                w.horas_sueno, w.sueno as calidad, w.energia, w.animo,
                m.nota,
-               (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 7.0
-                  FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+               (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE minutos * rpe END), 0) / 7.0
+                  FROM ((SELECT COALESCE(NULLIF(minutos, 0), 45) as minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                         UNION ALL
-                        (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                        (SELECT COALESCE(duracion_min, 60), rpe, 1, fecha FROM trainings)) loads
                   WHERE fecha <= w.fecha AND ${DateUtils.daysBetweenSQL("w.fecha", "fecha")} < 7) as acute_load,
-               (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
-                  FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+               (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE minutos * rpe END), 0) / 28.0
+                  FROM ((SELECT COALESCE(NULLIF(minutos, 0), 45) as minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                         UNION ALL
-                        (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                        (SELECT COALESCE(duracion_min, 60), rpe, 1, fecha FROM trainings)) loads
                   WHERE fecha <= w.fecha AND ${DateUtils.daysBetweenSQL("w.fecha", "fecha")} < 28) as chronic_load
         FROM wellness w
         JOIN matches m ON m.status = 'PLAYED' AND m.fecha > w.fecha AND m.fecha <= w.fecha + 2 $sf
@@ -10366,13 +10366,13 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
     try {
       // 1. ACWR riesgo — calculado directo sin sub-conexion
       val rsAcute = conn.prepareStatement(
-        "SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?"
+        "SELECT COALESCE(SUM(rpe * COALESCE(duracion_min, 60)), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?"
       )
       rsAcute.setInt(1, 7); val rsA = rsAcute.executeQuery()
       val acuteLoad = if (rsA.next()) rsA.getDouble(1) else 0.0
 
       val rsChronic = conn.prepareStatement(
-        "SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?"
+        "SELECT COALESCE(SUM(rpe * COALESCE(duracion_min, 60)), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?"
       )
       rsChronic.setInt(1, 28); val rsC = rsChronic.executeQuery()
       val chronicLoad = if (rsC.next()) rsC.getDouble(1) else 0.0
@@ -11207,9 +11207,9 @@ SOLO el JSON, nada mas."""
     val conn = getConnection()
     try {
       // ── 1. ACWR actual ──────────────────────────────────────────────────────
-      val rsAg = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      val rsAg = conn.prepareStatement("SELECT COALESCE(SUM(rpe * COALESCE(duracion_min, 60)), 0) FROM trainings WHERE fecha >= CURRENT_DATE - ?")
       rsAg.setInt(1, 7); val ag = rsAg.executeQuery(); val cargaAguda = if (ag.next()) ag.getDouble(1) else 0.0
-      val rsCr = conn.prepareStatement("SELECT COALESCE(SUM(rpe * 60), 0) / 4.0 FROM trainings WHERE fecha >= CURRENT_DATE - ?")
+      val rsCr = conn.prepareStatement("SELECT COALESCE(SUM(rpe * COALESCE(duracion_min, 60)), 0) / 4.0 FROM trainings WHERE fecha >= CURRENT_DATE - ?")
       rsCr.setInt(1, 28); val cr = rsCr.executeQuery(); val cargaCronica = if (cr.next() && cr.getDouble(1) > 0) cr.getDouble(1) else 1.0
       val acwr: Double = cargaAguda / cargaCronica
 
@@ -12024,15 +12024,15 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       val sf = seasonFilter(seasonId).replace("season_id", "m.season_id")
       val rs = conn.createStatement().executeQuery(s"""
         SELECT m.id, m.clima, m.es_local, m.nota,
-          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 7.0
-             FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE minutos * rpe END), 0) / 7.0
+             FROM ((SELECT COALESCE(NULLIF(minutos, 0), 45) as minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
-                   (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                   (SELECT COALESCE(duracion_min, 60), rpe, 1, fecha FROM trainings)) loads
              WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 7) as acute_load,
-          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
-             FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE minutos * rpe END), 0) / 28.0
+             FROM ((SELECT COALESCE(NULLIF(minutos, 0), 45) as minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
-                   (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                   (SELECT COALESCE(duracion_min, 60), rpe, 1, fecha FROM trainings)) loads
              WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 28) as chronic_load
         FROM matches m
         WHERE m.status = 'PLAYED' AND m.nota > 0 $sf
@@ -12106,15 +12106,15 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
         SELECT m.nota,
           ${DateUtils.daysBetweenSQL("m.fecha", "LAG(m.fecha) OVER (ORDER BY m.fecha)")} as dias_descanso,
           COALESCE(m.es_local::int, 0) as es_local,
-          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 7.0
-             FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE minutos * rpe END), 0) / 7.0
+             FROM ((SELECT COALESCE(NULLIF(minutos, 0), 45) as minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
-                   (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                   (SELECT COALESCE(duracion_min, 60), rpe, 1, fecha FROM trainings)) loads
              WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 7) as acute_load,
-          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE 60 * rpe END), 0) / 28.0
-             FROM ((SELECT minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
+          (SELECT COALESCE(SUM(CASE WHEN src = 0 THEN minutos * 4 ELSE minutos * rpe END), 0) / 28.0
+             FROM ((SELECT COALESCE(NULLIF(minutos, 0), 45) as minutos, 0 as rpe, 0 as src, fecha FROM matches WHERE status = 'PLAYED')
                    UNION ALL
-                   (SELECT 0, rpe, 1, fecha FROM trainings)) loads
+                   (SELECT COALESCE(duracion_min, 60), rpe, 1, fecha FROM trainings)) loads
              WHERE fecha <= m.fecha AND ${DateUtils.daysBetweenSQL("m.fecha", "fecha")} < 28) as chronic_load,
           COALESCE((SELECT w.horas_sueno FROM wellness w WHERE ${DateUtils.daysBetweenSQL("m.fecha", "w.fecha")} = 1), 0) as horas_sueno,
           COALESCE((${DateUtils.daysBetweenSQL("m.fecha", "SELECT MAX(t.fecha) FROM trainings t WHERE t.tipo ILIKE '%academia%' AND t.fecha <= m.fecha")}), 999) as dias_desde_academia
@@ -12515,9 +12515,9 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       // 3. ACWR: historico (aproximado con cargas semanales) vs actual
       val rsCargas = conn.createStatement().executeQuery("""
         SELECT TO_CHAR(fecha, 'IYYY-IW') as semana, SUM(carga) as carga_semana FROM (
-          (SELECT fecha, minutos * 4 as carga FROM matches WHERE status = 'PLAYED')
+          (SELECT fecha, COALESCE(NULLIF(minutos, 0), 45) * 4 as carga FROM matches WHERE status = 'PLAYED')
           UNION ALL
-          (SELECT fecha, 60 * rpe as carga FROM trainings)
+          (SELECT fecha, COALESCE(duracion_min, 60) * rpe as carga FROM trainings)
         ) t GROUP BY semana ORDER BY semana ASC
       """)
       var cargasSemanales = List[Double]()
@@ -13312,9 +13312,9 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
     // ACWR del dia (aguda 7d / cronica 28d) con la misma formula de carga que getWorkloads
     ("acwr", "📈 ACWR",
       """WITH cargas AS (
-           SELECT fecha::date as f, minutos * 4.0 as l FROM matches WHERE status='PLAYED' AND fecha IS NOT NULL
+           SELECT fecha::date as f, COALESCE(NULLIF(minutos, 0), 45) * 4.0 as l FROM matches WHERE status='PLAYED' AND fecha IS NOT NULL
            UNION ALL
-           SELECT fecha::date, 60.0 * COALESCE(rpe, 0) * (1 + COALESCE(fb_distancia, 0) * 0.05) FROM trainings WHERE fecha IS NOT NULL
+           SELECT fecha::date, COALESCE(duracion_min, 60) * COALESCE(rpe, 0) * (1 + COALESCE(fb_distancia, 0) * 0.05) FROM trainings WHERE fecha IS NOT NULL
          ), dias AS (SELECT DISTINCT f FROM cargas)
          SELECT dias.f as d,
            ((SELECT SUM(c.l) FROM cargas c WHERE c.f BETWEEN (dias.f - INTERVAL '6 days')::date AND dias.f) / 7.0) /
@@ -14254,11 +14254,11 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
     try {
       val ps = conn.prepareStatement("""
         SELECT fecha, tipo, detalle, carga FROM (
-          SELECT fecha, 'Partido vs ' || COALESCE(rival, '') as tipo, minutos || ' min' as detalle, minutos * 4.0 as carga, 1 as orden
+          SELECT fecha, 'Partido vs ' || COALESCE(rival, '') as tipo, COALESCE(NULLIF(minutos, 0), 45) || ' min' as detalle, COALESCE(NULLIF(minutos, 0), 45) * 4.0 as carga, 1 as orden
           FROM matches WHERE status = 'PLAYED' AND fecha >= CURRENT_DATE - ?
           UNION ALL
-          SELECT fecha, tipo || CASE WHEN tipo_ausencia IS NOT NULL THEN ' (no fue)' ELSE '' END, 'RPE ' || rpe,
-                 60 * rpe * (1 + COALESCE(fb_distancia, 0) * 0.05), 2
+          SELECT fecha, tipo || CASE WHEN tipo_ausencia IS NOT NULL THEN ' (no fue)' ELSE '' END, COALESCE(duracion_min || ' min · ', '') || 'RPE ' || rpe,
+                 COALESCE(duracion_min, 60) * rpe * (1 + COALESCE(fb_distancia, 0) * 0.05), 2
           FROM trainings WHERE fecha >= CURRENT_DATE - ?
         ) t ORDER BY fecha DESC, orden""")
       ps.setInt(1, dias); ps.setInt(2, dias)
