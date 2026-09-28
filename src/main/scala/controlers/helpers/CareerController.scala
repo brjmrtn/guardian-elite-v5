@@ -2884,7 +2884,16 @@ ${cuerpo.mkString("\n")}
             div(cls := "progress mb-2", style := "height:14px;",
               div(cls := "progress-bar bg-info fw-bold", style := s"width:$percentil%;", s"P$percentil")
             ),
-            div(cls := "xx-small text-muted", s"Datos de $totalPartidos partidos · $fuente · Actualizado el $fechaActualizado")
+            div(cls := "xx-small text-muted", s"Datos de $totalPartidos partidos · $fuente · Actualizado el $fechaActualizado"),
+            scala.util.Try(DatabaseManager.getPercentilComparablesRFFM(efectivo)).toOption.flatten match {
+              case Some(c) =>
+                val equipos = c("equipos").asInstanceOf[Int]
+                div(cls := "mt-2 pt-2 border-top border-secondary",
+                  div(cls := "small text-white",
+                    s"Percentil entre equipos con calendario similar ($equipos equipos, PJ ${c("pjHector")}±3): ${c("percentil")}."),
+                  badgeConfianza("rffm_comparables", equipos))
+              case None => frag()
+            }
           )
         )
       case None =>

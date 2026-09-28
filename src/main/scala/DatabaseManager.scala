@@ -7234,12 +7234,9 @@ Responde en espanol, tono positivo y motivador para un nino."""
     new Thread(() => { try syncRFFMBenchmark() catch { case e: Exception => println(s"[RFFM] sync async error: ${e.getMessage}") } }).start()
   }
 
-  def calcularPercentilesRFFM(): Unit = {
-    val conn = getConnection()
-    try {
-      val temporada = getRffmTemporada()
-      val competicion = getRffmCompeticionId()
-      val ps = conn.prepareStatement(s"""
+  /** CTE comun de la RFFM: goles encajados por equipo y stats de los equipos con >= 3 partidos (stats_equipo).
+   *  Lleva 4 parametros: temporada, competicion, temporada, competicion (ver bindTemporadaCompeticionRFFM). */
+  private val statsEquiposRFFMCte = """
         WITH gc_por_equipo AS (
           SELECT equipo_local as equipo, goles_visita as gc FROM rffm_benchmark WHERE temporada = ? AND competicion = ?
           UNION ALL
@@ -7252,7 +7249,27 @@ Responde en espanol, tono positivo y motivador para un nino."""
           FROM gc_por_equipo
           GROUP BY equipo
           HAVING COUNT(*) >= 3
-        )
+        )"""
+
+  private def bindTemporadaCompeticionRFFM(ps: java.sql.PreparedStatement): Unit = {
+    val temporada = getRffmTemporada(); val competicion = getRffmCompeticionId()
+    ps.setString(1, temporada); ps.setString(2, competicion); ps.setString(3, temporada); ps.setString(4, competicion)
+  }
+
+  /** GC bajo es mejor: menos goles encajados que el p10 de la categoria => percentil alto (elite). */
+  private def percentilPorGC(mediaGc: Double, p10: Double, p25: Double, p50: Double, p75: Double): Int =
+    if (mediaGc <= p10) 90
+    else if (mediaGc <= p25) 75
+    else if (mediaGc <= p50) 50
+    else if (mediaGc <= p75) 25
+    else 10
+
+  def calcularPercentilesRFFM(): Unit = {
+    val conn = getConnection()
+    try {
+      val temporada = getRffmTemporada()
+      val competicion = getRffmCompeticionId()
+      val ps = conn.prepareStatement(s"""$statsEquiposRFFMCte
         SELECT
           COUNT(*) as total_equipos,
           COALESCE(SUM(partidos), 0) as total_partidos,
@@ -7265,7 +7282,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
           COALESCE(AVG(pct_limpias), 0) as pct_limpias_media
         FROM stats_equipo
       """)
-      ps.setString(1, temporada); ps.setString(2, competicion); ps.setString(3, temporada); ps.setString(4, competicion)
+      bindTemporadaCompeticionRFFM(ps)
       val rs = ps.executeQuery()
       if (rs.next() && rs.getInt("total_equipos") > 0) {
         val ins = conn.prepareStatement("""
@@ -7342,13 +7359,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
         val p10 = cat("p10").asInstanceOf[Double]; val p25 = cat("p25").asInstanceOf[Double]
         val p50 = cat("p50").asInstanceOf[Double]; val p75 = cat("p75").asInstanceOf[Double]
-        // GC bajo es mejor: menos goles encajados que el p10 de la categoria => percentil alto (elite)
-        val percentilGC =
-          if (mediaGcHector <= p10) 90
-          else if (mediaGcHector <= p25) 75
-          else if (mediaGcHector <= p50) 50
-          else if (mediaGcHector <= p75) 25
-          else 10
+        val percentilGC = percentilPorGC(mediaGcHector, p10, p25, p50, p75)
 
         Map(
           "pjHector"         -> rH.getInt("pj"),
@@ -7362,6 +7373,35 @@ Responde en espanol, tono positivo y motivador para un nino."""
           "fuenteDatos"      -> s"RFFM Prebenjamín F7 Madrid temporada ${getRffmTemporada()}"
         )
       }
+    } finally { conn.close() }
+  }
+
+  /** Percentil de Hector solo entre equipos RFFM con calendario similar (partidos = PJ de Hector ± 3).
+   *  None con menos de 8 equipos comparables. Nunca devuelve nombres de equipo. */
+  def getPercentilComparablesRFFM(seasonId: Int = 0): Option[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val efectivo = if (seasonId > 0) seasonId else getTemporadaActivaId()
+      val rsH = conn.createStatement().executeQuery(
+        s"SELECT COUNT(*) as pj, COALESCE(AVG(goles_contra), 0) as media_gc FROM matches WHERE status='PLAYED' ${seasonFilter(efectivo)}")
+      rsH.next()
+      val pj = rsH.getInt("pj")
+      val mediaGcHector = rsH.getDouble("media_gc")
+      if (pj == 0) return None
+      val ps = conn.prepareStatement(s"""$statsEquiposRFFMCte
+        SELECT COUNT(*) as equipos,
+          COALESCE(PERCENTILE_CONT(0.10) WITHIN GROUP (ORDER BY media_gc), 0) as p10,
+          COALESCE(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY media_gc), 0) as p25,
+          COALESCE(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY media_gc), 0) as p50,
+          COALESCE(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY media_gc), 0) as p75
+        FROM stats_equipo WHERE partidos BETWEEN ? AND ?""")
+      bindTemporadaCompeticionRFFM(ps)
+      ps.setInt(5, pj - 3); ps.setInt(6, pj + 3)
+      val rs = ps.executeQuery(); rs.next()
+      val equipos = rs.getInt("equipos")
+      if (equipos < 8) None
+      else Some(Map("equipos" -> equipos, "pjHector" -> pj,
+        "percentil" -> percentilPorGC(mediaGcHector, rs.getDouble("p10"), rs.getDouble("p25"), rs.getDouble("p50"), rs.getDouble("p75"))))
     } finally { conn.close() }
   }
 
@@ -7652,6 +7692,17 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val inevitables: Int = rows.count(r => r("responsabilidad") == "Ninguna")
       val dudosos: Int     = total - evitables - inevitables
 
+      // Zona y cuarto cruzados por gol individual; solo con >= 10 goles con zona y minuto
+      def cuarto(minuto: Int): String =
+        if (minuto <= 12) "Q1" else if (minuto <= 25) "Q2" else if (minuto <= 37) "Q3" else "Q4"
+      val golesZonaMinuto = rows.filter(r => r("zonaGol").nonEmpty && r("minuto").toIntOption.exists(_ > 0))
+      val zonaYCuarto: Map[String, Any] = if (golesZonaMinuto.size < 10) Map.empty else {
+        val porZonaYCuarto: Map[(String, String), Int] =
+          golesZonaMinuto.groupBy(r => (r("zonaGol"), cuarto(r("minuto").toInt))).map { case (k, v) => k -> v.size }
+        val combinacionMasFrecuente = if (porZonaYCuarto.nonEmpty) Some(porZonaYCuarto.maxBy(_._2)) else None
+        Map("porZonaYCuarto" -> porZonaYCuarto, "combinacionMasFrecuente" -> combinacionMasFrecuente)
+      }
+
       // Nota ajustada: de cada partido, descuenta los goles inevitables
       val rsNota = conn.createStatement().executeQuery(
         "SELECT m.id, m.nota, m.goles_contra, " +
@@ -7686,7 +7737,70 @@ Responde en espanol, tono positivo y motivador para un nino."""
         "notaAjustada"     -> notaAjustada,
         "notaReal"         -> notaReal,
         "rows"             -> rows
-      )
+      ) ++ zonaYCuarto
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // CALIDAD DE DECISION vs RESULTADO — matches.calidad_decision_pct (0-100). SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  def getCalidadDecisionAnalysis(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT
+          COUNT(CASE WHEN calidad_decision_pct IS NOT NULL THEN 1 END) as partidos_con_dato,
+          AVG(nota) as nota_media_general,
+          AVG(CASE WHEN calidad_decision_pct >= 70 THEN nota END) as nota_decision_alta,
+          AVG(CASE WHEN calidad_decision_pct < 50 THEN nota END) as nota_decision_baja
+        FROM matches WHERE status='PLAYED' ${seasonFilter(seasonId)}""")
+      rs.next()
+      val n = rs.getInt("partidos_con_dato")
+      if (n < 8) return Map("suficiente" -> false, "n" -> n)
+      def opt(c: String) = Option(rs.getObject(c)).map(_ => rs.getDouble(c))
+      val notaGeneral = opt("nota_media_general"); val notaAlta = opt("nota_decision_alta"); val notaBaja = opt("nota_decision_baja")
+      // Decision buena (>= 70%) pero resultado no favorable
+      val rsL = conn.createStatement().executeQuery(s"""
+        SELECT rival, fecha, goles_favor, goles_contra, calidad_decision_pct, nota FROM matches
+        WHERE status='PLAYED' AND calidad_decision_pct >= 70 AND goles_favor <= goles_contra ${seasonFilter(seasonId)}
+        ORDER BY fecha DESC LIMIT 5""")
+      val procesoSinPremio = Iterator.continually(rsL).takeWhile(_.next()).map { r =>
+        Map[String, Any]("rival" -> fixEncoding(Option(r.getString("rival")).getOrElse("")), "fecha" -> r.getDate("fecha").toString,
+          "resultado" -> s"${r.getInt("goles_favor")}-${r.getInt("goles_contra")}",
+          "calidadDecision" -> r.getInt("calidad_decision_pct"), "nota" -> r.getDouble("nota"))
+      }.toList
+      Map("suficiente" -> true, "n" -> n, "notaMediaGeneral" -> notaGeneral, "notaDecisionAlta" -> notaAlta,
+        "notaDecisionBaja" -> notaBaja, "procesoSinPremio" -> procesoSinPremio)
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // MINERIA DE FACTORES EXTERNOS — palabras clave en matches.factores_externos. SQL puro, sin Gemini
+  // ═════════════════════════════════════════════════════════════════════════════
+  private val palabrasClaveFactoresExternos =
+    List("examen", "cansad", "viaj", "frio", "frío", "enfad", "dolor", "llorando", "triste", "nervios", "dormid", "tarde")
+
+  /** Palabras con >= 3 partidos cuya nota media se separa >= 0.5 de la general. Lista vacia si ninguna tiene señal. */
+  def getFactoresExternosPatterns(seasonId: Int = 0): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rsG = conn.createStatement().executeQuery(
+        s"SELECT AVG(nota) as media FROM matches WHERE status='PLAYED' AND nota > 0 ${seasonFilter(seasonId)}")
+      rsG.next()
+      val notaMediaGeneral = Option(rsG.getObject("media")).map(_ => rsG.getDouble("media"))
+      notaMediaGeneral.toList.flatMap { general =>
+        val ps = conn.prepareStatement(s"""
+          SELECT AVG(nota) as nota_con, COUNT(*) as n_con FROM matches
+          WHERE status='PLAYED' AND nota > 0 AND LOWER(factores_externos) LIKE '%' || ? || '%' ${seasonFilter(seasonId)}""")
+        palabrasClaveFactoresExternos.flatMap { palabra =>
+          ps.setString(1, palabra)
+          val rs = ps.executeQuery(); rs.next()
+          val n = rs.getInt("n_con")
+          Option(rs.getObject("nota_con")).map(_ => rs.getDouble("nota_con"))
+            .filter(notaCon => n >= 3 && math.abs(notaCon - general) >= 0.5)
+            .map(notaCon => Map[String, Any]("palabra" -> palabra, "notaCon" -> notaCon, "notaGeneral" -> general, "n" -> n))
+        }
+      }
     } finally { conn.close() }
   }
 
@@ -14344,6 +14458,8 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
       case "paso_negativo"          => (8, 20)
       case "scanning_efectividad"   => (10, 25)
       case "rfmf_benchmarking"      => (5, 15)
+      case "calidad_decision"       => (8, 21)   // 🔴 <8 · 🟡 8-20 · 🟢 >20 partidos con dato
+      case "rffm_comparables"       => (8, 16)   // 🟡 8-15 · 🟢 >15 equipos
       case _                        => (10, 25)
     }
     if (n < minRojo) Map(

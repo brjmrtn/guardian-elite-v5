@@ -1733,6 +1733,43 @@ object HistoryController extends cask.Routes {
 
             ),
 
+            // ── Calidad de decision vs resultado (solo con >= 8 partidos con dato) ──
+            {
+              val cd = DatabaseManager.getCalidadDecisionAnalysis(efectivo)
+              if (!cd("suficiente").asInstanceOf[Boolean]) frag()
+              else {
+                def f1(o: Any) = o.asInstanceOf[Option[Double]].map(v => f"$v%.1f").getOrElse("—")
+                val lista = cd("procesoSinPremio").asInstanceOf[List[Map[String, Any]]]
+                seccion("🧠 Calidad de decisión vs resultado")(
+                  badgeConfianza("calidad_decision", cd("n").asInstanceOf[Int]),
+                  div(cls := "small text-white mb-2",
+                    s"Nota media cuando decide bien (≥70%): ${f1(cd("notaDecisionAlta"))}. Nota media cuando decide mal (<50%): ${f1(cd("notaDecisionBaja"))}."),
+                  if (lista.isEmpty) frag()
+                  else div(
+                    div(cls := "xx-small text-muted mb-1",
+                      "Partidos donde el proceso fue correcto aunque el marcador no lo refleje — útil para revisar con el entrenador."),
+                    frag(lista.map { m =>
+                      div(cls := "xx-small text-light border-bottom border-secondary py-1",
+                        f"${m("fecha")} · vs ${m("rival")} · ${m("resultado")} · decisión ${m("calidadDecision")}%% · nota ${m("nota").asInstanceOf[Double]}%.1f")
+                    }: _*))
+                )
+              }
+            },
+
+            // ── Goles: zona y cuarto mas repetidos (amplia getGoalsAnalysis, >= 10 goles con zona y minuto) ──
+            DatabaseManager.getGoalsAnalysis().get("combinacionMasFrecuente").flatMap(_.asInstanceOf[Option[((String, String), Int)]]) match {
+              case Some(((zona, cuarto), n)) =>
+                def etiquetaZona(z: String): String = {
+                  val altura = z.headOption.collect { case 'T' => "arriba"; case 'M' => "a media altura"; case 'B' => "abajo" }
+                  val lado = z.lift(1).collect { case 'L' => "a la izquierda"; case 'C' | 'M' => "al centro"; case 'R' => "a la derecha" }
+                  (altura, lado) match { case (Some(a), Some(l)) => s"$z ($a $l)"; case _ => z }
+                }
+                seccion("🥅 Goles por zona y cuarto")(
+                  div(cls := "small text-white",
+                    s"La combinación más repetida es ${etiquetaZona(zona)} en $cuarto ($n goles) — posible patrón de fatiga técnica localizada, más allá del ACWR general."))
+              case None => frag()
+            },
+
             // ── Tests de movilidad (colapsable) ──
             seccion("🧠 Tests de movilidad")(
               DatabaseManager.getMovilidadTests().lastOption match {
@@ -2035,6 +2072,15 @@ object HistoryController extends cask.Routes {
       },
 
       ),
+      {
+        val patrones = DatabaseManager.getFactoresExternosPatterns()
+        if (patrones.isEmpty) frag()
+        else seccion("📝 Patrones en factores externos")(
+          frag(patrones.map { p =>
+            div(cls := "small text-light mb-1",
+              f"Cuando el contexto menciona '${p("palabra")}': nota media ${p("notaCon").asInstanceOf[Double]}%.1f frente a ${p("notaGeneral").asInstanceOf[Double]}%.1f general, en ${p("n")} partidos.")
+          }: _*))
+      },
       seccion("📊 Registro psicológico")(
         DatabaseManager.getPsychRecords().lastOption match {
           case Some(r) => div(cls := "card bg-dark border-secondary p-2 mb-2 small",
