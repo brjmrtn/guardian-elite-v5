@@ -738,6 +738,12 @@ object AdminController extends cask.Routes {
             f"⚠️ Tus valoraciones tienen una correlación alta con el resultado del partido (r=$r%.2f).$detalle Intenta evaluar a Héctor independientemente del marcador.")
         } else div(cls := "small text-success mb-2", f"✅ Tus valoraciones no muestran sesgo significativo por resultado (r=$r%.2f).")
       }
+    // Nota del padre vs Nota Guardian: la diferencia no deberia depender del resultado
+    val sesgoGuardian = DatabaseManager.calcularSesgoNotaGuardian(temporada)
+    val sesgoGuardianWidget: Modifier =
+      if (!sesgoGuardian("sesgo").asInstanceOf[Boolean]) frag()
+      else div(cls := "alert alert-warning small p-2 mb-2",
+        s"⚠️ La diferencia entre tu nota y la Nota Guardian es mayor en ${sesgoGuardian("mayorEn")} — puede indicar sesgo por resultado.")
     // BLOQUE B3: rubrica del padre vs rubrica IA del analisis de video (3+ partidos)
     val cruce = DatabaseManager.getCruceRubricaVideo(temporada)
     val cruceWidget: Modifier = DatabaseManager.mensajeCruceRubricaVideo(cruce) match {
@@ -779,7 +785,7 @@ object AdminController extends cask.Routes {
       faseWidget,
       dqWidget,
       div(cls := "xx-small text-muted fw-bold mb-2", "SESGO EN LA RÚBRICA"),
-      sesgoWidget, cruceWidget,
+      sesgoWidget, sesgoGuardianWidget, cruceWidget,
       if (!sesgo("suficiente").asInstanceOf[Boolean] && cruce.size < 3)
         div(cls := "xx-small text-muted", s"Se necesitan al menos 10 partidos con nota y resultado para detectar sesgos (hay ${sesgo("partidos")}).")
       else frag()

@@ -7692,7 +7692,8 @@ Responde en espanol, tono positivo y motivador para un nino."""
 
   // == FASE 8: PSxG DELTA (Post-Shot xG vs Goals Conceded) =====================
   // BLOQUE B3: seasonId=0 = historico completo (comportamiento anterior, sin cambios)
-  def getPSxGDeltaData(seasonId: Int = 0): Map[String, Any] = {
+  /** desde/hasta (yyyy-MM-dd, opcionales): acota los goles a ese rango de fechas, p. ej. una semana. */
+  def getPSxGDeltaData(seasonId: Int = 0, desde: String = "", hasta: String = ""): Map[String, Any] = {
     val conn = getConnection()
     try {
       // Tabla de xG base por zona + situacion
@@ -7726,6 +7727,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
         "FROM match_goals mg " +
         "JOIN matches m ON mg.match_id = m.id " +
         s"WHERE m.status = 'PLAYED' ${seasonFilter(seasonId)} " +
+        (if (desde.nonEmpty && hasta.nonEmpty) s"AND m.fecha BETWEEN '${LocalDate.parse(desde)}'::date AND '${LocalDate.parse(hasta)}'::date " else "") +
         "ORDER BY m.fecha DESC")
 
       case class GoalRow(zona: String, situacion: String, responsabilidad: String,
@@ -12990,8 +12992,250 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
         val cuarto = if (m <= 0) "" else if (m <= 12) " Q1" else if (m <= 25) " Q2" else if (m <= 37) " Q3" else " Q4"
         r.getInt("match_id") -> (Option(r.getString("zona_gol")).getOrElse("?") + cuarto + Option(r.getString("situacion")).filter(_.nonEmpty).map(" · " + _).getOrElse(""))
       }.toList.groupBy(_._1).map { case (k, l) => k -> l.map(_._2) }
-      base.map { case (id, d) => id -> (d + ("goles" -> goles.getOrElse(id, Nil))) }
+      val guardian = getNotasGuardian(seasonId)
+      base.map { case (id, d) => id -> (d + ("goles" -> goles.getOrElse(id, Nil)) + ("notaGuardian" -> guardian.get(id))) }
     } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // CORRELACIONES EXPLORADAS — /correlaciones guarda las que el padre consulta (con datos suficientes)
+  // para que el informe semanal las muestre sin recalcular nada.
+  // ═════════════════════════════════════════════════════════════════════════════
+  def registrarCorrelacionExplorada(varX: String, varY: String, seasonId: Int, r: Map[String, Any]): Unit = {
+    val corr = r.get("correlacion").flatMap(_.asInstanceOf[Option[Double]])
+    if (!r.get("suficiente").exists(_.asInstanceOf[Boolean]) || corr.isEmpty) return
+    def etiqueta(k: String) = variablesCorrelacion.find(_._1 == k).map(_._2).getOrElse(k)
+    val payload = ujson.Obj("x" -> etiqueta(varX), "y" -> etiqueta(varY), "correlacion" -> corr.get,
+      "puntos" -> r("puntos").asInstanceOf[Int], "interpretacion" -> r.getOrElse("interpretacion", "").toString, "temporada" -> seasonId)
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
+      ps.setString(1, s"correlacion_explorada_${varX}_$varY"); ps.setString(2, ujson.write(payload)); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Correlaciones consultadas en los ultimos `dias`, la mas reciente primero. */
+  def getCorrelacionesExploradas(dias: Int = 30, limite: Int = 5): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "SELECT payload FROM feature_cache WHERE cache_key LIKE 'correlacion_explorada_%' AND updated_at > NOW() - (? * INTERVAL '1 day') ORDER BY updated_at DESC LIMIT ?")
+      ps.setInt(1, dias); ps.setInt(2, limite)
+      val rs = ps.executeQuery()
+      Iterator.continually(rs).takeWhile(_.next()).flatMap { r =>
+        scala.util.Try(ujson.read(r.getString("payload"))).toOption.map { j =>
+          Map[String, Any]("x" -> j("x").str, "y" -> j("y").str, "correlacion" -> j("correlacion").num,
+            "puntos" -> j("puntos").num.toInt, "interpretacion" -> j("interpretacion").str)
+        }
+      }.toList
+    } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // INFORME SEMANAL IMPRIMIBLE (/career/informe-semanal). SQL puro y calculos existentes, sin Gemini.
+  // Semana ISO (lunes a domingo) que contiene `fecha`. Las secciones sin datos van vacias y la pagina las omite.
+  // ═════════════════════════════════════════════════════════════════════════════
+  def getInformeSemanal(fechaInicio: String): Map[String, Any] = {
+    val hoy = ahoraGuardian().toLocalDate
+    val fecha = scala.util.Try(LocalDate.parse(fechaInicio)).getOrElse(hoy)
+    val lunes = fecha.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+    val domingo = lunes.plusDays(6)
+    val esSemanaActual = !hoy.isBefore(lunes) && !hoy.isAfter(domingo)
+
+    val conn = getConnection()
+    val (seasonId, entrenos, ausencias, partidosBase, goles, lesiones) = try {
+      // Temporada que cubre la semana (si no, la activa)
+      val psT = conn.prepareStatement("""
+        SELECT id FROM seasons
+        WHERE COALESCE(fecha_inicio, DATE '1900-01-01') <= ?::date AND (fecha_fin IS NULL OR fecha_fin >= ?::date)
+        ORDER BY id DESC LIMIT 1""")
+      psT.setString(1, domingo.toString); psT.setString(2, lunes.toString)
+      val rsT = psT.executeQuery()
+      val sid = if (rsT.next()) rsT.getInt("id") else getTemporadaActivaId()
+
+      val psE = conn.prepareStatement("""
+        SELECT fecha, tipo, foco, duracion_min, rpe, rpe_hector, atencion, calidad, feedback_entrenador, tipo_ausencia
+        FROM trainings WHERE fecha BETWEEN ?::date AND ?::date ORDER BY fecha, id""")
+      psE.setString(1, lunes.toString); psE.setString(2, domingo.toString)
+      val rsE = psE.executeQuery()
+      def oi(r: java.sql.ResultSet, c: String) = Option(r.getObject(c)).map(_ => r.getInt(c))
+      def os(r: java.sql.ResultSet, c: String) = Option(r.getString(c)).map(fixEncoding).map(_.trim).filter(_.nonEmpty)
+      val filasE = Iterator.continually(rsE).takeWhile(_.next()).map { r =>
+        Map[String, Any]("fecha" -> r.getDate("fecha").toString, "tipo" -> os(r, "tipo").getOrElse(""), "foco" -> os(r, "foco").getOrElse(""),
+          "duracion" -> oi(r, "duracion_min"), "rpe" -> oi(r, "rpe"), "rpeHector" -> oi(r, "rpe_hector"),
+          "atencion" -> oi(r, "atencion"), "calidad" -> oi(r, "calidad"), "feedback" -> os(r, "feedback_entrenador").getOrElse(""),
+          "ausencia" -> os(r, "tipo_ausencia"))
+      }.toList
+      val (aus, ent) = filasE.partition(_("ausencia").asInstanceOf[Option[String]].isDefined)
+
+      val psP = conn.prepareStatement("""
+        SELECT id, fecha, rival, goles_favor, goles_contra, nota, paradas, paradas_1v1, paradas_aereas, cpi, posicion_set,
+               rubrica_posicion, rubrica_decisiones, rubrica_pies, rubrica_comunicacion, rubrica_actitud
+        FROM matches WHERE status = 'PLAYED' AND fecha BETWEEN ?::date AND ?::date ORDER BY fecha, id""")
+      psP.setString(1, lunes.toString); psP.setString(2, domingo.toString)
+      val rsP = psP.executeQuery()
+      val filasP = Iterator.continually(rsP).takeWhile(_.next()).map { r =>
+        Map[String, Any]("id" -> r.getInt("id"), "fecha" -> r.getDate("fecha").toString, "rival" -> os(r, "rival").getOrElse(""),
+          "gf" -> r.getInt("goles_favor"), "gc" -> r.getInt("goles_contra"), "nota" -> r.getDouble("nota"),
+          "paradas" -> r.getInt("paradas"), "p1v1" -> r.getInt("paradas_1v1"), "pAir" -> r.getInt("paradas_aereas"),
+          "cpi" -> Option(r.getObject("cpi")).map(_ => r.getDouble("cpi")), "posicionSet" -> os(r, "posicion_set"),
+          "rubrica" -> dimensionesRubrica.map { case (_, col, et) => et -> oi(r, col) }.toList)
+      }.toList
+
+      val psG = conn.prepareStatement("""
+        SELECT g.match_id, g.minuto, g.zona_gol, g.situacion, g.notas FROM match_goals g JOIN matches m ON m.id = g.match_id
+        WHERE m.status = 'PLAYED' AND m.fecha BETWEEN ?::date AND ?::date ORDER BY g.match_id, g.minuto, g.id""")
+      psG.setString(1, lunes.toString); psG.setString(2, domingo.toString)
+      val rsG = psG.executeQuery()
+      val filasG = Iterator.continually(rsG).takeWhile(_.next()).map { r =>
+        val m = r.getInt("minuto")
+        val cuarto = if (m <= 0) "" else if (m <= 12) "Q1" else if (m <= 25) "Q2" else if (m <= 37) "Q3" else "Q4"
+        val posicion = os(r, "notas").filter(_.startsWith("POS:")).map(_.stripPrefix("POS:"))
+        r.getInt("match_id") -> Map[String, Any]("minuto" -> m, "cuarto" -> cuarto, "zona" -> os(r, "zona_gol").getOrElse(""),
+          "situacion" -> os(r, "situacion").getOrElse(""), "posicion" -> posicion)
+      }.toList.groupBy(_._1).map { case (k, l) => k -> l.map(_._2) }
+
+      val psL = conn.prepareStatement("""
+        SELECT fecha_inicio, fecha_alta, zona, tipo, gravedad, descripcion, dias_baja, activa FROM injuries
+        WHERE (fecha_inicio BETWEEN ?::date AND ?::date)
+           OR (fecha_alta BETWEEN ?::date AND ?::date)
+           OR (activa = TRUE AND fecha_inicio <= ?::date)
+        ORDER BY fecha_inicio""")
+      Seq(lunes, domingo, lunes, domingo, domingo).zipWithIndex.foreach { case (d, i) => psL.setString(i + 1, d.toString) }
+      val rsL = psL.executeQuery()
+      val filasL = Iterator.continually(rsL).takeWhile(_.next()).map { r =>
+        Map[String, Any]("inicio" -> Option(r.getDate("fecha_inicio")).map(_.toString).getOrElse(""),
+          "alta" -> Option(r.getDate("fecha_alta")).map(_.toString).getOrElse(""), "zona" -> os(r, "zona").getOrElse(""),
+          "tipo" -> os(r, "tipo").getOrElse(""), "gravedad" -> os(r, "gravedad").getOrElse(""),
+          "descripcion" -> os(r, "descripcion").getOrElse(""), "diasBaja" -> r.getInt("dias_baja"), "activa" -> r.getBoolean("activa"))
+      }.toList
+      (sid, ent, aus, filasP, filasG, filasL)
+    } finally { conn.close() }
+
+    val temporadaNombre = getTodasTemporadas().find(_("id") == seasonId).map(_("nombre").toString).getOrElse("")
+    val guardian = notasGuardian(s"AND m.fecha BETWEEN '$lunes'::date AND '$domingo'::date")
+    val partidos = partidosBase.map { p =>
+      val id = p("id").asInstanceOf[Int]
+      p + ("notaGuardian" -> guardian.get(id)) + ("goles" -> goles.getOrElse(id, Nil))
+    }
+
+    // Progreso de la temporada hasta el domingo de esa semana (no solo la semana)
+    val jugados = getMatchesList(seasonId).filter(m => m.status == "PLAYED" && m.fecha.take(10) <= domingo.toString)
+    val progreso: Option[Map[String, Any]] = if (jugados.isEmpty) None else {
+      val gcs = jugados.flatMap(_.resultado.split("-").lift(1).flatMap(_.trim.toIntOption))
+      val conNota = jugados.filter(_.nota > 0)
+      Some(Map("pj" -> jugados.size,
+        "notaMedia" -> (if (conNota.nonEmpty) Some(conNota.map(_.nota).sum / conNota.size) else None),
+        "pctPc0" -> (if (gcs.nonEmpty) Some(gcs.count(_ == 0) * 100.0 / gcs.size) else None),
+        "gcPorPartido" -> (if (gcs.nonEmpty) Some(gcs.sum.toDouble / gcs.size) else None)))
+    }
+
+    val psxg: Option[Map[String, Any]] = scala.util.Try(getPSxGDeltaData(seasonId, lunes.toString, domingo.toString)).toOption
+      .filter(_.get("nGoles").exists(_.asInstanceOf[Int] > 0))
+
+    // Carga y deuda de sueno: los calculos existentes miden "ahora" (ultimos 7/28 dias), asi que solo
+    // se incluyen en el informe de la semana en curso; la fase de maduracion es la actual en cualquier semana
+    val acwr: Option[(Double, String)] = if (!esSemanaActual) None else scala.util.Try {
+      val e = calcularACWRConEstado()
+      if (e("status") == "INSUFICIENTE") None
+      else { val v = e("acwr").asInstanceOf[Double]; Some(v -> nivelACWR(v)._3) }
+    }.toOption.flatten
+    val riesgo: Option[(Double, String)] = if (!esSemanaActual) None else scala.util.Try {
+      val r = calcularRiesgoLesion(); r("riesgo").asInstanceOf[Double] -> r("clasificacion").toString
+    }.toOption
+    val deudaSueno: Option[Map[String, Any]] = if (!esSemanaActual) None
+      else scala.util.Try(calcularDeudaSueno()).toOption.filter(_("diasConDatos").asInstanceOf[Int] > 0)
+    val faseBio: Option[String] = scala.util.Try(getBioBandingData().getOrElse("faseBio", "").toString).toOption
+      .map(_.trim).filter(f => f.nonEmpty && f != "Sin datos")
+
+    val arquetipo: Option[(String, Int)] = scala.util.Try(calcularArquetipoPortero(seasonId)).toOption
+      .filter(_.get("activo").exists(_.asInstanceOf[Boolean]))
+      .map(a => a("dominanteLabel").toString -> a("dominantePct").asInstanceOf[Int])
+
+    val sesgo: List[String] = scala.util.Try {
+      val sr = calcularSesgoPorResultado(seasonId)
+      val sg = calcularSesgoNotaGuardian(seasonId)
+      val lineaResultado =
+        if (!sr("suficiente").asInstanceOf[Boolean]) None
+        else {
+          val r = sr("correlacion").asInstanceOf[Option[Double]].getOrElse(0.0)
+          Some(if (sr("sesgo").asInstanceOf[Boolean]) f"Tus notas se mueven con el resultado del partido (r=$r%.2f)."
+               else f"Tus notas no muestran sesgo significativo por resultado (r=$r%.2f).")
+        }
+      val lineaGuardian = if (sg("sesgo").asInstanceOf[Boolean])
+        Some(s"La diferencia entre tu nota y la Nota Guardian es mayor en ${sg("mayorEn")}.") else None
+      lineaResultado.toList ++ lineaGuardian.toList
+    }.getOrElse(Nil)
+
+    Map("lunes" -> lunes.toString, "domingo" -> domingo.toString, "esSemanaActual" -> esSemanaActual,
+      "temporadaNombre" -> temporadaNombre, "entrenos" -> entrenos, "ausencias" -> ausencias, "partidos" -> partidos,
+      "progreso" -> progreso, "psxg" -> psxg, "correlaciones" -> scala.util.Try(getCorrelacionesExploradas()).getOrElse(Nil),
+      "acwr" -> acwr, "riesgo" -> riesgo, "deudaSueno" -> deudaSueno, "faseBio" -> faseBio,
+      "lesiones" -> lesiones, "arquetipo" -> arquetipo, "sesgo" -> sesgo)
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // NOTA GUARDIAN — nota calculada que se muestra junto a la del padre para contrastar.
+  // Solo informativa: ningun modulo (arquetipo, CPI, Volatility, percentil...) la usa como fuente.
+  //   rubrica (60%) + eficacia bajo presion (25%) + ejecucion tecnica (15%). SQL puro, sin Gemini.
+  // ═════════════════════════════════════════════════════════════════════════════
+  private val posicionesGolEvitables = Set("PASO_NEGATIVO", "DESPLAZAMIENTO_TARDIO")
+  private val posicionesGolNoEvitables = Set("BIEN_PLANTADO", "IMPARABLE")
+
+  /** Nota Guardian de los partidos jugados con rubrica completa que cumplen `filtro` (SQL sobre el alias m). */
+  private def notasGuardian(filtro: String): Map[Int, Double] = {
+    val conn = getConnection()
+    try {
+      // La posicion por gol solo existe en los goles del bot de Telegram (notas 'POS:<posicion>');
+      // el formulario web guarda una posicion por partido en matches.posicion_set
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT m.id, m.rubrica_posicion, m.rubrica_decisiones, m.rubrica_pies, m.rubrica_comunicacion, m.rubrica_actitud,
+          COALESCE(m.goles_contra, 0) as gc, m.posicion_set, m.economia_movimiento,
+          COALESCE(m.scanning_efectivo, 0) as scan_ef, COALESCE(m.scanning_rate, 0) as scan_rate,
+          (SELECT COUNT(*) FROM match_goals g WHERE g.match_id = m.id
+             AND g.notas IN ('POS:PASO_NEGATIVO', 'POS:DESPLAZAMIENTO_TARDIO')) as evitables,
+          (SELECT COUNT(*) FROM match_goals g WHERE g.match_id = m.id
+             AND g.notas IN ('POS:BIEN_PLANTADO', 'POS:IMPARABLE')) as no_evitables
+        FROM matches m
+        WHERE m.status = 'PLAYED' AND m.rubrica_posicion IS NOT NULL AND m.rubrica_decisiones IS NOT NULL
+          AND m.rubrica_pies IS NOT NULL AND m.rubrica_comunicacion IS NOT NULL AND m.rubrica_actitud IS NOT NULL
+          $filtro""")
+      Iterator.continually(rs).takeWhile(_.next()).map { r =>
+        val rubrica = Seq("rubrica_posicion", "rubrica_decisiones", "rubrica_pies", "rubrica_comunicacion", "rubrica_actitud")
+          .map(r.getInt).sum / 5.0 / 5.0 * 10
+        val gc = r.getInt("gc")
+        val (evitables, noEvitables) = {
+          val (e, n) = (r.getInt("evitables"), r.getInt("no_evitables"))
+          if (e + n > 0) (e, n)
+          else Option(r.getString("posicion_set")) match {
+            case Some(p) if posicionesGolEvitables(p) => (gc, 0)
+            case Some(p) if posicionesGolNoEvitables(p) => (0, gc)
+            case _ => (0, 0)
+          }
+        }
+        // sin posicion registrada en los goles: 7 (neutro), sin penalizar por falta de dato
+        val eficacia = if (gc == 0) 10.0 else if (evitables + noEvitables == 0) 7.0
+          else noEvitables.toDouble / (evitables + noEvitables) * 10
+        val economia = Option(r.getObject("economia_movimiento")).map(_ => r.getInt("economia_movimiento") / 5.0 * 10)
+        val scanning = if (r.getInt("scan_rate") > 0) Some(math.min(10.0, r.getInt("scan_ef").toDouble / r.getInt("scan_rate") * 10)) else None
+        val componentes = economia.toList ++ scanning.toList
+        val ejecucion = if (componentes.isEmpty) 7.0 else componentes.sum / componentes.size
+        val nota = math.max(0.0, math.min(10.0, rubrica * 0.60 + eficacia * 0.25 + ejecucion * 0.15))
+        r.getInt("id") -> math.round(nota * 10) / 10.0
+      }.toMap
+    } finally { conn.close() }
+  }
+
+  /** None si el partido no tiene las 5 dimensiones de la rubrica. */
+  def calcularNotaGuardian(matchId: Int): Option[Double] = notasGuardian(s"AND m.id = $matchId").get(matchId)
+
+  def getNotasGuardian(seasonId: Int = 0): Map[Int, Double] = notasGuardian(seasonFilter(seasonId, "m"))
+
+  /** Diferencia nota del padre - Nota Guardian si supera 1.5 puntos (aviso para revisar la rubrica). */
+  def divergenciaNotaGuardian(notaPadre: Double, notaGuardian: Double): Option[Double] = {
+    val d = notaPadre - notaGuardian
+    if (notaPadre > 0 && math.abs(d) > 1.5) Some(d) else None
   }
 
   /** Badges de origen para el historial: QUICK_PENDIENTE (registro minimo sin rubrica completa) e IMPORTADO. */
@@ -14151,6 +14395,30 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
         "notaVictoria" -> opt("nota_victoria"), "notaDerrota" -> opt("nota_derrota"), "notaEmpate" -> opt("nota_empate"),
         "sesgo" -> (n >= 10 && r.exists(_ > 0.6)))
     } finally { conn.close() }
+  }
+
+  /** Correlacion entre (nota del padre - Nota Guardian) y el resultado (victoria 1 / empate 0.5 / derrota 0).
+   *  r > 0: la diferencia crece en victorias; r < 0: en derrotas. Sesgo si |r| > 0.6 con >= 10 partidos. */
+  def calcularSesgoNotaGuardian(seasonId: Int = 0): Map[String, Any] = {
+    val guardian = getNotasGuardian(seasonId)
+    val conn = getConnection()
+    val pares = try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT id, nota, goles_favor, goles_contra FROM matches
+        WHERE status = 'PLAYED' AND nota IS NOT NULL AND nota > 0
+          AND goles_favor IS NOT NULL AND goles_contra IS NOT NULL ${seasonFilter(seasonId)}""")
+      Iterator.continually(rs).takeWhile(_.next()).flatMap { r =>
+        guardian.get(r.getInt("id")).map { g =>
+          val (gf, gc) = (r.getInt("goles_favor"), r.getInt("goles_contra"))
+          (r.getDouble("nota") - g, if (gf > gc) 1.0 else if (gf == gc) 0.5 else 0.0)
+        }
+      }.toList
+    } finally { conn.close() }
+    val n = pares.size
+    val r = if (n >= 3) calcCorrelation(pares) else 0.0
+    val suficiente = n >= 10
+    Map("partidos" -> n, "suficiente" -> suficiente, "correlacion" -> r,
+      "sesgo" -> (suficiente && math.abs(r) > 0.6), "mayorEn" -> (if (r > 0) "victorias" else "derrotas"))
   }
 
   /**

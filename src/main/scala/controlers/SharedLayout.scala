@@ -97,6 +97,7 @@ object SharedLayout {
     val audioIcon = if (m.analisisVoz.nonEmpty) span(style := "color:#8b5cf6;", "🎙️") else span("🎤")
     val rubrica = detalle.getOrElse("rubrica", Nil).asInstanceOf[List[Option[Int]]]
     val goles = detalle.getOrElse("goles", Nil).asInstanceOf[List[String]]
+    val notaGuardian = detalle.get("notaGuardian").flatMap(_.asInstanceOf[Option[Double]])
     tag("details")(cls := s"hcard${if (pendiente) " hcard-pendiente" else ""}",
       attr("data-res") := res, attr("data-pc0") := (if (gc.contains(0)) "1" else "0"), attr("data-video") := (if (videoIA || m.video.nonEmpty) "1" else "0"),
       tag("summary")(cls := "hcard-sum",
@@ -115,6 +116,13 @@ object SharedLayout {
           m.cpi.map(c => span(cls := "badge bg-dark border border-info text-info", attr("title") := "El CPI ajusta la nota por la dificultad real del contexto: rival, condiciones físicas, clima y si jugó en casa o fuera.", f"CPI $c%.1f")).getOrElse(frag()),
           zScoreOpt.map(zScoreBadge).getOrElse(frag()),
           if (videoIA) span(cls := "badge bg-danger", "🎬 Vídeo IA") else frag()),
+        div(cls := "xx-small mb-1", span(cls := "text-muted", "Nota: "), f"${m.nota}%.1f",
+          // Nota Guardian: calculada, solo para contrastar; no sustituye a la del padre
+          notaGuardian.map(g => div(cls := "text-muted", style := "font-size:10px;", f"Nota Guardian: $g%.1f")).getOrElse(frag()),
+          notaGuardian.flatMap(g => DatabaseManager.divergenciaNotaGuardian(m.nota, g)).map(d =>
+            div(style := "font-size:10px; color:#fcd34d;",
+              f"⚠️ Diferencia de ${math.abs(d)}%.1f puntos con la Nota Guardian — puede valer la pena revisar la rúbrica de este partido.")
+          ).getOrElse(frag())),
         if (rubrica.exists(_.isDefined))
           div(cls := "xx-small mb-1", span(cls := "text-muted", "Rúbrica: "),
             Seq("Pos", "Dec", "Pie", "Com", "Act").zip(rubrica).map { case (e, v) => s"$e ${v.map(_.toString).getOrElse("—")}" }.mkString(" · "))

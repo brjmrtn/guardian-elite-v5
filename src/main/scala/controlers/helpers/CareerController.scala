@@ -419,8 +419,9 @@ object CareerController extends cask.Routes {
       div(cls := "col-md-10 col-12",
         div(cls := "d-flex flex-column justify-content-center align-items-center mb-4 text-center",
           h2(cls := "text-warning m-0 mb-2", "Trayectoria"),
-          div(cls := "mb-3 w-100",
-            a(href := "/career/legacy", cls := "btn btn-warning w-100 fw-bold", "⭐ MODO LEGADO (RPG)")
+          div(cls := "mb-3 w-100 d-flex gap-2",
+            a(href := "/career/legacy", cls := "btn btn-warning flex-fill fw-bold", "⭐ MODO LEGADO (RPG)"),
+            a(href := "/career/informe-semanal", cls := "btn btn-outline-light flex-fill fw-bold", "🖨️ Informe semanal")
           ),
           resilienceWidget(),
           learningVelocityWidget(),
@@ -659,6 +660,187 @@ object CareerController extends cask.Routes {
   def distributionPage(request: cask.Request) = withAuth(request) {
     cask.Response("".getBytes("UTF-8"), statusCode = 302,
       headers = Seq("Location" -> "/moneyball"))
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // INFORME SEMANAL IMPRIMIBLE — una semana ISO con todo lo registrado y las metricas calculadas.
+  // Mismo patron que el resto de paginas imprimibles (.no-print + window.print()). Sin Gemini.
+  // ─────────────────────────────────────────────────────────────────
+  @cask.get("/career/informe-semanal")
+  def informeSemanalPage(request: cask.Request, semana: String = "") = withAuth(request) {
+    val d = DatabaseManager.getInformeSemanal(semana)
+    val card = DatabaseManager.getLatestCardData()
+    def esc(t: String) = DatabaseManager.escHtml(t)
+    def f1(v: Double) = f"$v%.1f"
+    def oi(v: Any) = v.asInstanceOf[Option[Int]].map(_.toString).getOrElse("—")
+    val fmtDia = java.time.format.DateTimeFormatter.ofPattern("d MMM", new java.util.Locale("es", "ES"))
+    def dia(fecha: String) = scala.util.Try(java.time.LocalDate.parse(fecha.take(10)).format(fmtDia)).getOrElse(fecha)
+    def seccion(titulo: String, cuerpo: String) = s"""<section><h2>$titulo</h2>$cuerpo</section>"""
+
+    val lunes = d("lunes").toString; val domingo = d("domingo").toString
+    val entrenos = d("entrenos").asInstanceOf[List[Map[String, Any]]]
+    val ausencias = d("ausencias").asInstanceOf[List[Map[String, Any]]]
+    val partidos = d("partidos").asInstanceOf[List[Map[String, Any]]]
+    val acwr = d("acwr").asInstanceOf[Option[(Double, String)]]
+    val riesgo = d("riesgo").asInstanceOf[Option[(Double, String)]]
+    val deuda = d("deudaSueno").asInstanceOf[Option[Map[String, Any]]]
+    val faseBio = d("faseBio").asInstanceOf[Option[String]]
+    val progreso = d("progreso").asInstanceOf[Option[Map[String, Any]]]
+    val psxg = d("psxg").asInstanceOf[Option[Map[String, Any]]]
+    val correlaciones = d("correlaciones").asInstanceOf[List[Map[String, Any]]]
+    val arquetipo = d("arquetipo").asInstanceOf[Option[(String, Int)]]
+    val sesgo = d("sesgo").asInstanceOf[List[String]]
+    val lesiones = d("lesiones").asInstanceOf[List[Map[String, Any]]]
+    val temporada = d("temporadaNombre").toString
+
+    // 2. Resumen de una linea (sin IA)
+    val notasSemana = partidos.map(_("nota").asInstanceOf[Double]).filter(_ > 0)
+    val resumen = (Seq(
+      s"${entrenos.size} ${if (entrenos.size == 1) "entrenamiento" else "entrenamientos"}",
+      s"${partidos.size} ${if (partidos.size == 1) "partido" else "partidos"}") ++
+      (if (notasSemana.nonEmpty) Seq(s"Nota media semana: ${f1(notasSemana.sum / notasSemana.size)}") else Nil) ++
+      acwr.map { case (v, nivel) => f"ACWR: $v%.2f ($nivel)" }.toSeq).mkString(" · ")
+
+    // 3. Entrenamientos
+    val seccionEntrenos = if (entrenos.isEmpty && ausencias.isEmpty) "" else seccion("Entrenamientos",
+      (if (entrenos.isEmpty) "" else
+        s"""<table><thead><tr><th>Día</th><th>Tipo</th><th>Duración</th><th>RPE</th><th>RPE Héctor</th><th>Atención</th><th>Calidad</th></tr></thead><tbody>""" +
+        entrenos.map { e =>
+          val foco = e("foco").toString
+          val feedback = e("feedback").toString
+          s"""<tr><td>${dia(e("fecha").toString)}</td><td>${esc(e("tipo").toString)}${if (foco.nonEmpty) s"<br><small>${esc(foco)}</small>" else ""}</td>
+            <td>${e("duracion").asInstanceOf[Option[Int]].map(m => s"$m min").getOrElse("—")}</td><td>${oi(e("rpe"))}</td><td>${oi(e("rpeHector"))}</td>
+            <td>${oi(e("atencion"))}</td><td>${oi(e("calidad"))}</td></tr>""" +
+          (if (feedback.nonEmpty) s"""<tr class="sub"><td></td><td colspan="6">Entrenador: ${esc(feedback)}</td></tr>""" else "")
+        }.mkString + "</tbody></table>") +
+      (if (ausencias.isEmpty) "" else
+        "<p><b>Ausencias:</b> " + ausencias.map(a => s"${dia(a("fecha").toString)} ${esc(a("tipo").toString)} (${esc(a("ausencia").asInstanceOf[Option[String]].getOrElse(""))})").mkString(" · ") + "</p>"))
+
+    // 4. Partidos
+    val seccionPartidos = if (partidos.isEmpty) "" else seccion(if (partidos.size == 1) "Partido" else "Partidos",
+      partidos.map { p =>
+        val nota = p("nota").asInstanceOf[Double]
+        val guardian = p("notaGuardian").asInstanceOf[Option[Double]]
+        val rubrica = p("rubrica").asInstanceOf[List[(String, Option[Int])]]
+        val goles = p("goles").asInstanceOf[List[Map[String, Any]]]
+        val posicionPartido = p("posicionSet").asInstanceOf[Option[String]]
+        val golesHtml = if (goles.isEmpty) "" else
+          "<ul>" + goles.map { g =>
+            val partes = Seq(
+              Option(g("minuto").asInstanceOf[Int]).filter(_ > 0).map(m => s"min $m"),
+              Option(g("cuarto").toString).filter(_.nonEmpty),
+              Option(g("zona").toString).filter(_.nonEmpty).map(z => s"zona $z"),
+              Option(g("situacion").toString).filter(_.nonEmpty),
+              g("posicion").asInstanceOf[Option[String]].orElse(posicionPartido).map(x => s"posición ${x.replace('_', ' ').toLowerCase}")
+            ).flatten
+            s"<li>${esc(partes.mkString(" · "))}</li>"
+          }.mkString + "</ul>"
+        s"""<div class="partido">
+          <h3>vs ${esc(p("rival").toString)} — ${p("gf")}-${p("gc")} <small>(${dia(p("fecha").toString)})</small></h3>
+          <p>Nota del padre: <b>${if (nota > 0) f1(nota) else "—"}</b>${guardian.map(g => s" · Nota Guardian: <b>${f1(g)}</b>").getOrElse("")}${p("cpi").asInstanceOf[Option[Double]].map(c => s" · CPI: ${f1(c)}").getOrElse("")}</p>
+          ${guardian.flatMap(g => DatabaseManager.divergenciaNotaGuardian(nota, g)).map(dv => f"<p class='aviso'>⚠️ Diferencia de ${math.abs(dv)}%.1f puntos con la Nota Guardian.</p>").getOrElse("")}
+          ${if (rubrica.exists(_._2.isDefined)) "<p>Rúbrica: " + rubrica.map { case (et, v) => s"${esc(et)} ${v.map(_.toString).getOrElse("—")}" }.mkString(" · ") + "</p>" else ""}
+          <p>Paradas: ${p("paradas")} (${p("p1v1")} en 1v1 · ${p("pAir")} aéreas)</p>
+          ${if (goles.nonEmpty) s"<p>Goles encajados:</p>$golesHtml" else ""}
+        </div>"""
+      }.mkString)
+
+    // 5. Progreso de temporada (hasta el domingo de la semana)
+    val seccionProgreso = progreso.map { pr =>
+      val kpis = Seq(Some(s"PJ <b>${pr("pj")}</b>"),
+        pr("notaMedia").asInstanceOf[Option[Double]].map(v => s"Nota media <b>${f1(v)}</b>"),
+        pr("pctPc0").asInstanceOf[Option[Double]].map(v => f"Porterías a cero <b>$v%.0f%%</b>"),
+        pr("gcPorPartido").asInstanceOf[Option[Double]].map(v => s"GC/partido <b>${f1(v)}</b>")).flatten
+      seccion("Progreso de temporada", s"""<p class="kpis">${kpis.mkString(" · ")}</p><p class="nota">Hasta el ${dia(domingo)}${if (temporada.nonEmpty) s" · ${esc(temporada)}" else ""}.</p>""")
+    }.getOrElse("")
+
+    // 6. Carga y salud
+    val lineasSalud = Seq(
+      acwr.map { case (v, nivel) => f"ACWR: <b>$v%.2f</b> ($nivel)" },
+      riesgo.map { case (v, c) => f"Riesgo de lesión: <b>$v%.1f</b>/10 ($c)" },
+      faseBio.map(f => s"Fase de maduración (actual): <b>${esc(f)}</b>"),
+      deuda.map(dd => s"Deuda de sueño: <b>${f1(dd("deudaHoras").asInstanceOf[Double])}h</b> (${dd("nivel").toString.toLowerCase}) — ${esc(dd.getOrElse("desglose", "").toString)}")
+    ).flatten
+    val seccionSalud = if (lineasSalud.isEmpty) "" else seccion("Carga y salud", lineasSalud.map(l => s"<p>$l</p>").mkString)
+
+    // 7. Analisis
+    val lineasAnalisis = Seq(
+      psxg.map(x => s"PSxG de la semana: ${x("nGoles")} goles encajados frente a ${f1(x("xgTotal").asInstanceOf[Double])} esperados (delta ${esc(x("psxgDeltaStr").toString)} · ${esc(x("psxgLabel").toString)})"),
+      arquetipo.map { case (et, pct) => s"Arquetipo dominante: <b>${esc(et)}</b> ($pct%)" }
+    ).flatten ++
+      correlaciones.map(c => f"Correlación ${esc(c("x").toString)} ↔ ${esc(c("y").toString)}: r=${c("correlacion").asInstanceOf[Double]}%.2f (${c("puntos")} días) — ${esc(c("interpretacion").toString)}") ++
+      sesgo.map(l => s"Sesgo: ${esc(l)}")
+    val seccionAnalisis = if (lineasAnalisis.isEmpty) "" else seccion("Análisis", lineasAnalisis.map(l => s"<p>$l</p>").mkString)
+
+    // 8. Lesiones
+    val seccionLesiones = if (lesiones.isEmpty) "" else seccion("Lesiones", lesiones.map { l =>
+      val estado = if (l("activa").asInstanceOf[Boolean]) "activa" else s"alta el ${dia(l("alta").toString)}"
+      val desc = l("descripcion").toString
+      s"<p><b>${esc(Seq(l("zona"), l("tipo")).map(_.toString).filter(_.nonEmpty).mkString(" · "))}</b> — ${esc(l("gravedad").toString.toLowerCase)}, desde el ${dia(l("inicio").toString)}, $estado${if (desc.nonEmpty) s"<br><small>${esc(desc)}</small>" else ""}</p>"
+    }.mkString)
+
+    val cuerpo = Seq(seccionEntrenos, seccionPartidos, seccionProgreso, seccionSalud, seccionAnalisis, seccionLesiones).filter(_.nonEmpty)
+    val htmlStr = s"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Informe semanal — ${esc(card.nombre)}</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:system-ui,-apple-system,'Segoe UI',sans-serif; background:#0f172a; color:#e2e8f0; padding:20px; line-height:1.45; }
+  .hoja { max-width:820px; margin:0 auto; }
+  .no-print { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center; margin-bottom:20px; }
+  .no-print input { padding:8px; border-radius:6px; border:1px solid #475569; background:#1e293b; color:#e2e8f0; }
+  .no-print button, .no-print a { padding:9px 16px; border-radius:6px; border:none; font-weight:700; cursor:pointer; text-decoration:none; font-size:14px; }
+  .print-btn { background:#d4af37; color:#000; }
+  .ver-btn { background:#334155; color:#e2e8f0; }
+  .volver { color:#94a3b8 !important; background:transparent; }
+  h1 { font-size:22px; border-bottom:3px solid #d4af37; padding-bottom:8px; margin-bottom:8px; }
+  .resumen { font-size:14px; color:#cbd5e1; margin-bottom:18px; }
+  section { margin-bottom:18px; page-break-inside:avoid; }
+  h2 { font-size:15px; text-transform:uppercase; letter-spacing:1px; color:#d4af37; border-bottom:1px solid #334155; padding-bottom:4px; margin-bottom:8px; }
+  h3 { font-size:14px; margin-bottom:4px; }
+  p { font-size:13px; margin-bottom:4px; }
+  ul { font-size:12px; margin:2px 0 6px 20px; }
+  small, .nota { color:#94a3b8; font-size:11px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:8px; }
+  th, td { border:1px solid #334155; padding:5px 7px; text-align:left; vertical-align:top; }
+  th { background:#1e293b; }
+  tr.sub td { font-size:11px; color:#94a3b8; font-style:italic; }
+  .partido { border-left:3px solid #d4af37; padding-left:10px; margin-bottom:12px; }
+  .aviso { color:#fcd34d; }
+  .kpis b { font-size:15px; }
+  .pie { margin-top:20px; text-align:center; color:#64748b; font-size:11px; }
+  @media print {
+    .no-print { display:none; }
+    body { background:#fff; color:#000; padding:0; }
+    h1 { border-color:#000; }
+    h2 { color:#000; border-color:#000; }
+    small, .nota, tr.sub td, .resumen, .pie { color:#333; }
+    th { background:#eee; }
+    th, td { border-color:#999; }
+    .partido { border-color:#000; }
+    .aviso { color:#000; font-weight:700; }
+  }
+</style>
+</head>
+<body>
+<div class="hoja">
+<form class="no-print" method="get" action="/career/informe-semanal">
+  <a class="volver" href="/career">← Trayectoria</a>
+  <input type="date" name="semana" value="$lunes"/>
+  <button type="submit" class="ver-btn">Ver</button>
+  <button type="button" class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+</form>
+<h1>Informe semanal — ${esc(card.nombre)} — Semana del ${dia(lunes)} al ${dia(domingo)}${if (temporada.nonEmpty) s" — Temporada ${esc(temporada)}" else ""}</h1>
+<p class="resumen">${esc(resumen)}</p>
+${cuerpo.mkString("\n")}
+<div class="pie">Generado con Guardian Elite</div>
+</div>
+</body>
+</html>"""
+    cask.Response(htmlStr.getBytes("UTF-8"), headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
   }
 
   @cask.get("/career/legacy")
@@ -2597,6 +2779,8 @@ object CareerController extends cask.Routes {
       else if (x == y) div(cls := "alert alert-warning small", "Elige dos variables distintas.")
       else {
         val r = DatabaseManager.getCorrelacionPersonalizada(xSel, ySel, temporadaId)
+        try DatabaseManager.registrarCorrelacionExplorada(xSel, ySel, temporadaId, r)
+        catch { case e: Exception => println(s"[Correlaciones] no se pudo registrar: ${e.getMessage.take(120)}") }
         val puntos = r("puntos").asInstanceOf[Int]
         if (!r("suficiente").asInstanceOf[Boolean])
           div(cls := "alert alert-secondary small", s"Solo hay $puntos días con ambos datos registrados. Se necesitan al menos 10 para una correlación fiable.")
