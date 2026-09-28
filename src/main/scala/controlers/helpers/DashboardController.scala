@@ -5,6 +5,13 @@ import SharedLayout._
 
 object DashboardController extends cask.Routes {
 
+  // Un modulo secundario que falla (columna que falta, dato inesperado...) no debe tumbar el dashboard entero
+  private def seguro[T](modulo: String, porDefecto: => T)(expr: => T): T =
+    try expr catch { case e: Exception =>
+      println(s"[Dashboard] fallo en $modulo: ${DatabaseManager.ocultarApiKey(e.getMessage)}")
+      porDefecto
+    }
+
   @cask.get("/")
   def dashboard(request: cask.Request) = withAuth(request) {
     // 1. OBTENCION DE DATOS Y NUEVOS MOTORES (FASE 1)
@@ -48,7 +55,7 @@ object DashboardController extends cask.Routes {
       else div()
 
     // Protocolo de recuperacion (solo lectura; se genera en la tarea programada o con el boton)
-    val protocoloWidget: Modifier =
+    val protocoloWidget: Modifier = seguro[Modifier]("protocolo de recuperacion", frag()) {
       if (!riesgoEsAltoOCritico) frag()
       else {
         val proto = DatabaseManager.getProtocoloRecuperacion()
@@ -64,6 +71,7 @@ object DashboardController extends cask.Routes {
             button(tpe := "submit", cls := "btn btn-sm btn-outline-info fw-bold w-100",
               if (proto.isDefined) "🔄 Actualizar protocolo" else "🔄 Generar protocolo")))
       }
+    }
 
     val riesgoLesionWidget: Modifier = {
       val explicacion: Modifier =
@@ -82,7 +90,7 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE 5.6: DETECTOR DE DESGASTE SILENCIOSO (prioridad maxima) ────────
-    val desgasteDetectado = DatabaseManager.detectarDesgasteSilencioso()
+    val desgasteDetectado = seguro("desgaste silencioso", Option.empty[String])(DatabaseManager.detectarDesgasteSilencioso())
     val desgasteActivo = desgasteDetectado.isDefined
     val desgasteWidget: Modifier = desgasteDetectado match {
       case Some(msg) => div(cls := "alert alert-danger fw-bold shadow mb-3", style := "border-left:6px solid #dc3545;", msg)
@@ -90,7 +98,7 @@ object DashboardController extends cask.Routes {
     }
 
     // ── ALERTAS POSITIVAS (verde suave; riesgo = rojo, recordatorios = amarillo) ──
-    val alertasPositivas = DatabaseManager.detectarAlertasPositivas()
+    val alertasPositivas = seguro("alertas positivas", List.empty[String])(DatabaseManager.detectarAlertasPositivas())
     val hayAlertasPositivas = alertasPositivas.nonEmpty
     val alertasPositivasWidget: Modifier = {
       val pos = alertasPositivas
@@ -101,13 +109,13 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE O: ENFERMEDAD INCIPIENTE (FC sube + energia y animo bajan, SQL puro) ──
-    val enfermedadWidget: Modifier = DatabaseManager.detectarEnfermedadIncipiente() match {
+    val enfermedadWidget: Modifier = seguro("enfermedad incipiente", Option.empty[String])(DatabaseManager.detectarEnfermedadIncipiente()) match {
       case Some(msg) => div(cls := "alert alert-warning small p-2 mb-3", style := "border-left:6px solid #facc15;", msg)
       case None => div()
     }
 
     // ── BLOQUE B2: PENDIENTE DE REGISTRAR (estructura semanal, SQL puro) ──────
-    val pendientesSemana = DatabaseManager.getSemanaIncompleta()
+    val pendientesSemana = seguro("pendientes de registrar", List.empty[String])(DatabaseManager.getSemanaIncompleta())
     val hayPendientes = pendientesSemana.nonEmpty
     val pendienteWidget: Modifier = {
       val pendientes = pendientesSemana
@@ -153,7 +161,8 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE 5.4: FOCO DE ESTA SEMANA (micro-objetivo) ──────────────────────
-    val microObjetivo = DatabaseManager.getMicroObjetivoSemana()
+    val microObjetivo = seguro("micro-objetivo", Map[String, Any]("objetivo" -> "", "completado" -> false, "resultado" -> ""))(
+      DatabaseManager.getMicroObjetivoSemana())
     // sufijo: el widget aparece en las dos pestanas y los id del checkbox no pueden repetirse
     def microObjetivoCard(sufijo: String): Modifier = {
       val completado = microObjetivo("completado").asInstanceOf[Boolean]
@@ -180,7 +189,7 @@ object DashboardController extends cask.Routes {
     val microObjetivoWidget: Modifier = microObjetivoCard("")
 
     // ── BLOQUE 5.5: PREPARACION SEMANAL (solo lectura de cache, nunca Gemini aqui) ─
-    val preparacionWidget: Modifier = DatabaseManager.getPreparacionSemanalCache() match {
+    val preparacionWidget: Modifier = seguro("preparacion semanal", Option.empty[String])(DatabaseManager.getPreparacionSemanalCache()) match {
       case Some(texto) =>
         val partes = texto.split("/").map(_.trim)
         def parte(prefijo: String): String = partes.find(_.startsWith(prefijo)).map(_.drop(prefijo.length).trim).getOrElse("")
@@ -264,7 +273,7 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE G: FORMA PROYECTADA PARA EL SABADO (miercoles/jueves, SQL puro) ──
-    val formaProyectadaWidget: Modifier = DatabaseManager.diasHastaPartidoSabado() match {
+    val formaProyectadaWidget: Modifier = seguro[Modifier]("forma proyectada", frag()) { DatabaseManager.diasHastaPartidoSabado() match {
       case Some(dias) =>
         val pred = DatabaseManager.predecirFormaPartido(dias)
         if (!pred("disponible").asInstanceOf[Boolean]) div()
@@ -281,7 +290,7 @@ object DashboardController extends cask.Routes {
           )
         }
       case None => div()
-    }
+    } }
 
     // ── BLOQUE A6 (RFMF): RESULTADOS DETECTADOS PENDIENTES DE CONFIRMAR ──────
     val rfmfPendientes = DatabaseManager.getPartidosRFMFPendientes()
@@ -361,7 +370,7 @@ object DashboardController extends cask.Routes {
       })
 
     // ── BLOQUE E: HITOS CONSEGUIDOS EN LOS ULTIMOS 7 DIAS (SQL puro, sin Gemini) ──
-    val hitosRecientes = DatabaseManager.getHitosRecientes(7)
+    val hitosRecientes = seguro("hitos recientes", List.empty[Map[String, Any]])(DatabaseManager.getHitosRecientes(7))
     val hitosWidget: Modifier =
       if (hitosRecientes.isEmpty) div()
       else div(cls := "card bg-dark border-warning shadow mb-3 p-3", style := "border-left:6px solid #d4af37;",
@@ -917,8 +926,8 @@ object DashboardController extends cask.Routes {
     }
 
     // ── BLOQUE F: FASE DE GUARDIAN (SQL puro) — modal propio, sin JS de Bootstrap ──
-    val faseGuardian = DatabaseManager.getFaseGuardian()
-    val faseGuardianModal: Modifier = {
+    val faseGuardianOpt = seguro("fase de Guardian", Option.empty[Map[String, Any]])(Some(DatabaseManager.getFaseGuardian()))
+    val faseGuardianModal: Modifier = faseGuardianOpt.fold[Modifier](frag()) { faseGuardian =>
       val siguiente = faseGuardian("siguiente").asInstanceOf[Option[Map[String, Any]]]
       val faltan = faseGuardian("faltan").asInstanceOf[List[String]]
       div(id := "faseGuardianModal", onclick := "if(event.target===this)this.style.display='none'",
@@ -959,7 +968,7 @@ object DashboardController extends cask.Routes {
         if (riesgoClasificacion != "BAJO") riesgoLesionWidget else frag(),
         protocoloWidget,
         // Partido hoy o en los proximos 2 dias
-        DatabaseManager.getProximoPartidoEn(2) match {
+        seguro("proximo partido", Option.empty[(Int, String)])(DatabaseManager.getProximoPartidoEn(2)) match {
           case Some((dias, rival)) =>
             val cuando = dias match { case 0 => "HOY"; case 1 => "MAÑANA"; case d => s"EN $d DÍAS" }
             div(cls := "mb-3 p-3", style := "background:linear-gradient(135deg,#451a03,#1e293b); border:1px solid #d4af37; border-radius:14px;",
@@ -971,7 +980,7 @@ object DashboardController extends cask.Routes {
         formaProyectadaWidget,
         if (microObjetivo("objetivo").toString.trim.nonEmpty) microObjetivoCard("Hoy") else frag(),
         // Reto semanal PARA Hector (se genera en la tarea programada; si falta, boton)
-        DatabaseManager.getRetoSemana() match {
+        seguro("reto de Hector", Option.empty[Map[String, Any]])(DatabaseManager.getRetoSemana()) match {
           case Some(r) =>
             div(cls := "card shadow-sm mb-3 p-3", style := "background:linear-gradient(135deg,#7c2d12,#a16207); border:0; border-radius:14px;",
               div(style := "font-size:11px; color:#fde68a; letter-spacing:1px; font-weight:700;", "🎯 RETO DE HÉCTOR ESTA SEMANA"),
@@ -986,7 +995,7 @@ object DashboardController extends cask.Routes {
         },
         // Registros pendientes: solo los 3 primeros
         {
-          val pendientes = DatabaseManager.getSemanaIncompleta()
+          val pendientes = pendientesSemana
           if (pendientes.isEmpty) frag()
           else div(cls := "mb-3 p-2", style := "border-left:4px solid #facc15; background:rgba(250,204,21,0.07); border-radius:8px;",
             div(cls := "xx-small fw-bold mb-1", style := "color:#facc15;", "📋 PENDIENTE DE REGISTRAR"),
@@ -1065,8 +1074,10 @@ object DashboardController extends cask.Routes {
                   s"📅 $temporadaActivaNombre")
               ),
               // BLOQUE F: fase actual de Guardian — al pulsar abre el detalle
-              div(style := "font-size:9px; color:#94a3b8; margin:-4px 0 8px; cursor:pointer;", onclick := "abrirFaseGuardian()",
-                s"${faseGuardian("emoji")} Guardian — Fase ${faseGuardian("numero")}: ${faseGuardian("nombre").toString.toLowerCase.capitalize} ⓘ"),
+              faseGuardianOpt.fold[Modifier](frag()) { faseGuardian =>
+                div(style := "font-size:9px; color:#94a3b8; margin:-4px 0 8px; cursor:pointer;", onclick := "abrirFaseGuardian()",
+                  s"${faseGuardian("emoji")} Guardian — Fase ${faseGuardian("numero")}: ${faseGuardian("nombre").toString.toLowerCase.capitalize} ⓘ")
+              },
               // KPIs rápidos
               div(cls := "row g-2",
                 frag(Seq(
@@ -1075,7 +1086,7 @@ object DashboardController extends cask.Routes {
                   (if(matches.nonEmpty) f"${matches.head.nota}%.1f" else "—", "ÚLTIMO", "#d4af37"),
                   (if(matches.nonEmpty) matches.head.resultado else "—", "RESULT", "#94a3b8"),
                   (if (matches.nonEmpty) s"${matches.count(_.resultado.trim.endsWith("-0")) * 100 / matches.size}%" else "—", "PORT. A 0", "#20c997"),
-                  (DatabaseManager.getTodosLosHitos().size.toString, "HITOS", "#facc15")
+                  (seguro("hitos", "—")(DatabaseManager.getTodosLosHitos().size.toString), "HITOS", "#facc15")
                 ).map { case (v, lbl, color) =>
                   div(cls := "col-6",
                     div(style := "background:#1e293b; border:1px solid #334155; border-radius:8px; padding:8px; text-align:center;",
@@ -1111,7 +1122,7 @@ object DashboardController extends cask.Routes {
         // ── 3. Indice de Forma + deuda de sueno + riesgo de lesion ──
         formaWidget,
         // Rachas de registro — discreto, sin alarma si se rompe
-        {
+        seguro[Modifier]("rachas de registro", frag()) {
           val st = DatabaseManager.getStreakRegistro()
           val racha = st("streakSueno").asInstanceOf[Int]
           div(cls := "mb-3 xx-small", style := "color:#94a3b8; line-height:1.7;",

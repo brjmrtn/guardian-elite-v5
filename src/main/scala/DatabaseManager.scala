@@ -460,6 +460,8 @@ object DatabaseManager {
         respuesta   TEXT,
         creado_en   TIMESTAMP DEFAULT NOW()
       )""")
+      // BDs donde ai_cache ya existia sin creado_en (el CREATE IF NOT EXISTS no la anade)
+      stmt.executeUpdate("ALTER TABLE ai_cache ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP DEFAULT NOW()")
       // Limpiar errores cacheados de versiones anteriores en cada arranque
       stmt.executeUpdate("""DELETE FROM ai_cache WHERE
         respuesta LIKE 'Error:%' OR
@@ -1145,6 +1147,9 @@ object DatabaseManager {
 
   // --- IA CONFIG ---
   val modelList = Seq("gemini-2.5-flash", "gemini-flash-latest")
+  /** Quita la API key de Gemini de URLs/mensajes de error antes de mostrarlos o registrarlos. */
+  def ocultarApiKey(s: String): String = Option(s).getOrElse("").replaceAll("key=[^&\\s\"']+", "key=***")
+
   object AIProvider {
     import java.security.MessageDigest
 
@@ -1235,11 +1240,11 @@ object DatabaseManager {
           if (r.statusCode == 200)
             return ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
           else {
-            lastError = s"Status ${r.statusCode}: ${r.text().take(300)}"
-            if (debugMode) println(s"DEBUG URL fallida: $url -> $lastError")
+            lastError = ocultarApiKey(s"Status ${r.statusCode}: ${r.text().take(300)}")
+            if (debugMode) println(s"DEBUG URL fallida: ${ocultarApiKey(url)} -> $lastError")
           }
         } catch { case e: Exception =>
-          lastError = e.getMessage
+          lastError = ocultarApiKey(e.getMessage)
           if (debugMode) println(s"DEBUG excepcion: $lastError")
         }
       }
@@ -13376,7 +13381,7 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
   }
 
   /** Protocolo guardado esta semana: (texto, acwr con el que se genero, fecha). */
-  def getProtocoloRecuperacion(): Option[(String, Double, String)] = {
+  def getProtocoloRecuperacion(): Option[(String, Double, String)] = scala.util.Try {
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement("SELECT respuesta, creado_en FROM ai_cache WHERE prompt_hash = ?")
@@ -13386,7 +13391,7 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
       else scala.util.Try(ujson.read(rs.getString("respuesta"))).toOption
         .map(j => (j("texto").str, j("acwr").num, Option(rs.getTimestamp("creado_en")).map(_.toString.take(16)).getOrElse("")))
     } finally { conn.close() }
-  }
+  }.toOption.flatten
 
   /** ACWR alto (umbral de riesgo de su edad) o riesgo de lesion ALTO/CRITICO. */
   def necesitaProtocoloRecuperacion(): Boolean = {

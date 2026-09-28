@@ -815,7 +815,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       } else {
         s"Error Gemini: HTTP ${r.statusCode}"
       }
-    } catch { case e: Exception => s"Error procesando audio: ${e.getMessage.take(100)}" }
+    } catch { case e: Exception => s"Error procesando audio: ${DatabaseManager.ocultarApiKey(e.getMessage).take(100)}" }
   }
 
   def saveVoiceAnalysis(matchId: Int, analysis: String): Unit = {
@@ -1877,7 +1877,7 @@ $jsonTpl"""
         "proximo"   -> proximo
       )
     } catch { case e: Exception =>
-      Map("ok" -> false, "error" -> e.getMessage)
+      Map("ok" -> false, "error" -> DatabaseManager.ocultarApiKey(e.getMessage))
     }
   }
 
