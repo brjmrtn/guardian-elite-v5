@@ -9064,7 +9064,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
       )
     } finally { conn.close() }
   }
-  def updateObjective(id: Int, meta: Int): Unit = { val conn=getConnection(); try{ val ps=conn.prepareStatement("UPDATE objectives SET meta=? WHERE id=?"); ps.setInt(1,meta); ps.setInt(2,id); ps.executeUpdate() } finally {conn.close()} }
+  def updateObjective(id: Int, meta: Int): Unit = { val conn=getConnection(); try{ val ps=conn.prepareStatement("UPDATE objectives SET objetivo=? WHERE id=?"); ps.setInt(1,meta); ps.setInt(2,id); ps.executeUpdate() } finally {conn.close()} }
   // ─────────────────────────────────────────────────────────────────────────────
   // BLOQUE 2 — GESTION COMPLETA DE TEMPORADAS
   // ─────────────────────────────────────────────────────────────────────────────
