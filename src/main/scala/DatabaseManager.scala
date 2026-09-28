@@ -4345,11 +4345,36 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
   }
 
   // ── MODULO 7: INFORME DE CAPTACION EXPORTABLE ───────────────────────────
-  def getScoutingReportNarrative(edad: Int, notaMedia: Double, pctCS: Int, winRate: Int, acwr: Double, pj: Int): String = {
+  /** Datos opcionales del informe de captacion: los None no se mencionan en el prompt. */
+  case class DatosScoutingExtra(
+    arquetipo: Option[(String, Int)] = None,              // dominante y %
+    volatilidad: Option[(String, Double)] = None,         // etiqueta de consistencia y desviacion de la nota
+    percentilRffm: Option[(Int, Int)] = None,             // percentil general y numero de equipos
+    percentilComparables: Option[(Int, Int, Int)] = None, // percentil, equipos comparables y PJ de Hector
+    cpiMedio: Option[Double] = None,
+    riesgoLesion: Option[String] = None,                  // clasificacion actual
+    fasePhv: Option[String] = None,
+    notaGuardian: Option[(Double, Double, Int)] = None    // Nota Guardian media, nota media del padre, partidos
+  )
+
+  def getScoutingReportNarrative(edad: Int, notaMedia: Double, pctCS: Int, winRate: Int, acwr: Double, pj: Int,
+                                 extra: DatosScoutingExtra = DatosScoutingExtra()): String = {
+    // Una frase por dato disponible; los que no tienen valor se omiten sin dejar hueco
+    val lineasExtra = Seq(
+      extra.arquetipo.map { case (et, pct) => s"Su perfil de portero dominante es $et ($pct%)." },
+      extra.volatilidad.map { case (et, desv) => f"Nivel de consistencia de su rendimiento: $et (desviación de la nota $desv%.2f)." },
+      extra.percentilRffm.map { case (p, eq) => s"En goles encajados está en el percentil $p de $eq equipos de su categoría en la RFFM Madrid." },
+      extra.percentilComparables.map { case (p, eq, pjH) => s"Entre $eq equipos con un calendario similar ($pjH±3 partidos) está en el percentil $p." },
+      extra.cpiMedio.map(c => f"Su CPI medio de la temporada (nota ajustada por la dificultad de cada partido) es $c%.1f."),
+      extra.riesgoLesion.map(r => s"Su riesgo de lesión actual es ${r.toLowerCase}."),
+      extra.fasePhv.map(f => s"Fase de maduración: $f."),
+      extra.notaGuardian.map { case (g, padre, n) => f"En $n partidos con rúbrica completa, la Nota Guardian media (calculada con rúbrica, eficacia y ejecución técnica) es $g%.1f frente a $padre%.1f de la valoración del padre." }
+    ).flatten
+    val bloqueExtra = if (lineasExtra.isEmpty) "" else "\nAnálisis adicionales de Guardian:\n" + lineasExtra.map("- " + _).mkString("\n")
     val prompt = s"""Eres un ojeador profesional de fútbol base español redactando un informe de captación.
-Portero de $edad años. Estadísticas: nota media ${f"$notaMedia%.1f"}/10, porterías a cero $pctCS%, win rate $winRate%, ACWR actual ${f"$acwr%.2f"}, $pj partidos registrados.
+Portero de $edad años. Estadísticas: nota media ${f"$notaMedia%.1f"}/10, porterías a cero $pctCS%, win rate $winRate%, ACWR actual ${f"$acwr%.2f"}, $pj partidos registrados.$bloqueExtra
 Entrena con su equipo (colectivo), asiste semanalmente a una academia específica de porteros, y complementa con judo como trabajo físico y de caídas.
-Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional de un informe de ojeador, que mencione explícitamente que combina entrenamiento colectivo + academia específica semanal + judo como complemento físico. Responde en texto plano, sin markdown."""
+Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional de un informe de ojeador, que mencione explícitamente que combina entrenamiento colectivo + academia específica semanal + judo como complemento físico.${if (lineasExtra.nonEmpty) " Integra los análisis adicionales que sean relevantes para un ojeador, sin inventar datos que no aparezcan arriba." else ""} Responde en texto plano, sin markdown."""
     AIProvider.ask(prompt)
   }
 

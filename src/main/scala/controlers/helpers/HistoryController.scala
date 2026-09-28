@@ -6178,8 +6178,42 @@ object HistoryController extends cask.Routes {
     val chronic = DatabaseManager.getWorkloads(28)
     val acwr    = StatsCalculator.calculateACWR(acute, chronic)
 
+    // Analisis adicionales para el informe: cada uno solo si tiene datos (y confianza) suficientes
+    val extraScouting = {
+      def intentar[T](nombre: String)(f: => Option[T]): Option[T] =
+        try f catch { case e: Exception => println(s"[Scouting] $nombre: ${e.getMessage.take(120)}"); None }
+      val temporada = DatabaseManager.getTemporadaActivaId()
+      DatabaseManager.DatosScoutingExtra(
+        arquetipo = intentar("arquetipo") {
+          val a = DatabaseManager.calcularArquetipoPortero(temporada)
+          val n = a.get("pj").map(_.toString.toDouble.toInt).getOrElse(0)
+          if (a.get("activo").contains(true) && DatabaseManager.getConfianzaModulo("arquetipo", n)("nivel") != "INSUFICIENTE")
+            Some(a("dominanteLabel").toString -> a("dominantePct").asInstanceOf[Int]) else None
+        },
+        volatilidad = intentar("volatility") {
+          val v = DatabaseManager.getVolatilityIndex(temporada)
+          if (v("suficiente").asInstanceOf[Boolean]) Some(v("etiqueta").toString -> v("desviacion").asInstanceOf[Double]) else None
+        },
+        percentilRffm = intentar("percentil RFFM")(DatabaseManager.getPercentilRealHector(temporada)
+          .map(p => p("percentilGC").asInstanceOf[Int] -> p("totalEquipos").asInstanceOf[Int])),
+        percentilComparables = intentar("percentil comparables")(DatabaseManager.getPercentilComparablesRFFM(temporada)
+          .map(c => (c("percentil").asInstanceOf[Int], c("equipos").asInstanceOf[Int], c("pjHector").asInstanceOf[Int]))),
+        cpiMedio = intentar("CPI")(DatabaseManager.getCpiMedioTemporada()),
+        riesgoLesion = intentar("riesgo de lesion")(Some(DatabaseManager.calcularRiesgoLesion()("clasificacion").toString)),
+        // getBioBandingData (SQL) en lugar de getDigitalTwinData, que llama a Gemini en cada ejecucion
+        fasePhv = intentar("fase PHV")(Option(DatabaseManager.getBioBandingData().getOrElse("faseBio", "").toString.trim)
+          .filter(f => f.nonEmpty && f != "Sin datos")),
+        notaGuardian = intentar("Nota Guardian") {
+          val guardian = DatabaseManager.getNotasGuardian(temporada)
+          val padre = DatabaseManager.getMatchesList(temporada).filter(m => m.nota > 0 && guardian.contains(m.id))
+          if (padre.size < 3) None
+          else Some((padre.map(m => guardian(m.id)).sum / padre.size, padre.map(_.nota).sum / padre.size, padre.size))
+        }
+      )
+    }
+
     val analisisIA = if (pj >= 3)
-      DatabaseManager.getScoutingReportNarrative(edad, notaMedia, pctCS, winRate, acwr, pj)
+      DatabaseManager.getScoutingReportNarrative(edad, notaMedia, pctCS, winRate, acwr, pj, extraScouting)
     else "Se necesitan al menos 3 partidos registrados para generar el análisis de ojeador."
 
     val rae = DatabaseManager.getRaeAdjustedStats()
