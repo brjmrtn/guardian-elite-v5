@@ -1148,7 +1148,20 @@ object DatabaseManager {
   // --- IA CONFIG ---
   val modelList = Seq("gemini-2.5-flash", "gemini-flash-latest")
   /** Quita la API key de Gemini de URLs/mensajes de error antes de mostrarlos o registrarlos. */
-  def ocultarApiKey(s: String): String = Option(s).getOrElse("").replaceAll("key=[^&\\s\"']+", "key=***")
+  def sanitizarError(msg: String): String = Option(msg).getOrElse("").replaceAll("key=[^&\\s\"]+", "key=***")
+
+  /** Texto que se devuelve cuando Gemini responde 402 (sin creditos) o 429 (cuota). Nunca se cachea. */
+  val MensajeIANoDisponible = "La IA no está disponible ahora mismo. Tus datos están guardados; reinténtalo más tarde."
+
+  /** Gemini no dio una respuesta valida (error o 402/429): los llamadores no deben guardarla. */
+  def esErrorIA(r: String): Boolean = r.startsWith("Error") || r == MensajeIANoDisponible
+
+  /** 402/429 de Gemini: deja una linea de diagnostico en el log (sin key ni prompt). */
+  def geminiNoDisponible(status: Int): Boolean = {
+    val cae = status == 402 || status == 429
+    if (cae) println(s"[IA] Gemini $status")
+    cae
+  }
 
   object AIProvider {
     import java.security.MessageDigest
@@ -1175,7 +1188,7 @@ object DatabaseManager {
         val response = callGeminiUnified(prompt, media)
 
         // Guardar en cache solo si la respuesta es valida (no un error)
-        if (!response.startsWith("Error:") && !response.contains("status code") && !response.contains("NOT_FOUND")) {
+        if (!esErrorIA(response) && !response.contains("status code") && !response.contains("NOT_FOUND")) {
           val save = conn.prepareStatement(
             "INSERT INTO ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta"
           )
@@ -1207,7 +1220,7 @@ object DatabaseManager {
         //s"https://generativelanguage.googleapis.com/v1beta/models/:generateContent?key=$apiKey"
       )
 
-      if (debugMode) println(s"DEBUG: isPdf=$isPdf key=[${apiKey.take(4)}...${apiKey.takeRight(4)}]")
+      if (debugMode) println(s"DEBUG: isPdf=$isPdf key=***")
 
       val parts = ujson.Arr(ujson.Obj("text" -> prompt))
 
@@ -1235,16 +1248,18 @@ object DatabaseManager {
             url,
             data = ujson.write(payload),
             headers = Map("Content-Type" -> "application/json"),
-            readTimeout = if (isVideo) 300000 else 60000  // Video necesita mucho mas tiempo; PDF un poco mas
+            readTimeout = if (isVideo) 300000 else 60000,  // Video necesita mucho mas tiempo; PDF un poco mas
+            check = false  // sin excepcion en 4xx/5xx: su mensaje llevaria la URL con la key
           )
+          if (geminiNoDisponible(r.statusCode)) return MensajeIANoDisponible
           if (r.statusCode == 200)
             return ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
           else {
-            lastError = ocultarApiKey(s"Status ${r.statusCode}: ${r.text().take(300)}")
-            if (debugMode) println(s"DEBUG URL fallida: ${ocultarApiKey(url)} -> $lastError")
+            lastError = sanitizarError(s"Status ${r.statusCode}: ${r.text().take(300)}")
+            if (debugMode) println(s"DEBUG URL fallida: ${sanitizarError(url)} -> $lastError")
           }
         } catch { case e: Exception =>
-          lastError = ocultarApiKey(e.getMessage)
+          lastError = sanitizarError(e.getMessage)
           if (debugMode) println(s"DEBUG excepcion: $lastError")
         }
       }
@@ -2857,7 +2872,7 @@ $analisisConcatenados"""
 $lineas
 En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál necesita más atención, si alguno parece poco realista para la fecha límite, y una acción concreta para las próximas dos semanas. Texto plano, sin listas."""
     val r = AIProvider.ask(prompt).trim
-    if (r.nonEmpty && !r.startsWith("Error")) {
+    if (r.nonEmpty && !esErrorIA(r)) {
       val conn = getConnection()
       try {
         val ps = conn.prepareStatement("UPDATE idp_temporadas SET resumen_ia = ? WHERE id = ?")
@@ -2976,13 +2991,15 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
   // BLOQUE A — DEUDA DE SUENO ACUMULADA SEMANAL
   // ─────────────────────────────────────────────────────────────────────────────
   // Calculo SQL/matematicas puras — sin Gemini, seguro de llamar en el render de pagina.
+  val HorasSuenoMinimas = 9.0
+
   def calcularDeudaSueno(): Map[String, Any] = {
     val conn = getConnection()
     try {
       val rs = conn.createStatement().executeQuery("""
         SELECT fecha::date as dia, horas_sueno, sueno_profundo_min
         FROM wellness
-        WHERE fecha::date >= CURRENT_DATE - INTERVAL '7 days'
+        WHERE fecha::date > CURRENT_DATE - INTERVAL '7 days'
         ORDER BY fecha DESC
       """)
       var diasConDatos = 0
@@ -2994,7 +3011,8 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
         val p = rs.getInt("sueno_profundo_min")
         if (p > 0) profundoTotal += p
       }
-      val horasOptimas = 10.0
+      // Minimo recomendado para 6-12 anos (rango 9-12h): la deuda es el deficit respecto a ese minimo
+      val horasOptimas = HorasSuenoMinimas
       val horasEsperadas = horasOptimas * diasConDatos
       val deudaHoras = Math.max(0.0, horasEsperadas - horasTotales)
       val mediaDiaria = if (diasConDatos > 0) horasTotales / diasConDatos else 0.0
@@ -3008,7 +3026,8 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
         "mediaDiaria"   -> mediaDiaria,
         "deudaHoras"    -> deudaHoras,
         "nivel"         -> nivel,
-        "profundoMedio" -> (if (diasConDatos > 0) profundoTotal / diasConDatos else 0)
+        "profundoMedio" -> (if (diasConDatos > 0) profundoTotal / diasConDatos else 0),
+        "desglose"      -> f"$diasConDatos ${if (diasConDatos == 1) "noche" else "noches"} · media $mediaDiaria%.1fh · mínimo recomendado ${HorasSuenoMinimas.toInt}h"
       )
     } finally { conn.close() }
   }
@@ -3700,7 +3719,7 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
       val deudaNivelSem = deudaSem("nivel").asInstanceOf[String]
       val deudaLinea =
         if (deudaNivelSem == "MINIMA") ""
-        else s" Deuda de sueño acumulada esta semana: ${"%.1f".format(deudaSem("deudaHoras").asInstanceOf[Double])}h (nivel $deudaNivelSem, media ${"%.1f".format(deudaSem("mediaDiaria").asInstanceOf[Double])}h/noche). Ten esto en cuenta en el DESCANSO_CASA."
+        else s" Deuda de sueño acumulada esta semana: ${"%.1f".format(deudaSem("deudaHoras").asInstanceOf[Double])}h (nivel $deudaNivelSem, media ${"%.1f".format(deudaSem("mediaDiaria").asInstanceOf[Double])}h/noche; mínimo recomendado 9h). Ten esto en cuenta en el DESCANSO_CASA."
 
       // BLOQUE I: firma de fatiga personal — solo si el ACWR es alto y hay datos suficientes
       val firmaFatigaLinea = if (estadoAcwr != "ALTA") "" else {
@@ -4396,7 +4415,7 @@ Escribe un párrafo de 5-6 líneas en tercera persona, con el tono profesional d
       val deudaNivelHoy = deudaHoy("nivel").asInstanceOf[String]
       val deudaLine =
         if (deudaNivelHoy == "MINIMA") ""
-        else s"\nDeuda de sueño acumulada esta semana: ${"%.1f".format(deudaHoy("deudaHoras").asInstanceOf[Double])}h (nivel: $deudaNivelHoy). Media de ${"%.1f".format(deudaHoy("mediaDiaria").asInstanceOf[Double])}h/noche, óptimo 10h para su edad.\n"
+        else s"\nDeuda de sueño acumulada esta semana: ${"%.1f".format(deudaHoy("deudaHoras").asInstanceOf[Double])}h (nivel: $deudaNivelHoy). Media de ${"%.1f".format(deudaHoy("mediaDiaria").asInstanceOf[Double])}h/noche, mínimo recomendado 9h para su edad.\n"
 
       // BLOQUE C: carga cognitiva escolar (examenes/fin de trimestre) — SQL puro, sin Gemini
       val cargaEscolarLine = getPeriodoEscolarHoy() match {
@@ -5102,7 +5121,7 @@ FORTALEZA: [principal fortaleza mental en 1 frase]
 CONSEJO: [1 consejo practico concreto para esta semana]
 Responde en espanol, tono positivo y motivador para un nino."""
         val r = AIProvider.ask(prompt, None, bypassCache = true)
-        if (r.nonEmpty && !r.startsWith("Error")) {
+        if (r.nonEmpty && !esErrorIA(r)) {
           val ps = conn.prepareStatement(
             "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('emocional_ia', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
           ps.setString(1, r); ps.executeUpdate()
@@ -11092,7 +11111,7 @@ SOLO el JSON, nada mas."""
           "SELECT plan_ia FROM nutrition_plans WHERE semana >= CURRENT_DATE - 6 ORDER BY created_at DESC LIMIT 1")
         if (rsCache.next()) {
           val cached = rsCache.getString("plan_ia")
-          if (cached.nonEmpty && !cached.startsWith("Error")) {
+          if (cached.nonEmpty && !esErrorIA(cached)) {
             return Map("plan" -> cached, "acwr" -> acwr, "rpe" -> rpeMedia, "nota" -> notaUlt,
               "faseStr" -> faseStr, "altura" -> altura, "peso" -> peso, "cached" -> true)
           }
@@ -11493,7 +11512,7 @@ PLAZO: <texto>"""
     if (hoy.getDayOfWeek != java.time.DayOfWeek.MONDAY || hoy.getDayOfMonth > 7) return None
     val mes = hoy.minusMonths(1).toString.take(7)
     val contenido = generateMonthlyDiary(mes)
-    if (contenido.isEmpty || contenido.startsWith("Error")) None else Some(mes -> contenido)
+    if (contenido.isEmpty || esErrorIA(contenido)) None else Some(mes -> contenido)
   }
 
   def getSeasonDiaryEntries(): List[Map[String, Any]] = {
@@ -11632,7 +11651,7 @@ $datosMes"""
 
       // Cache permanente en season_diary (un registro por mes); un error de la IA no se guarda
       val contenido = AIProvider.ask(promptNarrativo, None, bypassCache = true).trim
-      if (contenido.isEmpty || contenido.startsWith("Error")) return contenido
+      if (contenido.isEmpty || esErrorIA(contenido)) return contenido
 
       val insert = conn.prepareStatement("""
         INSERT INTO season_diary (mes, contenido, generado_en, partidos_incluidos, hitos_incluidos, datos_mes)
@@ -12543,7 +12562,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
 $datos
 En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (sin sobreinterpretar si la muestra es pequeña) y una acción concreta de entrenamiento para las próximas semanas. Texto plano, sin listas ni títulos."""
     val r = AIProvider.ask(prompt).trim
-    if (r.nonEmpty && !r.startsWith("Error")) {
+    if (r.nonEmpty && !esErrorIA(r)) {
       val conn = getConnection()
       try {
         val ps = conn.prepareStatement(
@@ -13209,7 +13228,7 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
     // la semana en el prompt hace que ai_cache no devuelva el mismo reto cada semana
     val prompt = s"""Genera un reto deportivo simple, divertido y concreto para Héctor, un portero de $edad años. El reto debe estar relacionado con $tema. Debe ser algo que el niño pueda entender, recordar y comprobar él mismo durante el partido. Máximo 15 palabras. Empieza con un emoji. Ejemplos: '🗣️ Esta semana grita MIAAA en todos los balones que salgas a por ellos', '👀 Esta semana mira siempre a los pies del delantero antes de que chute'. Tono divertido, sin presión, como un juego. Devuelve solo el reto, sin comillas. Semana del ${lunesDe(LocalDate.now())}."""
     val reto = AIProvider.ask(prompt).trim.stripPrefix("\"").stripSuffix("\"").linesIterator.find(_.trim.nonEmpty).getOrElse("").trim
-    if (reto.isEmpty || reto.startsWith("Error")) return Left(if (reto.isEmpty) "Respuesta vacía de la IA" else reto)
+    if (reto.isEmpty || esErrorIA(reto)) return Left(if (reto.isEmpty) "Respuesta vacía de la IA" else reto)
     val c2 = getConnection()
     try {
       val ps = c2.prepareStatement(s"""INSERT INTO retos_hector (season_id, semana, reto, dimension) VALUES ($temporadaActualSQL, ?, ?, ?)
@@ -13426,7 +13445,7 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
     val acwrTxt = if (estado("status") == "INSUFICIENTE") "sin histórico suficiente" else f"$acwr%.2f"
     val prompt = s"""Eres un preparador físico especializado en fútbol base pediátrico. Héctor tiene $edad años, pesa ${peso}kg, está en fase $fasePhv de maduración. Su ACWR actual es $acwrTxt y su riesgo de lesión es ${riesgo("clasificacion")} (${f"${riesgo("riesgo").asInstanceOf[Double]}%.1f"}/10; factores: ${riesgo("factoresActivos").asInstanceOf[List[String]].mkString(", ")}). Los entrenamientos previstos esta semana son: $estructura. Genera un protocolo de recuperación activa concreto y específico para esta semana, día a día, que le permita llegar al partido del sábado en las mejores condiciones posibles. Incluye: qué hacer en cada sesión de entrenamiento (intensidad reducida, tipo de trabajo, duración máxima), qué hacer en casa (sueño, hidratación, estiramientos específicos), y qué señales de alarma vigilar. Máximo 6 líneas en total — una por día de la semana. Tono práctico y directo para un padre, no clínico. Texto plano, una línea por día empezando por el nombre del día."""
     val texto = AIProvider.ask(prompt, None, bypassCache = true).replace("```", "").trim
-    if (texto.isEmpty || texto.startsWith("Error")) return Left(if (texto.isEmpty) "Respuesta vacía de la IA" else texto)
+    if (texto.isEmpty || esErrorIA(texto)) return Left(if (texto.isEmpty) "Respuesta vacía de la IA" else texto)
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement(
@@ -13519,7 +13538,7 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
     val prompt = s"""Eres entrenador de porteros de fútbol base. Escribe 3 situaciones breves y concretas de un partido de un portero de $edad años (Fútbol 7), cada una de 1-2 frases, SIN valorar ni insinuar si lo hizo bien o mal. Cada situación debe evaluar una dimensión distinta de estas: $claves. Para cada una indica la puntuación de referencia de 1 a 5 que le daría un entrenador experto y objetivo (1=muy mal, 3=correcto, 5=excelente), con variedad entre situaciones. Referencia temporal: ${LocalDate.now().toString.take(7)}.
 Devuelve ÚNICAMENTE un JSON válido sin backticks: [{"situacion": "...", "dimension": "<una de: $claves>", "referencia": N}, ...]"""
     val resp = AIProvider.ask(prompt)
-    if (resp.startsWith("Error")) return Left(resp)
+    if (esErrorIA(resp)) return Left(resp)
     val situaciones = try {
       ujson.read(resp.replace("```json", "").replace("```", "").trim).arr.toList.flatMap { j =>
         val dim = j("dimension").str.trim.toLowerCase
@@ -13568,7 +13587,7 @@ $tabla
 En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exigente o más generoso de lo esperado y en qué tipo de situaciones, y cómo ajustar mentalmente sus valoraciones en esa dimensión cuando registre partidos. Texto plano, sin listas."""
       val ia = AIProvider.ask(prompt)
       val resultado =
-        if (!ia.startsWith("Error") && ia.trim.nonEmpty) ia.trim
+        if (!esErrorIA(ia) && ia.trim.nonEmpty) ia.trim
         else if (desvMax == 0) "Tus valoraciones coinciden con la referencia en las tres situaciones."
         else f"Tiendes a ser ${if (desvMax < 0) "más exigente" else "más generoso"} de lo esperado en ${etiqueta.toLowerCase} (${math.abs(desvMax)}%.0f puntos). Ajusta mentalmente tus valoraciones en esa dimensión cuando registres partidos."
       val up = conn.prepareStatement("UPDATE calibracion_padre SET puntuaciones = ?, resultado = ?, dimension = ?, desviacion = ? WHERE id = ?")

@@ -3533,7 +3533,7 @@ object CareerController extends cask.Routes {
         new Thread(() => {
           try {
             val r = DatabaseManager.generateMonthlyDiary(mes)
-            if (r.startsWith("Error")) println(s"[Diario] $mes: ${r.take(200)}")
+            if (DatabaseManager.esErrorIA(r)) println(s"[Diario] $mes: ${r.take(200)}")
           } finally diarioEnCurso.remove(mes)
         }).start()
         s"⏳ Generando el diario de ${DatabaseManager.mesLabel(mes)} en segundo plano — recarga en unos segundos."

@@ -8,7 +8,7 @@ object DashboardController extends cask.Routes {
   // Un modulo secundario que falla (columna que falta, dato inesperado...) no debe tumbar el dashboard entero
   private def seguro[T](modulo: String, porDefecto: => T)(expr: => T): T =
     try expr catch { case e: Exception =>
-      println(s"[Dashboard] fallo en $modulo: ${DatabaseManager.ocultarApiKey(e.getMessage)}")
+      println(s"[Dashboard] fallo en $modulo: ${DatabaseManager.sanitizarError(e.getMessage)}")
       porDefecto
     }
 
@@ -384,18 +384,22 @@ object DashboardController extends cask.Routes {
     val deudaNivel = deudaSueno("nivel").asInstanceOf[String]
     val deudaHorasDash = deudaSueno("deudaHoras").asInstanceOf[Double]
     val deudaMediaDash = deudaSueno("mediaDiaria").asInstanceOf[Double]
+    val deudaDesglose: Modifier = div(cls := "xx-small text-muted mt-1", deudaSueno.getOrElse("desglose", "").toString)
     val deudaSuenoWidget: Modifier = deudaNivel match {
       case "MODERADA" =>
         div(cls := "card bg-dark border-info shadow-sm mb-3 p-2",
           div(cls := "xx-small", style := "color:#e2e8f0;",
-            raw(f"💤 Deuda de sueño esta semana: <strong>${deudaHorasDash}%.1fh</strong> — media de ${deudaMediaDash}%.1fh/noche")))
+            raw(f"💤 Deuda de sueño esta semana: <strong>${deudaHorasDash}%.1fh</strong> — media de ${deudaMediaDash}%.1fh/noche")),
+          deudaDesglose)
       case "ALTA" =>
         div(cls := "card bg-dark border-warning shadow-sm mb-3 p-2",
           div(cls := "xx-small", style := "color:#fde68a;",
-            raw(f"⚠️ Deuda de sueño alta: <strong>${deudaHorasDash}%.1fh acumuladas</strong> (${deudaMediaDash}%.1fh/noche de media)")))
+            raw(f"⚠️ Deuda de sueño alta: <strong>${deudaHorasDash}%.1fh acumuladas</strong> (${deudaMediaDash}%.1fh/noche de media)")),
+          deudaDesglose)
       case "CRITICA" =>
         div(cls := "alert alert-danger fw-bold shadow mb-3", style := "border-left:6px solid #dc3545;",
-          raw(f"🔴 Deuda de sueño crítica: <strong>${deudaHorasDash}%.1fh acumuladas</strong> esta semana"))
+          raw(f"🔴 Deuda de sueño crítica: <strong>${deudaHorasDash}%.1fh acumuladas</strong> esta semana"),
+          deudaDesglose)
       case _ => div()
     }
 

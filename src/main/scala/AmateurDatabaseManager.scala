@@ -141,13 +141,15 @@ object AmateurDatabaseManager {
         s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey",
         data = ujson.write(payload),
         headers = Map("Content-Type" -> "application/json"),
-        readTimeout = 45000
+        readTimeout = 45000,
+        check = false
       )
+      DatabaseManager.geminiNoDisponible(r.statusCode)
       val response = if (r.statusCode == 200)
         ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str.trim
       else ""
 
-      if (response.nonEmpty && !response.startsWith("Error")) {
+      if (response.nonEmpty && !DatabaseManager.esErrorIA(response)) {
         val save = conn.prepareStatement(
           "INSERT INTO am_ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta, creado_en = NOW()")
         save.setString(1, hash); save.setString(2, response)
@@ -805,17 +807,19 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
         s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey",
         data    = ujson.write(payload),
         headers = Map("Content-Type" -> "application/json"),
-        readTimeout = 30000
+        readTimeout = 30000,
+        check = false
       )
 
-      if (r.statusCode == 200) {
+      if (DatabaseManager.geminiNoDisponible(r.statusCode)) DatabaseManager.MensajeIANoDisponible
+      else if (r.statusCode == 200) {
         val analysis = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str
         saveVoiceAnalysis(matchId, analysis)
         analysis
       } else {
         s"Error Gemini: HTTP ${r.statusCode}"
       }
-    } catch { case e: Exception => s"Error procesando audio: ${DatabaseManager.ocultarApiKey(e.getMessage).take(100)}" }
+    } catch { case e: Exception => s"Error procesando audio: ${DatabaseManager.sanitizarError(e.getMessage).take(100)}" }
   }
 
   def saveVoiceAnalysis(matchId: Int, analysis: String): Unit = {
@@ -1804,8 +1808,10 @@ $jsonTpl"""
         s"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey",
         data = ujson.write(payload),
         headers = Map("Content-Type" -> "application/json"),
-        readTimeout = 45000
+        readTimeout = 45000,
+        check = false
       )
+      if (DatabaseManager.geminiNoDisponible(r.statusCode)) return Map("ok" -> false, "error" -> DatabaseManager.MensajeIANoDisponible)
       if (r.statusCode != 200) return Map("ok" -> false, "error" -> s"Gemini error ${r.statusCode}")
 
       val raw = ujson.read(r.text())("candidates")(0)("content")("parts")(0)("text").str.trim
@@ -1877,7 +1883,7 @@ $jsonTpl"""
         "proximo"   -> proximo
       )
     } catch { case e: Exception =>
-      Map("ok" -> false, "error" -> DatabaseManager.ocultarApiKey(e.getMessage))
+      Map("ok" -> false, "error" -> DatabaseManager.sanitizarError(e.getMessage))
     }
   }
 

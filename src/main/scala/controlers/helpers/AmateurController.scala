@@ -3976,7 +3976,7 @@ $penSection
           headers = Seq("Content-Type" -> "application/json"))
       case Some(m) =>
         val analysis = AmateurDatabaseManager.analyzeVoiceAmateur(matchId, audioData, m.nota, m.rival)
-        val ok = !analysis.startsWith("Error")
+        val ok = !DatabaseManager.esErrorIA(analysis)
         val json = ujson.Obj("ok" -> ok, "analysis" -> analysis,
           "error" -> (if (!ok) analysis else ""))
         cask.Response(ujson.write(json).getBytes("UTF-8"),
