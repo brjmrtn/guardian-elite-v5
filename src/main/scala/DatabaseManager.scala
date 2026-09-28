@@ -1035,6 +1035,23 @@ object DatabaseManager {
       // BLOQUE D/S: origen del registro del partido — NULL (formulario completo), 'quick' (registro minimo), 'importado' (CSV historico)
       stmt.executeUpdate("ALTER TABLE matches ADD COLUMN IF NOT EXISTS source TEXT DEFAULT NULL")
 
+      // Errores de Gemini guardados por versiones anteriores (algunos con la URL y la key): fuera al arrancar
+      stmt.executeUpdate("""DELETE FROM feature_cache WHERE
+        payload LIKE '%status code%' OR
+        payload LIKE '%generativelanguage.googleapis.com%' OR
+        payload LIKE '%prepayment credits%' OR
+        payload LIKE '%no está disponible ahora mismo%'
+      """)
+      // Mismo criterio en las columnas de texto que guardan analisis de IA
+      Seq("matches" -> "analisis_voz", "matches" -> "video_analisis_ia", "matches" -> "guia_conversacion",
+          "trainings" -> "analisis_voz_academia", "trainings" -> "video_analisis_ia",
+          "idp_revisiones" -> "analisis_ia", "voz_portero" -> "analisis_ia",
+          "seasons" -> "informe_fin_temporada", "nutrition_plans" -> "plan_ia").foreach { case (tabla, col) =>
+        scala.util.Try(stmt.executeUpdate(s"""UPDATE $tabla SET $col = NULL WHERE $col LIKE '%status code%' OR
+          $col LIKE '%generativelanguage.googleapis.com%' OR $col LIKE '%prepayment credits%' OR
+          $col LIKE '%no está disponible ahora mismo%'"""))
+      }
+
       println("[OK] initDB: todas las tablas verificadas.")
     } catch {
       case e: Exception => println(s"[!] initDB error: ${e.getMessage}")
@@ -1156,6 +1173,9 @@ object DatabaseManager {
   /** Gemini no dio una respuesta valida (error o 402/429): los llamadores no deben guardarla. */
   def esErrorIA(r: String): Boolean = r.startsWith("Error") || r == MensajeIANoDisponible
 
+  /** Solo se persiste (cache, feature_cache, columnas *_ia) una respuesta no vacia que no sea un error de la IA. */
+  def respuestaIAValida(r: String): Boolean = r != null && r.trim.nonEmpty && !esErrorIA(r.trim)
+
   /** 402/429 de Gemini: deja una linea de diagnostico en el log (sin key ni prompt). */
   def geminiNoDisponible(status: Int): Boolean = {
     val cae = status == 402 || status == 429
@@ -1188,7 +1208,7 @@ object DatabaseManager {
         val response = callGeminiUnified(prompt, media)
 
         // Guardar en cache solo si la respuesta es valida (no un error)
-        if (!esErrorIA(response) && !response.contains("status code") && !response.contains("NOT_FOUND")) {
+        if (respuestaIAValida(response) && !response.contains("status code") && !response.contains("NOT_FOUND")) {
           val save = conn.prepareStatement(
             "INSERT INTO ai_cache (prompt_hash, respuesta) VALUES (?, ?) ON CONFLICT (prompt_hash) DO UPDATE SET respuesta = EXCLUDED.respuesta"
           )
@@ -1847,7 +1867,7 @@ object DatabaseManager {
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisisIA)) upsert.executeUpdate()
 
       Map("suficiente" -> true, "indice" -> indice, "mediaDias" -> mediaDias,
         "porCategoria" -> porCategoria, "porHabilidad" -> porHabilidad, "analisisIA" -> analisisIA)
@@ -1920,7 +1940,7 @@ object DatabaseManager {
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisisIA)) upsert.executeUpdate()
       analisisIA
     } finally { conn.close() }
   }
@@ -2074,7 +2094,7 @@ RECOMENDACION: <texto>"""
       }
       val indice = extract("INDICE").takeWhile(c => c.isDigit || c == '.').toDoubleOption.getOrElse(5.0)
       val perfil = extract("PERFIL")
-      val recomendacion = extract("RECOMENDACION")
+      val recomendacion = if (respuestaIAValida(respuesta)) extract("RECOMENDACION") else respuesta.trim
 
       val eventosJson = ujson.Arr(eventos.map { case (label, antes, despues) =>
         ujson.Obj("label" -> label, "antes" -> antes, "despues" -> despues): ujson.Value
@@ -2086,7 +2106,7 @@ RECOMENDACION: <texto>"""
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(respuesta)) upsert.executeUpdate()
 
       Map(
         "indice" -> indice, "perfil" -> perfil, "recomendacion" -> recomendacion,
@@ -2196,7 +2216,7 @@ REFERENCIA: <texto>"""
         val endIdx = nextTag.map(nt => upper.indexOf(s"$nt:", contentStart)).filter(_ >= 0).getOrElse(resp.length)
         resp.substring(contentStart, endIdx).trim
       }
-      val percentilTxt  = extractSection(respuesta, "PERCENTIL", Some("AREAS"))
+      val percentilTxt  = if (respuestaIAValida(respuesta)) extractSection(respuesta, "PERCENTIL", Some("AREAS")) else respuesta.trim
       val areasTxt      = extractSection(respuesta, "AREAS", Some("REFERENCIA"))
       val referenciaTxt = extractSection(respuesta, "REFERENCIA", None)
 
@@ -2207,7 +2227,7 @@ REFERENCIA: <texto>"""
       """)
       upsert.setString(1, cacheKey)
       upsert.setString(2, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(respuesta)) upsert.executeUpdate()
 
       Map("percentil" -> percentilTxt, "areas" -> areasTxt, "referencia" -> referenciaTxt, "sinDatos" -> false) ++ rae ++ rffmReal
     } finally { conn.close() }
@@ -2368,7 +2388,7 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?")
-      ps.setString(1, fixEncoding(res)); ps.setInt(2, matchId); ps.executeUpdate()
+      ps.setString(1, fixEncoding(res)); ps.setInt(2, matchId); if (respuestaIAValida(res)) ps.executeUpdate()
     } finally { conn.close() }
     res
   }
@@ -2380,7 +2400,7 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement("UPDATE trainings SET analisis_voz_academia = ? WHERE id = ?")
-      ps.setString(1, fixEncoding(res)); ps.setInt(2, trainingId); ps.executeUpdate()
+      ps.setString(1, fixEncoding(res)); ps.setInt(2, trainingId); if (respuestaIAValida(res)) ps.executeUpdate()
     } finally { conn.close() }
     res
   }
@@ -2400,7 +2420,7 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
     val rivalPartido = try {
       val ps = conn.prepareStatement("UPDATE matches SET video_analisis_ia = ?, video_analisis_fecha = NOW() WHERE id = ?")
       ps.setString(1, fixEncoding(res)); ps.setInt(2, matchId)
-      ps.executeUpdate()
+      if (respuestaIAValida(res)) ps.executeUpdate()
       val rsR = conn.prepareStatement("SELECT rival FROM matches WHERE id = ?")
       rsR.setInt(1, matchId)
       val rr = rsR.executeQuery()
@@ -2408,7 +2428,7 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
     } finally { conn.close() }
     // BLOQUE G3: notificacion Telegram — ya estamos en el hilo de fondo del analisis de video
     val notaTecnica = extractNotaTecnica(res).map(n => f"$n%.1f").getOrElse("—")
-    TelegramService.enviar(s"🎬 Análisis de vídeo listo — vs $rivalPartido. Nota técnica: $notaTecnica/10")
+    if (respuestaIAValida(res)) TelegramService.enviar(s"🎬 Análisis de vídeo listo — vs $rivalPartido. Nota técnica: $notaTecnica/10")
     res
   }
 
@@ -2481,7 +2501,7 @@ Si el audio no contiene información sobre alguna sección escribe 'No mencionad
     try {
       val ps = conn.prepareStatement("UPDATE trainings SET video_analisis_ia = ?, video_analisis_fecha = NOW() WHERE id = ?")
       ps.setString(1, fixEncoding(res)); ps.setInt(2, trainingId)
-      ps.executeUpdate()
+      if (respuestaIAValida(res)) ps.executeUpdate()
     } finally { conn.close() }
     res
   }
@@ -2654,7 +2674,7 @@ $analisisConcatenados"""
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisis)) upsert.executeUpdate()
       analisis
     } finally { conn.close() }
   }
@@ -2715,6 +2735,7 @@ $analisisConcatenados"""
       val prompt = s"""Eres el director de desarrollo de jugadores de una academia de élite. Héctor es un portero de $edad años con estos datos actuales: checklist técnico conseguido $pctChecklist% (por categoría: $checklistPorCategoria), fase madurativa $faseBio, último test físico: $ultimoTest, índice de velocidad de aprendizaje: $indiceAprendizaje, último registro psicológico: $ultimoPsych, oportunidades de visibilidad este año: $oportunidadesAnio, ACWR medio últimas 4 semanas: ${f"$acwr%.2f"}.$arquetipoLine Genera exactamente 4 objetivos SMART para la temporada $temporada, uno por cada dimensión. Para cada objetivo devuelve en formato: DIMENSION|OBJETIVO|METRICA|VALOR_ACTUAL|VALOR_OBJETIVO|FECHA_LIMITE. Ejemplos: TECNICO|Consolidar el 80% del checklist de técnica básica|% habilidades técnicas conseguidas|45%|80%|2027-01-31. FISICO|Mantener ACWR en zona verde toda la temporada|% semanas con ACWR menor de 1.3|Sin datos|85%|2027-06-30. MENTAL|Registrar motivación igual o mayor a 4 en todos los registros trimestrales|Puntuación motivación|Sin datos|4/5|2027-06-30. VISIBILIDAD|Participar en 2 eventos de visibilidad ALTO|Eventos nivel ALTO participados|0|2|2027-05-31. Sé específico y realista para la edad de Héctor. Devuelve SOLO las 4 líneas en el formato indicado, sin texto adicional."""
 
       val respuesta = AIProvider.ask(prompt, None, bypassCache = true)
+      if (!respuestaIAValida(respuesta)) return -1
 
       val insTemp = conn.prepareStatement(
         "INSERT INTO idp_temporadas (temporada, fecha_inicio, fecha_fin, estado) VALUES (?, ?::date, ?::date, 'ACTIVA') RETURNING id"
@@ -2982,7 +3003,7 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
       val analisis = AIProvider.ask(prompt, None, bypassCache = true)
       val upd = conn.prepareStatement("UPDATE idp_revisiones SET analisis_ia = ? WHERE id = ?")
       upd.setString(1, fixEncoding(analisis)); upd.setInt(2, revisionId)
-      upd.executeUpdate()
+      if (respuestaIAValida(analisis)) upd.executeUpdate()
       analisis
     } finally { conn.close() }
   }
@@ -3743,7 +3764,7 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
       val up = conn.prepareStatement(
         "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?,?,NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
       up.setString(1, s"preparacion_semanal_$hash"); up.setString(2, resultado)
-      up.executeUpdate()
+      if (respuestaIAValida(resultado)) up.executeUpdate()
       resultado
     } finally { conn.close() }
   }
@@ -3866,7 +3887,7 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisis)) upsert.executeUpdate()
       analisis
     } finally { conn.close() }
   }
@@ -4744,7 +4765,7 @@ No reproduzcas la tabla de datos. Escribe siempre en párrafos. Habla en segunda
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisis)) upsert.executeUpdate()
       analisis
     } finally { conn.close() }
   }
@@ -5588,7 +5609,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val texto = AIProvider.ask(prompt, None, bypassCache = true)
       val ps = conn.prepareStatement(
         "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('ojeador_externo', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
-      ps.setString(1, texto); ps.executeUpdate()
+      ps.setString(1, texto); if (respuestaIAValida(texto)) ps.executeUpdate()
       texto
     } finally { conn.close() }
   }
@@ -6183,7 +6204,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
       val texto = AIProvider.ask(prompt, None, bypassCache = true)
       val ps = conn.prepareStatement(
         "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES ('arquetipo_analisis_ia', ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()")
-      ps.setString(1, texto); ps.executeUpdate()
+      ps.setString(1, texto); if (respuestaIAValida(texto)) ps.executeUpdate()
       texto
     } finally { conn.close() }
   }
@@ -6246,7 +6267,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
           val analisis = AIProvider.ask(prompt, None, bypassCache = true)
           val up = conn.prepareStatement("UPDATE voz_portero SET analisis_ia = ?, analisis_fecha = NOW() WHERE id = ?")
           up.setString(1, analisis); up.setInt(2, id)
-          up.executeUpdate()
+          if (respuestaIAValida(analisis)) up.executeUpdate()
         }
       } catch { case e: Exception => println(s"[!] analizarVozPortero error: ${e.getMessage}") }
       finally { if (conn != null) conn.close() }
@@ -7455,7 +7476,7 @@ Responde en espanol, tono positivo y motivador para un nino."""
           val guia = AIProvider.ask(prompt, None, bypassCache = true)
           val up = conn.prepareStatement("UPDATE matches SET guia_conversacion=? WHERE id=?")
           up.setString(1, guia); up.setInt(2, matchId)
-          up.executeUpdate()
+          if (respuestaIAValida(guia)) up.executeUpdate()
         }
       } catch { case e: Exception => println(s"[!] generarGuiaConversacion error: ${e.getMessage}") }
       finally { conn.close() }
@@ -9085,7 +9106,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
 
           val up = conn.prepareStatement("UPDATE seasons SET informe_fin_temporada=? WHERE id=?")
           up.setString(1, informe); up.setInt(2, seasonId)
-          up.executeUpdate()
+          if (respuestaIAValida(informe)) up.executeUpdate()
         }
       } catch { case e: Exception => println(s"[!] generarInformeFinTemporada error: ${e.getMessage}") }
       finally { conn.close() }
@@ -10155,7 +10176,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisis)) upsert.executeUpdate()
 
       analisis
     } finally { conn.close() }
@@ -10320,6 +10341,7 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
 
       // La magia: AIProvider.ask devolvera el analisis de la cache si ya se subio este mismo archivo
       val analisisIA = AIProvider.ask(prompt, Some((mime, fileBase64)))
+      if (!respuestaIAValida(analisisIA)) return analisisIA
 
       val partes = analisisIA.split("\\|")
       val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNOSTICO:", "").trim
@@ -10495,7 +10517,7 @@ Responde en texto plano. Si el audio no cubre un ancla, escribe "No mencionado".
       val ps = conn.prepareStatement("UPDATE matches SET analisis_voz = ? WHERE id = ?")
       ps.setString(1, fixEncoding(res))
       ps.setInt(2, matchId)
-      ps.executeUpdate()
+      if (respuestaIAValida(res)) ps.executeUpdate()
     } finally { conn.close() }
     res
   }
@@ -11169,7 +11191,7 @@ Solo HTML limpio."""
         "INSERT INTO nutrition_plans (semana, acwr, rpe_media, nota_ultimo, plan_ia) VALUES (CURRENT_DATE, ?, ?, ?, ?)")
       psSave.setDouble(1, acwr); psSave.setDouble(2, rpeMedia)
       psSave.setDouble(3, notaUlt); psSave.setString(4, planIA)
-      psSave.executeUpdate()
+      if (respuestaIAValida(planIA)) psSave.executeUpdate()
 
       Map("plan" -> planIA, "acwr" -> acwr, "rpe" -> rpeMedia, "nota" -> notaUlt,
           "faseStr" -> faseStr, "altura" -> altura, "peso" -> peso, "cached" -> false)
@@ -11288,7 +11310,7 @@ Solo HTML limpio."""
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisisIA)) upsert.executeUpdate()
 
       Map("semaforo" -> semaforo, "atributos" -> atributos, "topAtributo" -> topAtributo,
           "analisisIA" -> analisisIA, "edad" -> edad)
@@ -11370,6 +11392,7 @@ Solo HTML limpio."""
       val prompt = s"""Basandote en estos patrones de rendimiento de Hector: $combosStr, escribe en una frase el contexto optimo en que rinde mejor y el contexto donde mas sufre. Sin inventar - solo lo que muestran los datos."""
 
       val respuesta = AIProvider.ask(prompt)
+      if (!respuestaIAValida(respuesta)) return ""
 
       val payload = ujson.Obj("frase" -> respuesta)
       val upsert = conn.prepareStatement("""
@@ -12488,7 +12511,7 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisis)) upsert.executeUpdate()
       analisis
     } finally { conn.close() }
   }
@@ -12605,7 +12628,7 @@ En 3-5 frases, para su padre: qué dicen estos datos, qué merece vigilancia (si
         ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
       """)
       upsert.setString(1, ujson.write(payload))
-      upsert.executeUpdate()
+      if (respuestaIAValida(analisis)) upsert.executeUpdate()
       analisis
     } finally { conn.close() }
   }

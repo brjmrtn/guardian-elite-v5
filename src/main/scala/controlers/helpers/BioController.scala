@@ -761,7 +761,7 @@ object BioController extends cask.Routes {
       val diag = partes.headOption.getOrElse("No detectado").replace("DIAGNOSTICO:", "").trim
       val rec = partes.lastOption.getOrElse("No detectado").replace("RECOMENDACION:", "").trim
 
-      DatabaseManager.saveMedicalRecordFull(fecha, tipo, diag, rec, isPrevio)
+      if (DatabaseManager.respuestaIAValida(analisisIA)) DatabaseManager.saveMedicalRecordFull(fecha, tipo, diag, rec, isPrevio)
     }
 
     cask.Response("".getBytes("UTF-8"), statusCode=302, headers=Seq("Location" -> "/bio"))
@@ -858,7 +858,9 @@ object BioController extends cask.Routes {
         val docPrompt = s"Analiza este documento ($tipo) de Hector, un portero de futbol base. Extrae: tipo de contrato o documento, vigencia (fechas si las hay), entidad firmante, y cualquier clausula relevante para su carrera deportiva. Responde en texto plano, conciso, maximo 4 lineas."
         val analisisIA = try DatabaseManager.AIProvider.ask(docPrompt, Some((mimeType, base64Content))) catch { case _: Exception => "" }
 
-        DatabaseManager.saveDocumentVault(tipo, nombre, fecha, base64Content, analisisIA)
+        // el documento se guarda siempre; el analisis solo si la IA respondio de verdad
+        DatabaseManager.saveDocumentVault(tipo, nombre, fecha, base64Content,
+          if (DatabaseManager.respuestaIAValida(analisisIA)) analisisIA else "")
       case None => ()
     }
     cask.Response("".getBytes("UTF-8"), statusCode = 302, headers = Seq("Location" -> "/bio"))
