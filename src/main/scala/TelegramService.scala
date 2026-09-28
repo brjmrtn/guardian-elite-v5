@@ -8,12 +8,12 @@ object TelegramService {
 
   def configurado: Boolean = botToken.nonEmpty && chatIdConfigurado.nonEmpty
 
-  /** Mensaje al chat configurado (alertas, recordatorios). */
-  def enviar(mensaje: String): Unit = enviarA(chatIdConfigurado, mensaje)
+  /** Mensaje al chat configurado (alertas, recordatorios). true si Telegram lo acepto. */
+  def enviar(mensaje: String): Boolean = enviarA(chatIdConfigurado, mensaje)
 
   /** Texto plano: los mensajes llevan corchetes y texto libre del usuario, que romperian parse_mode HTML. */
-  def enviarA(chatId: String, mensaje: String): Unit = {
-    if (botToken.isEmpty || chatId.isEmpty || mensaje.trim.isEmpty) return
+  def enviarA(chatId: String, mensaje: String): Boolean = {
+    if (botToken.isEmpty || chatId.isEmpty || mensaje.trim.isEmpty) return false
     try {
       val body = ujson.write(ujson.Obj("chat_id" -> chatId, "text" -> mensaje.take(4000), "disable_web_page_preview" -> true))
       val conn = new java.net.URL(s"https://api.telegram.org/bot$botToken/sendMessage").openConnection().asInstanceOf[java.net.HttpURLConnection]
@@ -22,9 +22,10 @@ object TelegramService {
       conn.setConnectTimeout(10000); conn.setReadTimeout(15000)
       conn.setDoOutput(true)
       conn.getOutputStream.write(body.getBytes("UTF-8"))
-      conn.getResponseCode
+      val ok = conn.getResponseCode == 200
       conn.disconnect()
-    } catch { case _: Exception => () }
+      ok
+    } catch { case _: Exception => false }
   }
 
   /**

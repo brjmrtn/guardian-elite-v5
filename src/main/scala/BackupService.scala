@@ -8,7 +8,8 @@ import jakarta.activation.DataHandler
 // MODULO — SISTEMA DE BACKUPS AUTOMATICOS: envio del dump SQL por email
 // ─────────────────────────────────────────────────────────────────────────────
 object BackupService {
-  def enviarPorEmail(destino: String, filename: String, contenido: Array[Byte]): Unit = {
+  /** true si el email salio; false si SMTP no esta configurado. Los fallos de envio lanzan excepcion. */
+  def enviarPorEmail(destino: String, filename: String, contenido: Array[Byte]): Boolean = {
     val smtpHost = sys.env.getOrElse("SMTP_HOST", "smtp.gmail.com")
     val smtpPort = sys.env.getOrElse("SMTP_PORT", "587")
     val smtpUser = sys.env.getOrElse("SMTP_USER", "")
@@ -16,7 +17,7 @@ object BackupService {
 
     if (smtpUser.isEmpty || smtpPass.isEmpty) {
       println("[Backup Email] SMTP no configurado — saltando envío por email")
-      return
+      return false
     }
 
     val props = new Properties()
@@ -57,12 +58,13 @@ object BackupService {
 
     message.setContent(multipart)
     Transport.send(message)
-    println(s"[Backup Email] Enviado a $destino")
+    println("[Backup Email] Enviado")
+    true
   }
 
   // BLOQUE G: resumen semanal — mismo transporte SMTP que enviarPorEmail, pero sin adjunto
   // y con el HTML como cuerpo del email.
-  def enviarResumenEmail(destino: String, htmlContent: String): Unit = {
+  def enviarResumenEmail(destino: String, htmlContent: String): Boolean = {
     val smtpHost = sys.env.getOrElse("SMTP_HOST", "smtp.gmail.com")
     val smtpPort = sys.env.getOrElse("SMTP_PORT", "587")
     val smtpUser = sys.env.getOrElse("SMTP_USER", "")
@@ -70,7 +72,7 @@ object BackupService {
 
     if (smtpUser.isEmpty || smtpPass.isEmpty) {
       println("[Resumen Email] SMTP no configurado — saltando envío por email")
-      return
+      return false
     }
 
     val props = new Properties()
@@ -91,6 +93,7 @@ object BackupService {
     message.setContent(htmlContent, "text/html; charset=UTF-8")
 
     Transport.send(message)
-    println(s"[Resumen Email] Enviado a $destino")
+    println("[Resumen Email] Enviado")
+    true
   }
 }

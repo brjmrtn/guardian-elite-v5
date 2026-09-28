@@ -44,8 +44,17 @@ object GuardianServer extends cask.Main {
   // Verifica todos los usuarios con liga configurada y sincroniza si >24h sin sync.
   AmateurDatabaseManager.startAutoSyncEngine()
 
+  /** Milisegundos hasta la proxima `hora`:00 en GUARDIAN_TZ (del dia `dia` si se indica), nunca en la zona del servidor. */
+  private def msHastaProxima(dia: Option[java.time.DayOfWeek], hora: Int): Long = {
+    val ahora = DatabaseManager.ahoraGuardian()
+    var objetivo = ahora.withHour(hora).withMinute(0).withSecond(0).withNano(0)
+    dia.foreach(d => objetivo = objetivo.`with`(java.time.temporal.TemporalAdjusters.nextOrSame(d)))
+    if (!objetivo.isAfter(ahora)) objetivo = objetivo.plusDays(if (dia.isDefined) 7 else 1)
+    java.time.Duration.between(ahora, objetivo).toMillis
+  }
+
   // ── BACKUP ENGINE ────────────────────────────────────────────────────────────
-  // Se ejecuta automáticamente cada domingo a las 3:00 AM.
+  // Domingo a las 3:00 (y al arrancar, ver CATCH-UP): backup si el ultimo tiene mas de 7 dias.
   // Genera un dump SQL y lo guarda en la propia BD; lo envía por email si esta configurado.
   val backupExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r => {
     val t = new Thread(r, "backup-engine")
@@ -53,33 +62,13 @@ object GuardianServer extends cask.Main {
     t
   })
 
-  // Calcula milisegundos hasta el proximo domingo a las 3:00 AM
-  val ahora = java.time.LocalDateTime.now()
-  val proximoDomingo = ahora
-    .`with`(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.SUNDAY))
-    .withHour(3).withMinute(0).withSecond(0)
-  val msHastaBackup = java.time.Duration.between(ahora, proximoDomingo).toMillis
+  val msHastaBackup = msHastaProxima(Some(java.time.DayOfWeek.SUNDAY), 3)
 
   backupExecutor.scheduleAtFixedRate(
     new Runnable {
       def run(): Unit = {
         try {
-          println(s"[Guardian Backup] Iniciando backup semanal ${java.time.LocalDate.now()}")
-          val sql = DatabaseManager.generarBackupSQL()
-          val bytes = sql.getBytes("UTF-8")
-          val fecha = java.time.LocalDate.now().toString
-          val filename = s"guardian_backup_$fecha.sql"
-
-          // Destino 1: guardar en tabla de backups en la propia BD
-          DatabaseManager.guardarBackupEnBD(sql, fecha)
-
-          // Destino 2: enviar por email si BACKUP_EMAIL esta configurado
-          val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
-          if (emailDest.nonEmpty) {
-            BackupService.enviarPorEmail(emailDest, filename, bytes)
-          }
-
-          println(s"[Guardian Backup] Backup completado: ${bytes.length / 1024}KB")
+          println(s"[Guardian Backup] Programado: ${DatabaseManager.ejecutarBackupSemanal()}")
         } catch { case e: Exception =>
           println(s"[Guardian Backup] ERROR: ${e.getMessage.take(200)}")
         }
@@ -129,27 +118,13 @@ object GuardianServer extends cask.Main {
     t.setDaemon(true)
     t
   })
-  val ahora2 = java.time.LocalDateTime.now()
-  val proximoLunes = ahora2
-    .`with`(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.MONDAY))
-    .withHour(8).withMinute(0).withSecond(0)
-  val msHastaResumen = java.time.Duration.between(ahora2, proximoLunes).toMillis
+  val msHastaResumen = msHastaProxima(Some(java.time.DayOfWeek.MONDAY), 8)
 
   resumenExecutor.scheduleAtFixedRate(
     new Runnable {
       def run(): Unit = {
-        try {
-          val html = DatabaseManager.generarResumenSemanal()
-          val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
-          if (emailDest.nonEmpty) {
-            BackupService.enviarResumenEmail(emailDest, html)
-          }
-          // BLOQUE G3: mismo contenido del resumen, en texto plano, por Telegram
-          // (sin la alerta de carga: el bot ya la manda como mensaje propio a las 8:00, BLOQUE R)
-          val textoPlano = DatabaseManager.generarResumenSemanal(incluirAlertaCarga = false, incluirDiario = false)
-            .replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim
-          TelegramService.enviar(textoPlano)
-        } catch { case e: Exception =>
+        try DatabaseManager.ejecutarResumenSemanal()
+        catch { case e: Exception =>
           println(s"[Resumen Email] ERROR: ${e.getMessage.take(200)}")
         }
       }
@@ -167,16 +142,13 @@ object GuardianServer extends cask.Main {
     t.setDaemon(true)
     t
   })
-  val ahora3 = java.time.LocalDateTime.now()
-  var proximasNueve = ahora3.withHour(9).withMinute(0).withSecond(0)
-  if (!proximasNueve.isAfter(ahora3)) proximasNueve = proximasNueve.plusDays(1)
-  val msHastaAvisoPartido = java.time.Duration.between(ahora3, proximasNueve).toMillis
+  val msHastaAvisoPartido = msHastaProxima(None, 9)
 
   avisoPartidoExecutor.scheduleAtFixedRate(
     new Runnable {
       def run(): Unit = {
         try {
-          DatabaseManager.getAvisoDiaPartido().foreach(TelegramService.enviar)
+          DatabaseManager.enviarAvisoPartidoSiToca()
         } catch { case e: Exception =>
           println(s"[Aviso Partido] ERROR: ${e.getMessage.take(200)}")
         }
@@ -186,6 +158,39 @@ object GuardianServer extends cask.Main {
     24 * 60 * 60 * 1000L, // cada 24h
     java.util.concurrent.TimeUnit.MILLISECONDS
   )
+
+  // ── CATCH-UP AL ARRANCAR ─────────────────────────────────────────────────────
+  // Render apaga el servidor cuando no se usa y los schedulers de arriba se pierden sus horas.
+  // Al despertar se ponen al dia las tareas aplazables (cada funcion es idempotente).
+  // Hilo de fondo: nunca bloquea el arranque; un fallo en un paso no impide los demas.
+  val catchUpArranque = new Thread(() => {
+    val inicio = System.currentTimeMillis()
+    def esperarHasta(msDesdeInicio: Long): Unit = {
+      val restante = inicio + msDesdeInicio - System.currentTimeMillis()
+      if (restante > 0) try Thread.sleep(restante) catch { case _: InterruptedException => () }
+    }
+    def paso(nombre: String)(tarea: => Unit): Unit =
+      try tarea catch { case e: Exception => println(s"[Catch-up] $nombre ERROR: ${e.getMessage.take(200)}") }
+
+    esperarHasta(90 * 1000L)
+    paso("backup")(println(s"[Catch-up] backup: ${DatabaseManager.ejecutarBackupSemanal(forzar = false)}"))
+
+    esperarHasta(120 * 1000L)
+    paso("resumen semanal") {
+      val ahora = DatabaseManager.ahoraGuardian()
+      val lunesOcho = ahora.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        .withHour(8).withMinute(0).withSecond(0).withNano(0)
+      // solo la semana en curso: no se envian semanas atrasadas
+      if (!ahora.isBefore(lunesOcho) && !DatabaseManager.resumenSemanalEnviadoEstaSemana())
+        println(s"[Catch-up] resumen semanal: ${DatabaseManager.ejecutarResumenSemanal()}")
+    }
+    paso("aviso partido") {
+      val hora = DatabaseManager.ahoraGuardian().getHour
+      if (hora >= 9 && hora < 15) DatabaseManager.enviarAvisoPartidoSiToca()
+    }
+  }, "catch-up-arranque")
+  catchUpArranque.setDaemon(true)
+  catchUpArranque.start()
 
   // ── TELEGRAM BOT BIDIRECCIONAL (BLOQUE N) ──────────────────────────────────
   // Registra el webhook una vez al arrancar y revisa cada 10 min si toca algun recordatorio

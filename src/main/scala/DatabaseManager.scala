@@ -3552,7 +3552,7 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
   def getAvisoDiaPartido(): Option[String] = {
     val conn = getConnection()
     try {
-      val diaSemana = LocalDate.now().getDayOfWeek.getValue
+      val diaSemana = ahoraGuardian().getDayOfWeek.getValue
       val rsW = conn.prepareStatement("SELECT COUNT(*) as c FROM weekly_structure WHERE tipo_sesion='PARTIDO' AND activo=TRUE AND dia_semana=?")
       rsW.setInt(1, diaSemana)
       val rsWr = rsW.executeQuery()
@@ -4177,28 +4177,147 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
     } finally { conn.close() }
   }
 
-  def guardarBackupEnBD(sql: String, fecha: String): Unit = {
+  /** Guarda el dump con destino "bd_interna" y devuelve el id de la fila. */
+  def guardarBackupEnBD(sql: String, fecha: String): Int = {
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement(
-        "INSERT INTO backups_log (fecha, tamano_kb, sql_dump, destinos) VALUES (?::date, ?, ?, ?)")
+        "INSERT INTO backups_log (fecha, tamano_kb, sql_dump, destinos) VALUES (?::date, ?, ?, ?) RETURNING id")
       ps.setString(1, fecha)
       ps.setInt(2, sql.getBytes("UTF-8").length / 1024)
       ps.setString(3, sql)
       ps.setString(4, "bd_interna")
-      ps.executeUpdate()
+      val rsId = ps.executeQuery(); rsId.next()
+      val id = rsId.getInt("id")
       // Mantener solo los ultimos 12 (uno por semana ~ 3 meses)
       conn.createStatement().executeUpdate(
         "DELETE FROM backups_log WHERE id NOT IN (SELECT id FROM backups_log ORDER BY created_at DESC LIMIT 12)")
+      id
     } finally { conn.close() }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAREAS APLAZABLES: backup, resumen semanal y aviso de dia de partido
+  // Render apaga el servidor cuando no se usa, asi que el scheduler no basta: estas funciones son
+  // idempotentes y las llaman el scheduler, el catch-up al arrancar y los botones manuales.
+  // ═════════════════════════════════════════════════════════════════════════════
+  def zonaGuardian: java.time.ZoneId = java.time.ZoneId.of(sys.env.getOrElse("GUARDIAN_TZ", "Europe/Madrid"))
+  def ahoraGuardian(): java.time.ZonedDateTime = java.time.ZonedDateTime.now(zonaGuardian)
+
+  /** Semana ISO en la zona de Guardian, p. ej. 2026-W41. */
+  def semanaISO(momento: java.time.ZonedDateTime = ahoraGuardian()): String =
+    f"${momento.get(java.time.temporal.IsoFields.WEEK_BASED_YEAR)}%d-W${momento.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)}%02d"
+
+  private def leerMarcador(clave: String): Option[String] = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("SELECT payload FROM feature_cache WHERE cache_key = ?")
+      ps.setString(1, clave)
+      val rs = ps.executeQuery()
+      if (rs.next()) Option(rs.getString("payload")) else None
+    } finally { conn.close() }
+  }
+
+  private def guardarMarcador(clave: String, valor: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement(
+        "INSERT INTO feature_cache (cache_key, payload, updated_at) VALUES (?, ?, NOW()) ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()")
+      ps.setString(1, clave); ps.setString(2, valor); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  private val backupEnCurso = new java.util.concurrent.atomic.AtomicBoolean(false)
+  def backupEnMarcha: Boolean = backupEnCurso.get()
+
+  // 1 h de margen: el scheduler salta justo 7 dias despues y el backup anterior se registro unos segundos
+  // despues de su hora, asi que sin margen el backup del domingo se omitiria una semana de cada dos
+  private def hayBackupUltimos7Dias(): Boolean = {
+    val conn = getConnection()
+    try conn.createStatement().executeQuery(
+      "SELECT 1 FROM backups_log WHERE created_at > NOW() - INTERVAL '7 days' + INTERVAL '1 hour' LIMIT 1").next()
+    finally { conn.close() }
+  }
+
+  private def actualizarDestinosBackup(id: Int, destinos: String): Unit = {
+    val conn = getConnection()
+    try {
+      val ps = conn.prepareStatement("UPDATE backups_log SET destinos = ? WHERE id = ?")
+      ps.setString(1, destinos); ps.setInt(2, id); ps.executeUpdate()
+    } finally { conn.close() }
+  }
+
+  /** Backup en BD + email si BACKUP_EMAIL esta configurado. Sin forzar, se omite si ya hay uno de los ultimos 7 dias.
+   *  Devuelve "omitido", "en curso" o "<KB>KB · <destinos>". Nunca corren dos a la vez. */
+  def ejecutarBackupSemanal(forzar: Boolean = false): String = {
+    if (!backupEnCurso.compareAndSet(false, true)) return "en curso"
+    try {
+      if (!forzar && hayBackupUltimos7Dias()) return "omitido"
+      val sql = generarBackupSQL()
+      val bytes = sql.getBytes("UTF-8")
+      val fecha = ahoraGuardian().toLocalDate.toString
+      val id = guardarBackupEnBD(sql, fecha)
+      val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "").trim
+      val destinos =
+        if (emailDest.isEmpty) "bd_interna"
+        else {
+          val enviado = try BackupService.enviarPorEmail(emailDest, s"guardian_backup_$fecha.sql", bytes)
+            catch { case e: Exception => println(s"[Guardian Backup] Fallo del email: ${e.getClass.getSimpleName}"); false }
+          if (enviado) "bd_interna,email" else "bd_interna (email falló)"
+        }
+      if (destinos != "bd_interna") actualizarDestinosBackup(id, destinos)
+      val resultado = s"${bytes.length / 1024}KB · $destinos"
+      println(s"[Guardian Backup] Backup completado: $resultado")
+      resultado
+    } finally { backupEnCurso.set(false) }
+  }
+
+  def resumenSemanalEnviadoEstaSemana(): Boolean = leerMarcador("resumen_semanal_enviado").contains(semanaISO())
+
+  /** Resumen del lunes por email (si BACKUP_EMAIL) y en texto plano por Telegram. Sin forzar, una vez por semana ISO.
+   *  El marcador solo se guarda si salio por al menos un canal. Devuelve "omitido", "sin enviar" o los canales usados. */
+  def ejecutarResumenSemanal(forzar: Boolean = false): String = {
+    val semana = semanaISO()
+    if (!forzar && resumenSemanalEnviadoEstaSemana()) return "omitido"
+    var canales = List.empty[String]
+    val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "").trim
+    if (emailDest.nonEmpty) {
+      try { if (BackupService.enviarResumenEmail(emailDest, generarResumenSemanal())) canales :+= "email" }
+      catch { case e: Exception => println(s"[Resumen Email] ERROR: ${e.getMessage.take(200)}") }
+    }
+    // BLOQUE G3: mismo contenido, en texto plano, por Telegram
+    // (sin la alerta de carga: el bot ya la manda como mensaje propio a las 8:00, BLOQUE R)
+    try {
+      val textoPlano = generarResumenSemanal(incluirAlertaCarga = false, incluirDiario = false)
+        .replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim
+      if (TelegramService.enviar(textoPlano)) canales :+= "telegram"
+    } catch { case e: Exception => println(s"[Resumen Telegram] ERROR: ${e.getMessage.take(200)}") }
+    if (canales.nonEmpty) guardarMarcador("resumen_semanal_enviado", semana)
+    val resultado = if (canales.isEmpty) "sin enviar" else canales.mkString(",")
+    println(s"[Resumen semanal] $semana: $resultado")
+    resultado
+  }
+
+  /** Aviso de dia de partido por Telegram, como mucho una vez por fecha (marcador aviso_partido_<fecha>). */
+  def enviarAvisoPartidoSiToca(): Unit = {
+    val clave = s"aviso_partido_${ahoraGuardian().toLocalDate}"
+    if (leerMarcador(clave).isDefined) return
+    getAvisoDiaPartido().foreach { texto =>
+      if (TelegramService.enviar(texto)) guardarMarcador(clave, "1")
+    }
   }
 
   // Lista para el panel — sin traer el dump completo (puede ser pesado)
   def getBackupsLog(): List[Map[String, Any]] = {
     val conn = getConnection()
     try {
-      val rs = conn.createStatement().executeQuery(
-        "SELECT id, fecha, tamano_kb, destinos, created_at FROM backups_log ORDER BY created_at DESC")
+      // created_at se guarda con NOW() en la zona de la sesion: ::timestamptz la reinterpreta igual y se pasa a GUARDIAN_TZ
+      val ps = conn.prepareStatement(
+        """SELECT id, fecha, tamano_kb, destinos, created_at,
+                  TO_CHAR(created_at::timestamptz AT TIME ZONE ?, 'YYYY-MM-DD HH24:MI') AS creado_local
+           FROM backups_log ORDER BY created_at DESC""")
+      ps.setString(1, zonaGuardian.getId)
+      val rs = ps.executeQuery()
       var list = List[Map[String, Any]]()
       while (rs.next()) {
         list = list :+ Map[String, Any](
@@ -4206,7 +4325,8 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
           "fecha" -> rs.getDate("fecha").toString,
           "tamanoKb" -> rs.getInt("tamano_kb"),
           "destinos" -> Option(rs.getString("destinos")).getOrElse(""),
-          "createdAt" -> Option(rs.getTimestamp("created_at")).map(_.toString).getOrElse("")
+          "createdAt" -> Option(rs.getTimestamp("created_at")).map(_.toString).getOrElse(""),
+          "creadoLocal" -> Option(rs.getString("creado_local")).getOrElse("")
         )
       }
       list

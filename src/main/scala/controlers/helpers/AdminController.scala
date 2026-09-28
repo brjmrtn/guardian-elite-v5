@@ -232,8 +232,15 @@ object AdminController extends cask.Routes {
     val backups = DatabaseManager.getBackupsLog()
     val estado: Modifier = backups.headOption match {
       case Some(b) =>
-        div(cls := "alert alert-success small p-2 mb-3",
-          s"✅ Último backup: ${b("fecha").asInstanceOf[String]} · ${b("tamanoKb").asInstanceOf[Int]}KB")
+        val destinos = b("destinos").asInstanceOf[String]
+        val cuando = Option(b("creadoLocal").asInstanceOf[String]).filter(_.nonEmpty).getOrElse(b("fecha").asInstanceOf[String])
+        val conEmail = destinos.split(",").map(_.trim).contains("email")
+        frag(
+          div(cls := "alert alert-success small p-2 mb-2",
+            s"✅ Último backup: $cuando · ${if (destinos.nonEmpty) destinos else "bd_interna"} · ${b("tamanoKb").asInstanceOf[Int]}KB"),
+          if (conEmail) frag()
+          else div(cls := "alert small p-2 mb-3", style := "background:rgba(245,158,11,0.15); border:1px solid #f59e0b; color:#fcd34d;",
+            "⚠️ El último backup no tiene copia por email"))
       case None =>
         div(cls := "alert alert-warning small p-2 mb-3", "⚠️ Sin backups recientes")
     }
@@ -259,7 +266,7 @@ object AdminController extends cask.Routes {
       msgBox,
       estado,
       p(cls := "small text-muted",
-        "Guardian genera un backup automático cada domingo a las 3:00 AM. El backup se guarda en la base de datos y se envía a tu email si está configurado. Contiene todos los datos de Héctor desde el inicio del registro."),
+        "Guardian hace un backup cuando se despierta si el último tiene más de 7 días. Descarga una copia a mano una vez al mes."),
       div(cls := "d-flex gap-2 mb-3",
         form(action := "/admin/backup/generate", method := "post", cls := "flex-grow-1",
           button(tpe := "submit", cls := "btn btn-warning fw-bold w-100", "🔄 Generar backup ahora")
@@ -267,6 +274,9 @@ object AdminController extends cask.Routes {
         form(action := "/admin/backup/send-email", method := "post", cls := "flex-grow-1",
           button(tpe := "submit", cls := "btn btn-outline-warning fw-bold w-100", "📧 Enviarme el backup ahora por email")
         )
+      ),
+      form(action := "/admin/resumen/send", method := "post", cls := "mb-3",
+        button(tpe := "submit", cls := "btn btn-outline-info fw-bold w-100", "📧 Enviarme el resumen semanal ahora")
       ),
       div(cls := "border-top border-secondary pt-3",
         h6(cls := "text-muted small text-uppercase mb-2", "Últimos backups"),
@@ -486,7 +496,7 @@ object AdminController extends cask.Routes {
   // /settings — pestaña NOTIFICACIONES: Telegram, email de backup y horarios de recordatorios
   // (se configuran por variables de entorno en Render: aqui se ve el estado)
   // ─────────────────────────────────────────────────────────────────────────────
-  private def notificacionesPanel(): Modifier = {
+  private def notificacionesPanel(backupMsg: String): Modifier = {
     def env(k: String) = sys.env.get(k).exists(_.trim.nonEmpty)
     def estado(ok: Boolean): Modifier = span(cls := (if (ok) "text-success fw-bold" else "text-warning fw-bold"), if (ok) "✅ activo" else "⚠️ sin configurar")
     val emailOk = env("BACKUP_EMAIL") && env("SMTP_USER") && env("SMTP_PASS")
@@ -497,8 +507,8 @@ object AdminController extends cask.Routes {
       ("Diario 9:00–21:00", "Alertas positivas, como mucho una al día (Telegram)"),
       ("Lunes 6:00", "Sincronización RFMF"),
       ("Lunes 7:00", "Reto semanal de Héctor"),
-      ("Lunes 8:00", "Resumen semanal, recordatorio de peso y protocolo de recuperación si hace falta"),
-      ("Domingo 3:00", "Backup automático (BD + email si está configurado)"))
+      ("Lunes 8:00", "Resumen semanal (o al despertar si aún no ha salido esta semana), recordatorio de peso y protocolo de recuperación si hace falta"),
+      ("Al despertar", "Backup si el último tiene más de 7 días (BD + email si está configurado); también el domingo a las 3:00"))
     div(
       div(cls := "card bg-dark text-white border-info shadow p-3 mb-3",
         h5(cls := "text-info", "📲 Telegram"),
@@ -507,11 +517,9 @@ object AdminController extends cask.Routes {
       ),
       div(cls := "card bg-dark text-white border-warning shadow p-3 mb-3",
         h5(cls := "text-warning", "📧 Email de backup"),
-        div(cls := "d-flex justify-content-between small mb-2", span("BACKUP_EMAIL + SMTP"), estado(emailOk)),
-        form(action := "/admin/backup/send-email", method := "post",
-          button(tpe := "submit", cls := "btn btn-outline-warning fw-bold w-100", "📧 Enviarme el backup ahora por email")),
-        a(href := "/admin#backups", cls := "btn btn-link btn-sm text-muted w-100", "Ver backups en Admin")
+        div(cls := "d-flex justify-content-between small mb-2", span("BACKUP_EMAIL + SMTP"), estado(emailOk))
       ),
+      div(id := "backups", backupsPanel(backupMsg)),
       div(cls := "card bg-dark text-white border-secondary shadow p-3 mb-3",
         h5(cls := "text-white", "⏰ Horarios de recordatorios"),
         frag(horarios.map { case (h, d) => div(cls := "d-flex gap-2 small border-bottom border-secondary py-1",
@@ -556,7 +564,7 @@ object AdminController extends cask.Routes {
     ), perfilPublicoPanel()),
       "📅 ESTRUCTURA" -> div(weeklyStructurePanel(), rutinaPrepartidoPanel(), calendarioEscolarPanel()),
       "🎯 OBJETIVOS" -> objetivosSettingsPanel(),
-      "🔔 NOTIFICACIONES" -> notificacionesPanel()
+      "🔔 NOTIFICACIONES" -> notificacionesPanel(backupMsg)
     ))));
     renderHtml(basePage("settings", content))
   }
@@ -601,49 +609,45 @@ object AdminController extends cask.Routes {
   // ─────────────────────────────────────────────────────────────────────────────
   // MODULO — ENDPOINTS DE BACKUPS AUTOMATICOS (solo usuario Elite autenticado)
   // ─────────────────────────────────────────────────────────────────────────────
+  /** Lanza una tarea en un hilo de fondo (no bloquea la peticion); los errores van al log. */
+  private def enSegundoPlano(nombre: String)(tarea: => Unit): Unit = {
+    val t = new Thread(() => try tarea catch { case e: Exception => println(s"[$nombre] ERROR: ${e.getMessage.take(200)}") }, nombre)
+    t.setDaemon(true)
+    t.start()
+  }
+
+  private def volverABackups(msg: String) = cask.Response(Array.emptyByteArray, 302, headers = Seq(
+    "Location" -> s"/settings?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}#backups"))
+
+  private def lanzarBackupManual(): String =
+    if (DatabaseManager.backupEnMarcha) "⏳ Ya hay un backup en marcha."
+    else {
+      enSegundoPlano("backup-manual")(println(s"[Guardian Backup] Manual: ${DatabaseManager.ejecutarBackupSemanal(forzar = true)}"))
+      "⏳ Backup en marcha. Recarga la página en un minuto para verlo en la lista."
+    }
+
   @cask.post("/admin/backup/generate")
   def generateBackupNow(request: cask.Request) = withAuth(request) {
-    val msg = try {
-      val sql = DatabaseManager.generarBackupSQL()
-      val bytes = sql.getBytes("UTF-8")
-      val fecha = java.time.LocalDate.now().toString
-      DatabaseManager.guardarBackupEnBD(sql, fecha)
-
-      val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
-      if (emailDest.nonEmpty) {
-        BackupService.enviarPorEmail(emailDest, s"guardian_backup_$fecha.sql", bytes)
-      }
-      s"✅ Backup generado (${bytes.length / 1024}KB)."
-    } catch { case e: Exception => s"⚠️ Error generando el backup: ${e.getMessage.take(150)}" }
-
-    cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location" -> s"/admin?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}#backups"
-    ))
+    volverABackups(lanzarBackupManual())
   }
 
   @cask.post("/admin/backup/send-email")
   def sendBackupEmailNow(request: cask.Request) = withAuth(request) {
-    val emailDest = sys.env.getOrElse("BACKUP_EMAIL", "")
-    val smtpUser  = sys.env.getOrElse("SMTP_USER", "")
-    val smtpPass  = sys.env.getOrElse("SMTP_PASS", "")
+    val configurado = Seq("BACKUP_EMAIL", "SMTP_USER", "SMTP_PASS").forall(k => sys.env.getOrElse(k, "").trim.nonEmpty)
+    volverABackups(
+      if (!configurado) "⚠️ Configura BACKUP_EMAIL, SMTP_USER y SMTP_PASS en Render para poder enviar el backup por email."
+      else lanzarBackupManual())
+  }
 
-    val msg =
-      if (emailDest.isEmpty || smtpUser.isEmpty || smtpPass.isEmpty) {
-        "⚠️ Configura BACKUP_EMAIL, SMTP_USER y SMTP_PASS en Render para poder enviar el backup por email."
-      } else {
-        try {
-          val sql = DatabaseManager.generarBackupSQL()
-          val bytes = sql.getBytes("UTF-8")
-          val fecha = java.time.LocalDate.now().toString
-          DatabaseManager.guardarBackupEnBD(sql, fecha)
-          BackupService.enviarPorEmail(emailDest, s"guardian_backup_$fecha.sql", bytes)
-          s"✅ Backup enviado a $emailDest."
-        } catch { case e: Exception => s"⚠️ Error enviando el backup: ${e.getMessage.take(150)}" }
-      }
-
-    cask.Response(Array.emptyByteArray, 302, headers = Seq(
-      "Location" -> s"/admin?backupMsg=${java.net.URLEncoder.encode(msg, "UTF-8")}#backups"
-    ))
+  @cask.post("/admin/resumen/send")
+  def sendResumenNow(request: cask.Request) = withAuth(request) {
+    val hayCanal = sys.env.getOrElse("BACKUP_EMAIL", "").trim.nonEmpty || TelegramService.configurado
+    volverABackups(
+      if (!hayCanal) "⚠️ Configura BACKUP_EMAIL (con SMTP) o Telegram para recibir el resumen semanal."
+      else {
+        enSegundoPlano("resumen-manual")(DatabaseManager.ejecutarResumenSemanal(forzar = true))
+        "📧 Enviando el resumen semanal. Llegará en unos segundos."
+      })
   }
 
   @cask.post("/admin/rffm/sync")
