@@ -3393,20 +3393,46 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
         else if (faseBio.nonEmpty) 0.5
         else 0.5
 
-      // Descanso factor: dias consecutivos sin descanso (entreno o partido) terminando hoy
-      val rsFechas = conn.createStatement().executeQuery("""
-        (SELECT fecha FROM trainings WHERE fecha >= CURRENT_DATE - 14)
-        UNION
-        (SELECT fecha FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - 14)
-        ORDER BY fecha DESC
+      // Descanso factor: carga (RPE*duracion) de la racha de dias consecutivos con actividad terminando hoy,
+      // comparada con la carga diaria habitual de Hector. La semana tipo (judo, club, academia, partido)
+      // encadena 6 dias con actividad de forma estructural: solo penaliza si la racha trae mas carga de lo normal.
+      // matches no tiene RPE: se estima 6, y minutos=0 (valor por defecto) cuenta como 45
+      val rsCarga = conn.createStatement().executeQuery("""
+        SELECT fecha, COALESCE(rpe,5) * COALESCE(duracion_min,60) as carga FROM trainings WHERE fecha >= CURRENT_DATE - 14
+        UNION ALL
+        SELECT fecha, 6 * COALESCE(NULLIF(minutos,0),45) as carga FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - 14
       """)
-      var fechasActividad = Set[LocalDate]()
-      while (rsFechas.next()) fechasActividad += rsFechas.getDate("fecha").toLocalDate
+      var fechaCarga = Map[LocalDate, Double]()
+      while (rsCarga.next()) {
+        val f = rsCarga.getDate("fecha").toLocalDate
+        fechaCarga += f -> (fechaCarga.getOrElse(f, 0.0) + rsCarga.getDouble("carga"))
+      }
       var diasConsecutivos = 0
+      var cargaAcumuladaRacha = 0.0
       var cursor = LocalDate.now()
-      while (fechasActividad.contains(cursor)) { diasConsecutivos += 1; cursor = cursor.minusDays(1) }
+      while (fechaCarga.contains(cursor)) {
+        diasConsecutivos += 1
+        cargaAcumuladaRacha += fechaCarga(cursor)
+        cursor = cursor.minusDays(1)
+      }
+      // Carga media por dia con actividad (28 dias), sumando las sesiones de un mismo dia como en la racha
+      val rsMediaDiaria = conn.createStatement().executeQuery("""
+        SELECT AVG(carga_dia) as m FROM (
+          SELECT fecha, SUM(carga) as carga_dia FROM (
+            SELECT fecha, COALESCE(rpe,5) * COALESCE(duracion_min,60) as carga FROM trainings WHERE fecha >= CURRENT_DATE - 28
+            UNION ALL
+            SELECT fecha, 6 * COALESCE(NULLIF(minutos,0),45) as carga FROM matches WHERE status='PLAYED' AND fecha >= CURRENT_DATE - 28
+          ) t GROUP BY fecha
+        ) d
+      """)
+      val cargaMediaDiaria = if (rsMediaDiaria.next()) rsMediaDiaria.getDouble("m") else 0.0
+      val cargaEsperadaRacha = cargaMediaDiaria * diasConsecutivos
+      val ratioRacha = if (cargaEsperadaRacha > 0) cargaAcumuladaRacha / cargaEsperadaRacha else 1.0
       val descansoFactor =
-        if (diasConsecutivos > 5) 2.0 else if (diasConsecutivos > 3) 1.0 else 0.0
+        if (diasConsecutivos <= 3) 0.0
+        else if (ratioRacha > 1.3) 2.0   // racha larga y con bastante mas carga de la habitual
+        else if (ratioRacha > 1.1) 1.0   // racha larga con algo mas de carga de lo normal
+        else 0.0                         // racha larga pero carga normal para Hector: no penaliza
 
       // FC reposo factor
       val rsFcHoy = conn.createStatement().executeQuery(
@@ -3446,7 +3472,7 @@ En 4-6 frases, en tono práctico para el padre: qué objetivo va mejor y cuál n
       val factoresActivos = scala.collection.mutable.ListBuffer[String]()
       if (acwrFactor > 0) factoresActivos += s"ACWR ${"%.2f".format(acwr)}"
       if (phvFactor >= 3.0) factoresActivos += "Pico de crecimiento (PHV)"
-      if (descansoFactor > 0) factoresActivos += s"$diasConsecutivos días seguidos sin descanso"
+      if (descansoFactor > 0) factoresActivos += s"$diasConsecutivos días seguidos con carga por encima de lo habitual"
       if (fcFactor > 0) factoresActivos += "FC en reposo elevada"
       if (fatigaFactor > 0) factoresActivos += "Energía baja en los últimos días"
       if (dolorMuscularFactor > 0) factoresActivos += (if (dolorMuscular >= 3) "Dolor muscular fuerte" else "Dolor muscular moderado")
