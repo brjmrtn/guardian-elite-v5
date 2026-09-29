@@ -5496,27 +5496,35 @@ Responde en espanol, tono positivo y motivador para un nino."""
   // BLOQUE D — DETECTOR DE JETLAG SOCIAL
   // ─────────────────────────────────────────────────────────────────────────────
   // SQL puro — sin Gemini.
+  // Compara el sueño de los dias con actividad especial (partido, torneo, academia) segun weekly_structure
+  // contra el resto: en la semana de Hector el finde no es descanso, asi que laborable/finde no sirve.
+  // weekly_structure.dia_semana es ISO (1=lunes..7=domingo): se compara con ISODOW, no con DOW (domingo=0).
   def detectarJetlagSocial(): Option[String] = {
     val conn = getConnection()
     try {
+      val rsDias = conn.createStatement().executeQuery(
+        "SELECT COUNT(*) as c FROM weekly_structure WHERE activo = TRUE AND tipo_sesion IN ('PARTIDO','TORNEO','ACADEMIA')")
+      if (!rsDias.next() || rsDias.getInt("c") == 0) return None
       val rs = conn.createStatement().executeQuery("""
         SELECT
-          AVG(CASE WHEN EXTRACT(DOW FROM fecha) IN (1,2,3,4,5) THEN horas_sueno END) as media_semana,
-          AVG(CASE WHEN EXTRACT(DOW FROM fecha) IN (0,6) THEN horas_sueno END) as media_finde,
-          STDDEV(horas_sueno) as variabilidad,
+          AVG(CASE WHEN NOT esp THEN horas_sueno END) as media_normal,
+          AVG(CASE WHEN esp THEN horas_sueno END) as media_dias_especiales,
           COUNT(*) as n
-        FROM wellness
-        WHERE fecha >= CURRENT_DATE - INTERVAL '28 days' AND horas_sueno > 0
+        FROM (
+          SELECT w.horas_sueno, EXTRACT(ISODOW FROM w.fecha)::int IN (
+            SELECT dia_semana FROM weekly_structure WHERE activo = TRUE AND tipo_sesion IN ('PARTIDO','TORNEO','ACADEMIA')
+          ) as esp
+          FROM wellness w
+          WHERE w.fecha >= CURRENT_DATE - INTERVAL '28 days' AND w.horas_sueno > 0
+        ) t
       """)
       if (!rs.next() || rs.getInt("n") < 14) return None
-      val mediaSemana = rs.getDouble("media_semana")
-      val semanaNula = rs.wasNull()
-      val mediaFinde = rs.getDouble("media_finde")
-      val findeNulo = rs.wasNull()
-      if (semanaNula || findeNulo || mediaSemana <= 0 || mediaFinde <= 0) return None
-      val diff = mediaFinde - mediaSemana
-      if (math.abs(diff) > 1.5)
-        Some(f"⏰ Patrón de jetlag social detectado: $mediaSemana%.1fh entre semana vs $mediaFinde%.1fh el fin de semana. Esta inconsistencia puede desajustar el reloj biológico y afectar el rendimiento del sábado.")
+      val mediaNormal = rs.getDouble("media_normal"); if (rs.wasNull()) return None
+      val mediaEspecial = rs.getDouble("media_dias_especiales"); if (rs.wasNull()) return None
+      val diff = mediaEspecial - mediaNormal
+      // Umbral algo mas alto que antes: un cambio de sueño en dia de partido/academia es parcialmente esperable
+      if (math.abs(diff) > 2.0)
+        Some(f"⏰ El sueño de Héctor varía ${math.abs(diff)}%.1fh en los días de partido/academia respecto al resto de la semana. Puede ser normal por la logística de esos días, pero si el patrón se repite mucho conviene vigilar los horarios de esos días concretos.")
       else None
     } finally { conn.close() }
   }
@@ -14632,7 +14640,8 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
 
   // ═════════════════════════════════════════════════════════════════════════════
   // BLOQUE O — DETECTOR DE ENFERMEDAD INCIPIENTE (SQL puro, sin Gemini)
-  // FC en reposo > media+5 con energia y animo bajos a la vez. Requiere >=10 registros de FC.
+  // FC en reposo > media+5 dos dias seguidos (o > media+10 un dia) con energia y animo bajos a la vez.
+  // No salta el dia despues de un partido. Requiere >=10 registros de FC.
   // ═════════════════════════════════════════════════════════════════════════════
   val mensajeEnfermedadIncipiente =
     "🤒 Posible enfermedad incipiente — la FC en reposo subió y la energía y el ánimo bajaron simultáneamente. Vigila cómo se encuentra Héctor hoy."
@@ -14642,6 +14651,11 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
     try {
       val rsN = conn.createStatement().executeQuery("SELECT COUNT(*) as n FROM wellness WHERE fc_reposo IS NOT NULL")
       if (!rsN.next() || rsN.getInt("n") < 10) return None
+      // El dia despues de un partido, FC alta y energia/animo bajos son recuperacion normal, no enfermedad
+      val rsPartidoAyer = conn.createStatement().executeQuery(
+        "SELECT COUNT(*) as c FROM matches WHERE status='PLAYED' AND fecha = CURRENT_DATE - 1")
+      val huboPartidoAyer = rsPartidoAyer.next() && rsPartidoAyer.getInt("c") > 0
+      if (huboPartidoAyer) return None
       // fc_hoy: la medicion mas reciente, pero solo si es de hoy o ayer (una FC antigua no dice nada de hoy)
       val rs = conn.createStatement().executeQuery("""
         SELECT
@@ -14652,9 +14666,17 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
         FROM wellness WHERE fecha >= CURRENT_DATE - 30""")
       if (!rs.next()) return None
       def opt(c: String) = Option(rs.getObject(c)).map(_ => rs.getDouble(c))
+      // FC del dia anterior a la medicion de fc_hoy, para exigir persistencia salvo desviacion muy alta
+      val rsFcAyer = conn.createStatement().executeQuery("""
+        SELECT fc_reposo FROM wellness WHERE fc_reposo IS NOT NULL AND fecha = (
+          SELECT fecha FROM wellness WHERE fc_reposo IS NOT NULL AND fecha >= CURRENT_DATE - 1 ORDER BY fecha DESC LIMIT 1
+        ) - 1 LIMIT 1""")
+      val fcAyer = if (rsFcAyer.next()) Option(rsFcAyer.getObject("fc_reposo")).map(_ => rsFcAyer.getDouble("fc_reposo")) else None
       (opt("fc_media"), opt("fc_hoy"), opt("energia_reciente"), opt("animo_reciente")) match {
-        case (Some(media), Some(hoy), Some(energia), Some(animo)) if hoy > media + 5 && energia < 3.0 && animo < 3.0 =>
-          Some(mensajeEnfermedadIncipiente)
+        case (Some(media), Some(hoy), Some(energia), Some(animo)) if energia < 3.0 && animo < 3.0 =>
+          val desviacionFuerte = hoy > media + 10
+          val desviacionSostenida = hoy > media + 5 && fcAyer.exists(_ > media + 5)
+          if (desviacionFuerte || desviacionSostenida) Some(mensajeEnfermedadIncipiente) else None
         case _ => None
       }
     } finally { conn.close() }
