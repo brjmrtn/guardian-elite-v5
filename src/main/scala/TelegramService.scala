@@ -29,6 +29,27 @@ object TelegramService {
   }
 
   /**
+   * Bytes de una nota de voz o audio recibido por el bot (getFile + descarga). None si Telegram no lo entrega.
+   * El token va en la URL: los errores pasan siempre por sanitizarError antes de llegar al log.
+   */
+  def descargarAudioTelegram(fileId: String): Option[Array[Byte]] = {
+    if (botToken.isEmpty || fileId.isEmpty) return None
+    try {
+      val info = requests.get(s"https://api.telegram.org/bot$botToken/getFile",
+        params = Map("file_id" -> fileId), connectTimeout = 10000, readTimeout = 15000, check = false)
+      if (info.statusCode != 200) { println(s"[Telegram] getFile -> HTTP ${info.statusCode}"); return None }
+      val filePath = ujson.read(info.text())("result")("file_path").str
+      val audio = requests.get(s"https://api.telegram.org/file/bot$botToken/$filePath",
+        connectTimeout = 10000, readTimeout = 60000, check = false)
+      if (audio.statusCode == 200) Some(audio.bytes)
+      else { println(s"[Telegram] descarga de audio -> HTTP ${audio.statusCode}"); None }
+    } catch { case e: Exception =>
+      println(s"[Telegram] audio ERROR: ${DatabaseManager.sanitizarError(e.getMessage).take(200)}")
+      None
+    }
+  }
+
+  /**
    * Secreto que Telegram reenvia en la cabecera X-Telegram-Bot-Api-Secret-Token de cada update.
    * Se deriva del token del bot para no necesitar otra variable de entorno.
    */

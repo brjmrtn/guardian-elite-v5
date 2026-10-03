@@ -107,7 +107,7 @@ object MatchController extends cask.Routes {
               // BLOQUE D: formulario independiente del registro minimo — sus campos viven dentro del
               // formulario principal (no se pueden anidar forms) y se asocian con el atributo form=
               form(id := "quickRegisterForm", action := "/match-center/quick-save", method := "post", attr("accept-charset") := "UTF-8"),
-              form(action := "/match-center/save", method := "post", attr("accept-charset") := "UTF-8",
+              form(action := "/match-center/save", method := "post", attr("accept-charset") := "UTF-8", onsubmit := "return validarRubricaBloqueada()",
 
                 // ── BLOQUE A: REGISTRO RAPIDO POR VOZ O TEXTO (NLP con Gemini) ──
                 div(cls:="mb-4 p-3 border border-warning rounded", style:="background:rgba(212,175,55,0.06);",
@@ -227,7 +227,7 @@ object MatchController extends cask.Routes {
                 // ── BLOQUE 4.1: RUBRICA DE VALORACION — va ANTES del marcador (modo ciego: evaluar sin ver el resultado) ─
                 div(cls := "mb-3 p-2 border border-warning rounded bg-warning bg-opacity-10",
                   div(cls := "d-flex justify-content-between align-items-center", style := "cursor:pointer;", onclick := "toggleRubrica()",
-                    label(cls := "text-warning fw-bold small mb-0", style := "cursor:pointer;", "📋 RÚBRICA DE VALORACIÓN (opcional pero recomendado)"),
+                    label(cls := "text-warning fw-bold small mb-0", style := "cursor:pointer;", "📋 RÚBRICA DE VALORACIÓN (desbloquea el resultado)"),
                     span(id := "rubricaChevron", cls := "text-warning small", "▲")
                   ),
                   div(id := "rubricaPanel",
@@ -251,14 +251,22 @@ object MatchController extends cask.Routes {
                       )
                     },
                     div(id := "notaSugeridaBox", cls := "xx-small text-warning fw-bold text-center mt-2", "")
-                  )
+                  ),
+                  // El marcador solo se desbloquea con las 5 dimensiones puntuadas; a partir de ahi la rubrica queda fija
+                  input(tpe := "hidden", name := "rubricaBloqueada", id := "rubricaBloqueada", value := ""),
+                  div(id := "rubricaValoresBloqueados")
                 ),
 
-                // 2. MARCADOR Y PARADAS
+                // 2. MARCADOR Y PARADAS — GF/GC ocultos hasta bloquear la rubrica
                 div(cls := "row mb-3 bg-secondary bg-opacity-25 p-2 rounded mx-0",
-                  div(cls := "col-4 text-center", label(cls := "small fw-bold", "GOLES (GC)"), input(tpe := "number", name := "gc", id:="gcInput", cls := "form-control text-center bg-danger text-white border-0 fw-bold fs-4", value := "0", readonly:=true)),
-                  div(cls := "col-4 text-center", label(cls := "small fw-bold", "PARADAS"), input(tpe := "number", name := "paradas", id:="parInput", cls := "form-control text-center bg-success text-white border-0 fw-bold fs-4", value := "0", readonly:=true)),
-                  div(cls := "col-4 text-center", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))
+                  div(id := "marcadorPlaceholder", cls := "col-12 text-center small text-warning fw-bold py-2",
+                    span(id := "marcadorPlaceholderTexto", "🔒 Completa la rúbrica para desbloquear el resultado"),
+                    button(tpe := "button", id := "desbloquearMarcadorBtn", cls := "btn btn-warning btn-sm fw-bold w-100 mt-2", style := "display:none;",
+                      onclick := "desbloquearMarcador()", "🔓 Rúbrica completa — mostrar resultado")
+                  ),
+                  div(cls := "col-4 text-center marcador-oculto", style := "display:none;", label(cls := "small fw-bold", "GOLES (GC)"), input(tpe := "number", name := "gc", id:="gcInput", cls := "form-control text-center bg-danger text-white border-0 fw-bold fs-4", value := "0", readonly:=true)),
+                  div(cls := "col-4 text-center mx-auto", label(cls := "small fw-bold", "PARADAS"), input(tpe := "number", name := "paradas", id:="parInput", cls := "form-control text-center bg-success text-white border-0 fw-bold fs-4", value := "0", readonly:=true)),
+                  div(cls := "col-4 text-center marcador-oculto", style := "display:none;", label(cls := "small fw-bold", "A FAVOR (GF)"), input(tpe := "number", name := "gf", cls := "form-control text-center", value := "0", attr("inputmode"):="numeric"))
                 ),
 
                 // 4. PORTERIA (REJILLA 3x3)
@@ -745,8 +753,37 @@ object MatchController extends cask.Routes {
               function toggleFootbar(){var p=document.getElementById('footbarPanel');var c=document.getElementById('footbarChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
               function toggleRubrica(){var p=document.getElementById('rubricaPanel');var c=document.getElementById('rubricaChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
               function toggleContextoAvanzado(){var p=document.getElementById('contextoAvanzadoPanel');var c=document.getElementById('contextoAvanzadoChevron');var open=p.style.display!=='none';p.style.display=open?'none':'block';c.textContent=open?'▼':'▲';}
+              var rubricaIds=['rubricaPosicion','rubricaDecisiones','rubricaPies','rubricaComunicacion','rubricaActitud'];
+              function rubricaEstaBloqueada(){return document.getElementById('rubricaBloqueada').value==='1';}
+              function comprobarRubricaCompleta(){
+                if(rubricaEstaBloqueada()) return;
+                var completa=rubricaIds.every(function(id){return document.getElementById(id).value!=='';});
+                document.getElementById('desbloquearMarcadorBtn').style.display=completa?'block':'none';
+                document.getElementById('marcadorPlaceholderTexto').style.display=completa?'none':'inline';
+              }
+              function desbloquearMarcador(){
+                // Un select disabled no se envia: su valor viaja en un hidden con el mismo name
+                var cont=document.getElementById('rubricaValoresBloqueados');
+                rubricaIds.forEach(function(id){
+                  var sel=document.getElementById(id);
+                  var h=document.createElement('input');h.type='hidden';h.name=sel.name;h.value=sel.value;cont.appendChild(h);
+                  sel.disabled=true;sel.style.opacity='0.6';sel.style.cursor='not-allowed';
+                });
+                document.getElementById('rubricaBloqueada').value='1';
+                document.getElementById('marcadorPlaceholder').style.display='none';
+                document.querySelectorAll('.marcador-oculto').forEach(function(el){el.style.display='';});
+              }
+              function validarRubricaBloqueada(){
+                if(rubricaEstaBloqueada()) return true;
+                alert('Completa y bloquea la rúbrica antes de guardar el resultado.');
+                var panel=document.getElementById('rubricaPanel');
+                if(panel.style.display==='none') toggleRubrica();
+                panel.scrollIntoView({behavior:'smooth',block:'center'});
+                return false;
+              }
               function calcNotaSugerida(){
-                var ids=['rubricaPosicion','rubricaDecisiones','rubricaPies','rubricaComunicacion','rubricaActitud'];
+                comprobarRubricaCompleta();
+                var ids=rubricaIds;
                 var vals=ids.map(function(id){var v=document.getElementById(id).value;return v?parseInt(v):null;});
                 var box=document.getElementById('notaSugeridaBox');
                 if(vals.some(function(v){return v===null;})){box.textContent='';return;}
@@ -865,7 +902,7 @@ object MatchController extends cask.Routes {
               function nlpSetVal(name, val){
                 if (val === null || val === undefined || val === '') return;
                 var el = document.querySelector('[name="'+name+'"]:not([type="radio"])');
-                if (el) { el.value = val; nlpMarkAuto(el); }
+                if (el && !el.disabled) { el.value = val; nlpMarkAuto(el); }
               }
               function nlpSetRadio(name, val){
                 var el = document.querySelector('[name="'+name+'"][value="'+val+'"]');
@@ -900,6 +937,7 @@ object MatchController extends cask.Routes {
                     nlpSetVal('rubricaPies', d.rubrica_pies);
                     nlpSetVal('rubricaComunicacion', d.rubrica_comunicacion);
                     nlpSetVal('rubricaActitud', d.rubrica_actitud);
+                    comprobarRubricaCompleta();
                     nlpSetVal('notas', d.notas_partido);
                     var warn = document.getElementById('nlpConfianzaWarning');
                     warn.style.display = (typeof d.confianza === 'number' && d.confianza < 0.6) ? 'block' : 'none';
@@ -951,6 +989,16 @@ object MatchController extends cask.Routes {
     def getStr(key: String): String = formData.getOrElse(key, "")
     def getInt(key: String): Int = try { getStr(key).toInt } catch { case _: Exception => 0 }
     def getDouble(key: String): Double = try { getStr(key).toDouble } catch { case _: Exception => 0.0 }
+
+    // Unica validacion bloqueante del formulario completo (Quick Register tiene su propio endpoint y no pasa por aqui):
+    // el resultado solo se guarda si la rubrica se completo y bloqueo antes de ver el marcador
+    if (getStr("rubricaBloqueada") != "1") {
+      val aviso = """<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>""" +
+        """<body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding:40px 16px;">""" +
+        """<h3>🔒 Completa y bloquea la rúbrica antes de guardar el resultado.</h3>""" +
+        """<p><a href="javascript:history.back()" style="color:#ffc107;font-weight:bold;">← Volver al formulario</a></p></body></html>"""
+      cask.Response(aviso.getBytes("UTF-8"), statusCode = 400, headers = Seq("Content-Type" -> "text/html; charset=utf-8"))
+    } else {
 
     // Los 23 parametros (Extraidos manualmente del mapa)
     val scheduleId = getInt("scheduleId")
@@ -1141,6 +1189,7 @@ object MatchController extends cask.Routes {
       statusCode = 302,
       headers = Seq("Location" -> s"/match-center/saved?antes=$mediaAntes&despues=$mediaDespues&msg=${java.net.URLEncoder.encode(msg, "UTF-8")}")
     )
+    }
   }
   // BLOQUE D: registro minimo — status PLAYED, source 'quick', resto con los DEFAULT de la tabla
   @cask.post("/match-center/quick-save")

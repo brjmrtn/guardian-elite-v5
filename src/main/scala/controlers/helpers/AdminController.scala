@@ -999,8 +999,18 @@ object AdminController extends cask.Routes {
         update.obj.get("message").foreach { m =>
           val chatId = m("chat")("id") match { case n: ujson.Num => n.num.toLong.toString; case v => v.toString }
           val texto = m.obj.get("text").collect { case s: ujson.Str => s.str }.getOrElse("")
-          if (chatId == TelegramService.chatIdConfigurado && texto.trim.nonEmpty)
-            TelegramService.enviarA(chatId, DatabaseManager.parseTelegramMessage(texto, chatId))
+          // Nota de voz (siempre OGG/Opus) o archivo de audio: va al wizard de partido por audio, no al parser de texto
+          val audio = Seq("voice", "audio").flatMap(k => m.obj.get(k)).collectFirst { case a: ujson.Obj => a }
+          val fileId = audio.flatMap(_.obj.get("file_id")).collect { case s: ujson.Str => s.str }
+          if (chatId == TelegramService.chatIdConfigurado) fileId match {
+            case Some(id) =>
+              val mime = audio.flatMap(_.obj.get("mime_type")).collect { case s: ujson.Str => s.str }.getOrElse("audio/ogg")
+              // En segundo plano: Gemini tarda mas que el plazo del webhook y Telegram reenviaria el mismo audio
+              new Thread(() => TelegramService.enviarA(chatId, DatabaseManager.handleAudioPartido(id, mime, chatId))).start()
+            case None if texto.trim.nonEmpty =>
+              TelegramService.enviarA(chatId, DatabaseManager.parseTelegramMessage(texto, chatId))
+            case None =>
+          }
         }
       } catch { case e: Exception => println(s"[Telegram webhook] ERROR: ${e.getMessage.take(200)}") }
     }

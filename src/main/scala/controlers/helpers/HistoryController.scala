@@ -1273,6 +1273,43 @@ object HistoryController extends cask.Routes {
     val stats = DatabaseManager.getBiomecPosicional(efectivo)
     val setPieceStats = DatabaseManager.getSetPieceStats(efectivo) // BLOQUE C
 
+    // Lateralidad: % de acciones con el pie hechas con la pierna no dominante, y su tendencia por temporada
+    val lateralidadWidget: Modifier = {
+      val lat = DatabaseManager.getLateralidadTrend(efectivo)
+      val titulo = "🦶 LATERALIDAD EN LA DISTRIBUCIÓN"
+      lat("pctNoDominante").asInstanceOf[Option[Double]] match {
+        case None => SharedLayout.sinDatos(titulo, "Se calcula con las acciones con el pie y las de pierna no dominante del formulario de partido")
+        case Some(pct) =>
+          val periodos = lat("periodos").asInstanceOf[List[Map[String, Any]]]
+          val labelsJs = periodos.map(p => "\"" + p("etiqueta").toString.replace("\\", "").replace("\"", "") + "\"").mkString("[", ",", "]")
+          val pctJs = periodos.map(p => f"${p("pct").asInstanceOf[Double]}%.1f".replace(',', '.')).mkString("[", ",", "]")
+          conConfianza("lateralidad", lat("totalPie").asInstanceOf[Int])(
+            div(cls := "card bg-dark border-info shadow mb-4",
+              div(cls := "card-header text-info fw-bold small", titulo),
+              div(cls := "card-body p-3",
+                div(cls := "text-center mb-3",
+                  div(cls := "fw-bold text-info", style := "font-size:42px; line-height:1;", f"$pct%.0f%%"),
+                  div(cls := "small text-white mt-1", f"$pct%.0f%% de las acciones con el pie usan la pierna no dominante"),
+                  div(cls := "xx-small text-muted", s"${lat("noDominante")} de ${lat("totalPie")} acciones con el pie en ${lat("partidos")} partidos")),
+                div(style := "height:180px;", tag("canvas")(id := "chartLateralidad")),
+                script(raw(s"""
+                  var ctxLat = document.getElementById('chartLateralidad');
+                  if (ctxLat) {
+                    new Chart(ctxLat, {
+                      type: 'line',
+                      data: { labels: $labelsJs, datasets: [{ label: '% pierna no dominante', data: $pctJs,
+                        borderColor: '#0dcaf0', backgroundColor: 'rgba(13,202,240,0.15)', borderWidth:2, pointRadius:4, fill:true, tension:0.3 }] },
+                      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } },
+                        scales:{ x:{ ticks:{color:'#aaa'}, grid:{color:'#333'} }, y:{ min:0, max:100, ticks:{color:'#aaa', callback:function(v){return v+'%';}}, grid:{color:'#333'} } } }
+                    });
+                  }
+                """))
+              )
+            )
+          )
+      }
+    }
+
     // BLOQUE P: mapa de calor de goles encajados en 6 zonas — requiere >=10 goles con zona
     val heat6 = DatabaseManager.getGoalHeatmap6Zonas(efectivo)
     val heatmapGolesWidget: Modifier =
@@ -1522,6 +1559,7 @@ object HistoryController extends cask.Routes {
             heatmapGolesWidget,
             conConfianza("paso_negativo", pasoNegativo("n").asInstanceOf[Int], pasoNegativo("suficiente").asInstanceOf[Boolean])(pasoNegativoWidget),
             conConfianza("1v1_angulo", angulo1v1("n").asInstanceOf[Int], angulo1v1("suficiente").asInstanceOf[Boolean])(angulo1v1Widget),
+            lateralidadWidget,
 
             // ── Metricas detalladas (colapsable) ──
             seccion("📊 Métricas detalladas")(
@@ -1903,6 +1941,44 @@ object HistoryController extends cask.Routes {
                     data: { labels: $labelsJs, datasets: [{ data: $dataJs,
                       backgroundColor: ['#0dcaf0','#20c997','#dc3545','#6c757d','#ffc107','#8b5cf6'] }] },
                     options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{color:'#eee', font:{size:10}} } } }
+                  });
+                }
+              """))
+            )
+          )
+        }
+      },
+
+      // Evolucion mensual del reparto (categorias sin orden: solo distribucion, sin escala). Minimo 3 meses con datos.
+      {
+        val meses = DatabaseManager.getRegulacionEmocionalPorMes()
+        if (meses.size < 3) frag()
+        else {
+          val etiquetas = Seq("HABLA_SOLO" -> ("Habla solo", "#0dcaf0"), "RESPIRA" -> ("Respira", "#20c997"), "ENFADO" -> ("Enfado", "#dc3545"),
+            "NEUTRAL" -> ("Neutral", "#6c757d"), "REORGANIZA" -> ("Reorganiza", "#ffc107"), "DECAIDO" -> ("Decaído", "#8b5cf6"))
+          val labelsJs = meses.map(m => s""""${m("mes")}"""").mkString("[", ",", "]")
+          val totalesJs = meses.map(_("total").toString).mkString("[", ",", "]")
+          val datasetsJs = etiquetas.map { case (clave, (nombre, color)) =>
+            val datos = meses.map(m => f"${m("pct").asInstanceOf[Map[String, Double]](clave)}%.1f".replace(',', '.')).mkString("[", ",", "]")
+            s"{ label: '$nombre', data: $datos, backgroundColor: '$color' }"
+          }.mkString("[", ",", "]")
+          div(cls := "card bg-dark border-info shadow mb-3",
+            div(cls := "card-header text-info fw-bold small", "📊 EVOLUCIÓN DE LA REGULACIÓN EMOCIONAL"),
+            div(cls := "card-body p-3",
+              div(cls := "xx-small text-muted mb-2", "Reparto de cada mes en % sobre los partidos con goles encajados y reacción registrada."),
+              div(style := "height:240px;", tag("canvas")(id := "chartRegulacionMes")),
+              script(raw(s"""
+                var ctxREM = document.getElementById('chartRegulacionMes');
+                if (ctxREM) {
+                  var totalesREM = $totalesJs;
+                  new Chart(ctxREM, { type: 'bar',
+                    data: { labels: $labelsJs, datasets: $datasetsJs },
+                    options: { responsive:true, maintainAspectRatio:false,
+                      plugins:{ legend:{ position:'bottom', labels:{color:'#eee', font:{size:10}} },
+                        tooltip:{ callbacks:{ label:function(c){ return c.dataset.label+': '+Math.round(c.parsed.y)+'%'; },
+                          footer:function(items){ var n=totalesREM[items[0].dataIndex]; return n+(n===1?' partido':' partidos'); } } } },
+                      scales:{ x:{ stacked:true, ticks:{color:'#aaa'}, grid:{display:false} },
+                        y:{ stacked:true, min:0, max:100, ticks:{color:'#aaa', callback:function(v){return v+'%';}}, grid:{color:'#333'} } } }
                   });
                 }
               """))
@@ -5348,6 +5424,8 @@ object HistoryController extends cask.Routes {
                   val nTemp = m("nTemporadas").asInstanceOf[Int]
 
                   div(
+                    m("avisoFormato").asInstanceOf[Option[String]].map(a =>
+                      div(cls:="xx-small text-warning border border-warning rounded p-2 mb-3", a)).getOrElse(frag()),
                     // Linea de estados horizontales
                     div(cls:="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-1",
                       estados.zipWithIndex.map { case (est, i) =>

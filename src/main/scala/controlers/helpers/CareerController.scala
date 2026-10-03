@@ -1009,6 +1009,8 @@ ${cuerpo.mkString("\n")}
 
       div(
         div(cls := "alert alert-secondary small mt-3", textoAuto),
+        comp("avisoFormato").asInstanceOf[Option[String]].map(a =>
+          div(cls := "xx-small text-warning border border-warning rounded p-2 mb-2", a)).getOrElse(frag()),
         div(cls := "card bg-dark border-warning shadow mb-3",
           div(cls := "card-header text-warning fw-bold small", "EVOLUCIÓN POR TEMPORADA"),
           div(cls := "card-body", div(style := "height:260px;", tag("canvas")(id := "chartLongitudinal")))

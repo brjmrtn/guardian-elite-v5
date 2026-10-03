@@ -347,6 +347,8 @@ object DatabaseManager {
         goles_registrados INT DEFAULT 0,
         updated_at        TIMESTAMP DEFAULT NOW()
       )""")
+      // Pasos del flujo de partido ya rellenados por audio: el wizard de texto los salta
+      stmt.executeUpdate("ALTER TABLE telegram_session ADD COLUMN IF NOT EXISTS pasos_hechos TEXT DEFAULT ''")
       // BLOQUE D: Vídeo IA en entrenamientos
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS video_analisis_ia TEXT DEFAULT NULL")
       stmt.executeUpdate("ALTER TABLE trainings ADD COLUMN IF NOT EXISTS video_analisis_fecha TIMESTAMP DEFAULT NULL")
@@ -1164,8 +1166,9 @@ object DatabaseManager {
 
   // --- IA CONFIG ---
   val modelList = Seq("gemini-2.5-flash", "gemini-flash-latest")
-  /** Quita la API key de Gemini de URLs/mensajes de error antes de mostrarlos o registrarlos. */
+  /** Quita la API key de Gemini y el token del bot de Telegram de URLs/mensajes de error antes de mostrarlos o registrarlos. */
   def sanitizarError(msg: String): String = Option(msg).getOrElse("").replaceAll("key=[^&\\s\"]+", "key=***")
+    .replaceAll("bot\\d+:[A-Za-z0-9_-]+", "bot***")
 
   /** Texto que se devuelve cuando Gemini responde 402 (sin creditos) o 429 (cuota). Nunca se cachea. */
   val MensajeIANoDisponible = "La IA no está disponible ahora mismo. Tus datos están guardados; reinténtalo más tarde."
@@ -6143,6 +6146,71 @@ Responde en espanol, tono positivo y motivador para un nino."""
     } finally { conn.close() }
   }
 
+  /** Los 6 comportamientos tras gol encajado (formulario web y bot). Son categorias sin orden entre si. */
+  val regulacionesEmocionales: List[String] = List("HABLA_SOLO", "RESPIRA", "ENFADO", "NEUTRAL", "REORGANIZA", "DECAIDO")
+
+  /**
+   * Reparto mensual de la regulacion emocional, en % sobre los partidos con dato de ese mes (un mes con
+   * pocos goles encajados no distorsiona la escala). Sin puntuacion ni "madurez": solo la distribucion.
+   */
+  def getRegulacionEmocionalPorMes(seasonId: Int = 0): List[Map[String, Any]] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery(s"""
+        SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, regulacion_emocional, COUNT(*) as n
+        FROM matches
+        WHERE status='PLAYED' AND regulacion_emocional IS NOT NULL AND goles_contra > 0
+          ${seasonFilter(seasonId)}
+        GROUP BY mes, regulacion_emocional
+        ORDER BY mes""")
+      var filas = List[(String, String, Int)]()
+      while (rs.next()) filas = filas :+ (rs.getString("mes"), rs.getString("regulacion_emocional"), rs.getInt("n"))
+      val validas = filas.filter(f => regulacionesEmocionales.contains(f._2))
+      validas.map(_._1).distinct.map { mes =>
+        val conteo = validas.filter(_._1 == mes).map(f => f._2 -> f._3).toMap
+        val total = conteo.values.sum
+        Map[String, Any]("mes" -> mes, "total" -> total,
+          "pct" -> regulacionesEmocionales.map(c => c -> conteo.getOrElse(c, 0) * 100.0 / total).toMap)
+      }
+    } finally { conn.close() }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LATERALIDAD — % de acciones con el pie hechas con la pierna no dominante
+  // ─────────────────────────────────────────────────────────────────────────────
+  /** Tendencia por periodo (anio + temporada, siempre con todas las temporadas) y valor actual de seasonId (0 = toda la carrera). */
+  def getLateralidadTrend(seasonId: Int = 0): Map[String, Any] = {
+    val conn = getConnection()
+    try {
+      val rs = conn.createStatement().executeQuery("""
+        SELECT
+          EXTRACT(YEAR FROM m.fecha)::int || '-T' || COALESCE(m.season_id, 0) as periodo,
+          EXTRACT(YEAR FROM m.fecha)::int || ' · ' || COALESCE(s.nombre, s.categoria, 'Temporada') as etiqueta,
+          COALESCE(m.season_id, 0) as season_id,
+          SUM(COALESCE(m.pie_no_dominante_acciones, 0)) as no_dominante,
+          SUM(m.acciones_pie) as total_pie,
+          COUNT(*) as partidos
+        FROM matches m LEFT JOIN seasons s ON s.id = m.season_id
+        WHERE m.status='PLAYED' AND m.acciones_pie > 0
+        GROUP BY periodo, etiqueta, COALESCE(m.season_id, 0)
+        ORDER BY MIN(m.fecha)""")
+      case class Periodo(periodo: String, etiqueta: String, seasonId: Int, noDominante: Int, totalPie: Int, partidos: Int)
+      var periodos = List[Periodo]()
+      while (rs.next()) periodos = periodos :+ Periodo(rs.getString("periodo"), fixEncoding(rs.getString("etiqueta")),
+        rs.getInt("season_id"), rs.getInt("no_dominante"), rs.getInt("total_pie"), rs.getInt("partidos"))
+      // El padre puede anotar mas acciones con la no dominante que acciones con el pie: se acota a 100
+      def pct(noDominante: Int, totalPie: Int): Double = math.min(100.0, noDominante * 100.0 / totalPie)
+      val actuales = if (seasonId > 0) periodos.filter(_.seasonId == seasonId) else periodos
+      val (noDom, totalPie) = (actuales.map(_.noDominante).sum, actuales.map(_.totalPie).sum)
+      Map(
+        "periodos" -> periodos.map(p => Map[String, Any]("periodo" -> p.periodo, "etiqueta" -> p.etiqueta,
+          "noDominante" -> p.noDominante, "totalPie" -> p.totalPie, "partidos" -> p.partidos, "pct" -> pct(p.noDominante, p.totalPie))),
+        "noDominante" -> noDom, "totalPie" -> totalPie, "partidos" -> actuales.map(_.partidos).sum,
+        "pctNoDominante" -> (if (totalPie > 0) Some(pct(noDom, totalPie)) else None)
+      )
+    } finally { conn.close() }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // MODULO — ARQUETIPO DE PORTERO
   // ─────────────────────────────────────────────────────────────────────────────
@@ -9470,6 +9538,29 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
   val temporadaActualSQL: String =
     "COALESCE((SELECT id FROM seasons WHERE fecha_fin IS NULL ORDER BY id DESC LIMIT 1), (SELECT MAX(id) FROM seasons))"
 
+  /** Formato de juego de una categoria (sin tildes: "Benjamín" y "BENJAMIN" son lo mismo). */
+  def formatoJuego(categoria: String): String =
+    java.text.Normalizer.normalize(Option(categoria).getOrElse(""), java.text.Normalizer.Form.NFD).replaceAll("\\p{M}", "").toUpperCase match {
+      case c if c.contains("PREBENJAMIN") || c.contains("BENJAMIN") || c.contains("ALEVIN") => "F7"
+      case c if c.contains("INFANTIL") || c.contains("CADETE") || c.contains("JUVENIL") => "F11"
+      case _ => "DESCONOCIDO"
+    }
+
+  /** Aviso para los modulos que cruzan temporadas: solo si entre ellas hay fútbol 7 y fútbol 11. */
+  def avisoCambioFormato(categorias: Seq[String]): Option[String] = {
+    val formatos = categorias.map(formatoJuego).toSet
+    if (formatos.contains("F7") && formatos.contains("F11"))
+      Some("⚠️ Esta comparativa incluye temporadas en fútbol 7 y fútbol 11. Algunas métricas (zona del gol, cobertura de portería, tamaño de portería) no son directamente comparables entre ambos formatos.")
+    else None
+  }
+
+  /** Categoria de cada temporada (o su nombre si no tiene), opcionalmente solo las cerradas. */
+  private def categoriasTemporadas(conn: Connection, soloCerradas: Boolean): List[String] = {
+    val rs = conn.createStatement().executeQuery(
+      s"SELECT COALESCE(categoria, nombre, '') as c FROM seasons ${if (soloCerradas) "WHERE fecha_fin IS NOT NULL" else ""}")
+    Iterator.continually(rs).takeWhile(_.next()).map(r => fixEncoding(r.getString("c"))).toList
+  }
+
   def seasonFilterActual(alias: String = ""): String =
     s"AND ${if (alias.isEmpty) "" else alias + "."}season_id = $temporadaActualSQL"
 
@@ -9683,7 +9774,8 @@ PROYECCION: [nivel al que podria llegar segun datos actuales, en 1 frase motivad
         )
       }
 
-      Map("suficiente" -> true, "n" -> temporadas.size, "temporadas" -> datos)
+      Map("suficiente" -> true, "n" -> temporadas.size, "temporadas" -> datos,
+        "avisoFormato" -> avisoCambioFormato(categoriasTemporadas(conn, soloCerradas = false)))
     } finally { conn.close() }
   }
   def saveRivalInfo(nombre: String, estilo: String, claves: String, notas: String): Unit = { val conn = getConnection(); try { conn.createStatement().executeUpdate(s"DELETE FROM rivals WHERE LOWER(nombre) = LOWER('${fixEncoding(nombre)}')"); val ps = conn.prepareStatement("INSERT INTO rivals (nombre, estilo_juego, jugadores_clave, notas_scouting) VALUES (?,?,?,?)"); ps.setString(1, fixEncoding(nombre)); ps.setString(2, estilo); ps.setString(3, fixEncoding(claves)); ps.setString(4, fixEncoding(notas)); ps.executeUpdate() } finally { conn.close() } }
@@ -12530,12 +12622,12 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
 
   def calcularMarkovPathway(): Option[Map[String, Any]] = {
     val conn = getConnection()
-    val cerradas = try {
+    val (cerradas, avisoFormato) = try {
       val rs = conn.createStatement().executeQuery(
         "SELECT COALESCE(nombre, categoria, 'Temporada') as nombre, media FROM seasons WHERE fecha_fin IS NOT NULL ORDER BY id ASC")
       var l = List[(String, Double)]()
       while (rs.next()) l = l :+ (fixEncoding(rs.getString("nombre")), rs.getDouble("media"))
-      l
+      (l, avisoCambioFormato(categoriasTemporadas(conn, soloCerradas = true)))
     } finally { conn.close() }
 
     if (cerradas.size < 2) return None
@@ -12579,7 +12671,8 @@ Teniendo en cuenta el nivel actual de Héctor y su edad, sugiere cuáles eventos
       "temporadaEstimada"        -> temporadaEstimadaStr.getOrElse(""),
       "nTemporadas"              -> cerradas.size,
       "estados"                  -> estados.map(s => estadosLabel.getOrElse(s, s)),
-      "estadoActualIdx"          -> idxActual
+      "estadoActualIdx"          -> idxActual,
+      "avisoFormato"             -> avisoFormato
     ))
   }
 
@@ -14519,6 +14612,7 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
       case "rfmf_benchmarking"      => (5, 15)
       case "calidad_decision"       => (8, 21)   // 🔴 <8 · 🟡 8-20 · 🟢 >20 partidos con dato
       case "rffm_comparables"       => (8, 16)   // 🟡 8-15 · 🟢 >15 equipos
+      case "lateralidad"            => (10, 31)  // 🔴 <10 · 🟡 10-30 · 🟢 >30 acciones con el pie
       case _                        => (10, 25)
     }
     if (n < minRojo) Map(
@@ -14688,7 +14782,8 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
   // ═════════════════════════════════════════════════════════════════════════════
   private case class TgSesion(flujo: Option[String] = None, paso: Option[String] = None,
                               matchId: Option[Int] = None, trainingId: Option[Int] = None,
-                              golesPendientes: Int = 0, golesRegistrados: Int = 0)
+                              golesPendientes: Int = 0, golesRegistrados: Int = 0,
+                              pasosHechos: Set[String] = Set.empty)
 
   /** Sesion activa del chat. Una conversacion abandonada caduca a las 6 horas. */
   private def tgSesion(chatId: String): TgSesion = {
@@ -14702,7 +14797,8 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
       else {
         def optInt(c: String) = Option(rs.getObject(c)).map(_ => rs.getInt(c))
         TgSesion(Option(rs.getString("flujo")), Option(rs.getString("paso")), optInt("match_id_temp"), optInt("training_id_temp"),
-          rs.getInt("goles_pendientes"), rs.getInt("goles_registrados"))
+          rs.getInt("goles_pendientes"), rs.getInt("goles_registrados"),
+          Option(rs.getString("pasos_hechos")).getOrElse("").split(",").filter(_.nonEmpty).toSet)
       }
     } finally { conn.close() }
   }
@@ -14711,17 +14807,18 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
     val conn = getConnection()
     try {
       val ps = conn.prepareStatement("""
-        INSERT INTO telegram_session (chat_id, flujo, paso, match_id_temp, training_id_temp, goles_pendientes, goles_registrados, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+        INSERT INTO telegram_session (chat_id, flujo, paso, match_id_temp, training_id_temp, goles_pendientes, goles_registrados, pasos_hechos, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
         ON CONFLICT (chat_id) DO UPDATE SET flujo = EXCLUDED.flujo, paso = EXCLUDED.paso, match_id_temp = EXCLUDED.match_id_temp,
           training_id_temp = EXCLUDED.training_id_temp, goles_pendientes = EXCLUDED.goles_pendientes,
-          goles_registrados = EXCLUDED.goles_registrados, updated_at = NOW()""")
+          goles_registrados = EXCLUDED.goles_registrados, pasos_hechos = EXCLUDED.pasos_hechos, updated_at = NOW()""")
       ps.setString(1, chatId)
       s.flujo match { case Some(v) => ps.setString(2, v); case None => ps.setNull(2, java.sql.Types.VARCHAR) }
       s.paso match { case Some(v) => ps.setString(3, v); case None => ps.setNull(3, java.sql.Types.VARCHAR) }
       s.matchId match { case Some(v) => ps.setInt(4, v); case None => ps.setNull(4, java.sql.Types.INTEGER) }
       s.trainingId match { case Some(v) => ps.setInt(5, v); case None => ps.setNull(5, java.sql.Types.INTEGER) }
       ps.setInt(6, s.golesPendientes); ps.setInt(7, s.golesRegistrados)
+      ps.setString(8, s.pasosHechos.mkString(","))
       ps.executeUpdate()
     } finally { conn.close() }
   }
@@ -14768,7 +14865,7 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
   private val tgPosiciones = Set("BIEN_PLANTADO", "PASO_NEGATIVO", "DESPLAZAMIENTO_TARDIO", "IMPARABLE")
   // Minuto representativo de cada cuarto, coherente con los cortes de saveMinutoGoles (12/25/37)
   private val tgCuartos: Map[String, Int] = Map("Q1" -> 6, "Q2" -> 19, "Q3" -> 31, "Q4" -> 44)
-  private val tgRegulaciones = Set("HABLA_SOLO", "RESPIRA", "ENFADO", "NEUTRAL", "REORGANIZA", "DECAIDO")
+  private val tgRegulaciones = regulacionesEmocionales.toSet
   private val tgComandos = Set("SUEÑO", "SUENO", "FC", "PARTIDO", "RUBRICA", "GOL", "PARADAS", "CONTEXTO", "EXTRAS", "1V1",
     "JUDO", "CLUB", "ACADEMIA", "PESO", "APP", "SALTAR", "LISTO", "SI", "NO", "NINGUNO", "ESTADO", "AYUDA")
 
@@ -14932,10 +15029,14 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
     case _ => ""
   }
 
-  /** Pasa al siguiente paso del flujo de partido (saltando GOL si no quedan goles) o lo cierra si no hay mas. */
+  /** Paso que aun hay que preguntar: no lo relleno el audio y, si es GOL, quedan goles por detallar. */
+  private def tgPasoPendiente(s: TgSesion)(p: String): Boolean =
+    !s.pasosHechos.contains(p) && (p != "GOL" || s.golesRegistrados < s.golesPendientes)
+
+  /** Pasa al siguiente paso pendiente del flujo de partido o lo cierra si no hay mas. */
   private def tgSiguientePaso(chatId: String, s: TgSesion, desde: String, prefijo: String): String = {
     val restantes = tgPasosPartido.dropWhile(_ != desde).drop(1)
-    restantes.find(p => p != "GOL" || s.golesRegistrados < s.golesPendientes) match {
+    restantes.find(tgPasoPendiente(s)) match {
       case Some(p) =>
         val nueva = s.copy(paso = Some(p))
         tgGuardarSesion(chatId, nueva)
@@ -15076,8 +15177,99 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
 
   private def handleFactor(texto: String, chatId: String, s: TgSesion): String = {
     val matchId = tgPartidoEnCurso(s).getOrElse(return tgSinPartido)
-    tgActualizarPartido(matchId, Seq("factores_externos" -> fixEncoding(texto.take(500))))
+    tgGuardarFactor(matchId, texto)
     tgFinalizarPartido(chatId, s)
+  }
+
+  private def tgGuardarFactor(matchId: Int, texto: String): Unit =
+    tgActualizarPartido(matchId, Seq("factores_externos" -> fixEncoding(texto.take(500))))
+
+  // ── PARTIDO POR AUDIO: rellena de golpe los pasos del wizard y deja el resto al flujo de texto ──
+  private val tgPromptAudioPartido = """Transcribe y extrae del siguiente audio una descripción de un partido de fútbol de un portero de base. Devuelve ÚNICAMENTE un JSON válido, sin backticks ni texto adicional, con cualquier campo que puedas identificar (deja fuera los que no se mencionen, no inventes valores): {"rival":"", "golesFavor":0, "golesContra":0, "nota":0.0, "rubrica":{"posicion":0,"decisiones":0,"pies":0,"comunicacion":0,"actitud":0}, "goles":[{"zona":"","situacion":"","posicion":"","cuarto":""}], "paradas":{"total":0,"unoVsUno":0,"aereas":0,"pie":0}, "sede":"", "autopercepcion":0, "factorExterno":""}"""
+
+  private val tgAudioNoEntendido = "No pude entender el audio. Prueba con PARTIDO [rival] [GF]-[GC] [nota] para empezar por texto."
+
+  /**
+   * Audio de Telegram -> Gemini -> partido. Cada bloque extraido se aplica con el mismo handler que su
+   * paso de texto (RUBRICA, GOL, PARADAS...), asi que valida y guarda exactamente igual.
+   * Sin rival, marcador y nota no se crea nada.
+   */
+  def handleAudioPartido(fileId: String, mimeType: String, chatId: String): String = {
+    try {
+      val audio = TelegramService.descargarAudioTelegram(fileId).getOrElse(return tgAudioNoEntendido)
+      val res = AIProvider.ask(tgPromptAudioPartido, Some((mimeType, java.util.Base64.getEncoder.encodeToString(audio))), bypassCache = true)
+      if (!respuestaIAValida(res)) return if (res == MensajeIANoDisponible) res else tgAudioNoEntendido
+      val ini = res.indexOf('{'); val fin = res.lastIndexOf('}')
+      if (ini < 0 || fin <= ini) return tgAudioNoEntendido
+      val j = try ujson.read(res.substring(ini, fin + 1)).obj catch { case _: Exception => return tgAudioNoEntendido }
+
+      type Campos = collection.Map[String, ujson.Value]
+      def num(o: Campos, k: String): Option[Double] = o.get(k).flatMap {
+        case n: ujson.Num => Some(n.num); case s: ujson.Str => tgNum(s.str.trim); case _ => None }
+      def entero(o: Campos, k: String): Option[Int] = num(o, k).filter(n => n == n.toInt).map(_.toInt)
+      def texto(o: Campos, k: String): Option[String] =
+        o.get(k).collect { case s: ujson.Str => s.str.trim.replaceAll("\\s+", " ") }.filter(_.nonEmpty)
+      def sub(k: String): Option[Campos] = j.get(k).collect { case o: ujson.Obj => o.obj }
+      def codigo(v: Option[String]): String = v.map(_.toUpperCase.replace(' ', '_')).getOrElse("-")
+
+      val (rival, gf, gc, nota) = (texto(j, "rival"), entero(j, "golesFavor"), entero(j, "golesContra"), num(j, "nota")) match {
+        case (Some(r), Some(f), Some(c), Some(n)) if f >= 0 && f <= 99 && c >= 0 && c <= 99 && n >= 0 && n <= 10 => (r, f, c, n)
+        case _ => return tgAudioNoEntendido
+      }
+      val creado = handlePartidoStep1(s"PARTIDO $rival $gf-$gc $nota", chatId)
+      if (!creado.startsWith("✅")) return creado
+
+      val lineas = scala.collection.mutable.ListBuffer(f"✅ $rival $gf-$gc · Nota $nota%.1f")
+      var hechos = Set.empty[String]
+      def aplicado(resultado: String): Boolean = resultado.startsWith("✅")
+
+      sub("rubrica").foreach { r =>
+        val v = List("posicion", "decisiones", "pies", "comunicacion", "actitud").flatMap(entero(r, _))
+        if (v.size == 5 && aplicado(handleRubrica("RUBRICA " + v.mkString(" "), chatId))) {
+          hechos += "RUBRICA"; lineas += s"✅ Rúbrica: ${v.mkString(" ")}"
+        }
+      }
+      val golesTxt = j.get("goles").collect { case a: ujson.Arr => a.arr.toList }.getOrElse(Nil).collect { case o: ujson.Obj => o.obj: Campos }.take(gc)
+        .map(g => List("zona", "situacion", "posicion", "cuarto").map(k => codigo(texto(g, k))))
+        .filter(g => aplicado(handleGol("GOL " + g.mkString(" "), chatId)))
+        .map(_.filter(_ != "-").mkString(" / "))
+      if (golesTxt.nonEmpty) lineas += s"✅ ${golesTxt.size} ${if (golesTxt.size == 1) "gol" else "goles"}: ${golesTxt.mkString(" · ")}"
+      sub("paradas").foreach { p =>
+        entero(p, "total").foreach { total =>
+          // Las columnas que el audio no menciona quedan a 0, que es su DEFAULT
+          val v = total :: List("unoVsUno", "aereas", "pie").map(entero(p, _).getOrElse(0))
+          if (aplicado(handleParadas("PARADAS " + v.mkString(" "), chatId))) {
+            hechos += "PARADAS"; lineas += s"✅ Paradas: ${v.head} (${v(1)} en 1v1, ${v(2)} aéreas, ${v(3)} con el pie)"
+          }
+        }
+      }
+      // Sede y autopercepcion solo cubren una parte de CONTEXTO y EXTRAS: se guardan, pero el paso sigue pendiente
+      texto(j, "sede").map(_.toUpperCase).collect { case "CASA" | "LOCAL" => "CASA"; case "FUERA" | "VISITANTE" => "FUERA" }.foreach { sede =>
+        if (aplicado(handleContexto(s"CONTEXTO $sede", chatId))) lineas += s"✅ Sede: $sede"
+      }
+      entero(j, "autopercepcion").foreach { a =>
+        if (aplicado(handleExtras(s"EXTRAS $a", chatId))) lineas += s"✅ Autopercepción: $a"
+      }
+      val matchId = tgPartidoEnCurso(tgSesion(chatId)).getOrElse(return tgSinPartido)
+      texto(j, "factorExterno").filterNot(_.equalsIgnoreCase("NINGUNO")).foreach { f =>
+        tgGuardarFactor(matchId, f); hechos += "FACTOR"; lineas += s"✅ Factor externo: ${f.take(80)}"
+      }
+
+      // Los handlers han ido moviendo el paso: se recoloca en el primero que sigue pendiente
+      val s = tgSesion(chatId).copy(pasosHechos = hechos)
+      val pendientes = tgPasosPartido.filter(tgPasoPendiente(s))
+      val cabecera = "🎙️ Audio procesado:\n" + lineas.mkString("\n") + "\n"
+      pendientes.headOption match {
+        case Some(p) =>
+          val nueva = s.copy(paso = Some(p))
+          tgGuardarSesion(chatId, nueva)
+          cabecera + s"⏳ Me falta: ${pendientes.mkString(", ")}\n" + tgPrompt(p, nueva)
+        case None => cabecera + tgFinalizarPartido(chatId, s)
+      }
+    } catch { case e: Exception =>
+      println(s"[Telegram bot] ERROR audio: ${sanitizarError(e.getMessage).take(200)}")
+      tgAudioNoEntendido
+    }
   }
 
   private def tgFinalizarPartido(chatId: String, s: TgSesion): String = {
@@ -15331,6 +15523,7 @@ En 2 frases, en segunda persona y en tono amable, dile si tiende a ser más exig
       |💤 SUEÑO 9 95 180 10 4 5
       |❤️ FC 58
       |🏟️ PARTIDO Rivas 2-1 7.5
+      |🎙️ Nota de voz contando el partido
       |🥋 JUDO 60 6
       |⚽ CLUB 75 7 4 4
       |🎓 ACADEMIA 60 6 5 4
